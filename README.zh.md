@@ -99,6 +99,7 @@ pnpm dev
 ```bash
 /path/to/python3 -m pytest -q tests/test_config.py tests/test_provider_facts.py tests/test_state.py tests/test_session_events.py
 
+bash scripts/bootstrap-sidecar.sh
 cargo test --manifest-path mac-app/src-tauri/Cargo.toml --quiet
 
 cd mac-app
@@ -107,6 +108,8 @@ pnpm build
 ```
 
 `pnpm build` 可能会输出一个已有的 Vite chunk-size 警告。只要命令以 0 状态码退出，构建就是成功的。
+
+`scripts/bootstrap-sidecar.sh` 会创建一个被 Git 忽略的本地 sidecar 占位文件，用于满足 Tauri 源码态测试的构建元数据检查。它只用于源码测试；正式打包前，`scripts/build.sh` 会用真实 PyInstaller sidecar 覆盖它。
 
 ## 构建
 
