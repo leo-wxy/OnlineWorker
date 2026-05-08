@@ -1,0 +1,75 @@
+schema_version: 1
+id: codex
+kind: provider
+visibility: public
+order: 10
+runtime_id: codex
+label: Codex
+description: OpenAI Codex CLI sessions
+default_visible: true
+
+provider:
+  visible: true
+  managed: true
+  autostart: true
+  runtime_id: codex
+  bin: codex
+  owner_transport: stdio
+  live_transport: owner_bridge
+  control_mode: app
+  transport:
+    type: stdio
+  capabilities:
+    sessions: true
+    send: true
+    approvals: true
+    questions: false
+    photos: false
+    commands: true
+    command_wrappers:
+      - model
+      - review
+    control_modes:
+      - app
+      - tui
+      - hybrid
+  process:
+    cleanup_matchers:
+      - "codex.*app-server"
+      - "codex-aar"
+  health: {}
+  auth: {}
+  commands:
+    - name: help
+      scope: thread
+      description: 查看 Codex slash command 帮助
+    - name: init
+      scope: thread
+      description: 初始化 AGENTS 指南
+    - name: status
+      scope: thread
+      description: 查看当前会话状态
+    - name: permissions
+      scope: thread
+      description: 配置命令审批策略
+    - name: model
+      scope: thread
+      description: 切换模型和推理强度
+    - name: review
+      scope: thread
+      description: 对当前改动做 review
+    - name: mcp
+      scope: thread
+      description: 查看 MCP 工具
+    - name: compact
+      scope: thread
+      description: 压缩上下文
+    - name: search
+      scope: thread
+      description: 执行搜索
+    - name: plan
+      scope: thread
+      description: 规划下一步任务
+
+entrypoints:
+  python_descriptor: plugins.providers.builtin.codex.python.provider:create_provider_descriptor

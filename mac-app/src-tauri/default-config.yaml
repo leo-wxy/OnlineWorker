@@ -1,0 +1,31 @@
+# OnlineWorker Configuration
+# Sensitive values (tokens, user IDs) are in .env, not here.
+
+schema_version: 2
+
+providers:
+  codex:
+    managed: true
+    autostart: true
+    bin: "codex"
+    owner_transport: "stdio"
+    live_transport: "owner_bridge"
+    transport:
+      type: "stdio"
+    control_mode: "app"
+
+  claude:
+    managed: false
+    autostart: false
+    bin: "claude"
+    owner_transport: "stdio"
+    live_transport: "stdio"
+    transport:
+      type: "stdio"
+    auth:
+      key: ""
+      base_url: ""
+      model: ""
+
+logging:
+  level: "INFO"

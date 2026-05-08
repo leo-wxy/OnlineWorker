@@ -1,0 +1,1003 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OnlineWorker Markdown Rendering Strategy Options</title>
+  <style>
+    :root {
+      --bg: #f5f8fb;
+      --paper: #ffffff;
+      --ink: #172033;
+      --muted: #64748b;
+      --line: #dbe4ef;
+      --blue: #2563eb;
+      --cyan: #0891b2;
+      --green: #059669;
+      --amber: #b45309;
+      --red: #dc2626;
+      --slate-950: #020617;
+      --slate-900: #0f172a;
+      --slate-100: #f1f5f9;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 20px 20px, rgba(100, 116, 139, 0.16) 1.2px, transparent 1.4px) 0 0 / 30px 30px,
+        linear-gradient(135deg, #fbfdff 0%, #edf5f7 46%, #f8fafc 100%);
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.62;
+    }
+
+    .page {
+      width: min(1560px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 40px 0 80px;
+    }
+
+    .hero {
+      margin-bottom: 24px;
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      border-radius: 32px;
+      background: rgba(255, 255, 255, 0.8);
+      padding: 30px 34px;
+      box-shadow: 0 28px 80px rgba(15, 23, 42, 0.08);
+      backdrop-filter: blur(16px);
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: #0f766e;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(32px, 4vw, 58px);
+      letter-spacing: -0.06em;
+      line-height: 0.96;
+    }
+
+    .hero p {
+      max-width: 1080px;
+      margin: 14px 0 0;
+      color: #475569;
+      font-size: 16px;
+    }
+
+    .criteria {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .criteria span {
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      border-radius: 16px;
+      background: rgba(248, 250, 252, 0.82);
+      padding: 10px 12px;
+      color: #334155;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .strategy {
+      overflow: hidden;
+      margin-top: 22px;
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      border-radius: 30px;
+      background: rgba(255, 255, 255, 0.88);
+      box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
+      backdrop-filter: blur(14px);
+    }
+
+    .strategy-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: start;
+      padding: 22px 24px 18px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+    }
+
+    .strategy-title {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: -0.035em;
+      line-height: 1.15;
+    }
+
+    .strategy-desc {
+      max-width: 920px;
+      margin: 8px 0 0;
+      color: #64748b;
+      font-size: 14px;
+    }
+
+    .badge {
+      border-radius: 999px;
+      padding: 7px 11px;
+      font-size: 11px;
+      font-weight: 950;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .best {
+      background: #dcfce7;
+      color: #047857;
+    }
+
+    .good {
+      background: #dbeafe;
+      color: #1d4ed8;
+    }
+
+    .advanced {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .risky {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .strategy-body {
+      display: grid;
+      grid-template-columns: 380px minmax(0, 1fr);
+      gap: 0;
+    }
+
+    .pipeline {
+      border-right: 1px solid rgba(148, 163, 184, 0.22);
+      background: linear-gradient(180deg, rgba(248, 250, 252, 0.78), rgba(255, 255, 255, 0.7));
+      padding: 20px;
+    }
+
+    .pipeline h3,
+    .preview h3 {
+      margin: 0 0 12px;
+      color: #334155;
+      font-size: 12px;
+      font-weight: 950;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .flow {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .flow span {
+      position: relative;
+      border: 1px solid #dbe4ef;
+      border-radius: 14px;
+      background: #fff;
+      padding: 9px 11px;
+      color: #334155;
+      font-size: 12px;
+      font-weight: 750;
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+    }
+
+    .flow span + span::before {
+      content: "↓";
+      position: absolute;
+      top: -14px;
+      left: 16px;
+      color: #94a3b8;
+      font-size: 11px;
+    }
+
+    .matrix {
+      display: grid;
+      gap: 8px;
+    }
+
+    .metric {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
+      font-size: 12px;
+    }
+
+    .metric b {
+      color: #475569;
+    }
+
+    .bar {
+      overflow: hidden;
+      height: 8px;
+      border-radius: 999px;
+      background: #e2e8f0;
+    }
+
+    .bar i {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #22c55e, #06b6d4);
+    }
+
+    .note {
+      margin-top: 16px;
+      border-radius: 16px;
+      padding: 12px 13px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .note.good-note {
+      background: #ecfdf5;
+      color: #047857;
+    }
+
+    .note.warn-note {
+      background: #fffbeb;
+      color: #92400e;
+    }
+
+    .note.risk-note {
+      background: #fef2f2;
+      color: #b91c1c;
+    }
+
+    .preview {
+      padding: 20px;
+    }
+
+    .chat-row {
+      display: grid;
+      grid-template-columns: 40px minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+
+    .avatar {
+      display: grid;
+      width: 40px;
+      height: 40px;
+      place-items: center;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #2563eb, #06b6d4);
+      color: white;
+      font-size: 11px;
+      font-weight: 950;
+      letter-spacing: 0.08em;
+      box-shadow: 0 12px 28px rgba(37, 99, 235, 0.24);
+    }
+
+    .assistant-label {
+      display: inline-flex;
+      margin-bottom: 8px;
+      border-radius: 999px;
+      background: #eff6ff;
+      padding: 4px 8px;
+      color: #1d4ed8;
+      font-size: 10px;
+      font-weight: 950;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+
+    .bubble {
+      max-width: 980px;
+    }
+
+    .bubble h2 {
+      margin: 0 0 12px;
+      font-size: 20px;
+      letter-spacing: -0.035em;
+      line-height: 1.25;
+    }
+
+    .bubble h3 {
+      margin: 18px 0 8px;
+      font-size: 15px;
+      letter-spacing: -0.02em;
+    }
+
+    .bubble p {
+      margin: 10px 0;
+    }
+
+    .bubble ul,
+    .bubble ol {
+      margin: 10px 0;
+      padding-left: 1.35rem;
+    }
+
+    .bubble li {
+      margin: 6px 0;
+      padding-left: 0.15rem;
+    }
+
+    .bubble code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+
+    .bubble pre {
+      overflow: auto;
+      margin: 14px 0;
+    }
+
+    .bubble table {
+      width: 100%;
+      margin: 14px 0;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .bubble th,
+    .bubble td {
+      padding: 8px 10px;
+      text-align: left;
+    }
+
+    .safe-md .bubble {
+      border: 1px solid #dbe4ef;
+      border-radius: 20px 24px 24px 8px;
+      background: #fff;
+      padding: 18px 20px;
+      box-shadow: 0 16px 38px rgba(30, 41, 59, 0.08);
+    }
+
+    .safe-md .bubble p {
+      color: #243044;
+      font-size: 15px;
+      line-height: 1.72;
+    }
+
+    .safe-md .bubble strong {
+      color: #0f172a;
+      font-weight: 850;
+    }
+
+    .safe-md .bubble :not(pre) > code {
+      border: 1px solid #d7e2ef;
+      border-radius: 7px;
+      background: #f3f7fb;
+      padding: 0.13em 0.42em;
+      color: #0f4c81;
+      font-size: 0.92em;
+      font-weight: 750;
+    }
+
+    .safe-md .bubble pre {
+      border: 1px solid #132238;
+      border-radius: 14px;
+      background: #0b1220;
+      padding: 13px 15px;
+      color: #dbeafe;
+      font-size: 13px;
+      line-height: 1.58;
+    }
+
+    .safe-md .bubble blockquote {
+      margin: 14px 0;
+      border-left: 3px solid #38bdf8;
+      border-radius: 0 12px 12px 0;
+      background: #f0f9ff;
+      padding: 10px 14px;
+      color: #334155;
+    }
+
+    .safe-md .bubble th {
+      background: #f8fafc;
+      color: #334155;
+      font-size: 12px;
+    }
+
+    .safe-md .bubble td,
+    .safe-md .bubble th {
+      border: 1px solid #e2e8f0;
+    }
+
+    .doc-render .bubble {
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      background: #ffffff;
+      padding: 26px 30px;
+      box-shadow: 0 18px 44px rgba(15, 23, 42, 0.07);
+    }
+
+    .doc-render .bubble h2 {
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 10px;
+      font-size: 24px;
+    }
+
+    .doc-render .bubble p {
+      max-width: 780px;
+      color: #263244;
+      font-size: 15.5px;
+      line-height: 1.82;
+    }
+
+    .doc-render .bubble :not(pre) > code {
+      border-radius: 6px;
+      background: #eef6ff;
+      padding: 0.12em 0.38em;
+      color: #075985;
+      font-size: 0.9em;
+      font-weight: 750;
+    }
+
+    .doc-render .bubble pre {
+      border-radius: 12px;
+      background: #101827;
+      padding: 15px 16px;
+      color: #e5edf8;
+      font-size: 13px;
+      line-height: 1.62;
+    }
+
+    .doc-render .bubble blockquote {
+      margin: 16px 0;
+      border: 1px solid #bae6fd;
+      border-left: 4px solid #0284c7;
+      border-radius: 12px;
+      background: #f0f9ff;
+      padding: 12px 14px;
+      color: #334155;
+    }
+
+    .doc-render .bubble td,
+    .doc-render .bubble th {
+      border: 1px solid #dbe4ef;
+    }
+
+    .doc-render .bubble th {
+      background: #f8fafc;
+    }
+
+    .semantic .bubble {
+      display: grid;
+      gap: 12px;
+    }
+
+    .semantic .hero-card {
+      border: 1px solid rgba(14, 165, 233, 0.24);
+      border-radius: 22px;
+      background:
+        radial-gradient(circle at top right, rgba(14, 165, 233, 0.13), transparent 38%),
+        linear-gradient(180deg, #ffffff, #f8fbff);
+      padding: 18px 20px;
+      box-shadow: 0 16px 36px rgba(37, 99, 235, 0.08);
+    }
+
+    .semantic .hero-card h2 {
+      margin-bottom: 8px;
+    }
+
+    .semantic .summary-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .semantic .mini-card {
+      border: 1px solid #dbeafe;
+      border-radius: 16px;
+      background: #eff6ff;
+      padding: 12px;
+      color: #1e3a8a;
+      font-size: 13px;
+      font-weight: 750;
+      line-height: 1.5;
+    }
+
+    .semantic .callout {
+      border: 1px solid #bbf7d0;
+      border-radius: 16px;
+      background: #f0fdf4;
+      padding: 12px 14px;
+      color: #166534;
+      font-size: 14px;
+    }
+
+    .semantic .code-card {
+      overflow: hidden;
+      border: 1px solid #172033;
+      border-radius: 16px;
+      background: #0b1220;
+    }
+
+    .semantic .code-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 8px 12px;
+      color: #94a3b8;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+    }
+
+    .semantic pre {
+      margin: 0;
+      padding: 13px 15px;
+      color: #dbeafe;
+      font-size: 13px;
+      line-height: 1.58;
+    }
+
+    .semantic code.inline {
+      border-radius: 7px;
+      background: #e0f2fe;
+      padding: 0.12em 0.38em;
+      color: #075985;
+      font-size: 0.92em;
+      font-weight: 750;
+    }
+
+    .html-render .bubble {
+      border: 1px solid rgba(245, 158, 11, 0.26);
+      border-radius: 24px;
+      background:
+        linear-gradient(180deg, rgba(255, 251, 235, 0.75), rgba(255, 255, 255, 0.95)),
+        #fff;
+      padding: 20px 22px;
+      box-shadow: 0 18px 44px rgba(120, 53, 15, 0.08);
+    }
+
+    .html-render .html-title {
+      display: inline-flex;
+      margin-bottom: 12px;
+      border-radius: 999px;
+      background: #fef3c7;
+      padding: 5px 9px;
+      color: #92400e;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .html-render .bubble p {
+      color: #292524;
+      font-family: Charter, "Iowan Old Style", "Songti SC", Georgia, serif;
+      font-size: 16px;
+      line-height: 1.82;
+    }
+
+    .html-render .bubble mark {
+      border-radius: 6px;
+      background: #fde68a;
+      padding: 0.08em 0.26em;
+      color: #78350f;
+    }
+
+    .html-render .bubble kbd,
+    .html-render .bubble code {
+      border: 1px solid #fed7aa;
+      border-radius: 7px;
+      background: #fff7ed;
+      padding: 0.1em 0.38em;
+      color: #9a3412;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.86em;
+      font-weight: 750;
+    }
+
+    .html-render .html-callout {
+      border: 1px solid #fcd34d;
+      border-radius: 16px;
+      background: #fffbeb;
+      padding: 12px 14px;
+      color: #78350f;
+    }
+
+    .subset .bubble {
+      border-radius: 22px 24px 24px 10px;
+      background: #ffffff;
+      padding: 16px 18px;
+      box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+    }
+
+    .subset .line {
+      margin: 8px 0;
+      color: #243044;
+      font-size: 15px;
+      line-height: 1.62;
+    }
+
+    .subset b {
+      color: #0f172a;
+    }
+
+    .subset code {
+      border-radius: 6px;
+      background: #eaf2ff;
+      padding: 0.1em 0.36em;
+      color: #1e40af;
+      font-size: 0.9em;
+      font-weight: 750;
+    }
+
+    .subset .quote {
+      margin: 12px 0;
+      border-left: 3px solid #93c5fd;
+      background: #eff6ff;
+      padding: 9px 12px;
+      color: #334155;
+    }
+
+    .subset .plain-code {
+      white-space: pre;
+      overflow: auto;
+      margin-top: 12px;
+      border-radius: 12px;
+      background: #111827;
+      padding: 12px 14px;
+      color: #e5e7eb;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.52;
+    }
+
+    @media (max-width: 1080px) {
+      .criteria {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .strategy-body {
+        grid-template-columns: 1fr;
+      }
+
+      .pipeline {
+        border-right: none;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+      }
+    }
+
+    @media (max-width: 700px) {
+      .page {
+        width: min(100vw - 24px, 760px);
+        padding-top: 18px;
+      }
+
+      .hero,
+      .strategy-head,
+      .pipeline,
+      .preview {
+        padding: 18px;
+      }
+
+      .criteria,
+      .semantic .summary-row {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <p class="eyebrow">OnlineWorker Rendering Strategy Preview</p>
+      <h1>不是只选样式，而是选渲染方案</h1>
+      <p>
+        下面每个方案代表不同管线。左侧是数据怎么从 assistant reply 变成 UI，右侧是同一段内容的最终效果。
+        重点比较：安全性、Markdown 兼容度、是否可做富组件、落地复杂度、是否适合当前 Session Tab。
+      </p>
+      <div class="criteria">
+        <span>安全：能否避免 HTML 注入</span>
+        <span>兼容：GFM/表格/代码块</span>
+        <span>可控：组件和样式边界</span>
+        <span>维护：后续 bug 成本</span>
+        <span>效果：阅读和聊天体验</span>
+      </div>
+    </section>
+
+    <section class="strategy safe-md">
+      <header class="strategy-head">
+        <div>
+          <h2 class="strategy-title">方案 1：Markdown AST → React 组件渲染</h2>
+          <p class="strategy-desc">
+            当前方向的正确版本。保留 <code>react-markdown</code>，修正 inline/block code 判断，为 h/p/li/code/pre/table/blockquote 定制组件和 CSS。
+            这是安全性、效果和维护成本最平衡的方案。
+          </p>
+        </div>
+        <span class="badge best">Best Default</span>
+      </header>
+      <div class="strategy-body">
+        <aside class="pipeline">
+          <h3>Pipeline</h3>
+          <div class="flow">
+            <span>assistant markdown text</span>
+            <span>react-markdown + remark-gfm</span>
+            <span>Markdown AST</span>
+            <span>safe React components</span>
+            <span>SessionMarkdown CSS</span>
+          </div>
+          <div class="matrix">
+            <div class="metric"><b>安全</b><span class="bar"><i style="width: 94%"></i></span></div>
+            <div class="metric"><b>兼容</b><span class="bar"><i style="width: 86%"></i></span></div>
+            <div class="metric"><b>效果</b><span class="bar"><i style="width: 88%"></i></span></div>
+            <div class="metric"><b>复杂度</b><span class="bar"><i style="width: 38%"></i></span></div>
+          </div>
+          <p class="note good-note">
+            推荐落地。关键修复点是不要依赖失效的 <code>inline</code> 参数，改用 fenced code 的 className / 换行判断区分 code block。
+          </p>
+        </aside>
+        <div class="preview">
+          <h3>Rendered Effect</h3>
+          <div class="chat-row">
+            <div class="avatar">CD</div>
+            <div>
+              <span class="assistant-label">Codex</span>
+              <div class="bubble">
+                <h2>Markdown 渲染判断</h2>
+                <p><strong>TG 日志里的</strong> <code>最终回复已按 HTML edit</code> 是 Telegram API 的格式化方式，不代表 App Session Tab 使用 HTML 注入。</p>
+                <p>App 侧仍应使用 <code>react-markdown</code>。关键是把 <code>displayMode: "markdown"</code> 的内容交给正确的 Markdown 组件渲染。</p>
+                <h3>判断标准</h3>
+                <ul>
+                  <li><strong>粗体</strong> 应该直接加粗，而不是显示 <code>**粗体**</code>。</li>
+                  <li>列表应该有正常缩进和项目符号。</li>
+                  <li><code>inline code</code> 是行内小胶囊，只有 fenced code 才是块。</li>
+                </ul>
+                <blockquote>如果粗体、列表、代码块都已经呈现为样式化内容，这轮验证可以判定通过。</blockquote>
+                <pre><code>function normalizeDisplayMode(role) {
+  return role === "assistant" ? "markdown" : "plain";
+}</code></pre>
+                <table>
+                  <thead><tr><th>项目</th><th>期望</th></tr></thead>
+                  <tbody>
+                    <tr><td>inline code</td><td>行内、小面积、低干扰</td></tr>
+                    <tr><td>code block</td><td>块级、可横向滚动</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="strategy doc-render">
+      <header class="strategy-head">
+        <div>
+          <h2 class="strategy-title">方案 2：Markdown AST → 文档式 Prose 渲染</h2>
+          <p class="strategy-desc">
+            仍然安全地使用 Markdown AST，但 assistant final 不再完全像聊天气泡，而是像一张内嵌文档卡片。长回复、计划、验证报告会更好读。
+          </p>
+        </div>
+        <span class="badge good">Long Reply</span>
+      </header>
+      <div class="strategy-body">
+        <aside class="pipeline">
+          <h3>Pipeline</h3>
+          <div class="flow">
+            <span>assistant markdown text</span>
+            <span>react-markdown + remark-gfm</span>
+            <span>document/prose container</span>
+            <span>wide article layout</span>
+            <span>chat shell only as frame</span>
+          </div>
+          <div class="matrix">
+            <div class="metric"><b>安全</b><span class="bar"><i style="width: 94%"></i></span></div>
+            <div class="metric"><b>兼容</b><span class="bar"><i style="width: 86%"></i></span></div>
+            <div class="metric"><b>效果</b><span class="bar"><i style="width: 90%"></i></span></div>
+            <div class="metric"><b>复杂度</b><span class="bar"><i style="width: 46%"></i></span></div>
+          </div>
+          <p class="note good-note">
+            适合 Codex/Claude 的长最终回复。缺点是聊天节奏稍弱，占用垂直空间也更大。
+          </p>
+        </aside>
+        <div class="preview">
+          <h3>Rendered Effect</h3>
+          <div class="chat-row">
+            <div class="avatar">CD</div>
+            <div>
+              <span class="assistant-label">Codex</span>
+              <div class="bubble">
+                <h2>Markdown 渲染判断</h2>
+                <p><strong>TG 日志里的</strong> <code>最终回复已按 HTML edit</code> 是 Telegram API 的格式化方式，不代表 App Session Tab 使用 HTML 注入。</p>
+                <p>App 侧仍应使用 <code>react-markdown</code>。关键是把 <code>displayMode: "markdown"</code> 的内容交给正确的 Markdown 组件渲染。</p>
+                <h3>判断标准</h3>
+                <ol>
+                  <li><strong>粗体</strong> 应该直接加粗，而不是显示 <code>**粗体**</code>。</li>
+                  <li>列表应该有正常缩进和项目符号。</li>
+                  <li><code>inline code</code> 是行内小胶囊，只有 fenced code 才是块。</li>
+                </ol>
+                <blockquote>文档式布局会把最终回答当作“可阅读结果”，而不是普通聊天泡泡。</blockquote>
+                <pre><code>function normalizeDisplayMode(role) {
+  return role === "assistant" ? "markdown" : "plain";
+}</code></pre>
+                <table>
+                  <thead><tr><th>项目</th><th>期望</th></tr></thead>
+                  <tbody>
+                    <tr><td>长文</td><td>阅读更稳定</td></tr>
+                    <tr><td>短答</td><td>略显正式</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="strategy semantic">
+      <header class="strategy-head">
+        <div>
+          <h2 class="strategy-title">方案 3：Markdown AST → 语义组件渲染</h2>
+          <p class="strategy-desc">
+            不只按 Markdown 标签渲染，而是识别“结论、证据、风险、下一步、代码”等语义块，渲染成卡片、callout、code card。
+            效果最好，但需要额外解析规则。
+          </p>
+        </div>
+        <span class="badge advanced">Rich UI</span>
+      </header>
+      <div class="strategy-body">
+        <aside class="pipeline">
+          <h3>Pipeline</h3>
+          <div class="flow">
+            <span>assistant markdown text</span>
+            <span>markdown AST parse</span>
+            <span>semantic classifier</span>
+            <span>AnswerSummary / Evidence / Risk / CodeCard</span>
+            <span>fallback to normal Markdown</span>
+          </div>
+          <div class="matrix">
+            <div class="metric"><b>安全</b><span class="bar"><i style="width: 90%"></i></span></div>
+            <div class="metric"><b>兼容</b><span class="bar"><i style="width: 78%"></i></span></div>
+            <div class="metric"><b>效果</b><span class="bar"><i style="width: 96%"></i></span></div>
+            <div class="metric"><b>复杂度</b><span class="bar"><i style="width: 76%"></i></span></div>
+          </div>
+          <p class="note warn-note">
+            第二阶段可做。第一阶段先修方案 1，否则语义分类会扩大改动面，也更容易误判 AI 回复结构。
+          </p>
+        </aside>
+        <div class="preview">
+          <h3>Rendered Effect</h3>
+          <div class="chat-row">
+            <div class="avatar">CD</div>
+            <div>
+              <span class="assistant-label">Codex</span>
+              <div class="bubble">
+                <section class="hero-card">
+                  <h2>结论：Session Tab 不该改成直接 HTML 注入</h2>
+                  <p>推荐保留 <code class="inline">react-markdown</code>，但把 final reply 渲染成更有结构的组件。</p>
+                </section>
+                <div class="summary-row">
+                  <div class="mini-card">安全：不使用 dangerouslySetInnerHTML</div>
+                  <div class="mini-card">阅读：长回复拆成可扫读卡片</div>
+                  <div class="mini-card">兼容：代码块、表格继续支持</div>
+                </div>
+                <div class="callout"><strong>判断标准：</strong> <code class="inline">inline code</code> 必须是行内小胶囊，不能再变成整行黑块。</div>
+                <div class="code-card">
+                  <div class="code-head"><span>TypeScript</span><span>CodeCard</span></div>
+                  <pre><code>function normalizeDisplayMode(role) {
+  return role === "assistant" ? "markdown" : "plain";
+}</code></pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="strategy html-render">
+      <header class="strategy-head">
+        <div>
+          <h2 class="strategy-title">方案 4：Markdown/HTML → sanitize → HTML 渲染</h2>
+          <p class="strategy-desc">
+            先把 Markdown 转为 HTML，允许部分 HTML 标签，再用 sanitizer 清洗，最后注入 DOM。视觉自由度高，但安全和边界成本最高。
+          </p>
+        </div>
+        <span class="badge risky">Risky</span>
+      </header>
+      <div class="strategy-body">
+        <aside class="pipeline">
+          <h3>Pipeline</h3>
+          <div class="flow">
+            <span>assistant markdown / html text</span>
+            <span>remark / rehype</span>
+            <span>rehype-sanitize allowlist</span>
+            <span>trusted HTML string</span>
+            <span>dangerouslySetInnerHTML</span>
+          </div>
+          <div class="matrix">
+            <div class="metric"><b>安全</b><span class="bar"><i style="width: 58%"></i></span></div>
+            <div class="metric"><b>兼容</b><span class="bar"><i style="width: 92%"></i></span></div>
+            <div class="metric"><b>效果</b><span class="bar"><i style="width: 92%"></i></span></div>
+            <div class="metric"><b>复杂度</b><span class="bar"><i style="width: 82%"></i></span></div>
+          </div>
+          <p class="note risk-note">
+            不建议作为默认。必须维护严格 allowlist，否则 AI 回复内容会变成 HTML 注入面，可能污染布局或引入 XSS 风险。
+          </p>
+        </aside>
+        <div class="preview">
+          <h3>Rendered Effect</h3>
+          <div class="chat-row">
+            <div class="avatar">CD</div>
+            <div>
+              <span class="assistant-label">Codex</span>
+              <div class="bubble">
+                <span class="html-title">Sanitized HTML Result</span>
+                <p><strong>HTML 渲染可以更自由</strong>，例如允许 <mark>mark 高亮</mark>、<kbd>kbd</kbd>、自定义 span class。</p>
+                <p>但这要求 sanitizer 精准控制标签、属性、URL scheme、style/class allowlist。否则 <code>dangerouslySetInnerHTML</code> 会变成长期风险点。</p>
+                <div class="html-callout">
+                  适用场景：内容来源可信、需要渲染非常复杂的 HTML 结构。当前 OnlineWorker assistant 回复不是这个场景。
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="strategy subset">
+      <header class="strategy-head">
+        <div>
+          <h2 class="strategy-title">方案 5：Telegram-like 子集渲染</h2>
+          <p class="strategy-desc">
+            仿 Telegram Bot API，只支持粗体、斜体、链接、行内代码、pre 等少量格式。实现简单，但会损失 Markdown 表格、嵌套列表和复杂结构。
+          </p>
+        </div>
+        <span class="badge good">Subset</span>
+      </header>
+      <div class="strategy-body">
+        <aside class="pipeline">
+          <h3>Pipeline</h3>
+          <div class="flow">
+            <span>assistant markdown text</span>
+            <span>custom lightweight parser</span>
+            <span>limited token stream</span>
+            <span>b / i / code / pre / link components</span>
+            <span>fallback plain text</span>
+          </div>
+          <div class="matrix">
+            <div class="metric"><b>安全</b><span class="bar"><i style="width: 92%"></i></span></div>
+            <div class="metric"><b>兼容</b><span class="bar"><i style="width: 54%"></i></span></div>
+            <div class="metric"><b>效果</b><span class="bar"><i style="width: 70%"></i></span></div>
+            <div class="metric"><b>复杂度</b><span class="bar"><i style="width: 42%"></i></span></div>
+          </div>
+          <p class="note warn-note">
+            适合 TG，不适合 App Session Tab。App 里用户会期待完整 Markdown，而不是 Telegram 子集。
+          </p>
+        </aside>
+        <div class="preview">
+          <h3>Rendered Effect</h3>
+          <div class="chat-row">
+            <div class="avatar">CD</div>
+            <div>
+              <span class="assistant-label">Codex</span>
+              <div class="bubble">
+                <p class="line"><b>TG 日志里的</b> <code>最终回复已按 HTML edit</code> 是 Telegram API 的格式化方式。</p>
+                <p class="line">App 侧仍应使用 <code>react-markdown</code>，但这个子集方案只渲染有限格式。</p>
+                <p class="line">• <b>粗体</b> 可以支持</p>
+                <p class="line">• <code>inline code</code> 可以支持</p>
+                <p class="line">• 表格、复杂嵌套列表、GFM task list 会退化</p>
+                <div class="quote">这个方案稳定但表现力不足，适合远程轻办公，不适合主控 Session UI。</div>
+                <div class="plain-code">function normalizeDisplayMode(role) {
+  return role === "assistant" ? "markdown" : "plain";
+}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

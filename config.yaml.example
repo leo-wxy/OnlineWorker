@@ -1,0 +1,42 @@
+# OnlineWorker configuration template.
+# Sensitive values such as Telegram token and user IDs belong in .env.
+
+schema_version: 2
+
+providers:
+  codex:
+    visible: true
+    managed: true
+    autostart: true
+    runtime_id: codex
+    bin: "codex"
+    owner_transport: "stdio"
+    live_transport: "owner_bridge"
+    control_mode: "app"
+    transport:
+      type: "stdio"
+
+  claude:
+    visible: true
+    managed: false
+    autostart: false
+    runtime_id: claude
+    bin: "claude"
+    owner_transport: "stdio"
+    live_transport: "stdio"
+    control_mode: "app"
+    transport:
+      type: "stdio"
+    auth:
+      key: ""
+      base_url: ""
+      model: ""
+
+telegram:
+  # true = delete archived thread topics.
+  # false = close topics and keep history visible in Telegram.
+  delete_archived_topics: true
+
+logging:
+  # DEBUG / INFO / WARNING / ERROR
+  level: "INFO"

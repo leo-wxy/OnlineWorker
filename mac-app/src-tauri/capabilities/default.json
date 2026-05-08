@@ -1,0 +1,73 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability for main window - restricted permissions",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:event:default",
+    "window-state:default",
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [
+        {
+          "path": "$APPDATA/*"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [
+        {
+          "path": "$APPDATA/*"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-dir",
+      "allow": [
+        {
+          "path": "$APPDATA"
+        },
+        {
+          "path": "$HOME/.codex/rollouts"
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "binaries/onlineworker-bot",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "kill",
+          "cmd": "kill",
+          "args": ["-0", { "validator": "\\d+" }],
+          "sidecar": false
+        },
+        {
+          "name": "pgrep",
+          "cmd": "pgrep",
+          "args": ["-f", "python.*main.py.*--data-dir"],
+          "sidecar": false
+        },
+        {
+          "name": "which",
+          "cmd": "which",
+          "args": true,
+          "sidecar": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+schema_version: 1
+id: claude
+kind: provider
+visibility: public
+order: 20
+runtime_id: claude
+label: Claude
+description: Anthropic Claude Code CLI sessions
+default_visible: true
+
+provider:
+  visible: true
+  managed: false
+  autostart: false
+  runtime_id: claude
+  bin: claude
+  owner_transport: stdio
+  live_transport: stdio
+  control_mode: app
+  transport:
+    type: stdio
+  capabilities:
+    sessions: true
+    send: true
+    approvals: true
+    questions: true
+    photos: false
+    commands: true
+    command_wrappers: []
+    control_modes:
+      - app
+  process:
+    cleanup_matchers: []
+  health: {}
+  auth:
+    key: ""
+    base_url: ""
+    model: ""
+  auth_env:
+    key: ANTHROPIC_API_KEY
+    base_url: ANTHROPIC_BASE_URL
+    model: ANTHROPIC_MODEL
+  commands:
+    - name: doctor
+      scope: global
+      description: 执行 Claude CLI 自检（静态 fallback catalog）
+    - name: auth
+      scope: global
+      description: 查看或调整 Claude CLI 鉴权状态（静态 fallback catalog）
+    - name: mcp
+      scope: global
+      description: 查看 Claude CLI 的 MCP 配置入口（静态 fallback catalog）
+    - name: plugins
+      scope: global
+      description: 查看 Claude CLI 插件入口（静态 fallback catalog）
+    - name: update
+      scope: global
+      description: 检查 Claude CLI 更新（静态 fallback catalog）
+
+entrypoints:
+  python_descriptor: plugins.providers.builtin.claude.python.provider:create_provider_descriptor

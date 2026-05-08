@@ -1,0 +1,13 @@
+pub mod claude;
+pub mod codex;
+pub mod command_catalog;
+pub mod command_registry;
+pub mod config;
+pub mod config_provider;
+pub mod dashboard;
+pub mod logs;
+pub mod provider_sessions;
+pub mod service;
+pub mod session_state;
+pub mod telegram;
+pub mod terminal;

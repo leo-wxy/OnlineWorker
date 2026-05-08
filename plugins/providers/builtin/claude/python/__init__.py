@@ -1,0 +1,1 @@
+"""Claude Python runtime descriptor."""

@@ -1,0 +1,497 @@
+import type { AppTexts } from "../types";
+
+const BOT_COMMAND_LIST_EN = `start - Show welcome message
+help - Show available commands
+status - Show bot and adapter status
+workspace - Manage workspaces
+new - Create a new thread
+list - List active threads
+archive - Archive current thread
+history - View recent conversation
+active - Warm up adapter connections
+restart - Restart the bot
+stop - Stop the bot`;
+
+export const enTexts: AppTexts = {
+    common: {
+      loading: "Loading...",
+      saving: "Saving...",
+      saved: "Saved",
+      save: "Save",
+      refresh: "Refresh",
+      recheck: "Recheck",
+      view: "View",
+      edit: "Edit",
+      close: "Close",
+      copy: "Copy",
+      copied: "Copied",
+      show: "Show",
+      hide: "Hide",
+      checking: "Checking...",
+      installed: "Installed",
+      notFound: "Not found",
+      unknown: "Unknown",
+      done: "Done",
+      pending: "Pending",
+      active: "Active",
+      archived: "Archived",
+      healthy: "Healthy",
+      degraded: "Degraded",
+      stopped: "Stopped",
+      connected: "Connected",
+      disconnected: "Disconnected",
+      runningWithPid: (pid: number | string) => `Running (PID: ${pid})`,
+      noData: "No data",
+      empty: "empty",
+      items: (count: number) => `${count} items`,
+      secondsAgo: (value: number) => `${value}s ago`,
+      minutesAgo: (value: number) => `${value}m ago`,
+      hoursAgo: (value: number) => `${value}h ago`,
+      toolLabel: (tool: string) => `Tool: ${tool}`,
+    },
+    app: {
+      title: "OnlineWorker",
+      tabs: {
+        dashboard: "Dashboard",
+        sessions: "Sessions",
+        commands: "Commands",
+        config: "Config",
+        setup: "Setup",
+      },
+      firstRun: {
+        title: "Welcome to OnlineWorker!",
+        description:
+          "Please configure your Telegram credentials below to get started.",
+        dismiss: "Dismiss",
+      },
+      locale: {
+        label: "Language",
+        en: "English",
+        zh: "中文",
+      },
+    },
+    setup: {
+      configStatus: "Configuration Status",
+      allSet: "All set",
+      configured: (count: number) => `${count}/3 configured`,
+      saveChanges: "Save Changes",
+      notSet: "not set",
+      botToken: "Bot Token",
+      claudeApiKey: "Anthropic API Key (optional)",
+      claudeBaseUrl: "Claude Base URL (optional)",
+      claudeModel: "Claude Model (optional)",
+      userId: "User ID",
+      groupChatId: "Group Chat ID",
+      connectivityTest: "Connectivity Test",
+      pageEyebrow: "Setup",
+      pageTitle: "Configure OnlineWorker",
+      pageDescription:
+        "This page walks through CLI tools, Telegram credentials, and group setup in one vertical flow. Follow it from top to bottom without bouncing between tabs.",
+      advancedConfigTitle: "Need raw config or CLI diagnostics?",
+      advancedConfigDescription:
+        "Open the advanced page only when you need to inspect `config.yaml`, reveal `.env` fields, or troubleshoot the local runtime directly.",
+      openAdvancedConfig: "Open Advanced Config",
+      summaryCliTools: "CLI Tools",
+      summaryCliInstalled: (installed: number, total: number) =>
+        `${installed}/${total} installed`,
+      summaryNextAction: "Next Action",
+      summaryConfigDetail:
+        "Bot Token, User ID, and Group Chat ID are managed together here.",
+      summaryCliDetail:
+        "At least one AI CLI must be available before the bot can work.",
+      summaryNextActionDetail:
+        "This suggests the most important next step based on missing items.",
+      progressTitle: "Progress",
+      progressDescription: "Track completion across the current Setup flow.",
+      credentialsTitle: "Credentials",
+      credentialsDescription:
+        "Saved key fields are consolidated here for quick review.",
+      verificationEyebrow: "Verification",
+      verificationDescription:
+        "After filling Token and Group Chat ID, run connectivity checks here directly without switching pages.",
+      unsavedTitle: "You have unsaved configuration changes",
+      unsavedDescription:
+        "Saving writes back to `.env` only and does not change any runtime behavior.",
+      launchEyebrow: "Launch",
+      launchTitle: "Initialize and start OnlineWorker",
+      launchDescription:
+        "Once credentials are ready, save them, start the bot service, and jump back to Dashboard.",
+      launchReady:
+        "Setup is complete enough to start the bot service and return to Dashboard.",
+      launchBlockedCli:
+        "Install at least one supported CLI before starting the service.",
+      launchBlockedConfig:
+        "Fill in Bot Token, User ID, and Group Chat ID before starting the service.",
+      launchBlockedBotFather:
+        "Finish the BotFather setup first, then mark that step as done before starting the service.",
+      launchAndOpen: "Start Service and Open Dashboard",
+      saveAndLaunch: "Save and Start Service",
+      launching: "Starting service...",
+      launchSuccess: (message: string) => `Service started: ${message}`,
+      launchError: (error: string) => `Failed to start service: ${error}`,
+      tokenPlaceholder: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+      claudeApiKeyPlaceholder: "sk-ant-api03-...",
+      claudeBaseUrlPlaceholder: "http://localhost:3031",
+      claudeModelPlaceholder: "claude-opus-4-6",
+      userIdPlaceholder: "123456789",
+      groupChatIdPlaceholder: "-1001234567890",
+      showToken: "Show token",
+      hideToken: "Hide token",
+      commandList: BOT_COMMAND_LIST_EN,
+      step0Title: "Install AI Coding Tools",
+      step0Description:
+        "OnlineWorker needs at least one AI coding CLI installed. Check the status below and install any missing tools.",
+      step0CodexLabel: "OpenAI Codex CLI",
+      step0CodexCmd: "npm install -g @openai/codex",
+      step0CodexDocs: "https://github.com/openai/codex",
+      step0ClaudeLabel: "Anthropic Claude Code CLI",
+      step0ClaudeCmd: "npm install -g @anthropic-ai/claude-code",
+      step0ClaudeDocs: "https://docs.anthropic.com/en/docs/claude-code/getting-started",
+      step0Hint:
+        "At least one tool must be installed before the bot can work.",
+      step0RealtimeHint:
+        "If you want terminal and Telegram to follow the same codex session, codex should prefer the shared app-managed session bridge.",
+      step0AliasHint: "Tip: add these aliases to ~/.zshrc for convenience:",
+      step0AliasCodex: "alias codexReal='/opt/homebrew/bin/codex'",
+      step1Title: "Create a Telegram Bot",
+      step1Description: "Get the Bot Token first, then save it locally.",
+      step1Instructions: [
+        "Open Telegram and search for @BotFather",
+        "Send /newbot",
+        "Choose a display name and a username ending in bot",
+        "Copy the token BotFather gives you",
+      ],
+      claudeAuthTitle: "Claude authentication (optional)",
+      claudeAuthDescription:
+        "If you want OnlineWorker to drive Claude Code, you can either sign in with the official Claude CLI flow, or fill in API and proxy settings here.",
+      claudeAuthHint:
+        "Leaving this empty is fine if you only use codex. Official flow usually uses `claude auth login`. Proxy or gateway mode can set `ANTHROPIC_BASE_URL` and `ANTHROPIC_MODEL`; if `ANTHROPIC_API_KEY` is left empty, OnlineWorker will inject a dummy placeholder for Claude CLI. Any change to these Claude env values takes effect after restarting the OnlineWorker service.",
+      step2Title: "Get Your User ID",
+      step2Description: "Only the specified user is allowed to send commands.",
+      step2Instructions: [
+        "Open Telegram and search for @userinfobot",
+        "Send any message to it",
+        "Copy the Id number it replies with",
+      ],
+      step2Hint: "Only this user can send commands to the bot.",
+      step3Title: "Create & Configure Group",
+      step3Description:
+        "Create the group, enable Topics, grant the required bot permissions, and fill in Group Chat ID.",
+      step3SectionA: "A. Create the group",
+      step3A: [
+        "Open Telegram, tap the pencil icon (top right) → New Group",
+        "Add your bot (@your_bot_username) as a member",
+        'Give the group a name (for example "AlwaysOnline") and create it',
+      ],
+      step3SectionB: "B. Enable Topics",
+      step3B: [
+        "Open the group and tap the group name at the top",
+        "Tap the pencil icon (Edit) to enter group settings",
+        "Scroll down and enable Topics",
+        "Save it. The group becomes a supergroup with Topics enabled",
+      ],
+      step3SectionC: "C. Set bot as admin with permissions",
+      step3C: [
+        "In group settings → Administrators → Add Admin",
+        "Select your bot",
+        "Enable these permissions:",
+        "Save the admin settings",
+      ],
+      step3Perms: [
+        "Manage Topics — create or rename thread topics",
+        "Delete Messages — clean up placeholder messages",
+        "Pin Messages — pin important messages",
+        "Change Group Info — optional, for topic management",
+      ],
+      step3SectionD: "D. Get the Group Chat ID",
+      step3D: [
+        "Add @getidsbot to the group",
+        "It will reply with the Chat ID (starts with -100)",
+        "Copy that ID, then remove @getidsbot from the group",
+      ],
+      step4Title: "Configure Bot in BotFather",
+      step4Description:
+        "Finish the required BotFather settings so the bot can work correctly inside group Topics.",
+      step4Required: "Required: Disable Group Privacy",
+      step4RequiredSteps: [
+        "Open @BotFather in Telegram",
+        "Send /mybots and select your bot",
+        "Tap Bot Settings → Group Privacy",
+        "Set it to Disable so the bot can read all group messages, not only slash commands",
+      ],
+      step4OptionalCommands: "Optional: Set bot commands",
+      step4CommandsSteps: [
+        "In BotFather, send /setcommands",
+        "Select your bot, then paste the command list",
+      ],
+      step4OptionalDesc: "Optional: Set bot description",
+      step4DescSteps: [
+        "Send /setdescription to set what users see when they open the bot",
+        "Send /setabouttext to set the bot profile bio",
+      ],
+      step4Warning:
+        "Group Privacy must be disabled. Otherwise the bot can only see messages starting with `/` and will not receive normal text messages inside thread topics.",
+      step4PendingNote:
+        "This step is completed in BotFather, so the app cannot verify it automatically. After you finish it, mark it done here.",
+      step4CompletedNote:
+        "Marked as completed. If you change the bot or want to re-check the BotFather settings, you can reset this status.",
+      step4MarkDone: "Mark as done",
+      step4Reset: "Reset status",
+    },
+    serviceControl: {
+      title: "OnlineWorker Service",
+      checkingStatus: "Checking status...",
+      starting: "Starting service...",
+      stopping: "Stopping service...",
+      restarting: "Restarting service...",
+      stopped: "Stopped",
+      logs: "Logs",
+      restart: "Restart",
+      start: "Start",
+      stop: "Stop",
+    },
+    connectivity: {
+      title: "Connectivity Test",
+      runTests: "Run Tests",
+      testing: "Testing...",
+      allPassed: "✓ All Passed",
+      fillRequiredFields:
+        "Fill in TELEGRAM_TOKEN and GROUP_CHAT_ID to enable testing.",
+      botTokenLabel: "Bot Token",
+      groupAccessLabel: "Group Access",
+      botPermissionsLabel: "Bot Permissions",
+      checkingBotToken: "Checking bot token...",
+      checkingGroupAccess: "Checking group access...",
+      checkingBotPermissions: "Checking bot permissions...",
+      topicsEnabled: "Topics enabled",
+      topicsDisabled: "Topics NOT enabled",
+      admin: "Admin",
+      manageTopics: "Manage Topics",
+      deleteMessages: "Delete Messages",
+      pinMessages: "Pin Messages",
+      notAdmin: "not admin",
+      cannotManageTopics: "cannot manage topics",
+      none: "none",
+      missingSummary: (missing: string, has: string) =>
+        `Missing: ${missing}. Has: ${has}`,
+      botIdentity: (username: string, firstName: string) =>
+        `@${username} (${firstName})`,
+      groupIdentity: (title: string, chatType: string, forumBadge: string) =>
+        `${title} (${chatType}) ${forumBadge}`,
+    },
+    cliChecker: {
+      title: "CLI Dependencies",
+      allInstalled: "All installed",
+      missingCount: (count: number) => `${count} missing`,
+      installViaNpm: "Install via npm",
+      installViaOfficialInstaller: "Install via the official installer",
+      installManually: (bin: string) =>
+        `Install ${bin} manually and ensure it is in PATH`,
+      installInstructions: (label: string) =>
+        `${label} install instructions:`,
+      docs: "Docs",
+    },
+    config: {
+      yamlTab: "config.yaml",
+      envTab: ".env",
+      reveal: "Show",
+      conceal: "Hide",
+      cliCheckerHint: "CLI dependencies are detected from your current config.",
+      rawFilesTitle: "Raw Files",
+      rawFilesDescription: "Open low-level configuration only when the normal settings panels are not enough.",
+      yamlDescription: "Provider flags, autostart behavior, ports, and runtime defaults.",
+      envDescription: "Tokens, API keys, and local environment overrides.",
+      providerHint: "Use Agents and Extensions for normal provider setup. Open raw files here only for direct overrides or troubleshooting.",
+      emptyTitle: "Select a file to inspect",
+      emptyDescription: "Advanced keeps raw content hidden until you explicitly open one of the files on the left.",
+      envMaskedHint: ".env values stay masked in view mode. Switch to Edit when you need the raw file.",
+    },
+    sessions: {
+      refresh: "Refresh",
+      claudeTitle: "Claude Sessions",
+      codexTitle: "codex Sessions",
+      activeSummary: (active: number, archived: number) =>
+        archived > 0 ? `${active} active / ${archived} archived` : `${active} active`,
+      sessionsCount: (count: number) => `${count} sessions`,
+      selectWorkspace: "Select a workspace",
+      selectSession: "Select a session",
+      noSessions: "No sessions found",
+      noMessages: "No messages",
+      noFilteredSessions: (filter: "active" | "archived") =>
+        filter === "active" ? "No active sessions" : "No archived sessions",
+      sendPlaceholder: "Send a message... (Enter to send)",
+      send: "Send",
+      reloadMessages: "Reload messages",
+      waitingForReply: "Waiting for reply...",
+      waitingInBackground: "Reply is taking longer. Continuing to watch in the background...",
+      waitingExpired: "Still no completed reply after extended waiting. You can refresh to check the latest state.",
+      you: "You",
+      workspaceFallback: "(unknown)",
+      claudeConnectionError: "Cannot connect to claude",
+      codexConnectionError: "Cannot connect to codex",
+    },
+    commands: {
+      title: "Commands and Skills Registry",
+      description:
+        "This page is the command truth source for the app. Refresh discovers the current bot/downstream/skill commands into local registry, while Publish to Telegram only pushes the current selected active set.",
+      refresh: "Refresh Registry",
+      refreshing: "Refreshing...",
+      publish: "Publish to Telegram",
+      publishing: "Publishing...",
+      searchPlaceholder: "Search by name, description, id, backend, or scope",
+      filterAll: "All",
+      filterBot: "Bot",
+      filterDownstream: "Downstream",
+      filterCodex: "Codex",
+      filterClaude: "Claude",
+      filterSkill: "Skill",
+      secondaryCommand: "Command",
+      secondarySkill: "Skill",
+      summaryTotal: "Total Commands",
+      summarySelected: "Selected",
+      summaryMissing: "Missing",
+      unpublishedChanges: "Unpublished local changes",
+      noResults: "No commands match the current filter.",
+      selectedSectionTitle: "Selected Commands",
+      selectedSectionDescription:
+        "Commands enabled for Telegram are pinned here first so you can review the publish set before browsing the full catalog.",
+      noSelectedCommands: "No commands are currently selected for Telegram publishing.",
+      browserSectionTitle: "Browse Catalog",
+      browserSectionDescription:
+        "Browse commands by execution surface first, then drill into command vs skill when needed.",
+      never: "Never",
+      lastRefreshed: (value: string) => `Last refreshed: ${value}`,
+      lastPublished: (value: string) => `Last published: ${value}`,
+      telegramRulesHint:
+        "Telegram menu commands only accept lowercase letters, digits, and underscores, with length 1-32. Unsupported raw names stay in registry, and OnlineWorker auto-generates a real Telegram alias for publishing. Same-name entries are still coalesced into one Telegram command.",
+      aliasedNamesWarning: (names: string) =>
+        `Selected active commands will be registered to Telegram with generated aliases: ${names}`,
+      duplicateNamesWarning: (names: string) =>
+        `Selected active command names will be coalesced into one Telegram command when published: ${names}`,
+      publishSuccess: "Telegram menu published successfully.",
+      publishError: (error: string) => `Command registry operation failed: ${error}`,
+      missingBadge: "Missing",
+      publishedBadge: "Published",
+      selectedBadge: "Selected",
+      emptyDescription: "No description provided.",
+      invalidNameInline: "Raw name needs alias mapping",
+      telegramAliasLabel: (name: string) => `Telegram ${name}`,
+      telegramAliasMeta: (name: string) => `Registered as ${name}`,
+      savingSelection: "Saving selection...",
+      telegramSelectionLabel: "Enable this command for Telegram publishing",
+      idLabel: (id: string) => `ID: ${id}`,
+      backendLocal: "Local",
+      backendCodex: "Codex",
+      backendClaude: "Claude",
+      backendShared: "Shared",
+      scopeGlobal: "Global",
+      scopeWorkspace: "Workspace",
+      scopeThread: "Thread",
+    },
+    dashboard: {
+      overallTitle: {
+        healthy: "System is healthy",
+        degraded: "System is degraded",
+        misconfigured: "System configuration is incomplete",
+        stopped: "System is stopped",
+        unknown: "System state is unknown",
+      },
+      overallDetail: {
+        healthy: "Core services and configuration are ready.",
+        degraded:
+          "The service is running, but at least one subsystem needs attention.",
+        misconfigured:
+          "Setup still has missing items, so runtime stability is not guaranteed yet.",
+        stopped: "The service is currently not running. You can start it here directly.",
+        unknown:
+          "Diagnostics are insufficient. Check logs to confirm the current runtime state.",
+      },
+      snapshot: "Snapshot",
+      activeWorkspace: "Active Workspace",
+      noWorkspace: "No workspace",
+      subsystemsTitle: "Subsystems",
+      subsystemsDescription:
+        "Use an aggregated view to inspect the bot and each configured provider.",
+      telegramBotTitle: "Telegram Bot",
+      telegramBotDescription: "Main service process and Telegram connectivity summary",
+      telegramLabel: "Telegram",
+      pidLabel: "PID",
+      codexTitle: "codex",
+      codexDescription: "Current codex runtime managed by the app",
+      codexFallbackDetail:
+        "No extra diagnostics are available. The app-side runtime is treated as the default truth.",
+      claudeDescription: "Local Claude CLI session bridge managed through the bot runtime",
+      providerUnmanagedDetail:
+        "This provider is kept in config only and is excluded from app-managed startup and Telegram routing.",
+      providerAutostartDisabledDetail:
+        "This provider remains registered, but it will stay stopped until you enable autostart and restart the service.",
+      portLabel: "Port",
+      managedLabel: "Managed",
+      autostartLabel: "Autostart",
+      transportLabel: "Transport",
+      ownerTransportLabel: "Owner Transport",
+      liveTransportLabel: "Live Transport",
+      controlModeLabel: "Control Mode",
+      binaryLabel: "Binary",
+      providerRestartHint:
+        "Saving these switches rewrites config.yaml. If the bot service is running, OnlineWorker restarts it automatically so the new provider policy takes effect.",
+      recentActivityTitle: "Recent Activity",
+      workspaceLabel: "Workspace",
+      currentActiveSessionLabel: "Current Active Session",
+      highlightedThreadLabel: "Highlighted Thread",
+      noWorkspaceSelected: "No workspace selected",
+      noActiveSession: "No active session",
+      noThreadPreview: "No thread preview",
+      activeThreads: (count: number) => `Active threads: ${count}`,
+      alertsTitle: "Alerts",
+      noAlerts: "There are currently no system alerts that need action.",
+      failedToLoad: (error: string) => `Failed to load dashboard state: ${error}`,
+      quickActionsTitle: "Quick Actions",
+      openSetupTitle: "Open Setup",
+      openSetupDescription: "Adjust Telegram and provider configuration",
+      openSessionsTitle: "Open Sessions",
+      openSessionsDescription: "Browse codex and Claude sessions",
+      openLogsTitle: "Open Logs",
+      openLogsDescription: "Inspect runtime logs and diagnostics output",
+    },
+    alerts: {
+      configurationIncomplete: {
+        title: "Configuration incomplete",
+        missingFiles: "Missing required app configuration files.",
+        missingFields: (fields: string) => `Missing required settings: ${fields}`,
+      },
+      codexDegraded: {
+        title: "codex status degraded",
+        detail:
+          "Codex runtime looks stale or unavailable from the app diagnostics view.",
+      },
+      claudeDegraded: {
+        title: "claude status degraded",
+        detail:
+          "Claude CLI is unavailable or not authenticated from the app diagnostics view.",
+      },
+      telegramUnavailable: {
+        title: "Telegram connection unavailable",
+        detail:
+          "The bot process is up, but Telegram connectivity is reported as disconnected.",
+      },
+      openSetup: "Setup",
+      openLogs: "Logs",
+    },
+    logs: {
+      title: (path: string) => `Logs — ${path}`,
+      live: "● Live",
+      paused: "○ Paused",
+      pause: "Pause",
+      resume: "Resume",
+      clear: "Clear",
+      filter: "Filter:",
+      autoScroll: "Auto-scroll",
+      waiting: "Waiting for log output...",
+      noEntries: "No log entries",
+    },
+    workspaceTerminal: {
+      title: (path: string) => `Open terminal: ${path}`,
+      button: "⌨️ Terminal",
+    },
+};

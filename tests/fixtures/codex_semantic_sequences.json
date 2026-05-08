@@ -1,0 +1,50 @@
+{
+  "final_sequence": [
+    {
+      "kind": "turn_started",
+      "semanticKind": "run_started"
+    },
+    {
+      "kind": "assistant_completed",
+      "semanticKind": "assistant_progress",
+      "turn": {
+        "role": "assistant",
+        "content": "我先检查一下当前链路。"
+      },
+      "phase": "commentary"
+    },
+    {
+      "kind": "assistant_completed",
+      "semanticKind": "turn_completed",
+      "turn": {
+        "role": "assistant",
+        "content": "已经确认根因，开始修改。"
+      },
+      "phase": "final_answer"
+    },
+    {
+      "kind": "turn_completed",
+      "semanticKind": "turn_completed"
+    }
+  ],
+  "abort_sequence": [
+    {
+      "kind": "turn_started",
+      "semanticKind": "run_started"
+    },
+    {
+      "kind": "assistant_completed",
+      "semanticKind": "assistant_progress",
+      "turn": {
+        "role": "assistant",
+        "content": "我先检查一下当前链路。"
+      },
+      "phase": "commentary"
+    },
+    {
+      "kind": "turn_completed",
+      "semanticKind": "turn_aborted",
+      "reason": "interrupted"
+    }
+  ]
+}
