@@ -24,6 +24,7 @@ fi
 echo "=== Build OnlineWorker ==="
 echo "Project: $PROJECT_ROOT"
 echo "Target:  $TARGET_TRIPLE"
+echo "Profile: public"
 echo ""
 
 # Step 1: Use arm64 Python for PyInstaller

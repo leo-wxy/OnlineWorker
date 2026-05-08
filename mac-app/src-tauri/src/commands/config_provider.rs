@@ -8,6 +8,7 @@ const BUILTIN_CODEX_PLUGIN_MANIFEST: &str =
     include_str!("../../../../plugins/providers/builtin/codex/plugin.yaml");
 const BUILTIN_CLAUDE_PLUGIN_MANIFEST: &str =
     include_str!("../../../../plugins/providers/builtin/claude/plugin.yaml");
+const PROVIDER_OVERLAY_ENV: &str = "ONLINEWORKER_PROVIDER_OVERLAY";
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 pub(crate) struct ProviderConfigDocument {
@@ -295,12 +296,42 @@ fn read_manifest_files_from_overlay_path(overlay_path: &Path) -> Vec<String> {
 }
 
 fn read_manifest_files_from_overlay_env() -> Vec<String> {
-    let Ok(raw) = env::var("ONLINEWORKER_PROVIDER_OVERLAY") else {
+    let Some(raw) = read_overlay_env_spec() else {
         return Vec::new();
     };
     env::split_paths(&raw)
         .flat_map(|path| read_manifest_files_from_overlay_path(&path))
         .collect()
+}
+
+fn app_support_env_path() -> PathBuf {
+    let home = env::var("HOME").unwrap_or_else(|_| "/Users/unknown".to_string());
+    PathBuf::from(home).join("Library/Application Support/OnlineWorker/.env")
+}
+
+fn trimmed_env_value(value: String) -> Option<String> {
+    let trimmed = value.trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn overlay_env_spec_from_env_raw(raw: &str) -> Option<String> {
+    read_env_key(raw, PROVIDER_OVERLAY_ENV).and_then(trimmed_env_value)
+}
+
+fn read_overlay_env_spec_from_app_env() -> Option<String> {
+    let raw = fs::read_to_string(app_support_env_path()).ok()?;
+    overlay_env_spec_from_env_raw(&raw)
+}
+
+fn read_overlay_env_spec() -> Option<String> {
+    env::var(PROVIDER_OVERLAY_ENV)
+        .ok()
+        .and_then(trimmed_env_value)
+        .or_else(read_overlay_env_spec_from_app_env)
 }
 
 pub(crate) fn provider_plugin_manifest_sources() -> Vec<String> {
@@ -858,7 +889,8 @@ pub(super) fn set_provider_flags_in_document(
 mod tests {
     use super::{
         normalize_config_for_display, normalize_provider_document,
-        normalize_provider_document_with_env, provider_metadata_from_raw,
+        normalize_provider_document_with_env, overlay_env_spec_from_env_raw,
+        provider_metadata_from_raw,
         serialize_normalized_config_with_env, set_provider_flags_in_document,
     };
 
@@ -890,6 +922,26 @@ app_server_port: 4722
         let claude = providers.get("claude").expect("claude");
         assert_eq!(claude.managed, Some(false));
         assert_eq!(claude.autostart, Some(false));
+    }
+
+    #[test]
+    fn overlay_env_spec_from_env_raw_reads_trimmed_app_env_value() {
+        let raw = r#"
+TELEGRAM_TOKEN=token
+ONLINEWORKER_PROVIDER_OVERLAY=  /tmp/private-overlay:/tmp/other-overlay
+"#;
+
+        assert_eq!(
+            overlay_env_spec_from_env_raw(raw).as_deref(),
+            Some("/tmp/private-overlay:/tmp/other-overlay")
+        );
+    }
+
+    #[test]
+    fn overlay_env_spec_from_env_raw_ignores_blank_value() {
+        let raw = "ONLINEWORKER_PROVIDER_OVERLAY=   \n";
+
+        assert_eq!(overlay_env_spec_from_env_raw(raw), None);
     }
 
     #[test]

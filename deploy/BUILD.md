@@ -10,6 +10,8 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
 
 产物: `mac-app/src-tauri/target/release/bundle/dmg/OnlineWorker_0.2.0_aarch64.dmg`
 
+> 说明：这条命令对应的是 **public-only** 构建路径。私有 provider overlay 不会被打进这个 DMG；如果你维护内部 overlay，请使用私有 superproject 在运行态注入 `ONLINEWORKER_PROVIDER_OVERLAY`，或在 App 支持目录 `.env` 里写入该 key。
+
 ### x86_64 (Intel) DMG
 
 前提：`mac-app/src-tauri/binaries/onlineworker-bot-x86_64-apple-darwin` 已存在
@@ -69,6 +71,20 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
 1. 使用 PyInstaller 构建 Python bot binary (`dist/onlineworker-bot`)
 2. 将 binary 复制为带 target-triple 后缀的 sidecar (`mac-app/src-tauri/binaries/onlineworker-bot-{target}`)
 3. 使用 Tauri 构建 Mac App 并打包成 DMG
+
+### public / internal 两种样式
+
+- **public**：直接在 `onlineWorker` 仓库里执行 `scripts/build.sh`。产物只包含公开 builtin providers。
+- **internal**：在私有 superproject 里执行内部包装脚本。内部脚本负责固定 public app submodule 和 private overlay submodule，并在安装态把 overlay 路径写入 `~/Library/Application Support/OnlineWorker/.env`。
+
+内部工作区建议结构：
+
+```text
+onlineWorker-internal/
+├── app/                # public OnlineWorker submodule
+├── overlays/private/   # private provider overlay submodule
+└── scripts/            # internal dev/test/build/install wrappers
+```
 
 ### x86_64 Python Bot Binary
 

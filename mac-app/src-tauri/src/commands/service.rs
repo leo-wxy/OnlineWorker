@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tauri::AppHandle;
@@ -10,6 +12,8 @@ use tokio::sync::Mutex;
 use super::config::{
     ensure_data_dir, read_provider_metadata_from_disk, read_provider_runtime_policies_from_disk,
 };
+
+const PROVIDER_OVERLAY_ENV: &str = "ONLINEWORKER_PROVIDER_OVERLAY";
 
 /// Managed state for the sidecar bot process.
 pub struct BotState {
@@ -98,6 +102,41 @@ fn cleanup_codex_mirror_status_file() {
     if let Ok(path) = codex_mirror_status_path() {
         let _ = std::fs::remove_file(path);
     }
+}
+
+fn read_env_key(raw: &str, key: &str) -> Option<String> {
+    raw.lines().find_map(|line| {
+        let (line_key, value) = line.split_once('=')?;
+        if line_key.trim() == key {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        } else {
+            None
+        }
+    })
+}
+
+fn overlay_env_spec_from_app_env(data_dir: &Path) -> Option<String> {
+    let raw = fs::read_to_string(data_dir.join(".env")).ok()?;
+    read_env_key(&raw, PROVIDER_OVERLAY_ENV)
+}
+
+fn overlay_env_spec(data_dir: &Path) -> Option<String> {
+    std::env::var(PROVIDER_OVERLAY_ENV)
+        .ok()
+        .and_then(|value| {
+            let trimmed = value.trim().to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        })
+        .or_else(|| overlay_env_spec_from_app_env(data_dir))
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -371,6 +410,7 @@ async fn do_spawn(app: &AppHandle, state: &Arc<Mutex<BotState>>) -> Result<u32, 
         "{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
         home
     );
+    let overlay_env = overlay_env_spec(&dir);
 
     eprintln!("[service] do_spawn: creating sidecar command...");
     let sidecar = app.shell().sidecar("onlineworker-bot").map_err(|e| {
@@ -382,11 +422,15 @@ async fn do_spawn(app: &AppHandle, state: &Arc<Mutex<BotState>>) -> Result<u32, 
         "[service] do_spawn: spawning sidecar with --data-dir {}...",
         dir_str
     );
-    let (rx, child) = sidecar
+    let mut sidecar = sidecar
         .args(["--data-dir", &dir_str])
         .env("PATH", &path)
         .env("HOME", &home)
-        .env("LANG", "en_US.UTF-8")
+        .env("LANG", "en_US.UTF-8");
+    if let Some(overlay_env) = overlay_env {
+        sidecar = sidecar.env(PROVIDER_OVERLAY_ENV, overlay_env);
+    }
+    let (rx, child) = sidecar
         .spawn()
         .map_err(|e| {
             eprintln!("[service] Failed to spawn: {}", e);
@@ -725,11 +769,13 @@ mod tests {
     use super::should_ignore_sidecar_output_event;
     use super::{
         apply_manual_stop_policy, apply_service_start_policy, cleanup_process_matchers,
-        compute_service_status, pid_parent_pairs_from_output, pids_from_output, probe_http_health,
-        select_primary_pid, should_attempt_background_service_recovery, BotState,
-        CodexMirrorStatus, ManagedProcessCleanupPolicy,
+        compute_service_status, overlay_env_spec_from_app_env, pid_parent_pairs_from_output,
+        pids_from_output, probe_http_health, read_env_key, select_primary_pid,
+        should_attempt_background_service_recovery, BotState, CodexMirrorStatus,
+        ManagedProcessCleanupPolicy,
     };
     use std::collections::HashMap;
+    use std::fs;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
@@ -891,6 +937,34 @@ mod tests {
         assert!(matchers.contains(&"codex.*app-server".to_string()));
         assert!(matchers.contains(&"codex-aar".to_string()));
         assert!(matchers.contains(&"custom-provider.*serve".to_string()));
+    }
+
+    #[test]
+    fn read_env_key_trims_overlay_path_values() {
+        let raw = "ONLINEWORKER_PROVIDER_OVERLAY=  /tmp/private-overlay  \n";
+        assert_eq!(
+            read_env_key(raw, "ONLINEWORKER_PROVIDER_OVERLAY").as_deref(),
+            Some("/tmp/private-overlay")
+        );
+    }
+
+    #[test]
+    fn overlay_env_spec_from_app_env_reads_data_dir_env_file() {
+        let dir = std::env::temp_dir().join(format!("onlineworker-overlay-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        fs::write(
+            dir.join(".env"),
+            "TELEGRAM_TOKEN=token\nONLINEWORKER_PROVIDER_OVERLAY=/tmp/private-overlay\n",
+        )
+        .expect("write .env");
+
+        assert_eq!(
+            overlay_env_spec_from_app_env(&dir).as_deref(),
+            Some("/tmp/private-overlay")
+        );
+
+        let _ = fs::remove_file(dir.join(".env"));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

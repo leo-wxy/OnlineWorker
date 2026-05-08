@@ -58,7 +58,7 @@ The installed app reads and writes user data under:
 
 When running from source, the repo root may also use local `config.yaml`, `.env`, and `onlineworker_state.json` files.
 
-Private provider overlays can be mounted by setting `ONLINEWORKER_PROVIDER_OVERLAY` to a file or directory path. When the path points to a directory, OnlineWorker scans any `plugin.yaml` files under that tree and loads the provider descriptors it finds there. This keeps the public repo limited to builtin providers while still letting you mount a local private provider package when needed.
+Private provider overlays can be mounted by setting `ONLINEWORKER_PROVIDER_OVERLAY` to a file or directory path. When the path points to a directory, OnlineWorker scans any `plugin.yaml` files under that tree and loads the provider descriptors it finds there. The installed app also reads the same key from `~/Library/Application Support/OnlineWorker/.env`, with process env taking priority when both are present. This keeps the public repo limited to builtin providers while still letting you mount a local private provider package when needed.
 
 ### `.env`
 
@@ -119,6 +119,8 @@ pnpm build
 cd /path/to/onlineWorker
 bash scripts/build.sh
 ```
+
+This public build path packages the standalone open-source app only. If you maintain a private provider overlay, keep it in a separate private workspace and inject it at runtime through the overlay env configuration.
 
 ### Intel DMG
 
