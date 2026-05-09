@@ -9,7 +9,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PLUGIN_STAGING_ROOT="$PROJECT_ROOT/mac-app/src-tauri/resources/provider-plugins"
+PLUGIN_STAGING_ROOT="$PROJECT_ROOT/mac-app/src-tauri/provider-plugins"
 
 stage_provider_plugins() {
 	mkdir -p "$PLUGIN_STAGING_ROOT"
@@ -70,7 +70,6 @@ echo "=== Build OnlineWorker ==="
 echo "Project: $PROJECT_ROOT"
 echo "Target:  $TARGET_TRIPLE"
 echo "Profile: ${ONLINEWORKER_BUILD_PROFILE:-public}"
-echo "Tauri config: ${TAURI_CONFIG_FILE:-src-tauri/tauri.conf.json}"
 echo "Plugin sources: ${ONLINEWORKER_PLUGIN_SOURCE_DIRS:-<none>}"
 echo ""
 
@@ -109,7 +108,7 @@ if [ ! -x "$PROJECT_ROOT/mac-app/node_modules/.bin/tauri" ]; then
 	pnpm install --no-frozen-lockfile
 	echo ""
 fi
-pnpm tauri build --config "${TAURI_CONFIG_FILE:-src-tauri/tauri.conf.json}"
+pnpm tauri build
 
 echo ""
 echo "=== Build Complete ==="

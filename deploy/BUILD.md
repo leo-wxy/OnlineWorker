@@ -10,7 +10,7 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
 
 产物: `mac-app/src-tauri/target/release/bundle/dmg/OnlineWorker_0.2.0_aarch64.dmg`
 
-> 说明：这条命令对应的是 **public-only** 构建路径。私有 provider overlay 不会被打进这个 DMG；如果你维护内部 overlay，请使用私有 superproject 在运行态注入 `ONLINEWORKER_PROVIDER_OVERLAY`，或在 App 支持目录 `.env` 里写入该 key。
+> 说明：这条命令对应的是 **public-only** 构建路径。私有 provider overlay 不会被打进这个 DMG；如果你维护内部 overlay，请使用私有 superproject 在打包前注入私有插件。
 
 ### x86_64 (Intel) DMG
 
@@ -59,8 +59,8 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
    ```
 
 4. **私有 provider overlay（可选）**
-   - 如果你需要在本地恢复私有 provider，请通过 `ONLINEWORKER_PROVIDER_OVERLAY` 挂载外置 overlay 目录。
-   - 打包后的公开默认 App 不会自动包含该 overlay；它只在运行时按环境变量加载。
+   - 如果你需要在本地恢复私有 provider，可通过 `ONLINEWORKER_PROVIDER_OVERLAY` 挂载外置 overlay 目录。
+   - 内部打包链路则通过私有 superproject 在构建前把插件注入到 bundle resources。
 
 ## 详细打包流程
 
@@ -91,8 +91,6 @@ onlineWorker-internal/
 内部 `build-internal.sh` 会先导出：
 
 ```bash
-export ONLINEWORKER_APP_NAME="OnlineWorker"
-export ONLINEWORKER_APP_SUPPORT_DIR="OnlineWorker"
 export ONLINEWORKER_BUILD_PROFILE="internal"
 export ONLINEWORKER_PLUGIN_SOURCE_DIRS="$ONLINEWORKER_PRIVATE_PLUGIN_ROOT/codemaker"
 ```

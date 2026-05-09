@@ -12,11 +12,11 @@ use super::config_provider::{
 pub(crate) const DEFAULT_APP_NAME: &str = "OnlineWorker";
 
 pub(crate) fn app_name() -> &'static str {
-    option_env!("ONLINEWORKER_APP_NAME").unwrap_or(DEFAULT_APP_NAME)
+    DEFAULT_APP_NAME
 }
 
 pub(crate) fn app_support_dir_name() -> &'static str {
-    option_env!("ONLINEWORKER_APP_SUPPORT_DIR").unwrap_or(app_name())
+    DEFAULT_APP_NAME
 }
 
 /// Application data directory: ~/Library/Application Support/<app name>/
