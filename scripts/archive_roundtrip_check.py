@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-手动 archive 联调验证脚本。
+手动 archive roundtrip 检查脚本。
 
 用途：
 1. 按给定 workspace 路径真实创建一条 codex thread
