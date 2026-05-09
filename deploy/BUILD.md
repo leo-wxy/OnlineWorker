@@ -10,7 +10,7 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
 
 产物: `mac-app/src-tauri/target/release/bundle/dmg/OnlineWorker_0.2.0_aarch64.dmg`
 
-> 说明：这条命令对应当前仓库的基础构建路径。额外 provider 扩展包不会自动被打进这个 DMG；如果你在下游维护扩展包，请在调用 `scripts/build.sh` 前通过包装脚本设置 `ONLINEWORKER_PLUGIN_SOURCE_DIRS`。
+> 说明：这条命令对应当前仓库的基础构建路径。额外 provider 扩展包不会自动被打进这个 DMG；如果你在壳工程里维护扩展包，请在调用 `scripts/build.sh` 前通过包装脚本设置 `ONLINEWORKER_PLUGIN_SOURCE_DIRS`。
 
 ### x86_64 (Intel) DMG
 
@@ -75,7 +75,7 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
 ### 基础构建 / 扩展构建
 
 - **基础构建**：直接在 `onlineWorker` 仓库里执行 `scripts/build.sh`。产物只包含当前仓库自带的 builtin providers。
-- **扩展构建**：在你自己的下游包装脚本里先准备额外 provider 扩展包，再通过 `ONLINEWORKER_PLUGIN_SOURCE_DIRS` 调用同一套 `scripts/build.sh`。
+- **扩展构建**：在你自己的壳工程包装脚本里先准备额外 provider 扩展包，再通过 `ONLINEWORKER_PLUGIN_SOURCE_DIRS` 调用同一套 `scripts/build.sh`。
 
 两种样式最终都输出同一个 `OnlineWorker.app`。差异只存在于 build input，不存在于 bundle identity。
 
