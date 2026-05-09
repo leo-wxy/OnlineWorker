@@ -136,7 +136,7 @@ cd /path/to/onlineWorker
 bash scripts/build.sh
 ```
 
-This build path packages the base app from this repository. Downstream wrappers can mount extra provider packages at runtime through `ONLINEWORKER_PROVIDER_OVERLAY`, or stage them at build time through `ONLINEWORKER_PLUGIN_SOURCE_DIRS` before calling the same `scripts/build.sh`.
+This build path packages the base app from this repository. Shell repositories can mount extra provider packages at runtime through `ONLINEWORKER_PROVIDER_OVERLAY`, or stage them at build time through `ONLINEWORKER_PLUGIN_SOURCE_DIRS` before calling the same `scripts/build.sh`.
 
 ### Intel DMG
 

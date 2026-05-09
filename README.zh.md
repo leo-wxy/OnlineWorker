@@ -135,7 +135,7 @@ cd /path/to/onlineWorker
 bash scripts/build.sh
 ```
 
-这条构建链路打包的是当前仓库里的基础 App。下游如果需要附加 provider 扩展包，可以在运行态通过 `ONLINEWORKER_PROVIDER_OVERLAY` 挂载，或者在调用同一个 `scripts/build.sh` 前通过 `ONLINEWORKER_PLUGIN_SOURCE_DIRS` 做打包注入。
+这条构建链路打包的是当前仓库里的基础 App。壳工程如果需要附加 provider 扩展包，可以在运行态通过 `ONLINEWORKER_PROVIDER_OVERLAY` 挂载，或者在调用同一个 `scripts/build.sh` 前通过 `ONLINEWORKER_PLUGIN_SOURCE_DIRS` 做打包注入。
 
 ### Intel DMG
 

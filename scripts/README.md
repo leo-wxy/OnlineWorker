@@ -15,7 +15,7 @@
 
 ## Smoke / diagnostics
 
-- `claude_hook_smoke.py`：Claude hook smoke 脚本，已有 `tests/test_claude_hook_smoke.py` 保护。
+- `claude_hook_smoke.py`：Claude hook smoke 脚本，已有 `tests/test_claude_hook_smoke.py` 保护。默认复用当前 Python 解释器；如需指定 bridge 解释器，可设置 `ONLINEWORKER_BRIDGE_PYTHON=/path/to/python`。
 - `provider_smoke.py`：固定 session 的 provider smoke 脚本，基于仓库根目录复用 `codex / claude` 会话，验证消息收发与权限回填。
 - `provider_smoke.py --action archive`：归档并清理固定 smoke session，用于把已污染的测试线程收口。
 - `archive_roundtrip_check.py`：手动 archive 诊断脚本，会创建真实 codex thread；只在 archive 端到端链路排障时手工运行，不纳入日常回归。

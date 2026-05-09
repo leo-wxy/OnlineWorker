@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 
@@ -53,3 +54,17 @@ def test_build_permission_smoke_plan_keeps_single_run_without_allow_always():
             }
         ],
     }
+
+
+def test_resolve_bridge_python_prefers_env_override(monkeypatch):
+    module = _load_smoke_module()
+    monkeypatch.setenv("ONLINEWORKER_BRIDGE_PYTHON", "/tmp/custom-python")
+
+    assert module._resolve_bridge_python() == "/tmp/custom-python"
+
+
+def test_resolve_bridge_python_falls_back_to_current_interpreter(monkeypatch):
+    module = _load_smoke_module()
+    monkeypatch.delenv("ONLINEWORKER_BRIDGE_PYTHON", raising=False)
+
+    assert module._resolve_bridge_python() == sys.executable

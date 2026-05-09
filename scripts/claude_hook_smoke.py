@@ -16,7 +16,6 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MAIN_PY = REPO_ROOT / "main.py"
-PROJECT_PYTHON = Path("/Users/wxy/.pyenv/versions/3.13.1/bin/python3")
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -49,6 +48,13 @@ def _load_runtime_env(env_file: str | None) -> None:
 
 def _make_data_dir(prefix: str) -> Path:
     return Path(tempfile.gettempdir()) / f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
+def _resolve_bridge_python() -> str:
+    override = os.environ.get("ONLINEWORKER_BRIDGE_PYTHON", "").strip()
+    if override:
+        return override
+    return str(Path(sys.executable))
 
 
 def _insert_cli_options_before_prompt(argv: list[str], extra: list[str]) -> list[str]:
@@ -133,7 +139,7 @@ async def _run_single_claude_prompt(
 
 
 async def _bridge_roundtrip(data_dir: Path, payload: dict[str, Any]) -> dict[str, Any]:
-    bridge_python = str(PROJECT_PYTHON if PROJECT_PYTHON.exists() else Path(sys.executable))
+    bridge_python = _resolve_bridge_python()
     proc = await asyncio.create_subprocess_exec(
         bridge_python,
         str(MAIN_PY),

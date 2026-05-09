@@ -46,7 +46,7 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
    ```
 
 3. **Python 环境**
-   - arm64: `~/.pyenv/versions/3.13.1/bin/python3`（pyenv 管理）
+   - arm64: 你的本机 Python 3.13 环境（例如 pyenv 管理的 `python3`）
    - x86_64: `/usr/local/bin/python3.13`（x86_64 Homebrew `/usr/local/bin/brew` 安装）
    
    ```bash
