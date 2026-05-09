@@ -10,6 +10,25 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+ensure_pnpm() {
+	if command -v pnpm &>/dev/null; then
+		return
+	fi
+
+	local nvm_dir="${NVM_DIR:-$HOME/.nvm}"
+	if [ -s "${nvm_dir}/nvm.sh" ]; then
+		# shellcheck disable=SC1090
+		source "${nvm_dir}/nvm.sh"
+		nvm use 20 >/dev/null
+		hash -r
+	fi
+
+	if ! command -v pnpm &>/dev/null; then
+		echo "ERROR: pnpm not found. Install Node.js 20 and pnpm, or load nvm before running scripts/build.sh"
+		exit 1
+	fi
+}
+
 # Detect target triple via rustc
 if ! command -v rustc &>/dev/null; then
 	echo "ERROR: rustc not found. Install Rust: https://rustup.rs"
@@ -54,7 +73,14 @@ echo ""
 
 # Step 4: Build Tauri app (produces .dmg)
 echo "=== Step 3/3: Tauri build ==="
+ensure_pnpm
+hash -r
 cd "$PROJECT_ROOT/mac-app"
+if [ ! -x "$PROJECT_ROOT/mac-app/node_modules/.bin/tauri" ]; then
+	echo "=== Installing mac-app dependencies ==="
+	pnpm install --no-frozen-lockfile
+	echo ""
+fi
 pnpm tauri build --config "${TAURI_CONFIG_FILE:-src-tauri/tauri.conf.json}"
 
 echo ""
