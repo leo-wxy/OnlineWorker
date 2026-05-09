@@ -91,7 +91,6 @@ onlineWorker-internal/
 内部 `build-internal.sh` 会先导出：
 
 ```bash
-export ONLINEWORKER_BUILD_PROFILE="internal"
 export ONLINEWORKER_PLUGIN_SOURCE_DIRS="$ONLINEWORKER_PRIVATE_PLUGIN_ROOT/codemaker"
 ```
 

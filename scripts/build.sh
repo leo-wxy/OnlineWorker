@@ -69,7 +69,6 @@ fi
 echo "=== Build OnlineWorker ==="
 echo "Project: $PROJECT_ROOT"
 echo "Target:  $TARGET_TRIPLE"
-echo "Profile: ${ONLINEWORKER_BUILD_PROFILE:-public}"
 echo "Plugin sources: ${ONLINEWORKER_PLUGIN_SOURCE_DIRS:-<none>}"
 echo ""
 
