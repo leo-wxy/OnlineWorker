@@ -13,8 +13,9 @@ within the open-source scope:
 - builtin providers: `codex` and `claude`
 - packaging, tests, documentation, and developer ergonomics
 
-Do not submit private provider implementations, private service endpoints,
-private credentials, or internal-only workflow details to this repository.
+Do not submit non-public provider implementations, non-public service
+endpoints, credentials, or repository-external workflow details to this
+repository.
 
 ## Before You Start
 
@@ -77,8 +78,9 @@ PRs should include:
 
 Small PRs are preferred over broad mixed changes.
 
-## Public / Private Boundary
+## Extension Boundary
 
-This repository supports external provider overlays through the public plugin
-contracts, but it does not carry private provider code. If you maintain a
-private overlay downstream, keep that code in a separate private repository.
+This repository supports external provider packages through the public plugin
+contracts, but it only carries the builtin providers that ship here by
+default. If you maintain additional provider packages downstream, keep that
+code outside this public repository.

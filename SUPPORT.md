@@ -7,7 +7,7 @@ OnlineWorker currently targets:
 - macOS
 - public builtin providers: `codex`, `claude`
 
-Private overlays are downstream integrations and are out of scope for public
+Additional provider packages mounted downstream are out of scope for public
 support in this repository.
 
 ## Before Filing an Issue

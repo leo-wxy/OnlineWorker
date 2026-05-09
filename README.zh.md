@@ -28,7 +28,7 @@ English version: [README.md](README.md)
 - `codex`
 - `claude`
 
-应用仍然支持通过公开插件契约挂载外部 provider overlay，但私有 overlay 不会随这个仓库一起分发。
+应用仍然支持通过公开插件契约挂载外部 provider 扩展包，但这个仓库只分发上面列出的 builtin providers。
 
 ## 运行要求
 
@@ -73,7 +73,7 @@ xattr -cr /Applications/OnlineWorker.app
 
 从源码运行时，仓库根目录下也可能使用本地的 `config.yaml`、`.env` 和 `onlineworker_state.json`。
 
-私有 provider 可以通过 `ONLINEWORKER_PROVIDER_OVERLAY` 外置挂载。这个环境变量可以指向单个文件，也可以指向一个目录；当它指向目录时，OnlineWorker 会扫描目录下的 `plugin.yaml`，并加载其中声明的 provider descriptor。已安装的 App 也会从 `~/Library/Application Support/OnlineWorker/.env` 读取同名 key；如果进程环境变量和 `.env` 同时存在，进程环境变量优先。这样公开仓库只保留 builtin providers，本地需要私有 provider 时再单独挂载。
+额外 provider 扩展包可以通过 `ONLINEWORKER_PROVIDER_OVERLAY` 外置挂载。这个环境变量可以指向单个文件，也可以指向一个目录；当它指向目录时，OnlineWorker 会扫描目录下的 `plugin.yaml`，并加载其中声明的 provider descriptor。已安装的 App 也会从 `~/Library/Application Support/OnlineWorker/.env` 读取同名 key；如果进程环境变量和 `.env` 同时存在，进程环境变量优先。
 
 ### `.env`
 
@@ -135,7 +135,7 @@ cd /path/to/onlineWorker
 bash scripts/build.sh
 ```
 
-这条公开构建链路只打包独立开源 App。如果你在下游维护私有 provider overlay，应把它放在单独的私有工作区，并通过 overlay env 在运行态注入，或者通过你自己的包装脚本在打包时注入。
+这条构建链路打包的是当前仓库里的基础 App。下游如果需要附加 provider 扩展包，可以在运行态通过 `ONLINEWORKER_PROVIDER_OVERLAY` 挂载，或者在调用同一个 `scripts/build.sh` 前通过 `ONLINEWORKER_PLUGIN_SOURCE_DIRS` 做打包注入。
 
 ### Intel DMG
 

@@ -4,10 +4,10 @@
 
 ## Build / packaging
 
-- `build.sh`：Apple Silicon 公开完整打包脚本。按项目规则，只有用户明确允许打包时才执行。它只产出 public-only App，不会自动包含私有 overlay。
-- `build.sh` 额外支持 `ONLINEWORKER_PLUGIN_SOURCE_DIRS`，可在打包前把私有插件 staged 到 bundle resource 目录。
-- 私有 overlay 的内部构建和安装态注入由私有 superproject 的包装脚本负责，不放在这个 public scripts 目录里。
-- 内部包装脚本通过设置 `ONLINEWORKER_PLUGIN_SOURCE_DIRS=...` 复用同一套 public build 逻辑，但产物仍然是同一个 `OnlineWorker.app`。
+- `build.sh`：Apple Silicon 基础完整打包脚本。按项目规则，只有用户明确允许打包时才执行。它默认只打包当前仓库内置的 providers。
+- `build.sh` 额外支持 `ONLINEWORKER_PLUGIN_SOURCE_DIRS`，可在打包前把额外 provider 包 staged 到 bundle resource 目录。
+- 如果你在下游维护额外 provider 包，可在仓库外部包装脚本里设置 `ONLINEWORKER_PLUGIN_SOURCE_DIRS=...` 后复用同一套 `build.sh`。
+- 这个 public `scripts/` 目录只保留基础构建与诊断脚本，不维护任何下游私有包装逻辑。
 
 ## Runtime helpers
 

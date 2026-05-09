@@ -28,8 +28,8 @@ The public repository ships builtin support for:
 - `codex`
 - `claude`
 
-The app also supports external provider overlays through the public plugin
-contracts, but private overlays are not bundled in this repository.
+The app also supports external provider packages through the public plugin
+contracts, but this repository only bundles the builtin providers listed above.
 
 ## Requirements
 
@@ -74,7 +74,7 @@ The installed app reads and writes user data under:
 
 When running from source, the repo root may also use local `config.yaml`, `.env`, and `onlineworker_state.json` files.
 
-Private provider overlays can be mounted by setting `ONLINEWORKER_PROVIDER_OVERLAY` to a file or directory path. When the path points to a directory, OnlineWorker scans any `plugin.yaml` files under that tree and loads the provider descriptors it finds there. The installed app also reads the same key from `~/Library/Application Support/OnlineWorker/.env`, with process env taking priority when both are present. This keeps the public repo limited to builtin providers while still letting you mount a local private provider package when needed.
+Additional provider packages can be mounted by setting `ONLINEWORKER_PROVIDER_OVERLAY` to a file or directory path. When the path points to a directory, OnlineWorker scans any `plugin.yaml` files under that tree and loads the provider descriptors it finds there. The installed app also reads the same key from `~/Library/Application Support/OnlineWorker/.env`, with process env taking priority when both are present.
 
 ### `.env`
 
@@ -136,7 +136,7 @@ cd /path/to/onlineWorker
 bash scripts/build.sh
 ```
 
-This public build path packages the standalone open-source app only. If you maintain a private provider overlay downstream, keep it in a separate private workspace and either mount it at runtime through the overlay env configuration or stage it at build time through your own packaging wrapper.
+This build path packages the base app from this repository. Downstream wrappers can mount extra provider packages at runtime through `ONLINEWORKER_PROVIDER_OVERLAY`, or stage them at build time through `ONLINEWORKER_PLUGIN_SOURCE_DIRS` before calling the same `scripts/build.sh`.
 
 ### Intel DMG
 

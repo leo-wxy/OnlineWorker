@@ -10,7 +10,7 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
 
 产物: `mac-app/src-tauri/target/release/bundle/dmg/OnlineWorker_0.2.0_aarch64.dmg`
 
-> 说明：这条命令对应的是 **public-only** 构建路径。私有 provider overlay 不会被打进这个 DMG；如果你维护内部 overlay，请使用私有 superproject 在打包前注入私有插件。
+> 说明：这条命令对应当前仓库的基础构建路径。额外 provider 扩展包不会自动被打进这个 DMG；如果你在下游维护扩展包，请在调用 `scripts/build.sh` 前通过包装脚本设置 `ONLINEWORKER_PLUGIN_SOURCE_DIRS`。
 
 ### x86_64 (Intel) DMG
 
@@ -58,9 +58,9 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
      pyinstaller httpx websockets python-telegram-bot pyyaml python-dotenv
    ```
 
-4. **私有 provider overlay（可选）**
-   - 如果你需要在本地恢复私有 provider，可通过 `ONLINEWORKER_PROVIDER_OVERLAY` 挂载外置 overlay 目录。
-   - 内部打包链路则通过私有 superproject 在构建前把插件注入到 bundle resources。
+4. **外部 provider 扩展包（可选）**
+   - 如果你需要在本地挂载额外 provider，可通过 `ONLINEWORKER_PROVIDER_OVERLAY` 指向外部扩展包目录。
+   - 如果你需要把额外 provider 一起打进 App，可在调用 `scripts/build.sh` 前设置 `ONLINEWORKER_PLUGIN_SOURCE_DIRS`。
 
 ## 详细打包流程
 
@@ -72,29 +72,19 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
 2. 将 binary 复制为带 target-triple 后缀的 sidecar (`mac-app/src-tauri/binaries/onlineworker-bot-{target}`)
 3. 使用 Tauri 构建 Mac App 并打包成 DMG
 
-### public / internal 两种样式
+### 基础构建 / 扩展构建
 
-- **public**：直接在 `onlineWorker` 仓库里执行 `scripts/build.sh`。产物只包含公开 builtin providers。
-- **internal**：在私有 superproject 里执行内部包装脚本。内部脚本负责固定 public app submodule 和 private overlay submodule，并在打包前通过 `ONLINEWORKER_PLUGIN_SOURCE_DIRS` 注入私有插件。
+- **基础构建**：直接在 `onlineWorker` 仓库里执行 `scripts/build.sh`。产物只包含当前仓库自带的 builtin providers。
+- **扩展构建**：在你自己的下游包装脚本里先准备额外 provider 扩展包，再通过 `ONLINEWORKER_PLUGIN_SOURCE_DIRS` 调用同一套 `scripts/build.sh`。
 
 两种样式最终都输出同一个 `OnlineWorker.app`。差异只存在于 build input，不存在于 bundle identity。
 
-内部工作区建议结构：
-
-```text
-onlineWorker-internal/
-├── app/                # public OnlineWorker submodule
-├── overlays/private/   # private provider overlay submodule
-└── scripts/            # internal dev/test/build/install wrappers
-```
-
-内部 `build-internal.sh` 会先导出：
+下游工作区可以按自己的需要组织。一个最小包装脚本只需要在调用 `scripts/build.sh` 前导出扩展包目录，例如：
 
 ```bash
-export ONLINEWORKER_PLUGIN_SOURCE_DIRS="$ONLINEWORKER_PRIVATE_PLUGIN_ROOT/codemaker"
+export ONLINEWORKER_PLUGIN_SOURCE_DIRS="/path/to/provider-a:/path/to/provider-b"
+bash scripts/build.sh
 ```
-
-然后再调用 public `scripts/build.sh`，由它生成同一个 `OnlineWorker.app`。
 
 ### x86_64 Python Bot Binary
 
