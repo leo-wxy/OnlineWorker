@@ -6,6 +6,12 @@ The default workflow is **App / Sessions as the primary control surface + Telegr
 
 中文说明见 [README.zh.md](README.zh.md).
 
+See also:
+
+- [Contributing](CONTRIBUTING.md)
+- [Security Policy](SECURITY.md)
+- [Support](SUPPORT.md)
+
 ## Features
 
 - Mac app control for setup, dashboard, sessions, commands, and logs.
@@ -14,6 +20,16 @@ The default workflow is **App / Sessions as the primary control surface + Telegr
 - Session browsing and message sending from the app.
 - Markdown rendering for final replies.
 - Installer-friendly macOS packaging through Tauri and PyInstaller.
+
+## Public Provider Scope
+
+The public repository ships builtin support for:
+
+- `codex`
+- `claude`
+
+The app also supports external provider overlays through the public plugin
+contracts, but private overlays are not bundled in this repository.
 
 ## Requirements
 
@@ -120,9 +136,7 @@ cd /path/to/onlineWorker
 bash scripts/build.sh
 ```
 
-This public build path packages the standalone open-source app only. If you maintain a private provider overlay, keep it in a separate private workspace and either mount it at runtime through the overlay env configuration or stage it at build time with a wrapper script.
-
-The internal workspace reuses the same `OnlineWorker.app` build and injects private plugins during packaging. The installed bundle name and support directory stay the same; only the build input changes.
+This public build path packages the standalone open-source app only. If you maintain a private provider overlay downstream, keep it in a separate private workspace and either mount it at runtime through the overlay env configuration or stage it at build time through your own packaging wrapper.
 
 ### Intel DMG
 

@@ -6,6 +6,12 @@ OnlineWorker 是一个面向 macOS 的 AI 编码工作区。Mac App 负责 Setup
 
 English version: [README.md](README.md)
 
+另见：
+
+- [Contributing](CONTRIBUTING.md)
+- [Security Policy](SECURITY.md)
+- [Support](SUPPORT.md)
+
 ## 功能
 
 - Mac App 负责 Setup、Dashboard、Sessions、Commands 和日志控制。
@@ -14,6 +20,15 @@ English version: [README.md](README.md)
 - 可在 App 内浏览会话并发送消息。
 - 最终回复支持 Markdown 渲染。
 - 通过 Tauri + PyInstaller 提供适合安装的 macOS 打包能力。
+
+## 公开 Provider 范围
+
+公开仓库内置支持的 provider 只有：
+
+- `codex`
+- `claude`
+
+应用仍然支持通过公开插件契约挂载外部 provider overlay，但私有 overlay 不会随这个仓库一起分发。
 
 ## 运行要求
 
@@ -120,9 +135,7 @@ cd /path/to/onlineWorker
 bash scripts/build.sh
 ```
 
-这条公开构建链路只打包独立开源 App。如果你维护私有 provider overlay，应把它放在单独的私有工作区，并通过 overlay env 在运行态注入，或者通过包装脚本在打包时注入。
-
-内部工作区复用同一个 `OnlineWorker.app` 打包逻辑，只是在打包前注入私有插件。安装后的 bundle 名称和应用支持目录都不变，变化的只是 build input。
+这条公开构建链路只打包独立开源 App。如果你在下游维护私有 provider overlay，应把它放在单独的私有工作区，并通过 overlay env 在运行态注入，或者通过你自己的包装脚本在打包时注入。
 
 ### Intel DMG
 
