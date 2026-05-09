@@ -120,9 +120,9 @@ cd /path/to/onlineWorker
 bash scripts/build.sh
 ```
 
-这条公开构建链路只打包独立开源 App。如果你维护私有 provider overlay，应把它放在单独的私有工作区，并通过 overlay env 配置在运行态注入。
+这条公开构建链路只打包独立开源 App。如果你维护私有 provider overlay，应把它放在单独的私有工作区，并通过 overlay env 在运行态注入，或者通过包装脚本在打包时注入。
 
-内部工作区可以通过私有 superproject 和内部 Tauri 配置，生成单独的 `OnlineWorker Internal.app`。这个 App 使用自己的应用支持目录，并从该 profile 的 `.env` 读取私有 overlay。
+内部工作区复用同一个 `OnlineWorker.app` 打包逻辑，只是在打包前注入私有插件。安装后的 bundle 名称和应用支持目录都不变，变化的只是 build input。
 
 ### Intel DMG
 

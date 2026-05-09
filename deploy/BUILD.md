@@ -75,9 +75,9 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
 ### public / internal 两种样式
 
 - **public**：直接在 `onlineWorker` 仓库里执行 `scripts/build.sh`。产物只包含公开 builtin providers。
-- **internal**：在私有 superproject 里执行内部包装脚本。内部脚本负责固定 public app submodule 和 private overlay submodule，并在安装态把 overlay 路径写入该 profile 对应的 Application Support `.env`。
+- **internal**：在私有 superproject 里执行内部包装脚本。内部脚本负责固定 public app submodule 和 private overlay submodule，并在打包前通过 `ONLINEWORKER_PLUGIN_SOURCE_DIRS` 注入私有插件。
 
-内部构建会生成单独的 `OnlineWorker Internal.app`，不会覆盖 public 版 `OnlineWorker.app`。
+两种样式最终都输出同一个 `OnlineWorker.app`。差异只存在于 build input，不存在于 bundle identity。
 
 内部工作区建议结构：
 
@@ -91,13 +91,13 @@ onlineWorker-internal/
 内部 `build-internal.sh` 会先导出：
 
 ```bash
-export ONLINEWORKER_APP_NAME="OnlineWorker Internal"
-export ONLINEWORKER_APP_SUPPORT_DIR="OnlineWorker Internal"
+export ONLINEWORKER_APP_NAME="OnlineWorker"
+export ONLINEWORKER_APP_SUPPORT_DIR="OnlineWorker"
 export ONLINEWORKER_BUILD_PROFILE="internal"
-export TAURI_CONFIG_FILE="src-tauri/tauri.internal.conf.json"
+export ONLINEWORKER_PLUGIN_SOURCE_DIRS="$ONLINEWORKER_PRIVATE_PLUGIN_ROOT/codemaker"
 ```
 
-然后再调用 public `scripts/build.sh`，由它生成内部 App bundle。
+然后再调用 public `scripts/build.sh`，由它生成同一个 `OnlineWorker.app`。
 
 ### x86_64 Python Bot Binary
 

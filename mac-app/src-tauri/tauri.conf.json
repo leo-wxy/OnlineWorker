@@ -33,6 +33,7 @@
     "active": true,
     "targets": "dmg",
     "resources": [
+      "resources/provider-plugins",
       "icons/tray-template.png",
       "icons/tray-template@2x.png"
     ],

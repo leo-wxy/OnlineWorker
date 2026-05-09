@@ -24,6 +24,8 @@ config.yaml
 # Build artifacts
 mac-app/src-tauri/binaries/
 mac-app/src-tauri/target/
+mac-app/src-tauri/resources/provider-plugins/**
+!mac-app/src-tauri/resources/provider-plugins/.gitkeep
 mac-app/node_modules/
 mac-app/.vite/
 build/

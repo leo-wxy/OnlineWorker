@@ -9,6 +9,32 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PLUGIN_STAGING_ROOT="$PROJECT_ROOT/mac-app/src-tauri/resources/provider-plugins"
+
+stage_provider_plugins() {
+	mkdir -p "$PLUGIN_STAGING_ROOT"
+	find "$PLUGIN_STAGING_ROOT" -mindepth 1 -maxdepth 1 ! -name '.gitkeep' -exec rm -rf {} +
+
+	local raw_sources="${ONLINEWORKER_PLUGIN_SOURCE_DIRS:-}"
+	if [ -z "$raw_sources" ]; then
+		return
+	fi
+
+	local source
+	IFS=':' read -r -a plugin_sources <<< "$raw_sources"
+	for source in "${plugin_sources[@]}"; do
+		source="${source## }"
+		source="${source%% }"
+		if [ -z "$source" ]; then
+			continue
+		fi
+		if [ ! -e "$source" ]; then
+			echo "ERROR: plugin source not found: $source"
+			exit 1
+		fi
+		cp -R "$source" "$PLUGIN_STAGING_ROOT/$(basename "$source")"
+	done
+}
 
 ensure_pnpm() {
 	if command -v pnpm &>/dev/null; then
@@ -45,6 +71,7 @@ echo "Project: $PROJECT_ROOT"
 echo "Target:  $TARGET_TRIPLE"
 echo "Profile: ${ONLINEWORKER_BUILD_PROFILE:-public}"
 echo "Tauri config: ${TAURI_CONFIG_FILE:-src-tauri/tauri.conf.json}"
+echo "Plugin sources: ${ONLINEWORKER_PLUGIN_SOURCE_DIRS:-<none>}"
 echo ""
 
 # Step 1: Use arm64 Python for PyInstaller
@@ -75,6 +102,7 @@ echo ""
 echo "=== Step 3/3: Tauri build ==="
 ensure_pnpm
 hash -r
+stage_provider_plugins
 cd "$PROJECT_ROOT/mac-app"
 if [ ! -x "$PROJECT_ROOT/mac-app/node_modules/.bin/tauri" ]; then
 	echo "=== Installing mac-app dependencies ==="
