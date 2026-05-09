@@ -9,10 +9,20 @@ use super::config_provider::{
     ProviderRuntimePolicy,
 };
 
-/// Application data directory: ~/Library/Application Support/OnlineWorker/
+pub(crate) const DEFAULT_APP_NAME: &str = "OnlineWorker";
+
+pub(crate) fn app_name() -> &'static str {
+    option_env!("ONLINEWORKER_APP_NAME").unwrap_or(DEFAULT_APP_NAME)
+}
+
+pub(crate) fn app_support_dir_name() -> &'static str {
+    option_env!("ONLINEWORKER_APP_SUPPORT_DIR").unwrap_or(app_name())
+}
+
+/// Application data directory: ~/Library/Application Support/<app name>/
 pub fn data_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/unknown".to_string());
-    PathBuf::from(home).join("Library/Application Support/OnlineWorker")
+    PathBuf::from(home).join("Library/Application Support").join(app_support_dir_name())
 }
 
 /// Ensure the data directory exists, creating it if necessary.
@@ -42,8 +52,11 @@ const SENSITIVE_KEYS: &[&str] = &[
     "PASSWORD",
 ];
 
-fn default_env_template() -> &'static str {
-    "# OnlineWorker .env\n\nTELEGRAM_TOKEN=\nALLOWED_USER_ID=\nGROUP_CHAT_ID=\n"
+fn default_env_template() -> String {
+    format!(
+        "# {} .env\n\nTELEGRAM_TOKEN=\nALLOWED_USER_ID=\nGROUP_CHAT_ID=\n",
+        app_name()
+    )
 }
 
 fn is_sensitive_key(key: &str) -> bool {

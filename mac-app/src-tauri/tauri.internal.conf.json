@@ -1,0 +1,11 @@
+{
+  "productName": "OnlineWorker Internal",
+  "identifier": "com.wxy.onlineworker-internal",
+  "app": {
+    "windows": [
+      {
+        "title": "OnlineWorker Internal"
+      }
+    ]
+  }
+}

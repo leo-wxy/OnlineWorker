@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter, Manager, Wry};
 use tokio::sync::Mutex;
 
 use crate::commands::dashboard::{compute_dashboard_state, DashboardState, SystemHealth};
+use crate::commands::config::app_name;
 use crate::commands::service::{
     ensure_service_running_if_needed, snapshot_service_status, start_service_internal,
     stop_service_internal, BotState,
@@ -26,7 +27,6 @@ const APP_TRAY_OPEN_SETUP_ID: &str = "tray_open_setup";
 const APP_TRAY_TOGGLE_SERVICE_ID: &str = "tray_toggle_service";
 const APP_TRAY_QUIT_ID: &str = "tray_quit";
 const APP_NAVIGATE_TAB_EVENT: &str = "app:navigate-tab";
-const APP_NAME: &str = "OnlineWorker";
 const STATUS_PREFIX: &str = "Status: ";
 const WORKSPACE_PREFIX: &str = "Workspace: ";
 const SESSION_PREFIX: &str = "Active Session: ";
@@ -84,7 +84,8 @@ fn load_custom_tray_icon(app: &AppHandle) -> Option<Image<'static>> {
 }
 
 pub(crate) fn setup_menubar(app: &AppHandle, state: Arc<Mutex<BotState>>) -> tauri::Result<()> {
-    let app_title_item = MenuItem::with_id(app, APP_TRAY_TITLE_ID, APP_NAME, false, None::<&str>)?;
+    let app_title = app_name();
+    let app_title_item = MenuItem::with_id(app, APP_TRAY_TITLE_ID, app_title, false, None::<&str>)?;
     let status_item = MenuItem::with_id(
         app,
         APP_TRAY_STATUS_ID,
@@ -179,7 +180,7 @@ fn build_tray(
 
     let mut builder = TrayIconBuilder::with_id(APP_TRAY_ID)
         .menu(menu)
-        .tooltip(APP_NAME)
+        .tooltip(app_name())
         .show_menu_on_left_click(true)
         .icon_as_template(true)
         .on_menu_event(move |app, event| {
@@ -324,7 +325,7 @@ async fn update_menubar_state(
 }
 
 fn build_tray_tooltip(status: TrayStatus, dashboard: Option<&DashboardState>) -> String {
-    let mut lines = vec![APP_NAME.to_string(), format!("Status: {}", status.label())];
+    let mut lines = vec![app_name().to_string(), format!("Status: {}", status.label())];
 
     if let Some(workspace_name) = dashboard
         .and_then(|state| state.recent_activity.as_ref())

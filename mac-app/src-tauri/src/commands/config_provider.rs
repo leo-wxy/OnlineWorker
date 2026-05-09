@@ -4,6 +4,8 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use super::config::app_support_dir_name;
+
 const BUILTIN_CODEX_PLUGIN_MANIFEST: &str =
     include_str!("../../../../plugins/providers/builtin/codex/plugin.yaml");
 const BUILTIN_CLAUDE_PLUGIN_MANIFEST: &str =
@@ -306,7 +308,10 @@ fn read_manifest_files_from_overlay_env() -> Vec<String> {
 
 fn app_support_env_path() -> PathBuf {
     let home = env::var("HOME").unwrap_or_else(|_| "/Users/unknown".to_string());
-    PathBuf::from(home).join("Library/Application Support/OnlineWorker/.env")
+    PathBuf::from(home)
+        .join("Library/Application Support")
+        .join(app_support_dir_name())
+        .join(".env")
 }
 
 fn trimmed_env_value(value: String) -> Option<String> {

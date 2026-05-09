@@ -6,6 +6,7 @@
 
 - `build.sh`：Apple Silicon 公开完整打包脚本。按项目规则，只有用户明确允许打包时才执行。它只产出 public-only App，不会自动包含私有 overlay。
 - 私有 overlay 的内部构建和安装态注入由私有 superproject 的包装脚本负责，不放在这个 public scripts 目录里。
+- 内部包装脚本通过设置 `ONLINEWORKER_BUILD_PROFILE=internal` 和 `TAURI_CONFIG_FILE=src-tauri/tauri.internal.conf.json` 复用同一套 public build 逻辑，但产出独立的 `OnlineWorker Internal.app`。
 
 ## Runtime helpers
 

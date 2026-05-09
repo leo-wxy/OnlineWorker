@@ -122,6 +122,8 @@ bash scripts/build.sh
 
 This public build path packages the standalone open-source app only. If you maintain a private provider overlay, keep it in a separate private workspace and inject it at runtime through the overlay env configuration.
 
+The internal workspace can build a separate `OnlineWorker Internal.app` by using the private superproject and the internal Tauri config. That app uses its own application support directory and reads the private overlay from that profile's `.env`.
+
 ### Intel DMG
 
 ```bash

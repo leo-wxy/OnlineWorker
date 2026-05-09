@@ -24,7 +24,8 @@ fi
 echo "=== Build OnlineWorker ==="
 echo "Project: $PROJECT_ROOT"
 echo "Target:  $TARGET_TRIPLE"
-echo "Profile: public"
+echo "Profile: ${ONLINEWORKER_BUILD_PROFILE:-public}"
+echo "Tauri config: ${TAURI_CONFIG_FILE:-src-tauri/tauri.conf.json}"
 echo ""
 
 # Step 1: Use arm64 Python for PyInstaller
@@ -54,7 +55,7 @@ echo ""
 # Step 4: Build Tauri app (produces .dmg)
 echo "=== Step 3/3: Tauri build ==="
 cd "$PROJECT_ROOT/mac-app"
-pnpm tauri build
+pnpm tauri build --config "${TAURI_CONFIG_FILE:-src-tauri/tauri.conf.json}"
 
 echo ""
 echo "=== Build Complete ==="
