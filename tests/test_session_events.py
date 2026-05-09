@@ -144,7 +144,7 @@ def test_normalize_session_created_event():
                 "method": "session.created",
                 "params": {
                     "threadId": "ses-123",
-                    "title": "Phase 17",
+                    "title": "Investigate thread sync",
                 },
             },
         },
@@ -153,4 +153,4 @@ def test_normalize_session_created_event():
     assert event is not None
     assert event.kind == "session_created"
     assert event.thread_id == "ses-123"
-    assert event.payload["title"] == "Phase 17"
+    assert event.payload["title"] == "Investigate thread sync"

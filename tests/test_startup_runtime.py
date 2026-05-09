@@ -2539,7 +2539,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_from_task
         "plugins.providers.builtin.codex.python.storage_runtime.read_codex_turn_terminal_message",
         return_value=(
             "已经回写，并且已经提交。\n\n"
-            "本次验证结果已经写回到 Phase 14 相关文档里。"
+            "本次验证结果已经写回到相关验证文档里。"
         ),
         create=True,
     ) as read_terminal_mock:
@@ -2549,7 +2549,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_from_task
     kwargs = bot.edit_message_text.await_args.kwargs
     assert kwargs["chat_id"] == 2
     assert kwargs["message_id"] == 3822
-    assert "Phase 14 相关文档" in kwargs["text"]
+    assert "相关验证文档" in kwargs["text"]
     read_terminal_mock.assert_called_once_with("tid-123", turn_id="turn-123")
     assert ws.threads["tid-123"].streaming_msg_id is None
     assert "tid-123" not in state.streaming_turns
@@ -2613,7 +2613,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_with_mark
         return_value=[],
     ), patch(
         "plugins.providers.builtin.codex.python.storage_runtime.read_codex_turn_terminal_message",
-        return_value="## 修复完成\n\n- Phase 21 App 侧已收口",
+        return_value="## 修复完成\n\n- App 侧已收口",
         create=True,
     ):
         await codex_runtime.setup_adapter_connection(manager, bot=bot, adapter=adapter)
@@ -2624,7 +2624,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_with_mark
     assert kwargs["message_id"] == 3822
     assert kwargs["parse_mode"] == "HTML"
     assert "<b>修复完成</b>" in kwargs["text"]
-    assert "• Phase 21 App 侧已收口" in kwargs["text"]
+    assert "• App 侧已收口" in kwargs["text"]
     assert ws.threads["tid-123"].streaming_msg_id is None
     assert "tid-123" not in state.streaming_turns
     save_storage_mock.assert_called()
@@ -2655,7 +2655,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_from_same
         topic_id=3794,
         turn_id="turn-123",
         buffer=(
-            "💭 我已经把这轮修复收口到代码、测试和 Phase 14 文档三层证据了。"
+            "💭 我已经把这轮修复收口到代码、测试和验证文档三层证据了。"
             "这轮源码侧修复已经收口，但还不能宣称 App 运行态完全闭环。"
         ),
     )

@@ -148,7 +148,7 @@ rm -rf target/*/release/bundle/dmg/bundle_dmg.sh
 ```bash
 pip install -r requirements.txt
 rm -rf build dist __pycache__
-pyinstaller onlineworker-bot.spec --clean
+pyinstaller onlineworker.spec --clean --noconfirm
 ```
 
 ## 版本历史

@@ -133,7 +133,7 @@ def parse_codex_app_server_semantic_event(
     raw_method: str,
     payload: dict[str, Any],
 ) -> CodexSemanticEvent | None:
-    """Map codex app-server notifications into the Phase 19 semantic vocabulary."""
+    """Map codex app-server notifications into the normalized semantic event vocabulary."""
     if not isinstance(payload, dict):
         return None
 
@@ -212,7 +212,7 @@ def parse_codex_app_server_semantic_event(
 def parse_codex_rollout_semantic_event(
     record: dict[str, Any] | str,
 ) -> CodexSemanticEvent | None:
-    """Map a codex rollout JSONL record into the Phase 19 semantic vocabulary."""
+    """Map a codex rollout JSONL record into the normalized semantic event vocabulary."""
     if isinstance(record, str):
         try:
             record = json.loads(record)
