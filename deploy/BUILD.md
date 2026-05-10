@@ -8,9 +8,26 @@
 export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /path/to/onlineWorker && bash scripts/build.sh
 ```
 
-产物: `mac-app/src-tauri/target/release/bundle/dmg/OnlineWorker_0.2.0_aarch64.dmg`
+产物: `mac-app/src-tauri/target/release/bundle/dmg/OnlineWorker_1.0.0_aarch64.dmg`
 
 > 说明：这条命令对应当前仓库的基础构建路径。额外 provider 扩展包不会自动被打进这个 DMG；如果你需要把扩展包一起打包，请在调用 `scripts/build.sh` 前设置 `ONLINEWORKER_PLUGIN_SOURCE_DIRS`。
+
+### GitHub Release 自动打包
+
+仓库内置了 GitHub Actions workflow：`.github/workflows/release-dmg.yml`。
+
+- 触发方式：
+  - 发布 GitHub Release 后自动执行
+  - 手动 `workflow_dispatch`，并传入一个已存在的 `release_tag`
+- 运行环境：
+  - `macos-15`
+- 构建入口：
+  - 直接复用仓库根目录的 `bash scripts/build.sh`
+- 产物处理：
+  - 先作为 Actions artifact 上传
+  - 再追加上传到对应的 GitHub Release 资产列表
+
+当前 CI 只构建 **Apple Silicon / aarch64** DMG，不包含 Intel DMG，也不包含签名或 notarization。
 
 ### x86_64 (Intel) DMG
 
@@ -20,7 +37,7 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
 export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /path/to/onlineWorker/mac-app && pnpm tauri build --target x86_64-apple-darwin
 ```
 
-产物: `mac-app/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/OnlineWorker_0.2.0_x64.dmg`
+产物: `mac-app/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/OnlineWorker_1.0.0_x64.dmg`
 
 ---
 
@@ -152,6 +169,11 @@ pyinstaller onlineworker.spec --clean --noconfirm
 ```
 
 ## 版本历史
+
+- **v1.0.0** (2026-05-10)
+  - 完成首次公开仓库发布整理
+  - 接入 GitHub Release 自动构建 Apple Silicon DMG
+  - 收口 README、截图资源与公开发布文档
 
 - **v0.2.0** (2026-04-23)
   - 收口 codex 运行时标准化与语义事件流

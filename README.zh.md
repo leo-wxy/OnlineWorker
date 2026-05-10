@@ -157,6 +157,8 @@ bash scripts/build.sh
 
 这条构建链路打包的是当前仓库里的基础 App。额外 provider 扩展包可以在运行态通过 `ONLINEWORKER_PROVIDER_OVERLAY` 挂载，或者在调用同一个 `scripts/build.sh` 前通过 `ONLINEWORKER_PLUGIN_SOURCE_DIRS` 做打包注入。
 
+GitHub Release 也会通过 `.github/workflows/release-dmg.yml` 自动构建同一条 Apple Silicon DMG 链路。发布 GitHub Release 后，workflow 会先上传一份 Actions artifact，再把 DMG 追加到对应 Release 的资产列表。
+
 ### Intel DMG
 
 ```bash
