@@ -13,7 +13,6 @@ codex_monitor_daemon
 codex_monitor_daemon-*
 .superpowers/
 .worktrees/
-.planning/
 docs/superpowers/plans/
 plugins/providers/private/
 CLAUDE_APP_DESIGN_PROPOSAL.md
