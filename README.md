@@ -158,7 +158,7 @@ bash scripts/build.sh
 
 This build path packages the base app from this repository. Additional provider packages can be mounted at runtime through `ONLINEWORKER_PROVIDER_OVERLAY`, or staged at build time through `ONLINEWORKER_PLUGIN_SOURCE_DIRS` before calling the same `scripts/build.sh`.
 
-GitHub Releases also build this same Apple Silicon DMG automatically through `.github/workflows/release-dmg.yml`. Publishing a GitHub Release triggers the workflow, uploads the DMG as a workflow artifact, and then attaches it to the corresponding Release asset list.
+Pushing a version tag such as `1.0.0` also builds this same Apple Silicon DMG automatically through `.github/workflows/release-dmg.yml`. The workflow uploads the DMG as a workflow artifact, creates the matching GitHub Release if needed, and then attaches the DMG to that Release asset list.
 
 ### Intel DMG
 
