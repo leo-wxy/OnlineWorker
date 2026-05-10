@@ -49,6 +49,12 @@ ensure_pnpm() {
 		hash -r
 	fi
 
+	if command -v corepack &>/dev/null; then
+		corepack enable >/dev/null 2>&1 || true
+		corepack prepare pnpm@latest-10 --activate >/dev/null 2>&1 || true
+		hash -r
+	fi
+
 	if ! command -v pnpm &>/dev/null; then
 		echo "ERROR: pnpm not found. Install Node.js 20 and pnpm, or load nvm before running scripts/build.sh"
 		exit 1

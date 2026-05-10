@@ -42,7 +42,7 @@ jobs:
       - name: Enable pnpm
         run: |
           corepack enable
-          corepack prepare pnpm@latest --activate
+          corepack prepare pnpm@latest-10 --activate
           pnpm --version
 
       - name: Setup Rust stable
