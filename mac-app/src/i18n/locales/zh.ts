@@ -51,6 +51,10 @@ export const zhTexts: AppTexts = {
     },
     app: {
       title: "OnlineWorker",
+      sidebar: {
+        collapse: "收起侧边栏",
+        expand: "展开侧边栏",
+      },
       tabs: {
         dashboard: "总览",
         sessions: "会话",

@@ -39,6 +39,10 @@ export interface AppTexts {
   };
   app: {
     title: string;
+    sidebar: {
+      collapse: string;
+      expand: string;
+    };
     tabs: {
       dashboard: string;
       sessions: string;

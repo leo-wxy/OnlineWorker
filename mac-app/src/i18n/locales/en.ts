@@ -51,6 +51,10 @@ export const enTexts: AppTexts = {
     },
     app: {
       title: "OnlineWorker",
+      sidebar: {
+        collapse: "Collapse sidebar",
+        expand: "Expand sidebar",
+      },
       tabs: {
         dashboard: "Dashboard",
         sessions: "Sessions",

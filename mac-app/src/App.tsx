@@ -26,6 +26,7 @@ const appWindow = getCurrentWindow();
 export default function App() {
   const { locale, setLocale, t } = useI18n();
   const [activeTab, setActiveTab] = useState<AppTab>("dashboard");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsSection, setSettingsSection] = useState<"onlineworker" | "agents" | "extensions" | "advanced">("onlineworker");
   const [showLogs, setShowLogs] = useState(false);
   const [isFirstRun, setIsFirstRun] = useState(false);
@@ -93,21 +94,51 @@ export default function App() {
   return (
     <div className="relative flex h-screen w-screen overflow-hidden ow-app-shell text-[var(--ow-text)]">
       {/* Sidebar Navigation */}
-      <div className="w-[248px] ow-sidebar flex h-full shrink-0 flex-col p-4">
+      <div className={`${sidebarCollapsed ? "w-[84px]" : "w-[248px]"} ow-sidebar flex h-full shrink-0 flex-col p-4 transition-[width] duration-150 ease-out`}>
         <div
-          className="ow-drag-strip mb-3 h-8 shrink-0 select-none"
+          className="mb-3 h-8 shrink-0 select-none"
           data-tauri-drag-region
           onMouseDown={handleWindowDrag}
         />
 
-        <div className="ow-brand-card mb-5 flex items-center gap-3 rounded-[22px] p-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 via-blue-500 to-sky-500 shadow-[0_12px_26px_rgba(37,99,235,0.22)]">
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+        <div className={`ow-brand-card mb-5 flex min-h-16 items-center rounded-[22px] p-3 ${sidebarCollapsed ? "justify-center" : "gap-3"}`}>
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 via-blue-500 to-sky-500 shadow-[0_12px_26px_rgba(37,99,235,0.22)]">
+            <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
           </div>
-          <div className="min-w-0">
+          <div
+            aria-hidden={sidebarCollapsed}
+            className={`min-w-0 overflow-hidden transition-[width,opacity] duration-150 ease-out ${
+              sidebarCollapsed ? "w-0 opacity-0" : "flex-1 opacity-100"
+            }`}
+          >
             <span className="block truncate text-[17px] font-extrabold tracking-[-0.03em] text-gray-950">{t.app.title}</span>
-            <span className="mt-0.5 block text-[11px] font-semibold text-slate-500">Local AI workbench</span>
+            <span className="mt-0.5 block truncate text-[11px] font-semibold text-slate-500">Local AI workbench</span>
           </div>
+        </div>
+
+        <div className="mb-4">
+          <button
+            type="button"
+            onClick={() => setSidebarCollapsed((current) => !current)}
+            title={sidebarCollapsed ? t.app.sidebar.expand : t.app.sidebar.collapse}
+            className={`ow-sidebar-toggle flex w-full items-center rounded-2xl px-3 py-2.5 text-sm font-bold transition-all ${
+              sidebarCollapsed
+                ? "justify-center border border-[var(--ow-line-soft)] bg-white/72 text-slate-600 hover:text-gray-900"
+                : "gap-3 border border-[var(--ow-line-soft)] bg-white/72 text-slate-600 hover:bg-white/90 hover:text-gray-900"
+            }`}
+          >
+            <span className="grid h-8 w-8 place-items-center rounded-xl bg-white/60 text-slate-500">
+              <svg
+                className={`h-4 w-4 shrink-0 transition-transform ${sidebarCollapsed ? "rotate-180" : ""}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+              </svg>
+            </span>
+            {!sidebarCollapsed && <span>{t.app.sidebar.collapse}</span>}
+          </button>
         </div>
         
         <nav className="flex-1 space-y-1.5">
@@ -115,52 +146,68 @@ export default function App() {
             <button
               key={key}
               onClick={() => setActiveTab(key)}
-              className={`ow-tab-button w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-bold transition-all ${
+              title={t.app.tabs[key]}
+              className={`ow-tab-button w-full flex items-center rounded-2xl px-3 py-2.5 text-sm font-bold transition-all ${
                 activeTab === key
                   ? "ow-tab-button-active bg-white/90 text-gray-950 shadow-[0_8px_24px_rgba(15,23,42,0.06)]"
                   : "text-slate-500 hover:bg-white/55 hover:text-gray-900"
-              }`}
+              } ${sidebarCollapsed ? "justify-center" : "gap-3"}`}
             >
               <span className={`grid h-8 w-8 place-items-center rounded-xl ${
                 activeTab === key ? "bg-blue-50 text-blue-600" : "bg-white/60 text-slate-400"
               }`}>
                 {getTabIcon(key)}
               </span>
-              {t.app.tabs[key]}
+              {!sidebarCollapsed && t.app.tabs[key]}
             </button>
           ))}
         </nav>
         
         <div className="mt-auto space-y-3">
-          <div className="ow-page-frame-soft rounded-2xl p-3">
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">
-              {t.app.locale.label}
-            </p>
-            <div className="ow-segment grid w-full grid-cols-2 rounded-xl p-1">
-              {(["en", "zh"] as Locale[]).map((value) => (
-                <button
-                  key={value}
-                  onClick={() => setLocale(value)}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
-                    locale === value
-                      ? "ow-segment-button-active"
-                      : "ow-segment-button hover:text-gray-700"
-                  }`}
-                  title={value === "en" ? t.app.locale.en : t.app.locale.zh}
-                >
-                  {value === "en" ? "EN" : "中文"}
-                </button>
-              ))}
-            </div>
-          </div>
+          {!sidebarCollapsed ? (
+            <>
+              <div className="ow-page-frame-soft rounded-2xl p-3">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">
+                  {t.app.locale.label}
+                </p>
+                <div className="ow-segment grid w-full grid-cols-2 rounded-xl p-1">
+                  {(["en", "zh"] as Locale[]).map((value) => (
+                    <button
+                      key={value}
+                      onClick={() => setLocale(value)}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
+                        locale === value
+                          ? "ow-segment-button-active"
+                          : "ow-segment-button hover:text-gray-700"
+                      }`}
+                      title={value === "en" ? t.app.locale.en : t.app.locale.zh}
+                    >
+                      {value === "en" ? "EN" : "中文"}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          <div className="ow-page-frame-soft flex items-center gap-3 rounded-2xl p-3">
-            <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.13)]"></div>
-            <div className="flex-1">
-              <p className="text-xs font-bold text-emerald-800">Service Active</p>
-              <p className="text-[10px] font-medium text-emerald-600">OnlineWorker</p>
+              <div className="ow-page-frame-soft flex items-center gap-3 rounded-2xl p-3">
+                <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.13)]"></div>
+                <div className="flex-1">
+                  <p className="text-xs font-bold text-emerald-800">Service Active</p>
+                  <p className="text-[10px] font-medium text-emerald-600">OnlineWorker</p>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={() => setLocale(locale === "en" ? "zh" : "en")}
+                className="ow-page-frame-soft flex h-10 w-10 items-center justify-center rounded-2xl text-[11px] font-bold text-slate-600"
+                title={locale === "en" ? t.app.locale.zh : t.app.locale.en}
+              >
+                {locale === "en" ? "EN" : "中"}
+              </button>
             </div>
-          </div>
+          )}
         </div>
       </div>
 

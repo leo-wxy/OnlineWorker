@@ -85,16 +85,16 @@
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.35);
 }
 
-.ow-drag-strip {
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.28);
-  border: 1px dashed rgba(148, 163, 184, 0.16);
-}
-
 .ow-brand-card {
   border: 1px solid rgba(255, 255, 255, 0.74);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(246, 249, 252, 0.86));
   box-shadow: var(--ow-shadow-sm);
+}
+
+.ow-sidebar-toggle {
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  font-size: 0.75rem;
+  font-weight: 700;
 }
 
 .ow-main-surface {
