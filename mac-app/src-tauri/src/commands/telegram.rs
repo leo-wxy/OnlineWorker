@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::time::Duration;
 
 use super::command_registry::TelegramPublishCommand;
 
@@ -76,6 +77,54 @@ fn tg_url(token: &str, method: &str) -> String {
     format!("https://api.telegram.org/bot{}/{}", token, method)
 }
 
+const TELEGRAM_PROXY_ENV_KEYS: [&str; 6] = [
+    "ALL_PROXY",
+    "all_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+];
+
+fn select_proxy_value<'a, I>(values: I) -> Option<String>
+where
+    I: IntoIterator<Item = Option<&'a str>>,
+{
+    values.into_iter().find_map(|value| {
+        let trimmed = value?.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn telegram_proxy_from_env() -> Option<String> {
+    let values: Vec<Option<String>> = TELEGRAM_PROXY_ENV_KEYS
+        .iter()
+        .map(|key| std::env::var(key).ok())
+        .collect();
+    select_proxy_value(values.iter().map(|value| value.as_deref()))
+}
+
+fn telegram_agent() -> Result<ureq::Agent, String> {
+    let mut builder = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(10))
+        .timeout_read(Duration::from_secs(20))
+        .timeout_write(Duration::from_secs(20));
+
+    if let Some(proxy) = telegram_proxy_from_env() {
+        let parsed = ureq::Proxy::new(&proxy)
+            .map_err(|e| format!("Invalid proxy configuration: {proxy} ({e})"))?;
+        builder = builder.proxy(parsed);
+    } else {
+        builder = builder.try_proxy_from_env(true);
+    }
+
+    Ok(builder.build())
+}
+
 fn build_set_my_commands_payload(
     commands: &[TelegramPublishCommand],
     scope: &TelegramCommandScope,
@@ -108,8 +157,10 @@ pub fn set_my_commands(
     scope: &TelegramCommandScope,
 ) -> Result<(), String> {
     let payload = build_set_my_commands_payload(commands, scope);
+    let agent = telegram_agent()?;
 
-    let resp: TgResponse<bool> = ureq::post(&tg_url(token, "setMyCommands"))
+    let resp: TgResponse<bool> = agent
+        .post(&tg_url(token, "setMyCommands"))
         .send_json(payload)
         .map_err(|e| {
             format!(
@@ -154,7 +205,9 @@ pub fn publish_scoped_commands(
 
 #[tauri::command]
 pub async fn test_bot_token(token: String) -> Result<BotInfo, String> {
-    let resp: TgResponse<TgUser> = ureq::get(&tg_url(&token, "getMe"))
+    let agent = telegram_agent()?;
+    let resp: TgResponse<TgUser> = agent
+        .get(&tg_url(&token, "getMe"))
         .call()
         .map_err(|e| format!("Network error: {}", e))?
         .into_json()
@@ -175,7 +228,9 @@ pub async fn test_bot_token(token: String) -> Result<BotInfo, String> {
 #[tauri::command]
 pub async fn test_group_access(token: String, chat_id: String) -> Result<GroupInfo, String> {
     let url = format!("{}?chat_id={}", tg_url(&token, "getChat"), chat_id);
-    let resp: TgResponse<TgChat> = ureq::get(&url)
+    let agent = telegram_agent()?;
+    let resp: TgResponse<TgChat> = agent
+        .get(&url)
         .call()
         .map_err(|e| format!("Network error: {}", e))?
         .into_json()
@@ -198,8 +253,10 @@ pub async fn test_bot_permissions(
     token: String,
     chat_id: String,
 ) -> Result<PermissionInfo, String> {
+    let agent = telegram_agent()?;
     // First get bot's own user_id
-    let me_resp: TgResponse<TgUser> = ureq::get(&tg_url(&token, "getMe"))
+    let me_resp: TgResponse<TgUser> = agent
+        .get(&tg_url(&token, "getMe"))
         .call()
         .map_err(|e| format!("Network error: {}", e))?
         .into_json()
@@ -219,7 +276,8 @@ pub async fn test_bot_permissions(
         chat_id,
         bot_id
     );
-    let resp: TgResponse<TgChatMember> = ureq::get(&url)
+    let resp: TgResponse<TgChatMember> = agent
+        .get(&url)
         .call()
         .map_err(|e| format!("Network error: {}", e))?
         .into_json()
@@ -240,7 +298,9 @@ pub async fn test_bot_permissions(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_set_my_commands_payload, TelegramCommandScope};
+    use super::{
+        build_set_my_commands_payload, select_proxy_value, TelegramCommandScope,
+    };
     use crate::commands::command_registry::TelegramPublishCommand;
 
     #[test]
@@ -272,5 +332,37 @@ mod tests {
         assert_eq!(payload["scope"]["type"], "chat");
         assert_eq!(payload["scope"]["chat_id"], -1003766519352i64);
         assert_eq!(payload["commands"][0]["command"], "active");
+    }
+
+    #[test]
+    fn select_proxy_value_prefers_all_proxy_over_other_keys() {
+        assert_eq!(
+            select_proxy_value([
+                None,
+                Some("socks5://127.0.0.1:7890"),
+                None,
+                Some("http://127.0.0.1:8080"),
+                None,
+                None,
+            ])
+            .as_deref(),
+            Some("socks5://127.0.0.1:7890")
+        );
+    }
+
+    #[test]
+    fn select_proxy_value_ignores_blank_values() {
+        assert_eq!(
+            select_proxy_value([
+                None,
+                Some("   "),
+                None,
+                Some("http://127.0.0.1:8080"),
+                None,
+                None,
+            ])
+            .as_deref(),
+            Some("http://127.0.0.1:8080")
+        );
     }
 }

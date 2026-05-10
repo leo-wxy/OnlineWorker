@@ -15,6 +15,7 @@ a = Analysis(
         'httpx',
         'httpx._transports',
         'httpx._transports.default',
+        'socksio',
         'websockets',
         'websockets.legacy',
         'websockets.legacy.client',

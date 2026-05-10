@@ -234,6 +234,9 @@ export interface AppTexts {
     sendPlaceholder: string;
     send: string;
     reloadMessages: string;
+    providerBadge: (provider: string) => string;
+    sourceBadge: (source: string) => string;
+    smokeBadge: string;
     waitingForReply: string;
     waitingInBackground: string;
     waitingExpired: string;

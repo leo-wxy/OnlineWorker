@@ -31,6 +31,6 @@ serde_yaml = "0.9"
 tokio = { version = "1", features = ["full"] }
 thiserror = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
-ureq = { version = "2", features = ["json"] }
+ureq = { version = "2", features = ["json", "proxy-from-env", "socks-proxy"] }
 tungstenite = "0.24"
 uuid = { version = "1", features = ["v4"] }

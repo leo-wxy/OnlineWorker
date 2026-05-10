@@ -140,6 +140,10 @@ export interface CodexSession {
   cwd: string;
   title?: string;
   rolloutPath?: string;
+  archived?: boolean;
+  modelProvider?: string | null;
+  source?: string | null;
+  isSmoke?: boolean;
 }
 
 export interface SessionTurn {

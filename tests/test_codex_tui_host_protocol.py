@@ -22,7 +22,7 @@ def test_write_and_read_host_status_round_trip(tmp_path):
         "online": True,
         "pid": 1234,
         "child_pid": 5678,
-        "cwd": "/Users/wxy/Projects/onlineWorker",
+        "cwd": "/Users/example/Projects/onlineWorker",
         "remote_url": "ws://127.0.0.1:4722",
         "active_thread_id": "tid-1",
         "socket_path": str(tmp_path / "codex_tui_host.sock"),

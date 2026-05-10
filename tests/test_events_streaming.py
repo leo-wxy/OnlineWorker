@@ -68,7 +68,7 @@ def _build_semantic_session_event(entry: dict, *, thread_id: str, turn_id: str) 
 async def test_first_delta_persists_new_streaming_message_id():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",
@@ -130,7 +130,7 @@ async def test_first_delta_persists_new_streaming_message_id():
 async def test_turn_completed_failed_edits_failure_instead_of_completed():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",
@@ -177,7 +177,7 @@ async def test_turn_completed_failed_edits_failure_instead_of_completed():
 async def test_turn_completed_aborted_edits_interrupted_instead_of_completed():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",
@@ -230,7 +230,7 @@ async def test_turn_completed_aborted_edits_interrupted_instead_of_completed():
 async def test_turn_started_and_completed_update_codex_tui_turn_gate():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",
@@ -291,7 +291,7 @@ async def test_turn_started_and_completed_update_codex_tui_turn_gate():
 async def test_turn_completed_marks_streamed_reply_as_synced_for_background_dedup():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",
@@ -349,7 +349,7 @@ async def test_turn_completed_marks_streamed_reply_as_synced_for_background_dedu
 async def test_codex_turn_completed_keeps_single_stream_message_without_extra_stable_reply():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",
@@ -407,7 +407,7 @@ async def test_codex_turn_completed_keeps_single_stream_message_without_extra_st
 async def test_codex_turn_completed_no_longer_uses_persisted_reply_anchor():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",
@@ -458,7 +458,7 @@ async def test_codex_turn_completed_no_longer_uses_persisted_reply_anchor():
 async def test_customprovider_streaming_reply_does_not_emit_duplicate_or_touch_codex_dedup_state():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="customprovider",
         topic_id=3794,
         daemon_workspace_id="customprovider:onlineWorker",
@@ -547,7 +547,7 @@ async def test_customprovider_streaming_reply_does_not_emit_duplicate_or_touch_c
 async def test_turn_started_materializes_missing_topic_for_registered_customprovider_thread():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="customprovider",
         topic_id=3794,
         daemon_workspace_id="customprovider:onlineWorker",
@@ -599,7 +599,7 @@ async def test_turn_started_materializes_missing_topic_for_registered_customprov
 async def test_turn_started_with_new_turn_id_replaces_previous_streaming_turn():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",
@@ -653,7 +653,7 @@ async def test_turn_started_with_new_turn_id_replaces_previous_streaming_turn():
 async def test_stale_turn_completed_does_not_clear_newer_streaming_turn():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",
@@ -706,7 +706,7 @@ async def test_stale_turn_completed_does_not_clear_newer_streaming_turn():
 async def test_stale_item_completed_does_not_overwrite_newer_streaming_turn():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",
@@ -759,7 +759,7 @@ async def test_stale_item_completed_does_not_overwrite_newer_streaming_turn():
 async def test_final_answer_item_completed_marks_reply_as_synced_for_background_dedup():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",
@@ -821,7 +821,7 @@ async def test_final_answer_item_completed_marks_reply_as_synced_for_background_
 async def test_item_completed_can_render_codex_semantic_final_reply_without_raw_item_text():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",
@@ -897,7 +897,7 @@ async def test_item_completed_can_render_codex_semantic_final_reply_without_raw_
 async def test_item_completed_final_reply_falls_back_to_plain_text_when_formatted_edit_fails():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",
@@ -982,7 +982,7 @@ async def test_item_completed_final_reply_falls_back_to_plain_text_when_formatte
 async def test_turn_completed_formats_streamed_buffer_when_no_final_item_arrives():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",
@@ -1036,7 +1036,7 @@ async def test_turn_completed_formats_streamed_buffer_when_no_final_item_arrives
 async def test_customprovider_item_completed_without_phase_formats_final_reply():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="customprovider",
         topic_id=3794,
         daemon_workspace_id="customprovider:onlineWorker",
@@ -1092,7 +1092,7 @@ async def test_customprovider_item_completed_without_phase_formats_final_reply()
 async def test_turn_completed_can_use_semantic_abort_when_legacy_kind_is_not_aborted():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",
@@ -1166,7 +1166,7 @@ async def test_tg_codex_semantic_final_fixture_renders_single_completed_reply():
     sequences = _load_semantic_sequences()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",
@@ -1215,7 +1215,7 @@ async def test_tg_codex_semantic_abort_fixture_preserves_commentary_and_marks_in
     sequences = _load_semantic_sequences()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3794,
         daemon_workspace_id="codex:onlineWorker",

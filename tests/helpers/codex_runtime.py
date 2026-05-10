@@ -8,7 +8,7 @@ def make_codex_workspace_state(
     *,
     workspace_id: str = "codex:onlineWorker",
     workspace_name: str = "onlineWorker",
-    workspace_path: str = "/Users/wxy/Projects/onlineWorker",
+    workspace_path: str = "/Users/example/Projects/onlineWorker",
     thread_id: str = "tid-1",
     topic_id: int = 100,
     workspace_topic_id: int = 50,

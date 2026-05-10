@@ -20,7 +20,7 @@ async def test_message_handler_uses_tui_bridge_without_persistent_codex_adapter(
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -82,7 +82,7 @@ async def test_message_handler_in_app_ws_mode_uses_connected_codex_adapter():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -173,7 +173,7 @@ async def test_message_handler_in_app_ws_mode_falls_back_when_codex_thread_not_m
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -242,7 +242,7 @@ async def test_message_handler_in_app_ws_mode_waits_for_reconnected_codex_adapte
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -332,7 +332,7 @@ async def test_message_handler_in_app_ws_mode_reports_unconnected_after_reconnec
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -409,7 +409,7 @@ async def test_message_handler_in_app_ws_mode_interrupts_active_turn_before_send
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -488,7 +488,7 @@ async def test_message_handler_in_app_ws_mode_continues_when_interrupt_fails():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -554,7 +554,7 @@ async def test_message_handler_interrupts_active_claude_turn_before_send():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="ncmplayerengine",
-        path="/Users/wxy/Projects/ncmplayerengine",
+        path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
         daemon_workspace_id="claude:ncmplayerengine",
@@ -628,7 +628,7 @@ async def test_message_handler_does_not_block_on_claude_thread_history_activity(
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="ncmplayerengine",
-        path="/Users/wxy/Projects/ncmplayerengine",
+        path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
         daemon_workspace_id="claude:ncmplayerengine",
@@ -695,7 +695,7 @@ async def test_message_handler_detaches_imported_claude_thread_before_send():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="ncmplayerengine",
-        path="/Users/wxy/Projects/ncmplayerengine",
+        path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
         daemon_workspace_id="claude:ncmplayerengine",
@@ -779,7 +779,7 @@ async def test_message_handler_keeps_unknown_claude_thread_when_logs_mark_app_ow
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="ncmplayerengine",
-        path="/Users/wxy/Projects/ncmplayerengine",
+        path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
         daemon_workspace_id="claude:ncmplayerengine",
@@ -852,7 +852,7 @@ async def test_message_handler_rolls_back_imported_claude_remap_when_send_fails(
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="ncmplayerengine",
-        path="/Users/wxy/Projects/ncmplayerengine",
+        path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
         daemon_workspace_id="claude:ncmplayerengine",
@@ -932,7 +932,7 @@ async def test_message_handler_in_hybrid_mode_prefers_connected_codex_adapter():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -997,7 +997,7 @@ async def test_new_thread_handler_rejects_tui_mode_thread_creation():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -1058,7 +1058,7 @@ async def test_new_thread_handler_in_app_mode_creates_thread_and_topic():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -1125,7 +1125,7 @@ async def test_new_thread_handler_in_app_mode_requires_initial_text_for_codex():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -1187,7 +1187,7 @@ async def test_new_thread_handler_in_app_mode_accepts_top_level_thread_id():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -1250,7 +1250,7 @@ async def test_new_thread_handler_rolls_back_when_topic_creation_fails():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -1312,7 +1312,7 @@ async def test_new_thread_handler_rolls_back_when_initial_message_send_fails():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -1376,7 +1376,7 @@ async def test_archive_thread_handler_uses_codex_bridge_without_persistent_adapt
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -1440,7 +1440,7 @@ async def test_codex_new_then_archive_keeps_same_thread_id_across_full_flow():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -1532,7 +1532,7 @@ async def test_new_thread_handler_in_app_mode_requires_connected_adapter():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -1597,7 +1597,7 @@ async def test_list_thread_handler_hides_codex_unknown_state_only_residue(monkey
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3230,
         daemon_workspace_id="codex:onlineWorker",
@@ -1664,7 +1664,7 @@ async def test_list_thread_handler_skips_codex_state_only_subagent_threads(monke
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3230,
         daemon_workspace_id="codex:onlineWorker",
@@ -1742,7 +1742,7 @@ async def test_list_thread_handler_includes_codex_jsonl_only_main_thread(monkeyp
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3230,
         daemon_workspace_id="codex:onlineWorker",
@@ -1810,7 +1810,7 @@ async def test_sync_codex_tui_final_replies_once_pushes_new_assistant_reply_to_t
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -1845,7 +1845,7 @@ async def test_sync_codex_tui_final_replies_once_skips_already_synced_reply():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -1877,7 +1877,7 @@ async def test_sync_codex_tui_final_replies_once_only_pushes_final_answer():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -1909,7 +1909,7 @@ async def test_sync_codex_tui_final_replies_once_skips_commentary_only_history()
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -1939,7 +1939,7 @@ async def test_sync_codex_tui_final_replies_once_skips_reply_already_sent_by_sch
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -1970,7 +1970,7 @@ async def test_sync_codex_tui_final_replies_once_skips_reply_marked_by_live_even
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -2042,7 +2042,7 @@ async def test_sync_codex_tui_final_replies_once_revives_stale_archived_active_t
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -2116,7 +2116,7 @@ async def test_send_message_via_tui_bridge_baseline_counts_only_final_answers():
     state = AppState(storage=AppStorage())
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -2145,7 +2145,7 @@ async def test_send_message_via_tui_bridge_seeds_and_refreshes_watch_state():
     state = AppState(storage=AppStorage())
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -2177,7 +2177,7 @@ async def test_send_message_via_tui_bridge_uses_local_tui_host_client():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -2212,7 +2212,7 @@ async def test_send_message_via_tui_host_does_not_auto_start_managed_host_for_ap
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -2272,7 +2272,7 @@ async def test_start_thread_via_tui_bridge_prefers_persistent_codex_adapter_when
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -2303,7 +2303,7 @@ async def test_send_message_via_tui_bridge_propagates_local_host_error():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -2338,7 +2338,7 @@ async def test_start_thread_via_tui_bridge_falls_back_to_short_lived_bridge_when
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -2369,7 +2369,7 @@ async def test_enqueue_codex_tui_message_serializes_same_thread_sends():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -2421,7 +2421,7 @@ async def test_enqueue_codex_tui_message_waits_until_thread_turn_completed():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -2500,7 +2500,7 @@ async def test_prime_codex_tui_reply_state_records_latest_final_without_sending(
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
@@ -2528,7 +2528,7 @@ async def test_prime_codex_tui_reply_state_revives_stale_archived_active_thread(
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",

@@ -231,14 +231,14 @@ async def test_stdio_heartbeat_keeps_existing_rpc_behavior():
 @pytest.mark.asyncio
 async def test_start_thread_passes_registered_workspace_cwd():
     adapter = CodexAdapter()
-    adapter._workspace_cwd_map["codex:onlineWorker"] = "/Users/wxy/Projects/onlineWorker"
+    adapter._workspace_cwd_map["codex:onlineWorker"] = "/Users/example/Projects/onlineWorker"
     adapter._call = AsyncMock(return_value={"id": "tid-new"})
 
     result = await adapter.start_thread("codex:onlineWorker")
 
     adapter._call.assert_awaited_once_with(
         "thread/start",
-        {"cwd": "/Users/wxy/Projects/onlineWorker"},
+        {"cwd": "/Users/example/Projects/onlineWorker"},
     )
     assert result == {"id": "tid-new"}
     assert adapter._thread_workspace_map["tid-new"] == "codex:onlineWorker"
@@ -247,14 +247,14 @@ async def test_start_thread_passes_registered_workspace_cwd():
 @pytest.mark.asyncio
 async def test_start_thread_records_mapping_when_app_server_returns_nested_thread_object():
     adapter = CodexAdapter()
-    adapter._workspace_cwd_map["codex:onlineWorker"] = "/Users/wxy/Projects/onlineWorker"
+    adapter._workspace_cwd_map["codex:onlineWorker"] = "/Users/example/Projects/onlineWorker"
     adapter._call = AsyncMock(return_value={"thread": {"id": "tid-nested"}})
 
     result = await adapter.start_thread("codex:onlineWorker")
 
     adapter._call.assert_awaited_once_with(
         "thread/start",
-        {"cwd": "/Users/wxy/Projects/onlineWorker"},
+        {"cwd": "/Users/example/Projects/onlineWorker"},
     )
     assert result == {"thread": {"id": "tid-nested"}}
     assert adapter._thread_workspace_map["tid-nested"] == "codex:onlineWorker"
@@ -349,13 +349,13 @@ async def test_send_user_message_can_override_approvals_reviewer():
 
 def test_update_thread_workspace_map_uses_nested_thread_id_and_cwd():
     adapter = CodexAdapter()
-    adapter._workspace_cwd_map["codex:onlineWorker"] = "/Users/wxy/Projects/onlineWorker"
+    adapter._workspace_cwd_map["codex:onlineWorker"] = "/Users/example/Projects/onlineWorker"
 
     adapter._update_thread_workspace_map(
         "thread/started",
         {
             "thread": {"id": "tid-from-thread-object"},
-            "cwd": "/Users/wxy/Projects/onlineWorker",
+            "cwd": "/Users/example/Projects/onlineWorker",
         },
     )
 

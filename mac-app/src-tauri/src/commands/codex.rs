@@ -26,6 +26,9 @@ pub struct CodexThread {
     pub cwd: String,
     pub archived: bool,
     pub rollout_path: String,
+    pub model_provider: Option<String>,
+    pub source: Option<String>,
+    pub is_smoke: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -231,6 +234,11 @@ fn file_mtime_ms(path: &Path) -> i64 {
         .unwrap_or(0)
 }
 
+fn is_codex_smoke_preview(text: &str) -> bool {
+    text.trim_start()
+        .starts_with("This is an OnlineWorker fixed-session")
+}
+
 fn codex_jsonl_candidate_from_path(
     path: &Path,
     overlays: &std::collections::HashMap<String, super::session_state::LocalThreadOverlay>,
@@ -274,13 +282,29 @@ fn codex_jsonl_candidate_from_path(
     }
 
     let mtime_ms = file_mtime_ms(path);
+    let model_provider = payload
+        .get("model_provider")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let source = payload
+        .get("source")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
     let mut thread = CodexThread {
         id: thread_id.clone(),
         title: read_codex_first_user_preview(path).unwrap_or_default(),
         cwd,
         archived: false,
         rollout_path: path.to_string_lossy().to_string(),
+        model_provider,
+        source,
+        is_smoke: false,
     };
+    thread.is_smoke = is_codex_smoke_preview(&thread.title);
 
     if let Some(overlay) = overlays.get(&thread_id) {
         if !overlay.workspace_path.is_empty() {
@@ -293,7 +317,6 @@ fn codex_jsonl_candidate_from_path(
         }
         thread.archived = overlay.archived;
     }
-
     Some(CodexThreadCandidate {
         thread,
         created_at: mtime_ms,
@@ -314,7 +337,7 @@ fn list_codex_threads_from_paths(
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, title, cwd, archived, rollout_path, source, created_at, updated_at
+            "SELECT id, title, cwd, archived, rollout_path, source, model_provider, created_at, updated_at
              FROM threads
              ORDER BY updated_at DESC
              LIMIT 600",
@@ -330,8 +353,9 @@ fn list_codex_threads_from_paths(
                 row.get::<_, i64>(3)? != 0,
                 row.get::<_, String>(4)?,
                 row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                row.get::<_, i64>(6)?,
+                row.get::<_, Option<String>>(6)?,
                 row.get::<_, i64>(7)?,
+                row.get::<_, i64>(8)?,
             ))
         })
         .map_err(|e| e.to_string())?;
@@ -339,7 +363,7 @@ fn list_codex_threads_from_paths(
     let mut candidates = Vec::new();
     let mut seen_ids = std::collections::HashSet::new();
     for r in rows {
-        let (id, title, cwd, archived, rollout_path, source, created_at, updated_at) =
+        let (id, title, cwd, archived, rollout_path, source, model_provider, created_at, updated_at) =
             r.map_err(|e| e.to_string())?;
         if is_codex_subagent_source(&source) {
             continue;
@@ -350,7 +374,13 @@ fn list_codex_threads_from_paths(
             cwd,
             archived,
             rollout_path,
+            model_provider: model_provider
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            source: Some(source.clone()).filter(|value| !value.trim().is_empty()),
+            is_smoke: false,
         };
+        thread.is_smoke = is_codex_smoke_preview(&thread.title);
         if let Some(overlay) = overlays.get(&thread.id) {
             if !overlay.workspace_path.is_empty() {
                 thread.cwd = overlay.workspace_path.clone();
@@ -1492,7 +1522,7 @@ mod tests {
                 100_i64,
                 "vscode",
                 "openai",
-                "/Users/wxy/Projects/onlineWorker",
+                "/Users/example/Projects/onlineWorker",
                 "Main thread",
                 "workspace-write",
                 "default",
@@ -1522,7 +1552,7 @@ mod tests {
               "workspaces": {
                 "codex:onlineWorker": {
                   "name": "onlineWorker",
-                  "path": "/Users/wxy/Projects/onlineWorker",
+                  "path": "/Users/example/Projects/onlineWorker",
                   "tool": "codex",
                   "threads": {
                     "main-thread": {
@@ -1616,7 +1646,7 @@ mod tests {
                 100_i64,
                 "vscode",
                 "openai",
-                "/Users/wxy/Projects/onlineWorker",
+                "/Users/example/Projects/onlineWorker",
                 "Main thread",
                 "workspace-write",
                 "default",
@@ -1645,7 +1675,7 @@ mod tests {
         std::fs::write(
             &rollout_path,
             concat!(
-                "{\"timestamp\":\"2026-04-10T09:27:23.213Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"019d76b7-8229-7b63-b851-0e8e572b0672\",\"timestamp\":\"2026-04-10T09:27:11.147Z\",\"cwd\":\"/Users/wxy/Projects/onlineWorker\",\"source\":\"cli\"}}\n",
+                "{\"timestamp\":\"2026-04-10T09:27:23.213Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"019d76b7-8229-7b63-b851-0e8e572b0672\",\"timestamp\":\"2026-04-10T09:27:11.147Z\",\"cwd\":\"/Users/example/Projects/onlineWorker\",\"source\":\"cli\"}}\n",
                 "{\"timestamp\":\"2026-04-10T09:27:23.214Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"继续处理phase15\"}]}}\n"
             ),
         )
@@ -1661,6 +1691,187 @@ mod tests {
             threads[0].rollout_path,
             rollout_path.to_string_lossy().to_string()
         );
+        assert_eq!(threads[0].model_provider.as_deref(), None);
+        assert_eq!(threads[0].source.as_deref(), Some("cli"));
+        assert!(!threads[0].is_smoke);
+
+        let _ = std::fs::remove_file(&rollout_path);
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn list_codex_threads_exposes_model_provider_and_source_for_db_rows() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "onlineworker-codex-provider-meta-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let db_path = temp_dir.join("state_5.sqlite");
+
+        let conn = Connection::open(&db_path).expect("open sqlite");
+        conn.execute_batch(
+            "
+            CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                rollout_path TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                model_provider TEXT NOT NULL,
+                cwd TEXT NOT NULL,
+                title TEXT NOT NULL,
+                sandbox_policy TEXT NOT NULL,
+                approval_mode TEXT NOT NULL,
+                tokens_used INTEGER NOT NULL DEFAULT 0,
+                has_user_event INTEGER NOT NULL DEFAULT 0,
+                archived INTEGER NOT NULL DEFAULT 0,
+                archived_at INTEGER,
+                git_sha TEXT,
+                git_branch TEXT,
+                git_origin_url TEXT,
+                cli_version TEXT NOT NULL DEFAULT '',
+                first_user_message TEXT NOT NULL DEFAULT '',
+                agent_nickname TEXT,
+                agent_role TEXT,
+                memory_mode TEXT NOT NULL DEFAULT 'enabled',
+                model TEXT,
+                reasoning_effort TEXT,
+                agent_path TEXT
+            );
+            ",
+        )
+        .expect("create threads table");
+
+        conn.execute(
+            "
+            INSERT INTO threads (
+                id, rollout_path, created_at, updated_at, source, model_provider, cwd, title,
+                sandbox_policy, approval_mode, tokens_used, has_user_event, archived, archived_at,
+                git_sha, git_branch, git_origin_url, cli_version, first_user_message, agent_nickname,
+                agent_role, memory_mode, model, reasoning_effort, agent_path
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                ?9, ?10, ?11, ?12, ?13, ?14,
+                ?15, ?16, ?17, ?18, ?19, ?20,
+                ?21, ?22, ?23, ?24, ?25
+            );
+            ",
+            params![
+                "legacy-thread",
+                "/tmp/legacy.jsonl",
+                1_i64,
+                100_i64,
+                "cli",
+                "custom",
+                "/Users/example/Projects/onlineWorker",
+                "which model now use",
+                "workspace-write",
+                "default",
+                0_i64,
+                1_i64,
+                0_i64,
+                None::<i64>,
+                None::<String>,
+                None::<String>,
+                None::<String>,
+                "",
+                "which model now use",
+                None::<String>,
+                None::<String>,
+                "enabled",
+                None::<String>,
+                None::<String>,
+                None::<String>,
+            ],
+        )
+        .expect("insert thread");
+        drop(conn);
+
+        let threads =
+            list_codex_threads_from_paths(&db_path, None, None).expect("list codex threads");
+
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].id, "legacy-thread");
+        assert_eq!(threads[0].model_provider.as_deref(), Some("custom"));
+        assert_eq!(threads[0].source.as_deref(), Some("cli"));
+        assert!(!threads[0].is_smoke);
+
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn list_codex_threads_marks_smoke_threads() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "onlineworker-codex-smoke-meta-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        let sessions_dir = temp_dir.join("sessions");
+        let rollout_dir = sessions_dir.join("2026/05/10");
+        std::fs::create_dir_all(&rollout_dir).expect("create sessions dir");
+        let db_path = temp_dir.join("state_5.sqlite");
+
+        let conn = Connection::open(&db_path).expect("open sqlite");
+        conn.execute_batch(
+            "
+            CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                rollout_path TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                model_provider TEXT NOT NULL,
+                cwd TEXT NOT NULL,
+                title TEXT NOT NULL,
+                sandbox_policy TEXT NOT NULL,
+                approval_mode TEXT NOT NULL,
+                tokens_used INTEGER NOT NULL DEFAULT 0,
+                has_user_event INTEGER NOT NULL DEFAULT 0,
+                archived INTEGER NOT NULL DEFAULT 0,
+                archived_at INTEGER,
+                git_sha TEXT,
+                git_branch TEXT,
+                git_origin_url TEXT,
+                cli_version TEXT NOT NULL DEFAULT '',
+                first_user_message TEXT NOT NULL DEFAULT '',
+                agent_nickname TEXT,
+                agent_role TEXT,
+                memory_mode TEXT NOT NULL DEFAULT 'enabled',
+                model TEXT,
+                reasoning_effort TEXT,
+                agent_path TEXT
+            );
+            ",
+        )
+        .expect("create threads table");
+        drop(conn);
+
+        let rollout_path = rollout_dir
+            .join("rollout-2026-05-10T09-00-00-019smoke-8229-7b63-b851-0e8e572b0672.jsonl");
+        std::fs::write(
+            &rollout_path,
+            concat!(
+                "{\"timestamp\":\"2026-05-10T09:00:00.000Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"019smoke-8229-7b63-b851-0e8e572b0672\",\"cwd\":\"/Users/example/Projects/onlineWorker\",\"source\":\"cli\",\"model_provider\":\"codex\"}}\n",
+                "{\"timestamp\":\"2026-05-10T09:00:01.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"This is an OnlineWorker fixed-session smoke test for provider codex. Reply with ONLINEWORKER_SMOKE_OK.\"}]}}\n"
+            ),
+        )
+        .expect("write rollout file");
+
+        let threads = list_codex_threads_from_paths(&db_path, None, Some(&sessions_dir))
+            .expect("list codex threads");
+
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].model_provider.as_deref(), Some("codex"));
+        assert_eq!(threads[0].source.as_deref(), Some("cli"));
+        assert!(threads[0].is_smoke);
+        assert!(!threads[0].archived);
 
         let _ = std::fs::remove_file(&rollout_path);
         let _ = std::fs::remove_file(&db_path);
@@ -1682,7 +1893,7 @@ mod tests {
         std::fs::write(
             &rollout_path,
             concat!(
-                "{\"timestamp\":\"2026-04-13T10:00:00.000Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"thread-1\",\"cwd\":\"/Users/wxy/Projects/onlineWorker\"}}\n",
+                "{\"timestamp\":\"2026-04-13T10:00:00.000Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"thread-1\",\"cwd\":\"/Users/example/Projects/onlineWorker\"}}\n",
                 "{\"timestamp\":\"2026-04-13T10:00:01.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"developer\",\"content\":[{\"type\":\"input_text\",\"text\":\"ignore developer\"}]}}\n",
                 "{\"timestamp\":\"2026-04-13T10:00:02.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"继续处理phase15\"}]}}\n",
                 "{\"timestamp\":\"2026-04-13T10:00:03.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"我先定位问题。\"},{\"type\":\"output_text\",\"text\":\"随后补测试。\"}]}}\n"
@@ -1789,9 +2000,9 @@ mod tests {
         std::fs::write(
             &rollout_path,
             concat!(
-                "{\"timestamp\":\"2026-04-13T10:00:00.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"# AGENTS.md instructions for /Users/wxy/Projects/onlineWorker\\n\\n<INSTRUCTIONS>\\n# Global Agent Instructions\\n\\n- 默认使用中文回答\\n</INSTRUCTIONS>\"}]}}\n",
-                "{\"timestamp\":\"2026-04-13T10:00:01.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<environment_context>\\n  <cwd>/Users/wxy/Projects/onlineWorker</cwd>\\n</environment_context>\"}]}}\n",
-                "{\"timestamp\":\"2026-04-13T10:00:02.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<skill>\\n<name>ask</name>\\n<path>/Users/wxy/.git-ai/skills/ask/SKILL.md</path>\\n</skill>\"}]}}\n",
+                "{\"timestamp\":\"2026-04-13T10:00:00.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"# AGENTS.md instructions for /Users/example/Projects/onlineWorker\\n\\n<INSTRUCTIONS>\\n# Global Agent Instructions\\n\\n- 默认使用中文回答\\n</INSTRUCTIONS>\"}]}}\n",
+                "{\"timestamp\":\"2026-04-13T10:00:01.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<environment_context>\\n  <cwd>/Users/example/Projects/onlineWorker</cwd>\\n</environment_context>\"}]}}\n",
+                "{\"timestamp\":\"2026-04-13T10:00:02.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<skill>\\n<name>ask</name>\\n<path>/Users/example/.git-ai/skills/ask/SKILL.md</path>\\n</skill>\"}]}}\n",
                 "{\"timestamp\":\"2026-04-13T10:00:03.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"继续处理 phase17\"}]}}\n",
                 "{\"timestamp\":\"2026-04-13T10:00:04.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"我先定位问题。\"}]}}\n"
             ),

@@ -26,6 +26,9 @@ interface CodexThreadRaw {
   cwd: string;
   archived: boolean;
   rollout_path: string;
+  model_provider?: string | null;
+  source?: string | null;
+  is_smoke?: boolean;
 }
 
 interface ClaudeSessionRaw {
@@ -48,12 +51,15 @@ interface ClaudeSendResult {
 export async function fetchCodexSessions(): Promise<CodexSession[]> {
   const threads = await invoke<CodexThreadRaw[]>("list_codex_threads");
   return threads
-    .filter((thread) => !thread.archived)
     .map((thread) => ({
       threadId: thread.id,
       cwd: thread.cwd,
       title: thread.title || thread.cwd.split("/").pop() || thread.id.slice(0, 8),
       rolloutPath: thread.rollout_path,
+      archived: thread.archived,
+      modelProvider: thread.model_provider ?? null,
+      source: thread.source ?? null,
+      isSmoke: Boolean(thread.is_smoke),
     }));
 }
 

@@ -29,7 +29,7 @@ class _FakeAdapter:
 async def test_codex_owner_bridge_uses_workspace_mapping_when_cwd_matches(tmp_path):
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         daemon_workspace_id="ws-1",
         threads={"tid-1": ThreadInfo(thread_id="tid-1")},
@@ -41,7 +41,7 @@ async def test_codex_owner_bridge_uses_workspace_mapping_when_cwd_matches(tmp_pa
     response = await bridge._handle_send_message({
         "thread_id": "tid-1",
         "text": "hello",
-        "cwd": "/Users/wxy/Projects/onlineWorker",
+        "cwd": "/Users/example/Projects/onlineWorker",
     })
 
     assert response["ok"] is True

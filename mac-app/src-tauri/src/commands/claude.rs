@@ -1281,10 +1281,10 @@ mod tests {
         let root = temp_dir("onlineworker-claude-session-list");
         let projects_dir = root.join("projects");
         let history_path = root.join("history.jsonl");
-        let cwd = "/Users/wxy/Projects/onlineWorker";
+        let cwd = "/Users/example/Projects/onlineWorker";
 
         write_jsonl(
-            &projects_dir.join("-Users-wxy-Projects-onlineWorker/ses-old.jsonl"),
+            &projects_dir.join("-Users-example-Projects-onlineWorker/ses-old.jsonl"),
             &[json!({
                 "type": "user",
                 "timestamp": "2026-04-07T09:31:18.002Z",
@@ -1294,7 +1294,7 @@ mod tests {
             })],
         );
         write_jsonl(
-            &projects_dir.join("-Users-wxy-Projects-onlineWorker/ses-new.jsonl"),
+            &projects_dir.join("-Users-example-Projects-onlineWorker/ses-new.jsonl"),
             &[json!({
                 "type": "user",
                 "timestamp": "2026-04-07T10:31:18.002Z",
@@ -1351,10 +1351,10 @@ mod tests {
         let projects_dir = root.join("projects");
         let history_path = root.join("history.jsonl");
         let session_id = "ses-a";
-        let cwd = "/Users/wxy/Projects/onlineWorker";
+        let cwd = "/Users/example/Projects/onlineWorker";
 
         write_jsonl(
-            &projects_dir.join("-Users-wxy-Projects-onlineWorker/ses-a.jsonl"),
+            &projects_dir.join("-Users-example-Projects-onlineWorker/ses-a.jsonl"),
             &[
                 json!({
                     "type": "user",
@@ -1454,11 +1454,11 @@ mod tests {
         let projects_dir = root.join("projects");
         let history_path = root.join("history.jsonl");
         let session_id = "11111111-1111-4111-8111-111111111111";
-        let cwd = "/Users/wxy/Projects/onlineWorker";
+        let cwd = "/Users/example/Projects/onlineWorker";
 
         write_jsonl(
             &projects_dir.join(
-                "-Users-wxy-Projects-onlineWorker/11111111-1111-4111-8111-111111111111.jsonl",
+                "-Users-example-Projects-onlineWorker/11111111-1111-4111-8111-111111111111.jsonl",
             ),
             &[json!({
                 "type": "user",
@@ -1507,7 +1507,7 @@ mod tests {
         let projects_dir = root.join("projects");
         let history_path = root.join("history.jsonl");
         let session_id = "ses-tail";
-        let cwd = "/Users/wxy/Projects/onlineWorker";
+        let cwd = "/Users/example/Projects/onlineWorker";
 
         let rows = (1..=60)
             .map(|index| {
@@ -1521,7 +1521,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         write_jsonl(
-            &projects_dir.join("-Users-wxy-Projects-onlineWorker/ses-tail.jsonl"),
+            &projects_dir.join("-Users-example-Projects-onlineWorker/ses-tail.jsonl"),
             &rows,
         );
         fs::write(&history_path, "").expect("write empty history");
@@ -1557,7 +1557,7 @@ mod tests {
         let root = temp_dir("onlineworker-claude-session-noise");
         let projects_dir = root.join("projects");
         let history_path = root.join("history.jsonl");
-        let cwd = "/Users/wxy/Projects/onlineWorker";
+        let cwd = "/Users/example/Projects/onlineWorker";
 
         write_jsonl(
             &history_path,
@@ -1570,7 +1570,7 @@ mod tests {
         );
 
         write_jsonl(
-            &projects_dir.join("-Users-wxy-Projects-onlineWorker/ses-cli-noise.jsonl"),
+            &projects_dir.join("-Users-example-Projects-onlineWorker/ses-cli-noise.jsonl"),
             &[json!({
                 "type": "user",
                 "timestamp": "2026-04-07T09:33:42.791Z",
@@ -1584,7 +1584,7 @@ mod tests {
             })],
         );
         write_jsonl(
-            &projects_dir.join("-Users-wxy-Projects-onlineWorker/ses-login-failed.jsonl"),
+            &projects_dir.join("-Users-example-Projects-onlineWorker/ses-login-failed.jsonl"),
             &[
                 json!({
                     "type": "user",
@@ -1615,7 +1615,7 @@ mod tests {
             ],
         );
         write_jsonl(
-            &projects_dir.join("-Users-wxy-Projects-onlineWorker/ses-cli-real.jsonl"),
+            &projects_dir.join("-Users-example-Projects-onlineWorker/ses-cli-real.jsonl"),
             &[json!({
                 "type": "user",
                 "timestamp": "2026-04-16T02:30:22.087Z",
@@ -1629,7 +1629,7 @@ mod tests {
             })],
         );
         write_jsonl(
-            &projects_dir.join("-Users-wxy-Projects-onlineWorker/ses-hybrid.jsonl"),
+            &projects_dir.join("-Users-example-Projects-onlineWorker/ses-hybrid.jsonl"),
             &[
                 json!({
                     "type": "user",
@@ -1693,12 +1693,12 @@ mod tests {
         let root = temp_dir("onlineworker-claude-session-app-noise");
         let projects_dir = root.join("projects");
         let history_path = root.join("history.jsonl");
-        let real_cwd = "/Users/wxy/Projects/ncmplayerengine";
-        let worktree_cwd = "/Users/wxy/Projects/onlineWorker/.worktrees/phase16-claude-app-surface";
+        let real_cwd = "/Users/example/Projects/sample-project";
+        let worktree_cwd = "/Users/example/Projects/onlineWorker/.worktrees/phase16-sample-surface";
 
         write_jsonl(
             &projects_dir.join(
-                "-Users-wxy-Projects-onlineWorker--worktrees-phase16-claude-app-surface/ses-worktree.jsonl",
+                "-Users-example-Projects-onlineWorker--worktrees-phase16-sample-surface/ses-worktree.jsonl",
             ),
             &[
                 json!({
@@ -1723,7 +1723,7 @@ mod tests {
             ],
         );
         write_jsonl(
-            &projects_dir.join("-Users-wxy-Projects-ncmplayerengine/ses-smoke.jsonl"),
+            &projects_dir.join("-Users-example-Projects-sample-project/ses-smoke.jsonl"),
             &[
                 json!({
                     "type": "user",
@@ -1752,7 +1752,7 @@ mod tests {
             ],
         );
         write_jsonl(
-            &projects_dir.join("-Users-wxy-Projects-ncmplayerengine/ses-real.jsonl"),
+            &projects_dir.join("-Users-example-Projects-sample-project/ses-real.jsonl"),
             &[
                 json!({
                     "type": "user",
@@ -1796,10 +1796,10 @@ mod tests {
         let root = temp_dir("onlineworker-claude-session-recency");
         let projects_dir = root.join("projects");
         let history_path = root.join("history.jsonl");
-        let cwd = "/Users/wxy/Projects/onlineWorker";
+        let cwd = "/Users/example/Projects/onlineWorker";
 
         write_jsonl(
-            &projects_dir.join("-Users-wxy-Projects-onlineWorker/ses-old-but-active.jsonl"),
+            &projects_dir.join("-Users-example-Projects-onlineWorker/ses-old-but-active.jsonl"),
             &[
                 json!({
                     "type": "user",
@@ -1823,7 +1823,7 @@ mod tests {
             ],
         );
         write_jsonl(
-            &projects_dir.join("-Users-wxy-Projects-onlineWorker/ses-new-but-stale.jsonl"),
+            &projects_dir.join("-Users-example-Projects-onlineWorker/ses-new-but-stale.jsonl"),
             &[json!({
                 "type": "user",
                 "timestamp": "2026-04-16T10:00:00.000Z",
@@ -1953,10 +1953,10 @@ mod tests {
     fn resolve_claude_send_context_uses_session_cwd_when_workspace_missing() {
         let root = temp_dir("onlineworker-claude-send-context-existing");
         let projects_dir = root.join("projects");
-        let cwd = "/Users/wxy/Projects/onlineWorker";
+        let cwd = "/Users/example/Projects/onlineWorker";
 
         write_jsonl(
-            &projects_dir.join("-Users-wxy-Projects-onlineWorker/ses-existing.jsonl"),
+            &projects_dir.join("-Users-example-Projects-onlineWorker/ses-existing.jsonl"),
             &[json!({
                 "type": "user",
                 "timestamp": "2026-04-07T09:31:18.002Z",

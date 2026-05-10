@@ -1,6 +1,10 @@
 # OnlineWorker
 
-OnlineWorker is a macOS AI coding workspace. The Mac app provides the main control surface for setup, sessions, commands, and service lifecycle. Telegram is a lightweight remote entry point for starting work, adding context, handling approvals, checking status, and receiving the final response.
+<p align="center">
+  <img src="./launcher.png" alt="OnlineWorker launcher artwork" width="360" />
+</p>
+
+OnlineWorker is a macOS AI coding workspace for local CLI agents. The Mac app is the main control surface for setup, sessions, commands, logs, and service lifecycle. Telegram is a lightweight remote entry point for starting work, adding context, handling approvals, checking status, and receiving the final response.
 
 The default workflow is **App / Sessions as the primary control surface + Telegram for the final reply**.
 
@@ -8,9 +12,24 @@ The default workflow is **App / Sessions as the primary control surface + Telegr
 
 See also:
 
+- [Documentation Notes](docs/README.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
 - [Support](SUPPORT.md)
+
+## Screenshots
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard.png" alt="OnlineWorker dashboard" width="49%" />
+  <img src="./docs/screenshots/setup.png" alt="OnlineWorker setup" width="49%" />
+</p>
+
+## Overview
+
+- macOS desktop workspace for running and supervising local AI coding CLIs.
+- Built around an installed app, not a browser-hosted service.
+- App for setup and ongoing control, Telegram for remote input and final delivery.
+- Builtin providers in this repository: `codex` and `claude`.
 
 ## Features
 
@@ -21,9 +40,9 @@ See also:
 - Markdown rendering for final replies.
 - Installer-friendly macOS packaging through Tauri and PyInstaller.
 
-## Public Provider Scope
+## Provider Scope
 
-The public repository ships builtin support for:
+This repository ships builtin support for:
 
 - `codex`
 - `claude`
@@ -42,7 +61,7 @@ contracts, but this repository only bundles the builtin providers listed above.
 
 ## Quick Start
 
-1. Build or download the macOS app package.
+1. Build the DMG locally or download a packaged DMG.
 2. Open the DMG and drag `OnlineWorker.app` into `/Applications`.
 3. If macOS blocks the app on first launch, remove the quarantine attribute:
 
@@ -55,13 +74,14 @@ xattr -cr /Applications/OnlineWorker.app
 ## Initial Setup
 
 1. Open the app and go to `Setup`.
-2. Fill in the Telegram values:
+2. Make sure the supported CLI tools you want to use are installed and visible in `PATH`.
+3. Fill in the Telegram values:
    - `TELEGRAM_TOKEN`
    - `ALLOWED_USER_ID`
    - `GROUP_CHAT_ID`
-3. Make sure the supported CLI tools you want to use are installed and visible in `PATH`.
 4. If you use Claude through the official login flow, run `claude auth login` first.
-5. Go back to `Dashboard` and start the service.
+5. Use the in-app connectivity checks on the `Setup` page to confirm Telegram access.
+6. Go back to `Dashboard` and start the service.
 
 ## Configuration
 
@@ -136,7 +156,7 @@ cd /path/to/onlineWorker
 bash scripts/build.sh
 ```
 
-This build path packages the base app from this repository. Shell repositories can mount extra provider packages at runtime through `ONLINEWORKER_PROVIDER_OVERLAY`, or stage them at build time through `ONLINEWORKER_PLUGIN_SOURCE_DIRS` before calling the same `scripts/build.sh`.
+This build path packages the base app from this repository. Additional provider packages can be mounted at runtime through `ONLINEWORKER_PROVIDER_OVERLAY`, or staged at build time through `ONLINEWORKER_PLUGIN_SOURCE_DIRS` before calling the same `scripts/build.sh`.
 
 ### Intel DMG
 

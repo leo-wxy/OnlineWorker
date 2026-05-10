@@ -20,7 +20,7 @@ async def test_workspace_overview_revives_stale_archived_active_thread(monkeypat
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3230,
         daemon_workspace_id="codex:onlineWorker",
@@ -76,7 +76,7 @@ async def test_workspace_overview_hides_archived_claude_thread_from_active_secti
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="claude",
         topic_id=3230,
         daemon_workspace_id="claude:onlineWorker",
@@ -132,7 +132,7 @@ async def test_workspace_overview_for_claude_only_shows_provider_local_threads(m
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="ncmplayerengine",
-        path="/Users/wxy/Projects/ncmplayerengine",
+        path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
         daemon_workspace_id="claude:ncmplayerengine",
@@ -278,7 +278,7 @@ async def test_thread_open_uses_latest_codex_title_for_topic_name(monkeypatch):
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3230,
         daemon_workspace_id="codex:onlineWorker",
@@ -350,7 +350,7 @@ async def test_thread_open_renames_existing_topic_when_codex_title_changed(monke
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3230,
         daemon_workspace_id="codex:onlineWorker",
@@ -428,7 +428,7 @@ async def test_thread_open_existing_claude_topic_without_cursor_sends_history_sn
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="ncmplayerengine",
-        path="/Users/wxy/Projects/ncmplayerengine",
+        path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
         daemon_workspace_id="claude:ncmplayerengine",
@@ -519,7 +519,7 @@ async def test_thread_open_existing_claude_topic_only_syncs_turns_after_cursor(m
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="ncmplayerengine",
-        path="/Users/wxy/Projects/ncmplayerengine",
+        path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
         daemon_workspace_id="claude:ncmplayerengine",
@@ -611,7 +611,7 @@ async def test_thread_open_customprovider_status_message_avoids_markdown_parse_r
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="customprovider",
         topic_id=3160,
         daemon_workspace_id="customprovider:onlineWorker",
@@ -747,7 +747,7 @@ async def test_thread_open_uses_unique_payload_for_state_thread_collision(monkey
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3230,
         daemon_workspace_id="codex:onlineWorker",
@@ -820,7 +820,7 @@ async def test_thread_open_backfills_codex_jsonl_only_thread(monkeypatch):
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3230,
         daemon_workspace_id="codex:onlineWorker",
@@ -890,7 +890,7 @@ async def test_thread_open_uses_unique_payload_for_sqlite_backfill_collision(mon
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="customprovider",
         topic_id=3160,
         daemon_workspace_id="customprovider:onlineWorker",
@@ -944,7 +944,7 @@ async def test_thread_open_backfills_claude_local_session(monkeypatch):
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="claude",
         topic_id=3230,
         daemon_workspace_id="claude:onlineWorker",
@@ -1006,7 +1006,7 @@ async def test_thread_open_revives_stale_locally_archived_active_thread(monkeypa
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3230,
         daemon_workspace_id="codex:onlineWorker",

@@ -21,7 +21,7 @@ def test_get_adapter_for_workspace_prefers_storage_workspace_tool():
     state.set_adapter("customprovider", customprovider_adapter)
     state.storage.workspaces["workspace-1"] = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="customprovider",
         daemon_workspace_id="customprovider:onlineWorker",
     )
@@ -42,7 +42,7 @@ def test_get_adapter_for_workspace_uses_provider_thread_hook_for_custom_prefix(m
     custom_adapter = MagicMock()
     state.storage.workspaces["custom:onlineWorker"] = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="custom",
         daemon_workspace_id="custom:onlineWorker",
     )

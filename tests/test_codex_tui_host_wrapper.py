@@ -13,7 +13,7 @@ def test_build_codex_resume_command_targets_local_thread_and_cwd_by_default():
     cmd = build_codex_resume_command(
         codex_bin="codex",
         thread_id="019d6220-489a-7050-bf98-8fcf6e5bdfea",
-        cwd="/Users/wxy/Projects/onlineWorker",
+        cwd="/Users/example/Projects/onlineWorker",
         extra_args=["--no-alt-screen"],
     )
 
@@ -22,7 +22,7 @@ def test_build_codex_resume_command_targets_local_thread_and_cwd_by_default():
         "resume",
         "019d6220-489a-7050-bf98-8fcf6e5bdfea",
         "--cd",
-        "/Users/wxy/Projects/onlineWorker",
+        "/Users/example/Projects/onlineWorker",
         "--no-alt-screen",
     ]
 
@@ -31,7 +31,7 @@ def test_build_codex_resume_command_still_supports_optional_remote_url():
     cmd = build_codex_resume_command(
         codex_bin="codex",
         thread_id="019d6220-489a-7050-bf98-8fcf6e5bdfea",
-        cwd="/Users/wxy/Projects/onlineWorker",
+        cwd="/Users/example/Projects/onlineWorker",
         remote_url="ws://127.0.0.1:4722",
     )
 
@@ -42,7 +42,7 @@ def test_build_codex_resume_command_still_supports_optional_remote_url():
         "--remote",
         "ws://127.0.0.1:4722",
         "--cd",
-        "/Users/wxy/Projects/onlineWorker",
+        "/Users/example/Projects/onlineWorker",
     ]
 
 
@@ -60,7 +60,7 @@ def test_validate_thread_binding_rejects_other_thread():
 
 def test_resolve_host_thread_id_prefers_explicit_thread_id(tmp_path):
     thread_id = resolve_host_thread_id(
-        cwd="/Users/wxy/Projects/onlineWorker",
+        cwd="/Users/example/Projects/onlineWorker",
         data_dir=str(tmp_path),
         thread_id="tid-explicit",
     )
@@ -70,7 +70,7 @@ def test_resolve_host_thread_id_prefers_explicit_thread_id(tmp_path):
 def test_resolve_host_thread_id_uses_topic_mapping_from_onlineworker_state(tmp_path):
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3230,
         daemon_workspace_id="codex:onlineWorker",
@@ -80,7 +80,7 @@ def test_resolve_host_thread_id_uses_topic_mapping_from_onlineworker_state(tmp_p
     save_storage(storage, str(tmp_path / "onlineworker_state.json"))
 
     thread_id = resolve_host_thread_id(
-        cwd="/Users/wxy/Projects/onlineWorker",
+        cwd="/Users/example/Projects/onlineWorker",
         data_dir=str(tmp_path),
         topic_id=4586,
     )
@@ -91,7 +91,7 @@ def test_resolve_host_thread_id_uses_topic_mapping_from_onlineworker_state(tmp_p
 def test_resolve_host_thread_id_revives_stale_archived_active_topic_mapping(tmp_path, monkeypatch):
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=3230,
         daemon_workspace_id="codex:onlineWorker",
@@ -107,7 +107,7 @@ def test_resolve_host_thread_id_revives_stale_archived_active_topic_mapping(tmp_
     )
 
     thread_id = resolve_host_thread_id(
-        cwd="/Users/wxy/Projects/onlineWorker",
+        cwd="/Users/example/Projects/onlineWorker",
         data_dir=str(tmp_path),
         topic_id=4586,
     )
@@ -126,7 +126,7 @@ def test_resolve_host_thread_id_falls_back_to_latest_thread_for_cwd(tmp_path, mo
     )
 
     thread_id = resolve_host_thread_id(
-        cwd="/Users/wxy/Projects/onlineWorker",
+        cwd="/Users/example/Projects/onlineWorker",
         data_dir=str(tmp_path),
     )
 

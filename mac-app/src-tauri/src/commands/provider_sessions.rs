@@ -174,10 +174,10 @@ mod tests {
         let providers = provider_metadata_from_raw("", None).expect("metadata");
         assert!(!providers
             .iter()
-            .any(|provider| provider.id == "internal-tool"));
+            .any(|provider| provider.id == "overlay-tool"));
         assert_eq!(
-            provider_not_enabled_message("internal-tool"),
-            "Provider 'internal-tool' is not enabled"
+            provider_not_enabled_message("overlay-tool"),
+            "Provider 'overlay-tool' is not enabled"
         );
     }
 }

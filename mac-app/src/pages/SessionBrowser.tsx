@@ -82,6 +82,32 @@ function normalizeGenericProviderSessions(
   });
 }
 
+function CodexSessionBadges({ session, compact = false }: { session: CodexSession; compact?: boolean }) {
+  const { t } = useI18n();
+  const badges = [
+    session.modelProvider ? t.sessions.providerBadge(session.modelProvider) : null,
+    session.source ? t.sessions.sourceBadge(session.source) : null,
+    session.isSmoke ? t.sessions.smokeBadge : null,
+  ].filter((value): value is string => Boolean(value));
+
+  if (badges.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className={`flex flex-wrap items-center gap-2 ${compact ? "" : "mt-3"}`}>
+      {badges.map((badge) => (
+        <span
+          key={badge}
+          className="inline-flex items-center rounded-full border border-slate-200 bg-white/88 px-2.5 py-1 text-[10px] font-semibold tracking-[0.04em] text-slate-500"
+        >
+          {badge}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function CodexChat({ session }: { session: UnifiedSession }) {
   const { t } = useI18n();
   const rawSession = session.raw as CodexSession;
@@ -292,6 +318,7 @@ function CodexChat({ session }: { session: UnifiedSession }) {
               </span>
             </div>
             <h3 className="truncate text-base font-bold tracking-[-0.02em] text-gray-950">{session.title}</h3>
+            <CodexSessionBadges session={rawSession} />
           </div>
 
           <button
@@ -684,7 +711,7 @@ export function SessionBrowser() {
         type: "codex" as const,
         workspace: s.cwd || t.sessions.workspaceFallback,
         title: s.title || s.threadId,
-        archived: false,
+        archived: s.archived ?? false,
         raw: s
       }));
     }
@@ -694,7 +721,7 @@ export function SessionBrowser() {
       type: "claude" as const,
       workspace: s.workspace || t.sessions.workspaceFallback,
       title: s.title || s.sessionId,
-      archived: false,
+      archived: s.archived ?? false,
       raw: s
       }));
     }
@@ -891,6 +918,11 @@ export function SessionBrowser() {
                   <h4 className={`line-clamp-2 pl-1 text-sm leading-6 ${isActive ? "font-semibold text-gray-950" : "font-medium text-gray-700"}`}>
                     {session.title}
                   </h4>
+                  {session.type === "codex" ? (
+                    <div className="pl-1">
+                      <CodexSessionBadges session={session.raw as CodexSession} compact />
+                    </div>
+                  ) : null}
                   <p className="mt-2 truncate pl-1 font-mono text-[11px] text-slate-400">
                     {session.id.slice(0, 12)}
                   </p>

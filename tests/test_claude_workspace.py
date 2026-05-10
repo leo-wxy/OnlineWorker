@@ -54,12 +54,12 @@ async def test_open_workspace_syncs_claude_threads_from_adapter(monkeypatch):
         group_chat_id=GROUP_CHAT_ID,
         tool_cfg=ToolConfig(name="claude", enabled=True, codex_bin="claude", protocol="stdio"),
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
     )
 
     adapter.register_workspace_cwd.assert_called_once_with(
         "claude:onlineWorker",
-        "/Users/wxy/Projects/onlineWorker",
+        "/Users/example/Projects/onlineWorker",
     )
     adapter.list_threads.assert_awaited_once_with("claude:onlineWorker", limit=30)
     assert ws_info.tool == "claude"
@@ -75,7 +75,7 @@ async def test_list_thread_handler_uses_claude_local_threads(monkeypatch):
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="claude",
         topic_id=4101,
         daemon_workspace_id="claude:onlineWorker",
@@ -131,7 +131,7 @@ async def test_list_thread_handler_hides_archived_claude_threads(monkeypatch):
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="claude",
         topic_id=4101,
         daemon_workspace_id="claude:onlineWorker",
@@ -220,7 +220,7 @@ async def test_list_thread_handler_hides_stale_claude_state_only_threads(monkeyp
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="claude",
         topic_id=4101,
         daemon_workspace_id="claude:onlineWorker",
@@ -304,7 +304,7 @@ async def test_workspace_overview_hides_stale_claude_state_only_threads(monkeypa
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="claude",
         topic_id=4101,
         daemon_workspace_id="claude:onlineWorker",
@@ -370,7 +370,7 @@ async def test_history_handler_reads_claude_local_history(monkeypatch):
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="claude",
         topic_id=4101,
         daemon_workspace_id="claude:onlineWorker",

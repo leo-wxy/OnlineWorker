@@ -131,19 +131,19 @@ def test_config_yaml_example_uses_public_provider_schema():
     assert "customprovider" not in source.lower()
 
 
-def test_load_config_provider_overlay_enables_internal_tool(tmp_path, monkeypatch):
+def test_load_config_provider_overlay_enables_overlay_tool(tmp_path, monkeypatch):
     p = tmp_path / "config.yaml"
     p.write_text("logging:\n  level: \"INFO\"\n", encoding="utf-8")
     overlay = tmp_path / "provider-overlay.yaml"
     overlay.write_text(
         """
 providers:
-  internal-tool:
+  overlay-tool:
     visible: false
     managed: true
     autostart: false
-    runtime_id: internal-tool
-    bin: internal-tool
+    runtime_id: overlay-tool
+    bin: overlay-tool
     transport:
       type: stdio
     capabilities:
@@ -155,7 +155,7 @@ providers:
       photos: false
     process:
       cleanup_matchers:
-        - internal-tool
+        - overlay-tool
 """,
         encoding="utf-8",
     )
@@ -167,20 +167,20 @@ providers:
     from config import load_config
 
     cfg = load_config(str(p))
-    internal_tool = cfg.providers["internal-tool"]
-    assert internal_tool.runtime_id == "internal-tool"
-    assert internal_tool.managed is True
-    assert internal_tool.enabled is True
-    assert internal_tool.autostart is False
-    assert internal_tool.codex_bin == "internal-tool"
-    assert internal_tool.protocol == "stdio"
-    assert internal_tool.capabilities["sessions"] is True
-    assert internal_tool.capabilities["send"] is True
-    assert internal_tool.capabilities["commands"] is True
-    assert internal_tool.capabilities["approvals"] is True
-    assert internal_tool.capabilities["questions"] is True
-    assert internal_tool.capabilities["photos"] is False
-    assert internal_tool.process["cleanup_matchers"] == ["internal-tool"]
+    overlay_tool = cfg.providers["overlay-tool"]
+    assert overlay_tool.runtime_id == "overlay-tool"
+    assert overlay_tool.managed is True
+    assert overlay_tool.enabled is True
+    assert overlay_tool.autostart is False
+    assert overlay_tool.codex_bin == "overlay-tool"
+    assert overlay_tool.protocol == "stdio"
+    assert overlay_tool.capabilities["sessions"] is True
+    assert overlay_tool.capabilities["send"] is True
+    assert overlay_tool.capabilities["commands"] is True
+    assert overlay_tool.capabilities["approvals"] is True
+    assert overlay_tool.capabilities["questions"] is True
+    assert overlay_tool.capabilities["photos"] is False
+    assert overlay_tool.process["cleanup_matchers"] == ["overlay-tool"]
 
 
 def test_load_config_hidden_overlay_provider_is_runtime_enabled_but_not_public(tmp_path, monkeypatch):
@@ -190,12 +190,12 @@ def test_load_config_hidden_overlay_provider_is_runtime_enabled_but_not_public(t
     overlay.write_text(
         """
 providers:
-  internal-tool:
+  overlay-tool:
     visible: false
     managed: true
     autostart: true
-    runtime_id: internal-tool
-    bin: internal-tool
+    runtime_id: overlay-tool
+    bin: overlay-tool
     transport:
       type: http
       app_server_port: 4096
@@ -216,10 +216,10 @@ providers:
     from config import load_config
 
     cfg = load_config(str(p))
-    internal_tool = cfg.get_tool("internal-tool")
-    assert internal_tool is not None
-    assert internal_tool.visible is False
-    assert internal_tool.managed is True
+    overlay_tool = cfg.get_tool("overlay-tool")
+    assert overlay_tool is not None
+    assert overlay_tool.visible is False
+    assert overlay_tool.managed is True
     assert [provider.name for provider in cfg.enabled_tools] == ["codex"]
     assert [provider.name for provider in cfg.providers.values() if provider.visible] == ["codex", "claude"]
 
@@ -229,7 +229,7 @@ def test_load_config_provider_overlay_directory_enables_external_provider(tmp_pa
     p.write_text("logging:\n  level: \"INFO\"\n", encoding="utf-8")
 
     overlay_root = tmp_path / "provider-overlay"
-    provider_dir = overlay_root / "internal_tool"
+    provider_dir = overlay_root / "overlay_tool"
     provider_pkg_dir = provider_dir / "python"
     provider_pkg_dir.mkdir(parents=True)
     (provider_dir / "__init__.py").write_text("", encoding="utf-8")
@@ -241,14 +241,14 @@ from core.providers.contracts import ProviderCapabilities, ProviderDescriptor, P
 
 def create_provider_descriptor():
     return ProviderDescriptor(
-        name="internal-tool",
+        name="overlay-tool",
         metadata=ProviderMetadata(
-            id="internal-tool",
-            label="Internal Tool",
+            id="overlay-tool",
+            label="Overlay Tool",
             visible=False,
             managed=True,
             autostart=True,
-            bin="internal-tool",
+            bin="overlay-tool",
         ),
         facts=ProviderFactsHooks(
             scan_workspaces=lambda *, sessions_dir=None: [],
@@ -264,21 +264,21 @@ def create_provider_descriptor():
     (provider_dir / "plugin.yaml").write_text(
         """
 schema_version: 1
-id: internal-tool
+id: overlay-tool
 kind: provider
 visibility: private
 order: 100
-runtime_id: internal-tool
-label: Internal Tool
-description: Private overlay sessions
+runtime_id: overlay-tool
+label: Overlay Tool
+description: External overlay sessions
 default_visible: false
 
 provider:
   visible: false
   managed: true
   autostart: true
-  runtime_id: internal-tool
-  bin: internal-tool
+  runtime_id: overlay-tool
+  bin: overlay-tool
   transport:
     type: http
   capabilities:
@@ -288,7 +288,7 @@ provider:
     questions: true
 
 entrypoints:
-  python_descriptor: internal_tool.python.provider:create_provider_descriptor
+  python_descriptor: overlay_tool.python.provider:create_provider_descriptor
 """,
         encoding="utf-8",
     )
@@ -301,10 +301,10 @@ entrypoints:
     from config import load_config
 
     cfg = load_config(str(p))
-    internal_tool = cfg.get_tool("internal-tool")
-    assert internal_tool is not None
-    assert internal_tool.visible is False
-    assert internal_tool.managed is True
+    overlay_tool = cfg.get_tool("overlay-tool")
+    assert overlay_tool is not None
+    assert overlay_tool.visible is False
+    assert overlay_tool.managed is True
     assert [provider.name for provider in cfg.enabled_tools] == ["codex"]
 
 

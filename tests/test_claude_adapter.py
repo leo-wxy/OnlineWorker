@@ -73,10 +73,10 @@ def test_resolve_claude_bin_prefers_homebrew_binary_over_stale_local(monkeypatch
     monkeypatch.setattr("plugins.providers.builtin.claude.python.adapter.PREFERRED_CLAUDE_BINARIES", ("/opt/homebrew/bin/claude",))
     monkeypatch.setattr("plugins.providers.builtin.claude.python.adapter.os.path.isfile", lambda path: path in {
         "/opt/homebrew/bin/claude",
-        "/Users/wxy/.local/bin/claude",
+        "/Users/example/.local/bin/claude",
     })
     monkeypatch.setattr("plugins.providers.builtin.claude.python.adapter.os.access", lambda path, mode: True)
-    monkeypatch.setattr("plugins.providers.builtin.claude.python.adapter.shutil.which", lambda name: "/Users/wxy/.local/bin/claude")
+    monkeypatch.setattr("plugins.providers.builtin.claude.python.adapter.shutil.which", lambda name: "/Users/example/.local/bin/claude")
 
     assert resolve_claude_bin("claude") == "/opt/homebrew/bin/claude"
 
@@ -92,9 +92,9 @@ def test_resolve_claude_bin_preserves_explicit_path(monkeypatch):
 def test_resolve_preferred_node_bin_dir_prefers_latest_supported_nvm(monkeypatch):
     from plugins.providers.builtin.claude.python.adapter import resolve_preferred_node_bin_dir
 
-    node18 = "/Users/wxy/.nvm/versions/node/v18.20.4/bin/node"
-    node20 = "/Users/wxy/.nvm/versions/node/v20.20.1/bin/node"
-    node22 = "/Users/wxy/.nvm/versions/node/v22.1.0/bin/node"
+    node18 = "/Users/example/.nvm/versions/node/v18.20.4/bin/node"
+    node20 = "/Users/example/.nvm/versions/node/v20.20.1/bin/node"
+    node22 = "/Users/example/.nvm/versions/node/v22.1.0/bin/node"
 
     monkeypatch.setattr("plugins.providers.builtin.claude.python.adapter.glob.glob", lambda pattern: [node18, node20, node22])
     monkeypatch.setattr(
@@ -102,15 +102,15 @@ def test_resolve_preferred_node_bin_dir_prefers_latest_supported_nvm(monkeypatch
         lambda path: path in {node18, node20, node22},
     )
     monkeypatch.setattr("plugins.providers.builtin.claude.python.adapter.os.access", lambda path, mode: True)
-    monkeypatch.setenv("NVM_BIN", "/Users/wxy/.nvm/versions/node/v18.20.4/bin")
+    monkeypatch.setenv("NVM_BIN", "/Users/example/.nvm/versions/node/v18.20.4/bin")
 
-    assert resolve_preferred_node_bin_dir() == "/Users/wxy/.nvm/versions/node/v22.1.0/bin"
+    assert resolve_preferred_node_bin_dir() == "/Users/example/.nvm/versions/node/v22.1.0/bin"
 
 
 def test_resolve_preferred_node_bin_dir_falls_back_to_current_nvm_bin(monkeypatch):
     from plugins.providers.builtin.claude.python.adapter import resolve_preferred_node_bin_dir
 
-    current_nvm_bin = "/Users/wxy/.nvm/versions/node/v18.20.4/bin"
+    current_nvm_bin = "/Users/example/.nvm/versions/node/v18.20.4/bin"
     current_node = f"{current_nvm_bin}/node"
 
     monkeypatch.setattr("plugins.providers.builtin.claude.python.adapter.glob.glob", lambda pattern: [])
@@ -129,13 +129,13 @@ def test_inspect_claude_thread_busy_state_detects_recent_tool_activity():
         {
             "type": "queue-operation",
             "timestamp": "2026-04-13T02:43:50.088Z",
-            "cwd": "/Users/wxy/Projects/ncmplayerengine",
+            "cwd": "/Users/example/Projects/sample-project",
             "entrypoint": "sdk-cli",
         },
         {
             "type": "assistant",
             "timestamp": "2026-04-13T02:43:55.088Z",
-            "cwd": "/Users/wxy/Projects/ncmplayerengine/Demo/Android",
+            "cwd": "/Users/example/Projects/sample-project/Demo/Android",
             "entrypoint": "sdk-cli",
             "message": {
                 "stop_reason": "tool_use",
@@ -168,7 +168,7 @@ def test_inspect_claude_thread_busy_state_ignores_tool_result_without_other_rece
         {
             "type": "assistant",
             "timestamp": "2026-04-16T06:42:03.698Z",
-            "cwd": "/Users/wxy/Projects/onlineWorker",
+            "cwd": "/Users/example/Projects/onlineWorker",
             "entrypoint": "sdk-cli",
             "message": {
                 "stop_reason": "tool_use",
@@ -178,11 +178,11 @@ def test_inspect_claude_thread_busy_state_ignores_tool_result_without_other_rece
         {
             "type": "user",
             "timestamp": "2026-04-16T06:50:40.558Z",
-            "cwd": "/Users/wxy/Projects/onlineWorker",
+            "cwd": "/Users/example/Projects/onlineWorker",
             "entrypoint": "sdk-cli",
             "toolUseResult": (
                 "Error: Claude requested permissions to write to "
-                "/Users/wxy/Downloads/hello.txt, but you haven't granted it yet."
+                "/Users/example/Downloads/hello.txt, but you haven't granted it yet."
             ),
             "message": {
                 "role": "user",
@@ -191,7 +191,7 @@ def test_inspect_claude_thread_busy_state_ignores_tool_result_without_other_rece
                         "type": "tool_result",
                         "content": (
                             "Claude requested permissions to write to "
-                            "/Users/wxy/Downloads/hello.txt, but you haven't granted it yet."
+                            "/Users/example/Downloads/hello.txt, but you haven't granted it yet."
                         ),
                         "is_error": True,
                     }
@@ -222,13 +222,13 @@ def test_inspect_claude_thread_busy_state_ignores_recent_activity_after_end_turn
         {
             "type": "queue-operation",
             "timestamp": "2026-04-16T07:18:23.302Z",
-            "cwd": "/Users/wxy/Projects/onlineWorker",
+            "cwd": "/Users/example/Projects/onlineWorker",
             "entrypoint": "sdk-cli",
         },
         {
             "type": "assistant",
             "timestamp": "2026-04-16T07:18:29.267Z",
-            "cwd": "/Users/wxy/Projects/onlineWorker",
+            "cwd": "/Users/example/Projects/onlineWorker",
             "entrypoint": "sdk-cli",
             "message": {
                 "stop_reason": "tool_use",
@@ -238,7 +238,7 @@ def test_inspect_claude_thread_busy_state_ignores_recent_activity_after_end_turn
         {
             "type": "user",
             "timestamp": "2026-04-16T07:18:34.735Z",
-            "cwd": "/Users/wxy/Projects/onlineWorker",
+            "cwd": "/Users/example/Projects/onlineWorker",
             "entrypoint": "sdk-cli",
             "toolUseResult": {
                 "stdout": "",
@@ -261,14 +261,14 @@ def test_inspect_claude_thread_busy_state_ignores_recent_activity_after_end_turn
         {
             "type": "assistant",
             "timestamp": "2026-04-16T07:18:39.163Z",
-            "cwd": "/Users/wxy/Projects/onlineWorker",
+            "cwd": "/Users/example/Projects/onlineWorker",
             "entrypoint": "sdk-cli",
             "message": {
                 "stop_reason": "end_turn",
                 "content": [
                     {
                         "type": "text",
-                        "text": "文件已创建！/Users/wxy/Downloads/hello.txt",
+                        "text": "文件已创建！/Users/example/Downloads/hello.txt",
                     }
                 ],
             },
@@ -295,7 +295,7 @@ async def test_claude_adapter_lists_threads_from_local_facts(monkeypatch):
 
     adapter = ClaudeAdapter(claude_bin="claude")
     await adapter.connect()
-    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/wxy/Projects/onlineWorker")
+    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/example/Projects/onlineWorker")
 
     monkeypatch.setattr(
         "plugins.providers.builtin.claude.python.adapter.list_claude_threads_by_cwd",
@@ -327,7 +327,7 @@ async def test_claude_adapter_send_user_message_emits_minimal_turn_events(monkey
 
     adapter = ClaudeAdapter(claude_bin="claude")
     await adapter.connect()
-    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/wxy/Projects/onlineWorker")
+    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/example/Projects/onlineWorker")
 
     events = []
 
@@ -385,7 +385,7 @@ async def test_claude_adapter_resumes_existing_session_with_resume_flag(monkeypa
 
     adapter = ClaudeAdapter(claude_bin="claude")
     await adapter.connect()
-    adapter.register_workspace_cwd("claude:ncmplayerengine", "/Users/wxy/Projects/ncmplayerengine")
+    adapter.register_workspace_cwd("claude:ncmplayerengine", "/Users/example/Projects/sample-project")
 
     create_process = AsyncMock(
         side_effect=[
@@ -428,7 +428,7 @@ async def test_claude_adapter_uses_session_id_flag_for_new_session(monkeypatch):
 
     adapter = ClaudeAdapter(claude_bin="claude")
     await adapter.connect()
-    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/wxy/Projects/onlineWorker")
+    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/example/Projects/onlineWorker")
 
     create_process = AsyncMock(
         side_effect=[
@@ -508,14 +508,14 @@ async def test_claude_adapter_injects_dummy_api_key_for_proxy_env(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://localhost:3031")
     monkeypatch.setenv("ANTHROPIC_MODEL", "claude-opus-4-6")
-    monkeypatch.setenv("PATH", "/Users/wxy/.nvm/versions/node/v18.20.4/bin:/opt/homebrew/bin:/usr/bin:/bin")
-    monkeypatch.setenv("NVM_BIN", "/Users/wxy/.nvm/versions/node/v18.20.4/bin")
+    monkeypatch.setenv("PATH", "/Users/example/.nvm/versions/node/v18.20.4/bin:/opt/homebrew/bin:/usr/bin:/bin")
+    monkeypatch.setenv("NVM_BIN", "/Users/example/.nvm/versions/node/v18.20.4/bin")
     monkeypatch.setenv("CODEX_CI", "1")
     monkeypatch.setenv("CODEX_THREAD_ID", "thread-from-app")
 
     adapter = ClaudeAdapter(claude_bin="claude")
     await adapter.connect()
-    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/wxy/Projects/onlineWorker")
+    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/example/Projects/onlineWorker")
 
     captured_env = {}
     captured_kwargs = {}
@@ -531,12 +531,12 @@ async def test_claude_adapter_injects_dummy_api_key_for_proxy_env(monkeypatch):
     )
     monkeypatch.setattr(
         "plugins.providers.builtin.claude.python.adapter.glob.glob",
-        lambda pattern: ["/Users/wxy/.nvm/versions/node/v20.20.1/bin/node"],
+        lambda pattern: ["/Users/example/.nvm/versions/node/v20.20.1/bin/node"],
     )
     monkeypatch.setattr(
         "plugins.providers.builtin.claude.python.adapter.os.path.isfile",
         lambda path: path in {
-            "/Users/wxy/.nvm/versions/node/v20.20.1/bin/node",
+            "/Users/example/.nvm/versions/node/v20.20.1/bin/node",
         },
     )
     monkeypatch.setattr("plugins.providers.builtin.claude.python.adapter.os.access", lambda path, mode: True)
@@ -547,8 +547,8 @@ async def test_claude_adapter_injects_dummy_api_key_for_proxy_env(monkeypatch):
     assert captured_env["ANTHROPIC_API_KEY"] == "dummy"
     assert captured_env["ANTHROPIC_BASE_URL"] == "http://localhost:3031"
     assert captured_env["ANTHROPIC_MODEL"] == "claude-opus-4-6"
-    assert captured_env["NVM_BIN"] == "/Users/wxy/.nvm/versions/node/v20.20.1/bin"
-    assert captured_env["PATH"].startswith("/Users/wxy/.nvm/versions/node/v20.20.1/bin:")
+    assert captured_env["NVM_BIN"] == "/Users/example/.nvm/versions/node/v20.20.1/bin"
+    assert captured_env["PATH"].startswith("/Users/example/.nvm/versions/node/v20.20.1/bin:")
     assert "CODEX_CI" not in captured_env
     assert "CODEX_THREAD_ID" not in captured_env
     assert captured_kwargs["stdin"] == asyncio.subprocess.DEVNULL
@@ -560,7 +560,7 @@ async def test_claude_adapter_send_user_message_rejects_when_not_authenticated(m
 
     adapter = ClaudeAdapter(claude_bin="claude")
     await adapter.connect()
-    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/wxy/Projects/onlineWorker")
+    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/example/Projects/onlineWorker")
 
     create_process = AsyncMock(
         return_value=FakeAuthProcess(
@@ -584,7 +584,7 @@ async def test_claude_adapter_permission_request_roundtrip_via_hook_payload():
 
     adapter = ClaudeAdapter(claude_bin="claude")
     await adapter.connect()
-    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/wxy/Projects/onlineWorker")
+    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/example/Projects/onlineWorker")
 
     events = []
 
@@ -596,7 +596,7 @@ async def test_claude_adapter_permission_request_roundtrip_via_hook_payload():
     payload = {
         "hook_event_name": "PreToolUse",
         "session_id": "ses-1",
-        "cwd": "/Users/wxy/Projects/onlineWorker",
+        "cwd": "/Users/example/Projects/onlineWorker",
         "tool_name": "Bash",
         "tool_input": {
             "command": "pwd",
@@ -639,7 +639,7 @@ async def test_claude_adapter_pretool_allow_always_applies_session_tool_allowlis
 
     adapter = ClaudeAdapter(claude_bin="claude")
     await adapter.connect()
-    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/wxy/Projects/onlineWorker")
+    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/example/Projects/onlineWorker")
 
     events = []
 
@@ -651,7 +651,7 @@ async def test_claude_adapter_pretool_allow_always_applies_session_tool_allowlis
     payload = {
         "hook_event_name": "PreToolUse",
         "session_id": "ses-1",
-        "cwd": "/Users/wxy/Projects/onlineWorker",
+        "cwd": "/Users/example/Projects/onlineWorker",
         "tool_name": "Bash",
         "tool_input": {
             "command": "pwd",
@@ -693,7 +693,7 @@ async def test_claude_adapter_ask_user_question_roundtrip_with_multiselect():
 
     adapter = ClaudeAdapter(claude_bin="claude")
     await adapter.connect()
-    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/wxy/Projects/onlineWorker")
+    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/example/Projects/onlineWorker")
 
     events = []
 
@@ -705,7 +705,7 @@ async def test_claude_adapter_ask_user_question_roundtrip_with_multiselect():
     payload = {
         "hook_event_name": "PreToolUse",
         "session_id": "ses-1",
-        "cwd": "/Users/wxy/Projects/onlineWorker",
+        "cwd": "/Users/example/Projects/onlineWorker",
         "tool_name": "AskUserQuestion",
         "tool_input": {
             "questions": [

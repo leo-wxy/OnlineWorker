@@ -13,7 +13,7 @@ async def test_prepare_send_detaches_imported_thread_before_tg_write():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="claude",
         daemon_workspace_id="claude:onlineWorker",
     )
@@ -68,7 +68,7 @@ async def test_prepare_send_detaches_imported_thread_before_tg_write():
 async def test_prepare_send_resumes_app_owned_thread_without_remapping():
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="claude",
         daemon_workspace_id="claude:onlineWorker",
     )
@@ -110,7 +110,7 @@ async def test_prepare_send_resumes_app_owned_thread_without_remapping():
 async def test_prepare_send_detaches_thread_inferred_as_imported(monkeypatch):
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="claude",
         daemon_workspace_id="claude:onlineWorker",
     )

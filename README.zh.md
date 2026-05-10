@@ -1,6 +1,10 @@
 # OnlineWorker
 
-OnlineWorker 是一个面向 macOS 的 AI 编码工作区。Mac App 负责 Setup、Sessions、Commands 和服务生命周期的主要控制；Telegram 只作为远程入口，用于发起任务、补充上下文、处理审批、查看状态以及接收最终回复。
+<p align="center">
+  <img src="./launcher.png" alt="OnlineWorker 头图" width="360" />
+</p>
+
+OnlineWorker 是一个面向 macOS、本地 CLI agent 的 AI 编码工作区。Mac App 负责 Setup、Sessions、Commands、日志和服务生命周期的主要控制；Telegram 只作为远程入口，用于发起任务、补充上下文、处理审批、查看状态以及接收最终回复。
 
 默认工作流是 **App / Sessions 作为主控制面 + Telegram 负责最终回复**。
 
@@ -8,9 +12,24 @@ English version: [README.md](README.md)
 
 另见：
 
+- [Documentation Notes](docs/README.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
 - [Support](SUPPORT.md)
+
+## 截图
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard.png" alt="OnlineWorker 总览页" width="49%" />
+  <img src="./docs/screenshots/setup.png" alt="OnlineWorker 设置页" width="49%" />
+</p>
+
+## 概览
+
+- 一个运行和监管本地 AI 编码 CLI 的 macOS 桌面工作区。
+- 核心形态是已安装的 App，不是托管在浏览器里的服务。
+- App 负责配置和日常控制，Telegram 负责远程输入和最终回传。
+- 当前仓库内置的 provider 只有 `codex` 和 `claude`。
 
 ## 功能
 
@@ -21,9 +40,9 @@ English version: [README.md](README.md)
 - 最终回复支持 Markdown 渲染。
 - 通过 Tauri + PyInstaller 提供适合安装的 macOS 打包能力。
 
-## 公开 Provider 范围
+## Provider 范围
 
-公开仓库内置支持的 provider 只有：
+当前仓库内置支持的 provider 只有：
 
 - `codex`
 - `claude`
@@ -41,7 +60,7 @@ English version: [README.md](README.md)
 
 ## 快速开始
 
-1. 构建或下载 macOS 安装包。
+1. 本地构建 DMG，或直接下载打包好的 DMG。
 2. 打开 DMG，并将 `OnlineWorker.app` 拖到 `/Applications`。
 3. 如果 macOS 首次启动时拦截了应用，移除 quarantine 属性：
 
@@ -54,13 +73,14 @@ xattr -cr /Applications/OnlineWorker.app
 ## 初始设置
 
 1. 打开应用，进入 `Setup`。
-2. 填写 Telegram 相关值：
+2. 确认你要使用的 CLI 工具已经安装，并且在 `PATH` 中可见。
+3. 填写 Telegram 相关值：
    - `TELEGRAM_TOKEN`
    - `ALLOWED_USER_ID`
    - `GROUP_CHAT_ID`
-3. 确认你要使用的 CLI 工具已经安装，并且在 `PATH` 中可见。
 4. 如果你通过官方登录流程使用 Claude，先执行 `claude auth login`。
-5. 回到 `Dashboard`，启动服务。
+5. 在 `Setup` 页用内置连通性检查确认 Telegram 访问正常。
+6. 回到 `Dashboard`，启动服务。
 
 ## 配置
 
@@ -135,7 +155,7 @@ cd /path/to/onlineWorker
 bash scripts/build.sh
 ```
 
-这条构建链路打包的是当前仓库里的基础 App。壳工程如果需要附加 provider 扩展包，可以在运行态通过 `ONLINEWORKER_PROVIDER_OVERLAY` 挂载，或者在调用同一个 `scripts/build.sh` 前通过 `ONLINEWORKER_PLUGIN_SOURCE_DIRS` 做打包注入。
+这条构建链路打包的是当前仓库里的基础 App。额外 provider 扩展包可以在运行态通过 `ONLINEWORKER_PROVIDER_OVERLAY` 挂载，或者在调用同一个 `scripts/build.sh` 前通过 `ONLINEWORKER_PLUGIN_SOURCE_DIRS` 做打包注入。
 
 ### Intel DMG
 

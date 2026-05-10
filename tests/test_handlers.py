@@ -273,7 +273,7 @@ async def test_status_handler_revives_stale_archived_active_thread_in_count(stat
     )
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=77,
         daemon_workspace_id="codex:onlineWorker",
@@ -307,7 +307,7 @@ def test_reconcile_workspace_threads_with_source_prunes_stale_imported_claude_th
     state.storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="claude",
         topic_id=77,
         daemon_workspace_id="claude:onlineWorker",
@@ -362,7 +362,7 @@ def test_reconcile_workspace_threads_with_source_prunes_stale_unknown_claude_thr
     state.storage = AppStorage()
     ws = WorkspaceInfo(
         name="ncmplayerengine",
-        path="/Users/wxy/Projects/ncmplayerengine",
+        path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
         daemon_workspace_id="claude:ncmplayerengine",
@@ -418,7 +418,7 @@ def test_reconcile_workspace_threads_with_source_keeps_archived_claude_thread_ar
     state.storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="claude",
         topic_id=77,
         daemon_workspace_id="claude:onlineWorker",
@@ -457,7 +457,7 @@ async def test_list_handler_for_claude_ignores_state_only_threads(monkeypatch, s
 
     ws = WorkspaceInfo(
         name="ncmplayerengine",
-        path="/Users/wxy/Projects/ncmplayerengine",
+        path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
         daemon_workspace_id="claude:ncmplayerengine",

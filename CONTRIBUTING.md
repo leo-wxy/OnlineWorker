@@ -14,7 +14,7 @@ within the open-source scope:
 - packaging, tests, documentation, and developer ergonomics
 
 Do not submit non-public provider implementations, non-public service
-endpoints, credentials, or repository-external workflow details to this
+endpoints, credentials, or environment-specific workflow details to this
 repository.
 
 ## Before You Start
@@ -82,5 +82,4 @@ Small PRs are preferred over broad mixed changes.
 
 This repository supports external provider packages through the public plugin
 contracts, but it only carries the builtin providers that ship here by
-default. If you maintain additional provider packages downstream, keep that
-code outside this public repository.
+default. Keep any additional provider packages outside this repository.

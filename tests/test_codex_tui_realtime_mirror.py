@@ -43,7 +43,7 @@ def _make_state(tmp_path: Path):
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",

@@ -34,7 +34,7 @@ def test_merge_codex_hook_settings_removes_duplicate_permission_request_hooks():
         "hooks": {
             "PermissionRequest": [
                 {"matcher": "", "hooks": [{"type": "command", "command": "onlineworker"}]},
-                {"hooks": [{"type": "command", "command": "/Users/wxy/.codeisland/codeisland-bridge --source codex"}]},
+                {"hooks": [{"type": "command", "command": "/Users/example/.local/bin/codeisland-bridge --source codex"}]},
             ],
             "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "keep-stop"}]}],
         },
@@ -61,7 +61,7 @@ def test_merge_codex_hook_settings_removes_duplicate_permission_request_hooks():
 async def test_codex_hook_bridge_permission_request_emits_approval_and_waits_for_reply(tmp_path):
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         daemon_workspace_id="codex:onlineWorker",
         threads={"ses-1": ThreadInfo(thread_id="ses-1", topic_id=123, archived=False)},
@@ -76,7 +76,7 @@ async def test_codex_hook_bridge_permission_request_emits_approval_and_waits_for
     payload = {
         "hook_event_name": "PermissionRequest",
         "session_id": "ses-1",
-        "cwd": "/Users/wxy/Projects/onlineWorker",
+        "cwd": "/Users/example/Projects/onlineWorker",
         "tool_name": "Bash",
         "tool_input": {
             "command": "pwd",

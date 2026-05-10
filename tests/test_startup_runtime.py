@@ -445,7 +445,7 @@ async def test_setup_claude_connection_hides_stale_threads_from_authoritative_fa
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="claude",
         topic_id=4101,
         daemon_workspace_id="claude:onlineWorker",
@@ -515,7 +515,7 @@ async def test_setup_claude_connection_hides_stale_threads_from_authoritative_fa
 
     adapter.register_workspace_cwd.assert_called_once_with(
         "claude:onlineWorker",
-        "/Users/wxy/Projects/onlineWorker",
+        "/Users/example/Projects/onlineWorker",
     )
     assert ws.threads["ses-1"].archived is False
     assert ws.threads["ses-1"].is_active is True
@@ -1435,14 +1435,14 @@ async def test_codex_reconnect_loop_routes_notifications_to_codex_global_topic_w
     storage.global_topic_ids = {"codex": 11, "customprovider": 22}
     storage.workspaces["codex:onlineWorker"] = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=101,
         daemon_workspace_id="codex:onlineWorker",
     )
     storage.workspaces["customprovider:onlineWorker"] = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="customprovider",
         topic_id=202,
         daemon_workspace_id="customprovider:onlineWorker",
@@ -1490,14 +1490,14 @@ async def test_codex_reconnect_loop_prefers_active_codex_workspace_topic():
     storage.global_topic_ids = {"codex": 11, "customprovider": 22}
     storage.workspaces["codex:onlineWorker"] = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         topic_id=101,
         daemon_workspace_id="codex:onlineWorker",
     )
     storage.workspaces["customprovider:onlineWorker"] = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="customprovider",
         topic_id=202,
         daemon_workspace_id="customprovider:onlineWorker",
@@ -1594,7 +1594,7 @@ async def test_setup_codex_connection_clears_stale_streaming_state():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         daemon_workspace_id="codex:onlineWorker",
     )
@@ -1655,7 +1655,7 @@ async def test_prime_codex_thread_mappings_revives_stale_archived_active_thread(
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         daemon_workspace_id="codex:onlineWorker",
     )
@@ -1708,7 +1708,7 @@ async def test_cleanup_subagent_threads_archives_codex_subagents_and_deletes_top
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         daemon_workspace_id="codex:onlineWorker",
     )
@@ -1794,7 +1794,7 @@ async def test_cleanup_subagent_threads_skips_non_codex_workspaces():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="customprovider",
         daemon_workspace_id="customprovider:onlineWorker",
     )
@@ -1920,7 +1920,7 @@ async def test_ensure_thread_topics_replays_history_via_provider_defaults_for_co
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         daemon_workspace_id="codex:onlineWorker",
     )
@@ -1979,7 +1979,7 @@ async def test_sync_existing_claude_topics_syncs_active_threads_with_topic(monke
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="ncmplayerengine",
-        path="/Users/wxy/Projects/ncmplayerengine",
+        path="/Users/example/Projects/sample-project",
         tool="claude",
         daemon_workspace_id="claude:ncmplayerengine",
     )
@@ -2055,7 +2055,7 @@ async def test_ensure_thread_topics_revives_stale_archived_active_thread(monkeyp
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         daemon_workspace_id="codex:onlineWorker",
     )
@@ -2120,7 +2120,7 @@ async def test_cleanup_archived_threads_revives_stale_archived_active_thread(mon
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         daemon_workspace_id="codex:onlineWorker",
     )
@@ -2176,7 +2176,7 @@ async def test_setup_codex_connection_ignores_non_codex_workspaces():
     storage = AppStorage()
     codex_ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         daemon_workspace_id="codex:onlineWorker",
     )
@@ -2191,7 +2191,7 @@ async def test_setup_codex_connection_ignores_non_codex_workspaces():
 
     customprovider_ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="customprovider",
         daemon_workspace_id="customprovider:onlineWorker",
     )
@@ -2237,7 +2237,7 @@ async def test_setup_codex_connection_ignores_non_codex_workspaces():
 
     adapter.register_workspace_cwd.assert_called_once_with(
         "codex:onlineWorker",
-        "/Users/wxy/Projects/onlineWorker",
+        "/Users/example/Projects/onlineWorker",
     )
 
 
@@ -2246,7 +2246,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_from_hist
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         daemon_workspace_id="codex:onlineWorker",
     )
@@ -2314,7 +2314,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_after_del
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         daemon_workspace_id="codex:onlineWorker",
     )
@@ -2391,7 +2391,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_via_backg
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         daemon_workspace_id="codex:onlineWorker",
     )
@@ -2481,7 +2481,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_from_task
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         daemon_workspace_id="codex:onlineWorker",
     )
@@ -2562,7 +2562,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_with_mark
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         daemon_workspace_id="codex:onlineWorker",
     )
@@ -2635,7 +2635,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_from_same
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         daemon_workspace_id="codex:onlineWorker",
     )
@@ -2714,7 +2714,7 @@ async def test_setup_codex_connection_marks_stale_streaming_message_as_incomplet
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
         tool="codex",
         daemon_workspace_id="codex:onlineWorker",
     )

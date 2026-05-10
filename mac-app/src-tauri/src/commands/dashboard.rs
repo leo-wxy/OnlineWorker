@@ -1452,11 +1452,11 @@ providers:
     owner_transport: "stdio"
     live_transport: "owner_bridge"
     control_mode: "app"
-  internal-tool:
+  overlay-tool:
     visible: false
     managed: true
     autostart: true
-    bin: "internal-tool"
+    bin: "overlay-tool"
     transport:
       type: "http"
       app_server_port: 4096
@@ -1560,9 +1560,9 @@ providers:
         ));
         let projects_dir = dir.join("projects");
         let history_path = dir.join("history.jsonl");
-        let workspace_path = "/Users/wxy/Projects/onlineWorker";
+        let workspace_path = "/Users/example/Projects/onlineWorker";
         let session_file =
-            projects_dir.join("-Users-wxy-Projects-onlineWorker/ses-claude-dashboard.jsonl");
+            projects_dir.join("-Users-example-Projects-onlineWorker/ses-claude-dashboard.jsonl");
 
         std::fs::create_dir_all(session_file.parent().expect("session parent")).unwrap();
         let session_rows = [
@@ -1598,7 +1598,7 @@ providers:
             json!({
                 "display": "别的工程",
                 "timestamp": 1_775_603_700_000_i64,
-                "project": "/Users/wxy/Projects/other",
+                "project": "/Users/example/Projects/other",
                 "sessionId": "ses-other",
             }),
         ];
@@ -1649,12 +1649,12 @@ providers:
         ));
         let projects_dir = dir.join("projects");
         let history_path = dir.join("history.jsonl");
-        let workspace_path = "/Users/wxy/Projects/onlineWorker";
+        let workspace_path = "/Users/example/Projects/onlineWorker";
 
         std::fs::create_dir_all(&projects_dir).unwrap();
         std::fs::write(&history_path, "").unwrap();
 
-        let cli_file = projects_dir.join("-Users-wxy-Projects-onlineWorker/ses-cli.jsonl");
+        let cli_file = projects_dir.join("-Users-example-Projects-onlineWorker/ses-cli.jsonl");
         std::fs::create_dir_all(cli_file.parent().expect("cli parent")).unwrap();
         std::fs::write(
             &cli_file,
@@ -1677,7 +1677,7 @@ providers:
         .unwrap();
 
         let login_failed_file =
-            projects_dir.join("-Users-wxy-Projects-onlineWorker/ses-login-failed.jsonl");
+            projects_dir.join("-Users-example-Projects-onlineWorker/ses-login-failed.jsonl");
         std::fs::create_dir_all(login_failed_file.parent().expect("login parent")).unwrap();
         std::fs::write(
             &login_failed_file,
@@ -1708,7 +1708,7 @@ providers:
         )
         .unwrap();
 
-        let real_file = projects_dir.join("-Users-wxy-Projects-onlineWorker/ses-real.jsonl");
+        let real_file = projects_dir.join("-Users-example-Projects-onlineWorker/ses-real.jsonl");
         std::fs::create_dir_all(real_file.parent().expect("real parent")).unwrap();
         std::fs::write(
             &real_file,

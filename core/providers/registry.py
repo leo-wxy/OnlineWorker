@@ -46,10 +46,10 @@ def _load_descriptor_from_entrypoint(entrypoint: str, *, manifest_path: Path) ->
 
 
 def _load_provider_descriptors() -> dict[str, ProviderDescriptor]:
-    providers: dict[str, ProviderDescriptor] = {}
+    providers: dict[str, ProviderDescriptor] = _load_bundled_provider_descriptors()
     manifest_paths = _iter_provider_plugin_manifests()
     if not manifest_paths:
-        return _load_bundled_provider_descriptors()
+        return providers
 
     for manifest_path in manifest_paths:
         manifest = load_manifest(manifest_path)
@@ -63,8 +63,6 @@ def _load_provider_descriptors() -> dict[str, ProviderDescriptor]:
                 f"Provider plugin descriptor name mismatch for {manifest_path}: "
                 f"{descriptor.name!r} != {manifest_id!r}"
             )
-        if descriptor.name in providers:
-            raise ValueError(f"Duplicate provider plugin descriptor: {descriptor.name}")
         providers[descriptor.name] = descriptor
     return providers
 

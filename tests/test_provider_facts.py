@@ -3,6 +3,12 @@ from types import SimpleNamespace
 from pathlib import Path
 
 import yaml
+from core.providers.contracts import (
+    ProviderCapabilities,
+    ProviderDescriptor,
+    ProviderFactsHooks,
+    ProviderMetadata,
+)
 
 from core.providers.facts import (
     list_provider_threads,
@@ -244,6 +250,67 @@ def test_bundled_provider_catalog_supports_manifestless_packaged_runtime():
     assert providers["claude"].metadata.visible is True
 
 
+def test_overlay_provider_does_not_drop_bundled_public_descriptors(monkeypatch, tmp_path):
+    overlay_dir = tmp_path / "provider-plugins" / "overlay-tool"
+    overlay_dir.mkdir(parents=True)
+    (overlay_dir / "plugin.yaml").write_text(
+        """
+schema_version: 1
+id: overlay-tool
+kind: provider
+visibility: private
+label: Overlay Tool
+provider:
+  visible: false
+  managed: true
+  autostart: true
+entrypoints:
+  python_descriptor: overlay_manifest_entry:create_provider_descriptor
+""".strip(),
+        encoding="utf-8",
+    )
+    (tmp_path / "provider-plugins" / "overlay_manifest_entry.py").write_text(
+        """
+from core.providers.contracts import ProviderCapabilities, ProviderDescriptor, ProviderFactsHooks, ProviderMetadata
+
+def _noop(*args, **kwargs):
+    return []
+
+def create_provider_descriptor():
+    return ProviderDescriptor(
+        name="overlay-tool",
+        metadata=ProviderMetadata(
+            id="overlay-tool",
+            runtime_id="overlay-tool",
+            label="Overlay Tool",
+            visible=False,
+            managed=True,
+            autostart=True,
+        ),
+        facts=ProviderFactsHooks(
+            scan_workspaces=_noop,
+            list_threads=_noop,
+            read_thread_history=_noop,
+            query_active_thread_ids=lambda *_args, **_kwargs: set(),
+        ),
+        capabilities=ProviderCapabilities(),
+    )
+""".strip(),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("ONLINEWORKER_PROVIDER_OVERLAY", str(tmp_path / "provider-plugins"))
+    registry = importlib.import_module("core.providers.registry")
+    try:
+        reloaded = importlib.reload(registry)
+        monkeypatch.setattr(reloaded, "PROVIDER_PLUGIN_ROOT", tmp_path / "missing-builtin-root")
+        provider_names = list(reloaded._load_provider_descriptors().keys())
+        assert provider_names == ["claude", "codex", "overlay-tool"]
+    finally:
+        monkeypatch.delenv("ONLINEWORKER_PROVIDER_OVERLAY", raising=False)
+        importlib.reload(registry)
+
+
 def test_classify_provider_returns_unknown_for_overlay_provider_without_config():
     cfg = _config_with_providers(codex=_provider_config(), claude=_provider_config(enabled=False, managed=False))
 
@@ -292,7 +359,7 @@ def test_hidden_runtime_enabled_overlay_provider_still_dispatches_provider_hooks
 
     def fake_scan_overlay_session_cwds():
         called["overlay-tool"] = True
-        return [{"name": "internal", "path": "/tmp/internal", "thread_count": 1}]
+        return [{"name": "overlay", "path": "/tmp/overlay", "thread_count": 1}]
 
     monkeypatch.setattr(
         "core.providers.facts.get_provider",
@@ -313,7 +380,7 @@ def test_hidden_runtime_enabled_overlay_provider_still_dispatches_provider_hooks
 
 def test_provider_registry_loads_external_overlay_manifest(tmp_path, monkeypatch):
     overlay_root = tmp_path / "provider-overlay"
-    provider_dir = overlay_root / "internal_tool"
+    provider_dir = overlay_root / "overlay_tool"
     provider_pkg_dir = provider_dir / "python"
     provider_pkg_dir.mkdir(parents=True)
     (provider_dir / "__init__.py").write_text("", encoding="utf-8")
@@ -325,14 +392,14 @@ from core.providers.contracts import ProviderCapabilities, ProviderDescriptor, P
 
 def create_provider_descriptor():
     return ProviderDescriptor(
-        name="internal-tool",
+        name="overlay-tool",
         metadata=ProviderMetadata(
-            id="internal-tool",
-            label="Internal Tool",
+            id="overlay-tool",
+            label="Overlay Tool",
             visible=False,
             managed=True,
             autostart=True,
-            bin="internal-tool",
+            bin="overlay-tool",
         ),
         facts=ProviderFactsHooks(
             scan_workspaces=lambda *, sessions_dir=None: [],
@@ -348,21 +415,21 @@ def create_provider_descriptor():
     (provider_dir / "plugin.yaml").write_text(
         """
 schema_version: 1
-id: internal-tool
+id: overlay-tool
 kind: provider
 visibility: private
 order: 100
-runtime_id: internal-tool
-label: Internal Tool
-description: Private overlay sessions
+runtime_id: overlay-tool
+label: Overlay Tool
+description: External overlay sessions
 default_visible: false
 
 provider:
   visible: false
   managed: true
   autostart: true
-  runtime_id: internal-tool
-  bin: internal-tool
+  runtime_id: overlay-tool
+  bin: overlay-tool
   transport:
     type: http
   capabilities:
@@ -372,18 +439,22 @@ provider:
     questions: true
 
 entrypoints:
-  python_descriptor: internal_tool.python.provider:create_provider_descriptor
+  python_descriptor: overlay_tool.python.provider:create_provider_descriptor
 """,
         encoding="utf-8",
     )
 
     monkeypatch.setenv("ONLINEWORKER_PROVIDER_OVERLAY", str(overlay_root))
     registry = importlib.import_module("core.providers.registry")
-    importlib.reload(registry)
+    try:
+        importlib.reload(registry)
 
-    providers = registry.list_providers()
-    provider_ids = [provider.name for provider in providers]
-    assert provider_ids == ["claude", "codex", "internal-tool"]
-    internal_tool = registry.get_provider("internal-tool")
-    assert internal_tool is not None
-    assert internal_tool.metadata.visible is False
+        providers = registry.list_providers()
+        provider_ids = [provider.name for provider in providers]
+        assert provider_ids == ["claude", "codex", "overlay-tool"]
+        overlay_tool = registry.get_provider("overlay-tool")
+        assert overlay_tool is not None
+        assert overlay_tool.metadata.visible is False
+    finally:
+        monkeypatch.delenv("ONLINEWORKER_PROVIDER_OVERLAY", raising=False)
+        importlib.reload(registry)

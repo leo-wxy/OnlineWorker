@@ -144,7 +144,7 @@ class TestScanCodexSessionCwds:
 
 class TestListCodexSessionMetaThreadsByCwd:
     def test_lists_jsonl_only_main_threads_with_preview_and_created_time(self, tmp_path):
-        cwd = "/Users/wxy/Projects/onlineWorker"
+        cwd = "/Users/example/Projects/onlineWorker"
         session_path = tmp_path / "2026" / "04" / "10" / "rollout-2026-04-10T17-27-11-tid-phase15.jsonl"
         write_jsonl(
             str(session_path),
@@ -185,7 +185,7 @@ class TestListCodexSessionMetaThreadsByCwd:
         assert result[0]["updatedAt"] == 1775813231147
 
     def test_skips_subagent_sessions(self, tmp_path):
-        cwd = "/Users/wxy/Projects/onlineWorker"
+        cwd = "/Users/example/Projects/onlineWorker"
         write_jsonl(
             str(tmp_path / "rollout-main.jsonl"),
             {

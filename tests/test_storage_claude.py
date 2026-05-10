@@ -69,19 +69,19 @@ def test_scan_claude_session_cwds_groups_by_project(tmp_path):
     _write_claude_session(
         sessions_dir / "1001.json",
         session_id="ses-a",
-        cwd="/Users/wxy/Projects/onlineWorker",
+        cwd="/Users/example/Projects/onlineWorker",
         started_at=2000,
     )
     _write_claude_session(
         sessions_dir / "1002.json",
         session_id="ses-b",
-        cwd="/Users/wxy/Projects/onlineWorker",
+        cwd="/Users/example/Projects/onlineWorker",
         started_at=3000,
     )
     _write_claude_session(
         sessions_dir / "1003.json",
         session_id="ses-c",
-        cwd="/Users/wxy/Projects/ncmplayerengine",
+        cwd="/Users/example/Projects/sample-project",
         started_at=1000,
     )
 
@@ -91,8 +91,8 @@ def test_scan_claude_session_cwds_groups_by_project(tmp_path):
     )
 
     assert [item["path"] for item in result] == [
-        "/Users/wxy/Projects/onlineWorker",
-        "/Users/wxy/Projects/ncmplayerengine",
+        "/Users/example/Projects/onlineWorker",
+        "/Users/example/Projects/sample-project",
     ]
     assert result[0]["name"] == "onlineWorker"
     assert result[0]["thread_count"] == 2
@@ -102,7 +102,7 @@ def test_scan_claude_session_cwds_groups_by_project(tmp_path):
 def test_list_claude_threads_by_cwd_uses_started_at_and_history_preview(tmp_path):
     sessions_dir = tmp_path / "sessions"
     history_path = tmp_path / "history.jsonl"
-    cwd = "/Users/wxy/Projects/onlineWorker"
+    cwd = "/Users/example/Projects/onlineWorker"
 
     _write_claude_session(
         sessions_dir / "1001.json",
@@ -164,25 +164,25 @@ def test_read_claude_thread_history_returns_recent_user_messages_only(tmp_path):
             {
                 "display": "/status",
                 "timestamp": 1000,
-                "project": "/Users/wxy/Projects/onlineWorker",
+                "project": "/Users/example/Projects/onlineWorker",
                 "sessionId": "ses-a",
             },
             {
                 "display": "第一条有效消息",
                 "timestamp": 1100,
-                "project": "/Users/wxy/Projects/onlineWorker",
+                "project": "/Users/example/Projects/onlineWorker",
                 "sessionId": "ses-a",
             },
             {
                 "display": "第二条有效消息",
                 "timestamp": 1200,
-                "project": "/Users/wxy/Projects/onlineWorker",
+                "project": "/Users/example/Projects/onlineWorker",
                 "sessionId": "ses-a",
             },
             {
                 "display": "其他会话",
                 "timestamp": 1300,
-                "project": "/Users/wxy/Projects/onlineWorker",
+                "project": "/Users/example/Projects/onlineWorker",
                 "sessionId": "ses-b",
             },
         ],
@@ -202,7 +202,7 @@ def test_read_claude_thread_history_returns_recent_user_messages_only(tmp_path):
 
 def test_list_claude_threads_by_cwd_filters_history_only_resume_noise(tmp_path):
     history_path = tmp_path / "history.jsonl"
-    cwd = "/Users/wxy/Projects/ncmplayerengine"
+    cwd = "/Users/example/Projects/sample-project"
     _write_claude_history(
         history_path,
         [
@@ -236,9 +236,9 @@ def test_read_claude_thread_history_reads_project_jsonl_user_and_assistant_messa
     projects_dir = tmp_path / "projects"
     history_path = tmp_path / "history.jsonl"
     session_id = "ses-a"
-    cwd = "/Users/wxy/Projects/onlineWorker"
+    cwd = "/Users/example/Projects/onlineWorker"
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / f"{session_id}.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / f"{session_id}.jsonl",
         [
             {
                 "parentUuid": None,
@@ -328,21 +328,21 @@ def test_scan_claude_session_cwds_reads_project_jsonl_store_by_default(tmp_path,
     sessions_dir = tmp_path / "sessions"
     projects_dir = tmp_path / "projects"
     _write_claude_project_session(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-a.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-a.jsonl",
         session_id="ses-a",
-        cwd="/Users/wxy/Projects/onlineWorker",
+        cwd="/Users/example/Projects/onlineWorker",
         timestamp="2026-04-07T09:31:18.002Z",
     )
     _write_claude_project_session(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-b.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-b.jsonl",
         session_id="ses-b",
-        cwd="/Users/wxy/Projects/onlineWorker",
+        cwd="/Users/example/Projects/onlineWorker",
         timestamp="2026-04-07T10:31:18.002Z",
     )
     _write_claude_project_session(
-        projects_dir / "-Users-wxy-Projects-ncmplayerengine" / "ses-c.jsonl",
+        projects_dir / "-Users-example-Projects-sample-project" / "ses-c.jsonl",
         session_id="ses-c",
-        cwd="/Users/wxy/Projects/ncmplayerengine",
+        cwd="/Users/example/Projects/sample-project",
         timestamp="2026-04-06T09:31:18.002Z",
     )
     monkeypatch.setattr(storage_module, "CLAUDE_SESSIONS_DIR", str(sessions_dir))
@@ -353,8 +353,8 @@ def test_scan_claude_session_cwds_reads_project_jsonl_store_by_default(tmp_path,
     )
 
     assert [item["path"] for item in result] == [
-        "/Users/wxy/Projects/onlineWorker",
-        "/Users/wxy/Projects/ncmplayerengine",
+        "/Users/example/Projects/onlineWorker",
+        "/Users/example/Projects/sample-project",
     ]
     assert result[0]["thread_count"] == 2
     assert result[1]["thread_count"] == 1
@@ -363,16 +363,16 @@ def test_scan_claude_session_cwds_reads_project_jsonl_store_by_default(tmp_path,
 def test_list_claude_threads_by_cwd_reads_project_jsonl_store(tmp_path):
     projects_dir = tmp_path / "projects"
     history_path = tmp_path / "history.jsonl"
-    cwd = "/Users/wxy/Projects/onlineWorker"
+    cwd = "/Users/example/Projects/onlineWorker"
 
     _write_claude_project_session(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-old.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-old.jsonl",
         session_id="ses-old",
         cwd=cwd,
         timestamp="2026-04-07T09:31:18.002Z",
     )
     _write_claude_project_session(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-new.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-new.jsonl",
         session_id="ses-new",
         cwd=cwd,
         timestamp="2026-04-07T10:31:18.002Z",
@@ -412,11 +412,11 @@ def test_list_claude_threads_by_cwd_prefers_session_file_matching_workspace_slug
 ):
     projects_dir = tmp_path / "projects"
     history_path = tmp_path / "empty-history.jsonl"
-    cwd = "/Users/wxy/Projects/onlineWorker"
+    cwd = "/Users/example/Projects/onlineWorker"
     session_id = "11111111-1111-4111-8111-111111111111"
 
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / f"{session_id}.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / f"{session_id}.jsonl",
         [
             {
                 "type": "user",
@@ -455,16 +455,16 @@ def test_list_claude_threads_by_cwd_prefers_session_file_matching_workspace_slug
 
 def test_query_claude_active_session_ids_reads_project_jsonl_store(tmp_path):
     projects_dir = tmp_path / "projects"
-    cwd = "/Users/wxy/Projects/onlineWorker"
+    cwd = "/Users/example/Projects/onlineWorker"
 
     _write_claude_project_session(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-a.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-a.jsonl",
         session_id="ses-a",
         cwd=cwd,
         timestamp="2026-04-07T09:31:18.002Z",
     )
     _write_claude_project_session(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-b.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-b.jsonl",
         session_id="ses-b",
         cwd=cwd,
         timestamp="2026-04-07T10:31:18.002Z",
@@ -480,10 +480,10 @@ def test_query_claude_active_session_ids_reads_project_jsonl_store(tmp_path):
 
 def test_list_claude_threads_by_cwd_filters_single_turn_login_failed_sessions(tmp_path):
     projects_dir = tmp_path / "projects"
-    cwd = "/Users/wxy/Projects/onlineWorker"
+    cwd = "/Users/example/Projects/onlineWorker"
 
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-login-failed.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-login-failed.jsonl",
         [
             {
                 "parentUuid": None,
@@ -518,7 +518,7 @@ def test_list_claude_threads_by_cwd_filters_single_turn_login_failed_sessions(tm
         ],
     )
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-real.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-real.jsonl",
         [
             {
                 "parentUuid": None,
@@ -564,10 +564,10 @@ def test_list_claude_threads_by_cwd_filters_single_turn_login_failed_sessions(tm
 
 def test_query_claude_active_session_ids_filters_single_turn_login_failed_sessions(tmp_path):
     projects_dir = tmp_path / "projects"
-    cwd = "/Users/wxy/Projects/onlineWorker"
+    cwd = "/Users/example/Projects/onlineWorker"
 
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-login-failed.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-login-failed.jsonl",
         [
             {
                 "parentUuid": None,
@@ -597,7 +597,7 @@ def test_query_claude_active_session_ids_filters_single_turn_login_failed_sessio
         ],
     )
     _write_claude_project_session(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-real.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-real.jsonl",
         session_id="ses-real",
         cwd=cwd,
         timestamp="2026-04-12T11:48:36.917Z",
@@ -614,10 +614,10 @@ def test_query_claude_active_session_ids_filters_single_turn_login_failed_sessio
 
 def test_list_claude_threads_by_cwd_filters_plain_cli_sessions(tmp_path):
     projects_dir = tmp_path / "projects"
-    cwd = "/Users/wxy/Projects/onlineWorker"
+    cwd = "/Users/example/Projects/onlineWorker"
 
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-cli.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-cli.jsonl",
         [
             {
                 "parentUuid": None,
@@ -645,7 +645,7 @@ def test_list_claude_threads_by_cwd_filters_plain_cli_sessions(tmp_path):
         ],
     )
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-sdk.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-sdk.jsonl",
         [
             {
                 "parentUuid": None,
@@ -686,10 +686,10 @@ def test_list_claude_threads_by_cwd_filters_plain_cli_sessions(tmp_path):
 
 def test_list_claude_threads_by_cwd_filters_single_turn_smoke_prompt_sessions(tmp_path):
     projects_dir = tmp_path / "projects"
-    cwd = "/Users/wxy/Projects/ncmplayerengine"
+    cwd = "/Users/example/Projects/sample-project"
 
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-ncmplayerengine" / "ses-smoke.jsonl",
+        projects_dir / "-Users-example-Projects-sample-project" / "ses-smoke.jsonl",
         [
             {
                 "parentUuid": None,
@@ -722,7 +722,7 @@ def test_list_claude_threads_by_cwd_filters_single_turn_smoke_prompt_sessions(tm
         ],
     )
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-ncmplayerengine" / "ses-real.jsonl",
+        projects_dir / "-Users-example-Projects-sample-project" / "ses-real.jsonl",
         [
             {
                 "parentUuid": None,
@@ -762,10 +762,10 @@ def test_list_claude_threads_by_cwd_filters_single_turn_smoke_prompt_sessions(tm
 
 def test_query_claude_active_session_ids_filters_plain_cli_sessions(tmp_path):
     projects_dir = tmp_path / "projects"
-    cwd = "/Users/wxy/Projects/onlineWorker"
+    cwd = "/Users/example/Projects/onlineWorker"
 
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-cli.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-cli.jsonl",
         [
             {
                 "parentUuid": None,
@@ -793,7 +793,7 @@ def test_query_claude_active_session_ids_filters_plain_cli_sessions(tmp_path):
         ],
     )
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-sdk.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-sdk.jsonl",
         [
             {
                 "parentUuid": None,
@@ -821,14 +821,14 @@ def test_scan_claude_session_cwds_filters_noise_workspace_paths(tmp_path):
     projects_dir = tmp_path / "projects"
 
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker--worktrees-phase16-claude-app-surface" / "ses-worktree.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker--worktrees-phase16-sample-surface" / "ses-worktree.jsonl",
         [
             {
                 "parentUuid": None,
                 "type": "user",
                 "uuid": "ses-worktree-user",
                 "timestamp": "2026-04-17T07:00:08.431Z",
-                "cwd": "/Users/wxy/Projects/onlineWorker/.worktrees/phase16-claude-app-surface",
+                "cwd": "/Users/example/Projects/onlineWorker/.worktrees/phase16-sample-surface",
                 "sessionId": "ses-worktree",
                 "entrypoint": "sdk-cli",
                 "message": {"role": "user", "content": "请只回复 OK"},
@@ -838,7 +838,7 @@ def test_scan_claude_session_cwds_filters_noise_workspace_paths(tmp_path):
                 "type": "assistant",
                 "uuid": "ses-worktree-assistant",
                 "timestamp": "2026-04-17T07:00:09.431Z",
-                "cwd": "/Users/wxy/Projects/onlineWorker/.worktrees/phase16-claude-app-surface",
+                "cwd": "/Users/example/Projects/onlineWorker/.worktrees/phase16-sample-surface",
                 "sessionId": "ses-worktree",
                 "entrypoint": "sdk-cli",
                 "message": {"role": "assistant", "content": [{"type": "text", "text": "OK"}]},
@@ -846,14 +846,14 @@ def test_scan_claude_session_cwds_filters_noise_workspace_paths(tmp_path):
         ],
     )
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-ncmplayerengine" / "ses-real.jsonl",
+        projects_dir / "-Users-example-Projects-sample-project" / "ses-real.jsonl",
         [
             {
                 "parentUuid": None,
                 "type": "user",
                 "uuid": "ses-real-user",
                 "timestamp": "2026-04-17T07:10:08.431Z",
-                "cwd": "/Users/wxy/Projects/ncmplayerengine",
+                "cwd": "/Users/example/Projects/sample-project",
                 "sessionId": "ses-real",
                 "entrypoint": "sdk-cli",
                 "message": {"role": "user", "content": "继续处理播放器问题"},
@@ -866,7 +866,7 @@ def test_scan_claude_session_cwds_filters_noise_workspace_paths(tmp_path):
         history_path=str(tmp_path / "empty-history.jsonl"),
     )
 
-    assert [item["path"] for item in result] == ["/Users/wxy/Projects/ncmplayerengine"]
+    assert [item["path"] for item in result] == ["/Users/example/Projects/sample-project"]
 
 
 def test_scan_claude_session_cwds_includes_history_only_projects(tmp_path):
@@ -877,13 +877,13 @@ def test_scan_claude_session_cwds_includes_history_only_projects(tmp_path):
             {
                 "display": "历史工作区 A",
                 "timestamp": 1775520000000,
-                "project": "/Users/wxy/Projects/music4/music_app/module_source/music_base_audio_lib",
+                "project": "/Users/example/Projects/sample-music-app/module_source/audio_lib",
                 "sessionId": "ses-a",
             },
             {
                 "display": "历史工作区 B",
                 "timestamp": 1775523600000,
-                "project": "/Users/wxy/Desktop/claude-code-plugin",
+                "project": "/Users/example/Desktop/sample-plugin",
                 "sessionId": "ses-b",
             },
         ],
@@ -895,8 +895,8 @@ def test_scan_claude_session_cwds_includes_history_only_projects(tmp_path):
     )
 
     assert [item["path"] for item in result] == [
-        "/Users/wxy/Desktop/claude-code-plugin",
-        "/Users/wxy/Projects/music4/music_app/module_source/music_base_audio_lib",
+        "/Users/example/Desktop/sample-plugin",
+        "/Users/example/Projects/sample-music-app/module_source/audio_lib",
     ]
     assert result[0]["thread_count"] == 1
     assert result[1]["thread_count"] == 1
@@ -904,10 +904,10 @@ def test_scan_claude_session_cwds_includes_history_only_projects(tmp_path):
 
 def test_scan_claude_session_cwds_filters_workspace_noise_sessions(tmp_path):
     projects_dir = tmp_path / "projects"
-    cwd = "/Users/wxy/Projects/onlineWorker"
+    cwd = "/Users/example/Projects/onlineWorker"
 
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-cli.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-cli.jsonl",
         [
             {
                 "parentUuid": None,
@@ -922,7 +922,7 @@ def test_scan_claude_session_cwds_filters_workspace_noise_sessions(tmp_path):
         ],
     )
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-login-failed.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-login-failed.jsonl",
         [
             {
                 "parentUuid": None,
@@ -954,7 +954,7 @@ def test_scan_claude_session_cwds_filters_workspace_noise_sessions(tmp_path):
         ],
     )
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-real.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-real.jsonl",
         [
             {
                 "parentUuid": None,
@@ -989,7 +989,7 @@ def test_scan_claude_session_cwds_filters_workspace_noise_sessions(tmp_path):
 
     assert result == [
         {
-            "path": "/Users/wxy/Projects/onlineWorker",
+            "path": "/Users/example/Projects/onlineWorker",
             "name": "onlineWorker",
             "thread_count": 1,
         }
@@ -1003,7 +1003,7 @@ def test_list_claude_threads_by_cwd_prefers_history_project_over_nested_session_
     _write_claude_session(
         sessions_dir / "1001.json",
         session_id="ses-a",
-        cwd="/Users/wxy/Projects/ncmplayerengine/Demo/Android",
+        cwd="/Users/example/Projects/sample-project/Demo/Android",
         started_at=2000,
     )
     _write_claude_history(
@@ -1012,14 +1012,14 @@ def test_list_claude_threads_by_cwd_prefers_history_project_over_nested_session_
             {
                 "display": "继续 engine 改造",
                 "timestamp": 1775523600000,
-                "project": "/Users/wxy/Projects/ncmplayerengine",
+                "project": "/Users/example/Projects/sample-project",
                 "sessionId": "ses-a",
             }
         ],
     )
 
     result = storage_module.list_claude_threads_by_cwd(
-        "/Users/wxy/Projects/ncmplayerengine",
+        "/Users/example/Projects/sample-project",
         sessions_dir=str(sessions_dir),
         history_path=str(history_path),
         limit=20,
@@ -1036,7 +1036,7 @@ def test_query_claude_active_session_ids_prefers_history_project_over_nested_ses
     _write_claude_session(
         sessions_dir / "1001.json",
         session_id="ses-a",
-        cwd="/Users/wxy/Projects/ncmplayerengine/Demo/Android",
+        cwd="/Users/example/Projects/sample-project/Demo/Android",
         started_at=2000,
     )
     _write_claude_history(
@@ -1045,14 +1045,14 @@ def test_query_claude_active_session_ids_prefers_history_project_over_nested_ses
             {
                 "display": "继续 engine 改造",
                 "timestamp": 1775523600000,
-                "project": "/Users/wxy/Projects/ncmplayerengine",
+                "project": "/Users/example/Projects/sample-project",
                 "sessionId": "ses-a",
             }
         ],
     )
 
     result = storage_module.query_claude_active_session_ids(
-        "/Users/wxy/Projects/ncmplayerengine",
+        "/Users/example/Projects/sample-project",
         sessions_dir=str(sessions_dir),
         history_path=str(history_path),
     )
@@ -1064,15 +1064,15 @@ def test_scan_claude_session_cwds_skips_noise_workspaces_from_project_store(tmp_
     projects_dir = tmp_path / "projects"
     history_path = tmp_path / "history.jsonl"
     _write_claude_project_session(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-real.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-real.jsonl",
         session_id="ses-real",
-        cwd="/Users/wxy/Projects/onlineWorker",
+        cwd="/Users/example/Projects/onlineWorker",
         timestamp="2026-04-07T09:31:18.002Z",
     )
     _write_claude_project_session(
-        projects_dir / "-Users-wxy-Projects-onlineWorker--worktrees-phase16" / "ses-noise.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker--worktrees-phase16" / "ses-noise.jsonl",
         session_id="ses-noise",
-        cwd="/Users/wxy/Projects/onlineWorker/.worktrees/phase16",
+        cwd="/Users/example/Projects/onlineWorker/.worktrees/phase16",
         timestamp="2026-04-07T10:31:18.002Z",
     )
     _write_claude_project_session(
@@ -1087,7 +1087,7 @@ def test_scan_claude_session_cwds_skips_noise_workspaces_from_project_store(tmp_
             {
                 "display": "继续 onlineWorker 改造",
                 "timestamp": 1775520000000,
-                "project": "/Users/wxy/Projects/onlineWorker",
+                "project": "/Users/example/Projects/onlineWorker",
                 "sessionId": "ses-real",
             }
         ],
@@ -1098,16 +1098,16 @@ def test_scan_claude_session_cwds_skips_noise_workspaces_from_project_store(tmp_
         history_path=str(history_path),
     )
 
-    assert [item["path"] for item in result] == ["/Users/wxy/Projects/onlineWorker"]
+    assert [item["path"] for item in result] == ["/Users/example/Projects/onlineWorker"]
 
 
 def test_list_claude_threads_by_cwd_skips_smoke_prompt_and_login_failed_sessions(tmp_path):
     projects_dir = tmp_path / "projects"
     history_path = tmp_path / "history.jsonl"
-    cwd = "/Users/wxy/Projects/onlineWorker"
+    cwd = "/Users/example/Projects/onlineWorker"
 
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-real.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-real.jsonl",
         [
             {
                 "type": "user",
@@ -1126,7 +1126,7 @@ def test_list_claude_threads_by_cwd_skips_smoke_prompt_and_login_failed_sessions
         ],
     )
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-smoke.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-smoke.jsonl",
         [
             {
                 "type": "user",
@@ -1145,7 +1145,7 @@ def test_list_claude_threads_by_cwd_skips_smoke_prompt_and_login_failed_sessions
         ],
     )
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-login.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-login.jsonl",
         [
             {
                 "type": "user",
@@ -1185,10 +1185,10 @@ def test_list_claude_threads_by_cwd_skips_smoke_prompt_and_login_failed_sessions
 def test_list_claude_threads_by_cwd_skips_plain_cli_project_sessions(tmp_path):
     projects_dir = tmp_path / "projects"
     history_path = tmp_path / "history.jsonl"
-    cwd = "/Users/wxy/Projects/onlineWorker"
+    cwd = "/Users/example/Projects/onlineWorker"
 
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-sdk.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-sdk.jsonl",
         [
             {
                 "type": "user",
@@ -1207,7 +1207,7 @@ def test_list_claude_threads_by_cwd_skips_plain_cli_project_sessions(tmp_path):
         ],
     )
     _write_claude_project_rows(
-        projects_dir / "-Users-wxy-Projects-onlineWorker" / "ses-cli.jsonl",
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-cli.jsonl",
         [
             {
                 "type": "user",
@@ -1246,7 +1246,7 @@ def test_list_claude_threads_by_cwd_skips_plain_cli_project_sessions(tmp_path):
 def test_find_claude_project_session_file_prefers_workspace_copy_for_duplicate_session_id(tmp_path):
     projects_dir = tmp_path / "projects"
     session_id = "11111111-1111-4111-8111-111111111111"
-    canonical_path = projects_dir / "-Users-wxy-Projects-onlineWorker" / f"{session_id}.jsonl"
+    canonical_path = projects_dir / "-Users-example-Projects-onlineWorker" / f"{session_id}.jsonl"
     smoke_path = projects_dir / "-private-tmp-ow-claude-smoke" / f"{session_id}.jsonl"
 
     _write_claude_project_rows(
@@ -1255,7 +1255,7 @@ def test_find_claude_project_session_file_prefers_workspace_copy_for_duplicate_s
             {
                 "type": "user",
                 "timestamp": "2026-04-07T09:31:18.002Z",
-                "cwd": "/Users/wxy/Projects/onlineWorker",
+                "cwd": "/Users/example/Projects/onlineWorker",
                 "sessionId": session_id,
                 "entrypoint": "sdk-cli",
                 "message": {"role": "user", "content": "继续 onlineWorker"},

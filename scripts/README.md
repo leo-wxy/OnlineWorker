@@ -6,8 +6,8 @@
 
 - `build.sh`：Apple Silicon 基础完整打包脚本。按项目规则，只有用户明确允许打包时才执行。它默认只打包当前仓库内置的 providers。
 - `build.sh` 额外支持 `ONLINEWORKER_PLUGIN_SOURCE_DIRS`，可在打包前把额外 provider 包 staged 到 bundle resource 目录。
-- 如果你在下游维护额外 provider 包，可在仓库外部包装脚本里设置 `ONLINEWORKER_PLUGIN_SOURCE_DIRS=...` 后复用同一套 `build.sh`。
-- 这个 public `scripts/` 目录只保留基础构建与诊断脚本，不维护任何下游私有包装逻辑。
+- 如果你维护额外 provider 包，可在本地包装脚本里设置 `ONLINEWORKER_PLUGIN_SOURCE_DIRS=...` 后复用同一套 `build.sh`。
+- `scripts/` 目录只保留当前仓库可复用的基础构建与诊断脚本，不维护仓库外部的包装逻辑。
 
 ## Runtime helpers
 
@@ -16,8 +16,7 @@
 ## Smoke / diagnostics
 
 - `claude_hook_smoke.py`：Claude hook smoke 脚本，已有 `tests/test_claude_hook_smoke.py` 保护。默认复用当前 Python 解释器；如需指定 bridge 解释器，可设置 `ONLINEWORKER_BRIDGE_PYTHON=/path/to/python`。
-- `provider_smoke.py`：固定 session 的 provider smoke 脚本，基于仓库根目录复用 `codex / claude` 会话，验证消息收发与权限回填。
-- `provider_smoke.py --action archive`：归档并清理固定 smoke session，用于把已污染的测试线程收口。
+- `cleanup_smoke_sessions.py`：面向本地 `~/.codex` 和 `~/.claude` 存储的固定 smoke 清理脚本，用于归档 Codex smoke thread 并删除对应的本地 session 文件。
 - `archive_roundtrip_check.py`：手动 archive 诊断脚本，会创建真实 codex thread；只在 archive 端到端链路排障时手工运行，不纳入日常回归。
 
 ## Excluded
