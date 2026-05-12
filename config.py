@@ -1,5 +1,6 @@
 # config.py
 import os
+import sys
 import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +25,18 @@ BUILTIN_PROVIDER_PLUGIN_DIR = Path(__file__).resolve().parent / "plugins" / "pro
 def get_data_dir() -> str | None:
     """Return the data directory, or None if using CWD defaults."""
     return _data_dir
+
+
+def default_data_dir() -> str:
+    """Return the stable default data dir for the current platform."""
+    home = Path.home()
+    if sys.platform == "darwin":
+        return str(home / "Library" / "Application Support" / "OnlineWorker")
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA") or str(home / "AppData" / "Roaming")
+        return str(Path(appdata) / "OnlineWorker")
+    xdg_data_home = os.environ.get("XDG_DATA_HOME") or str(home / ".local" / "share")
+    return str(Path(xdg_data_home) / "OnlineWorker")
 
 
 def set_data_dir(path: str) -> None:

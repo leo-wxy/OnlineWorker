@@ -16,7 +16,7 @@ from telegram.ext import (
     filters,
 )
 from telegram.request import HTTPXRequest
-from config import load_config
+from config import load_config, default_data_dir, set_data_dir
 from core.state import AppState
 from core.storage import load_storage
 from core.lifecycle import LifecycleManager
@@ -197,10 +197,8 @@ def main() -> None:
     parser.add_argument("--provider-limit", type=int, default=50)
     args, _ = parser.parse_known_args()
 
-    data_dir = args.data_dir
-    if data_dir:
-        from config import set_data_dir
-        set_data_dir(data_dir)
+    data_dir = args.data_dir or default_data_dir()
+    set_data_dir(data_dir)
 
     if args.claude_hook_bridge:
         from plugins.providers.builtin.claude.python.hook_bridge import run_claude_hook_bridge_once

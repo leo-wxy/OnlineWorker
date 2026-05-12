@@ -123,6 +123,9 @@ cd /path/to/onlineWorker
 /path/to/python3 main.py
 ```
 
+By default, source-mode runs now use the same stable app data directory as the packaged app.
+Use `--data-dir /custom/path` only when you intentionally want an isolated runtime state.
+
 ### Run the Mac app in development mode
 
 ```bash

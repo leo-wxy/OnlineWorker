@@ -122,6 +122,9 @@ cd /path/to/onlineWorker
 /path/to/python3 main.py
 ```
 
+源码模式现在默认使用与安装包一致的稳定数据目录。
+只有在你明确需要隔离运行态时，才使用 `--data-dir /custom/path` 覆盖。
+
 ### 以开发模式运行 Mac App
 
 ```bash
