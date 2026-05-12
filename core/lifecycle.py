@@ -11,6 +11,10 @@ from typing import Optional
 from telegram.ext import Application
 
 from config import Config
+from core.provider_owner_bridge import (
+    ensure_provider_owner_bridge_started,
+    stop_provider_owner_bridge,
+)
 from core.providers.registry import get_provider
 from core.providers.facts import list_provider_threads, query_provider_active_thread_ids
 from core.state import AppState
@@ -88,6 +92,8 @@ class LifecycleManager:
             except Exception as e:
                 logger.error(f"[{tool.name}] 创建全局 Topic 失败：{e}")
 
+        await ensure_provider_owner_bridge_started(self.state)
+
         # 2. Start enabled providers via registry
         startup_tasks = self._build_startup_tasks(bot)
         if startup_tasks:
@@ -99,7 +105,9 @@ class LifecycleManager:
         await self._run_provider_after_startup_hooks(bot)
 
     async def post_shutdown(self, application: Application) -> None:
+        await self._cancel_reconnect_tasks()
         await self._shutdown_enabled_providers()
+        await stop_provider_owner_bridge(self.state)
         try:
             save_storage(self.storage)
         except Exception as e:
@@ -217,6 +225,19 @@ class LifecycleManager:
                     await shutdown_method()
             except Exception as e:
                 logger.warning("%s shutdown 失败：%s", provider_name, e)
+
+    async def _cancel_reconnect_tasks(self) -> None:
+        pending: list[asyncio.Task] = []
+        for provider_name, task in list(self._reconnect_tasks.items()):
+            self.set_reconnect_inflight(provider_name, False)
+            self.set_reconnect_task(provider_name, None)
+            if task is None or task.done():
+                continue
+            task.cancel()
+            pending.append(task)
+
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
     async def _setup_provider_connection(self, provider_name: str, bot, adapter, **kwargs) -> None:
         provider = get_provider(provider_name)

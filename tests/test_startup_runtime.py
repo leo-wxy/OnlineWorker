@@ -620,6 +620,61 @@ async def test_post_init_prefers_descriptor_runtime_start_hook(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_post_init_starts_shared_provider_owner_bridge_before_provider_runtime(monkeypatch):
+    storage = AppStorage()
+    state = AppState(storage=storage)
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=2,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="custom",
+                enabled=True,
+                codex_bin="custom",
+                protocol="stdio",
+            ),
+        ],
+        delete_archived_topics=True,
+    )
+    manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
+
+    bot = MagicMock()
+    bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=3169))
+    bot.send_message = AsyncMock()
+
+    events = []
+
+    async def runtime_start(manager_obj, bot_obj, tool_cfg):
+        events.append(f"startup:{tool_cfg.name}")
+
+    async def start_shared_bridge(state_obj):
+        events.append("shared-bridge")
+
+    monkeypatch.setattr(
+        "core.lifecycle.get_provider",
+        lambda name: SimpleNamespace(
+            runtime_hooks=SimpleNamespace(start=runtime_start),
+        ) if name == "custom" else None,
+    )
+    monkeypatch.setattr("core.lifecycle.ensure_provider_owner_bridge_started", start_shared_bridge)
+
+    with patch("core.lifecycle.save_storage"), patch.object(
+        LifecycleManager,
+        "_cleanup_archived_threads",
+        new=AsyncMock(),
+    ), patch.object(
+        LifecycleManager,
+        "_cleanup_subagent_threads",
+        new=AsyncMock(),
+    ):
+        await manager.post_init(SimpleNamespace(bot=bot))
+
+    assert events == ["shared-bridge", "startup:custom"]
+
+
+@pytest.mark.asyncio
 async def test_post_shutdown_uses_registry_shutdown_hook_for_custom_provider(monkeypatch):
     storage = AppStorage()
     state = AppState(storage=storage)
@@ -690,6 +745,59 @@ async def test_post_shutdown_prefers_descriptor_runtime_shutdown_hook(monkeypatc
 
     runtime_shutdown.assert_awaited_once_with(manager)
     fallback_shutdown.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_post_shutdown_cancels_reconnect_tasks_before_provider_shutdown(monkeypatch):
+    storage = AppStorage()
+    state = AppState(storage=storage)
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=2,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="custom",
+                enabled=True,
+                codex_bin="custom",
+                protocol="stdio",
+            ),
+        ],
+        delete_archived_topics=True,
+    )
+    manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
+
+    events = []
+
+    async def _pending_reconnect():
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            events.append("cancel")
+            raise
+
+    reconnect_task = asyncio.create_task(_pending_reconnect())
+    await asyncio.sleep(0)
+    manager.set_reconnect_task("custom", reconnect_task)
+    manager.set_reconnect_inflight("custom", True)
+
+    async def runtime_shutdown(manager_obj):
+        events.append("shutdown")
+
+    monkeypatch.setattr(
+        "core.lifecycle.get_provider",
+        lambda name: SimpleNamespace(
+            runtime_hooks=SimpleNamespace(shutdown=runtime_shutdown),
+        ) if name == "custom" else None,
+    )
+
+    with patch("core.lifecycle.save_storage"):
+        await manager.post_shutdown(SimpleNamespace())
+
+    assert events[:2] == ["cancel", "shutdown"]
+    assert manager.get_reconnect_task("custom") is None
+    assert manager.is_reconnect_inflight("custom") is False
 
 
 @pytest.mark.asyncio

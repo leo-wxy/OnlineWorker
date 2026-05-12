@@ -5,12 +5,14 @@ import {
   fetchClaudeMessages,
   fetchClaudeSessions,
   fetchCodexSessions,
+  fetchProviderSession,
   fetchCodexThreadState,
   fetchCodexThreadUpdates,
   fetchProviderMetadata,
   fetchProviderSessions,
   sendClaudeMessage,
   sendCodexMessage,
+  sendProviderSessionMessage,
 } from "../components/session-browser/api";
 import {
   BACKGROUND_REPLY_POLL,
@@ -304,7 +306,7 @@ function CodexChat({ session }: { session: UnifiedSession }) {
         : null;
 
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/60 bg-white/58 shadow-[0_18px_40px_rgba(15,23,42,0.06)] backdrop-blur-xl">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/60 bg-white/58 shadow-[0_18px_40px_rgba(15,23,42,0.06)] backdrop-blur-xl">
       <div className="border-b border-[var(--ow-line-soft)] bg-white/74 px-5 py-4 backdrop-blur-xl">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -335,7 +337,7 @@ function CodexChat({ session }: { session: UnifiedSession }) {
         </div>
       </div>
 
-      <div className="chat-bg flex-1 overflow-y-auto px-5 py-5">
+      <div className="chat-bg min-h-0 flex-1 overflow-y-auto px-5 py-5">
         <div className="mx-auto flex max-w-4xl flex-col gap-6">
           {turnsLoading ? (
             <StatePanel message={t.common.loading} />
@@ -541,7 +543,7 @@ function ClaudeChat({ session, refreshSessions }: { session: UnifiedSession; ref
         : null;
 
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/60 bg-white/58 shadow-[0_18px_40px_rgba(15,23,42,0.06)] backdrop-blur-xl">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/60 bg-white/58 shadow-[0_18px_40px_rgba(15,23,42,0.06)] backdrop-blur-xl">
       <div className="border-b border-[var(--ow-line-soft)] bg-white/74 px-5 py-4 backdrop-blur-xl">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -571,7 +573,7 @@ function ClaudeChat({ session, refreshSessions }: { session: UnifiedSession; ref
         </div>
       </div>
 
-      <div className="chat-bg flex-1 overflow-y-auto px-5 py-5">
+      <div className="chat-bg min-h-0 flex-1 overflow-y-auto px-5 py-5">
         <div className="mx-auto flex max-w-4xl flex-col gap-6">
           {msgLoading ? (
             <StatePanel message={t.common.loading} />
@@ -599,6 +601,228 @@ function ClaudeChat({ session, refreshSessions }: { session: UnifiedSession; ref
         placeholder={t.sessions.sendPlaceholder}
         sendLabel={t.sessions.send}
         assistantLabel="Claude"
+        onSend={handleSend}
+      />
+    </div>
+  );
+}
+
+function GenericProviderChat({ session }: { session: UnifiedSession }) {
+  const { t } = useI18n();
+  const providerLabel = getProviderUi(session.type).label;
+  const [messages, setMessages] = useState<SessionTurn[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [replyWatchState, setReplyWatchState] = useState<ReplyWatchState | null>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  const replyWatchTokenRef = useRef(0);
+  const messagesRef = useRef<SessionTurn[]>([]);
+
+  const cancelReplyWatch = useCallback(() => {
+    replyWatchTokenRef.current += 1;
+    setReplyWatchState(null);
+  }, []);
+
+  const loadMessages = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setMessages([]);
+    messagesRef.current = [];
+    try {
+      const turns = await fetchProviderSession(session.type, session.id, session.workspace);
+      messagesRef.current = turns;
+      setMessages(turns);
+      setReplyWatchState((current) => (current === "expired" ? null : current));
+    } catch (loadError) {
+      setError((loadError as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [session.id, session.type, session.workspace]);
+
+  useEffect(() => {
+    cancelReplyWatch();
+    void loadMessages();
+    return () => {
+      replyWatchTokenRef.current += 1;
+    };
+  }, [loadMessages, cancelReplyWatch]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const handleSend = async (trimmedText: string) => {
+    if (!trimmedText.trim()) {
+      return;
+    }
+
+    const previousMessages = messagesRef.current;
+    const optimisticMessages = limitSessionTurns([
+      ...previousMessages,
+      {
+        role: "user" as const,
+        content: trimmedText,
+        displayMode: "plain" as const,
+      },
+    ]);
+
+    const replyWatchToken = replyWatchTokenRef.current + 1;
+    replyWatchTokenRef.current = replyWatchToken;
+    const shouldContinue = () => replyWatchTokenRef.current === replyWatchToken;
+
+    setSending(true);
+    setError(null);
+    messagesRef.current = optimisticMessages;
+    setMessages(optimisticMessages);
+    setReplyWatchState("foreground");
+
+    const baselineAssistantCount = countAssistantEntries(previousMessages);
+
+    try {
+      await sendProviderSessionMessage(session.type, session.id, trimmedText, session.workspace);
+
+      const loadSnapshot = async () => {
+        const snapshot = await fetchProviderSession(session.type, session.id, session.workspace);
+        if (shouldContinue()) {
+          messagesRef.current = snapshot;
+        }
+        return snapshot;
+      };
+      const applySnapshot = (snapshot: SessionTurn[]) => {
+        if (shouldContinue()) {
+          messagesRef.current = snapshot;
+          setMessages(snapshot);
+        }
+      };
+
+      const foregroundResult = await pollAssistantReply({
+        loadSnapshot,
+        getAssistantCount: countAssistantEntries,
+        getSignature: buildSnapshotSignature,
+        baselineAssistantCount,
+        baselineSnapshot: previousMessages,
+        onUpdate: applySnapshot,
+        shouldContinue,
+        ...FOREGROUND_REPLY_POLL,
+      });
+      if (!shouldContinue()) {
+        return;
+      }
+
+      messagesRef.current = foregroundResult.snapshot;
+      setMessages(foregroundResult.snapshot);
+      if (foregroundResult.settled) {
+        setReplyWatchState(null);
+        return;
+      }
+
+      setReplyWatchState("background");
+      void (async () => {
+        const backgroundResult = await pollAssistantReply({
+          loadSnapshot,
+          getAssistantCount: countAssistantEntries,
+          getSignature: buildSnapshotSignature,
+          baselineAssistantCount,
+          baselineSnapshot: previousMessages,
+          onUpdate: applySnapshot,
+          shouldContinue,
+          ...BACKGROUND_REPLY_POLL,
+        });
+        if (!shouldContinue()) {
+          return;
+        }
+
+        messagesRef.current = backgroundResult.snapshot;
+        setMessages(backgroundResult.snapshot);
+        setReplyWatchState(backgroundResult.settled ? null : "expired");
+      })();
+    } catch (sendError) {
+      cancelReplyWatch();
+      setError((sendError as Error).message);
+      messagesRef.current = previousMessages;
+      setMessages(previousMessages);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const replyWatchText = replyWatchState === "foreground"
+    ? t.sessions.waitingForReply
+    : replyWatchState === "background"
+      ? t.sessions.waitingInBackground
+      : replyWatchState === "expired"
+        ? t.sessions.waitingExpired
+        : null;
+
+  return (
+    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/60 bg-white/58 shadow-[0_18px_40px_rgba(15,23,42,0.06)] backdrop-blur-xl">
+      <div className="border-b border-[var(--ow-line-soft)] bg-white/74 px-5 py-4 backdrop-blur-xl">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-700">
+                <span className="h-1.5 w-1.5 rounded-full bg-slate-500"></span>
+                {providerLabel}
+              </span>
+              <span className="rounded-full border border-slate-200 bg-white/88 px-2.5 py-1 font-mono text-[10px] text-slate-500">
+                {session.id.slice(0, 12)}
+              </span>
+            </div>
+            <h3 className="truncate text-base font-bold tracking-[-0.02em] text-gray-950">{session.title}</h3>
+          </div>
+
+          <button
+            onClick={() => void loadMessages()}
+            disabled={loading}
+            className="ow-btn inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-slate-600 transition-colors hover:text-gray-900 disabled:opacity-50"
+            title={t.sessions.reloadMessages}
+          >
+            <svg className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+            Reload
+          </button>
+        </div>
+      </div>
+
+      <div className="chat-bg flex-1 overflow-y-auto px-5 py-5">
+        <div className="mx-auto flex max-w-4xl flex-col gap-6">
+          {loading ? (
+            <StatePanel message={t.common.loading} />
+          ) : error ? (
+            <StatePanel message={error} tone="error" />
+          ) : messages.length === 0 ? (
+            <StatePanel message={t.sessions.noMessages} />
+          ) : (
+            messages.map((turn, index) => (
+              <TurnBubble
+                key={`${turn.role}-${index}-${turn.content}`}
+                turn={turn}
+                assistantLabel={providerLabel}
+              />
+            ))
+          )}
+          {replyWatchText && (
+            <p className={`px-3 pb-1 text-center text-xs ${replyWatchState === "expired" ? "text-amber-600" : "text-slate-400"}`}>
+              {replyWatchText}
+            </p>
+          )}
+          <div ref={endRef} />
+        </div>
+      </div>
+
+      <SessionComposer
+        resetKey={session.id}
+        sending={sending}
+        placeholder={t.sessions.sendPlaceholder}
+        sendLabel={t.sessions.send}
+        assistantLabel={providerLabel}
         onSend={handleSend}
       />
     </div>
@@ -936,9 +1160,7 @@ export function SessionBrowser() {
           {selectedSession ? (
             selectedSession.type === "codex" ? <CodexChat session={selectedSession} key={selectedSession.id} /> :
             selectedSession.type === "claude" ? <ClaudeChat session={selectedSession} key={selectedSession.id} refreshSessions={refreshCurrentProvider} /> :
-            <div className="ow-page-frame-soft flex h-full items-center justify-center rounded-[28px]">
-              <StatePanel message={`${providerLabels[selectedSession.type] ?? selectedSession.type} chat is not available`} />
-            </div>
+            <GenericProviderChat session={selectedSession} key={selectedSession.id} />
           ) : (
             <div className="ow-page-frame-soft flex h-full items-center justify-center rounded-[28px]">
               <StatePanel message={t.sessions.selectSession} />

@@ -6,6 +6,7 @@ use std::sync::{
     Arc,
 };
 use std::time::Duration;
+use std::{env, path::Path};
 use tauri::Manager;
 use tokio::sync::Mutex;
 
@@ -71,6 +72,34 @@ fn launch_service_self_check_delay() -> Duration {
 
 fn service_guard_check_interval() -> Duration {
     Duration::from_secs(15)
+}
+
+fn default_provider_overlay_env(
+    current_overlay: Option<&str>,
+    packaged_provider_plugins_dir: &Path,
+) -> Option<String> {
+    let current_overlay = current_overlay.map(str::trim).unwrap_or_default();
+    if !current_overlay.is_empty() {
+        return None;
+    }
+    if !packaged_provider_plugins_dir.exists() {
+        return None;
+    }
+    Some(packaged_provider_plugins_dir.to_string_lossy().to_string())
+}
+
+fn apply_default_provider_overlay_env(app: &tauri::AppHandle) {
+    let packaged_provider_plugins_dir = match app.path().resource_dir() {
+        Ok(resource_dir) => resource_dir.join("provider-plugins"),
+        Err(_) => return,
+    };
+    let default_overlay = default_provider_overlay_env(
+        env::var("ONLINEWORKER_PROVIDER_OVERLAY").ok().as_deref(),
+        &packaged_provider_plugins_dir,
+    );
+    if let Some(default_overlay) = default_overlay {
+        env::set_var("ONLINEWORKER_PROVIDER_OVERLAY", default_overlay);
+    }
 }
 
 fn should_auto_start_service_after_launch(status: &ServiceStatus) -> bool {
@@ -166,6 +195,7 @@ pub fn run() {
         .manage(Arc::new(Mutex::new(BotState::new())))
         .manage(AppExitState::default())
         .setup(|app| {
+            apply_default_provider_overlay_env(&app.handle());
             // Ensure main window is visible on startup
             // (window-state plugin may restore visible:false from cache)
             if let Some(window) = app.get_webview_window("main") {
@@ -277,13 +307,13 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        launch_service_self_check_delay, service_guard_check_interval,
-        should_auto_start_service_after_launch, should_auto_start_service_in_session,
-        should_cleanup_on_destroy, should_hide_window_on_close,
+        default_provider_overlay_env, launch_service_self_check_delay,
+        service_guard_check_interval, should_auto_start_service_after_launch,
+        should_auto_start_service_in_session, should_cleanup_on_destroy, should_hide_window_on_close,
         should_restore_main_window_on_reopen,
     };
     use crate::commands::service::ServiceStatus;
-    use std::time::Duration;
+    use std::{fs, time::Duration};
 
     #[test]
     fn main_window_close_hides_to_background_when_app_is_not_exiting() {
@@ -372,5 +402,37 @@ mod tests {
             true,
             true,
         ));
+    }
+
+    #[test]
+    fn default_provider_overlay_env_uses_packaged_plugins_when_env_is_missing() {
+        let dir = std::env::temp_dir().join(format!(
+            "onlineworker-packaged-provider-plugins-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create packaged provider dir");
+
+        assert_eq!(
+            default_provider_overlay_env(None, &dir).as_deref(),
+            Some(dir.to_string_lossy().as_ref())
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn default_provider_overlay_env_preserves_explicit_overlay() {
+        let dir = std::env::temp_dir().join(format!(
+            "onlineworker-packaged-provider-plugins-explicit-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create packaged provider dir");
+
+        assert_eq!(
+            default_provider_overlay_env(Some("/tmp/custom-overlay"), &dir),
+            None
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

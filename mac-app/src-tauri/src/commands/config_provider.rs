@@ -892,10 +892,12 @@ pub(super) fn set_provider_flags_in_document(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::{
         normalize_config_for_display, normalize_provider_document,
         normalize_provider_document_with_env, overlay_env_spec_from_env_raw,
-        provider_metadata_from_raw,
+        provider_metadata_from_raw, read_manifest_files_from_overlay_path,
         serialize_normalized_config_with_env, set_provider_flags_in_document,
     };
 
@@ -947,6 +949,27 @@ ONLINEWORKER_PROVIDER_OVERLAY=  /tmp/private-overlay:/tmp/other-overlay
         let raw = "ONLINEWORKER_PROVIDER_OVERLAY=   \n";
 
         assert_eq!(overlay_env_spec_from_env_raw(raw), None);
+    }
+
+    #[test]
+    fn read_manifest_files_from_overlay_path_recurses_provider_plugins_directory() {
+        let dir = std::env::temp_dir().join(format!(
+            "onlineworker-provider-plugins-{}",
+            std::process::id()
+        ));
+        let plugin_dir = dir.join("overlay-tool");
+        fs::create_dir_all(&plugin_dir).expect("create plugin dir");
+        fs::write(
+            plugin_dir.join("plugin.yaml"),
+            "schema_version: 1\nid: overlay-tool\nkind: provider\n",
+        )
+        .expect("write plugin manifest");
+
+        let manifests = read_manifest_files_from_overlay_path(&dir);
+        assert_eq!(manifests.len(), 1);
+        assert!(manifests[0].contains("id: overlay-tool"));
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

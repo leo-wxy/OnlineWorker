@@ -769,8 +769,8 @@ mod tests {
     use super::should_ignore_sidecar_output_event;
     use super::{
         apply_manual_stop_policy, apply_service_start_policy, cleanup_process_matchers,
-        compute_service_status, overlay_env_spec_from_app_env, pid_parent_pairs_from_output,
-        pids_from_output, probe_http_health, read_env_key, select_primary_pid,
+        compute_service_status, overlay_env_spec, overlay_env_spec_from_app_env,
+        pid_parent_pairs_from_output, pids_from_output, probe_http_health, read_env_key, select_primary_pid,
         should_attempt_background_service_recovery, BotState, CodexMirrorStatus,
         ManagedProcessCleanupPolicy,
     };
@@ -963,6 +963,30 @@ mod tests {
             Some("/tmp/private-overlay")
         );
 
+        let _ = fs::remove_file(dir.join(".env"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn overlay_env_spec_prefers_process_env_over_app_env_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "onlineworker-overlay-process-{}",
+            std::process::id()
+        ));
+        let _ = fs::create_dir_all(&dir);
+        fs::write(
+            dir.join(".env"),
+            "ONLINEWORKER_PROVIDER_OVERLAY=/tmp/from-app-env\n",
+        )
+        .expect("write .env");
+        std::env::set_var("ONLINEWORKER_PROVIDER_OVERLAY", "/tmp/from-process-env");
+
+        assert_eq!(
+            overlay_env_spec(&dir).as_deref(),
+            Some("/tmp/from-process-env")
+        );
+
+        std::env::remove_var("ONLINEWORKER_PROVIDER_OVERLAY");
         let _ = fs::remove_file(dir.join(".env"));
         let _ = fs::remove_dir_all(&dir);
     }

@@ -1,5 +1,6 @@
 import argparse
 import fcntl
+import json
 import logging
 import logging.handlers
 import os
@@ -60,6 +61,67 @@ def _acquire_flock(lock_file: str = _DEFAULT_LOCK_FILE) -> None:
 
 MAX_RAPID_CRASHES = 5       # 连续快速崩溃上限
 RAPID_CRASH_WINDOW = 60     # 秒内崩溃算"快速崩溃"
+
+
+def _print_provider_session_bridge_result(payload: object) -> None:
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    sys.stdout.flush()
+
+
+def _run_provider_session_bridge(
+    provider_id: str,
+    operation: str,
+    *,
+    session_id: str | None = None,
+    workspace_dir: str | None = None,
+    limit: int = 50,
+) -> int:
+    from core.provider_session_bridge import (
+        list_provider_session_rows,
+        read_provider_session_rows,
+        send_provider_session_message,
+    )
+
+    normalized_provider = str(provider_id or "").strip()
+    if not normalized_provider:
+        raise ValueError("provider_id is required")
+
+    normalized_operation = str(operation or "").strip().lower()
+    if normalized_operation == "list":
+        _print_provider_session_bridge_result(
+            list_provider_session_rows(normalized_provider, limit_per_workspace=limit)
+        )
+        return 0
+
+    if normalized_operation == "read":
+        normalized_session_id = str(session_id or "").strip()
+        if not normalized_session_id:
+            raise ValueError("session_id is required for read operation")
+        _print_provider_session_bridge_result(
+            read_provider_session_rows(
+                normalized_provider,
+                normalized_session_id,
+                limit=limit,
+                sessions_dir=workspace_dir,
+            )
+        )
+        return 0
+
+    if normalized_operation == "send":
+        normalized_session_id = str(session_id or "").strip()
+        if not normalized_session_id:
+            raise ValueError("session_id is required for send operation")
+        asyncio.run(
+            send_provider_session_message(
+                normalized_provider,
+                normalized_session_id,
+                session_id if False else "",  # unreachable placeholder removed below
+            )
+        )
+        _print_provider_session_bridge_result({"ok": True})
+        return 0
+
+    raise ValueError(f"unsupported provider session bridge operation: {operation}")
 
 
 async def _log_raw_update(update: Update, context) -> None:
@@ -123,6 +185,16 @@ def main() -> None:
         action="store_true",
         help="Run once as Codex hook bridge relay and exit",
     )
+    parser.add_argument(
+        "--provider-session-bridge",
+        action="store_true",
+        help="Run once as provider session bridge and exit",
+    )
+    parser.add_argument("--provider-id", default=None)
+    parser.add_argument("--provider-session-op", default=None)
+    parser.add_argument("--provider-session-id", default=None)
+    parser.add_argument("--provider-workspace-dir", default=None)
+    parser.add_argument("--provider-limit", type=int, default=50)
     args, _ = parser.parse_known_args()
 
     data_dir = args.data_dir
@@ -138,6 +210,16 @@ def main() -> None:
         from plugins.providers.builtin.codex.python.hook_bridge import run_codex_hook_bridge_once
 
         raise SystemExit(run_codex_hook_bridge_once(data_dir))
+    if args.provider_session_bridge:
+        raise SystemExit(
+            _run_provider_session_bridge(
+                args.provider_id,
+                args.provider_session_op,
+                session_id=args.provider_session_id,
+                workspace_dir=args.provider_workspace_dir,
+                limit=args.provider_limit,
+            )
+        )
 
     # Resolve paths based on data_dir ----------------------------------------
     if data_dir:
