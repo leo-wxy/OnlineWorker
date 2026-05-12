@@ -39,3 +39,16 @@ test("sidebar collapse labels exist in both locales", () => {
     assert.match(source, /expand:\s*"/);
   }
 });
+
+test("app shell exposes a first-class usage tab in navigation and routing", () => {
+  const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
+  const tabs = readFileSync(join(root, "src", "utils", "appTabs.js"), "utf8");
+  const types = readFileSync(join(root, "src", "utils", "appTabs.d.ts"), "utf8");
+  const pages = readFileSync(join(root, "src", "pages", "index.ts"), "utf8");
+
+  assert.match(tabs, /PRIMARY_APP_TABS = \["dashboard", "sessions", "usage", "commands", "setup"\]/);
+  assert.match(types, /"dashboard" \| "sessions" \| "usage" \| "commands" \| "config" \| "setup"/);
+  assert.match(app, /activeTab === "usage"/);
+  assert.match(app, /<UsageBrowser \/>/);
+  assert.match(pages, /export \{ UsageBrowser \} from "\.\/UsageBrowser";/);
+});

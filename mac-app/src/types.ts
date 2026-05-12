@@ -116,6 +116,28 @@ export interface DashboardState {
   generatedAtEpoch: number;
 }
 
+export interface ProviderUsageDay {
+  date: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  totalTokens: number;
+  totalCostUsd?: number | null;
+}
+
+export interface ProviderUsageQuery {
+  startDate: string;
+  endDate: string;
+}
+
+export interface ProviderUsageSummary {
+  providerId: string;
+  days: ProviderUsageDay[];
+  updatedAtEpoch: number;
+  unsupportedReason?: string | null;
+}
+
 // Config file content
 export interface ConfigContent {
   raw: string;

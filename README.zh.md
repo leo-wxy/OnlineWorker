@@ -30,6 +30,7 @@ English version: [README.md](README.md)
 - 核心形态是已安装的 App，不是托管在浏览器里的服务。
 - App 负责配置和日常控制，Telegram 负责远程输入和最终回传。
 - 当前仓库内置的 provider 只有 `codex` 和 `claude`。
+- App 内提供一级 `Usage / 用量` 页面，可在 `Codex / Claude` 之间切换查看最近用量。
 
 ## 功能
 
@@ -37,6 +38,8 @@ English version: [README.md](README.md)
 - Telegram 作为远程任务入口和最终状态回传通道。
 - 基于 provider 的配置方式，支持已接入的 CLI 后端。
 - 可在 App 内浏览会话并发送消息。
+- 提供独立的 `Usage / 用量` 页面，默认查看近 7 天数据，并支持日期筛选、汇总卡和每日图表。
+- 用量统计仍然收口在 provider/plugin 适配层之后，不把 provider-specific 解析逻辑扩散到共享 React 页面。
 - 最终回复支持 Markdown 渲染。
 - 通过 Tauri + PyInstaller 提供适合安装的 macOS 打包能力。
 

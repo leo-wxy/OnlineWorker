@@ -46,6 +46,7 @@ export interface AppTexts {
     tabs: {
       dashboard: string;
       sessions: string;
+      usage: string;
       commands: string;
       config: string;
       setup: string;
@@ -248,6 +249,31 @@ export interface AppTexts {
     workspaceFallback: string;
     claudeConnectionError: string;
     codexConnectionError: string;
+  };
+  usage: {
+    title: string;
+    description: string;
+    refresh: string;
+    applying: string;
+    applyFilters: string;
+    rangeLast7Days: string;
+    startDate: string;
+    endDate: string;
+    chartTitle: string;
+    summaryTotalTokens: string;
+    summaryInputTokens: string;
+    summaryOutputTokens: string;
+    providerTabs: Record<"codex" | "claude", string>;
+    empty: string;
+    unavailable: string;
+    today: string;
+    inputTokens: string;
+    outputTokens: string;
+    cacheCreationTokens: string;
+    cacheReadTokens: string;
+    totalTokens: string;
+    totalCost: string;
+    updatedAt: (value: string) => string;
   };
   commands: {
     title: string;

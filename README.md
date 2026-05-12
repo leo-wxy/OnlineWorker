@@ -30,6 +30,7 @@ See also:
 - Built around an installed app, not a browser-hosted service.
 - App for setup and ongoing control, Telegram for remote input and final delivery.
 - Builtin providers in this repository: `codex` and `claude`.
+- A first-class `Usage` page for recent provider consumption, with `Codex / Claude` switching inside the app.
 
 ## Features
 
@@ -37,6 +38,8 @@ See also:
 - Telegram entry point for remote task submission and final updates.
 - Provider-driven configuration for supported CLI backends.
 - Session browsing and message sending from the app.
+- A dedicated `Usage` page for recent provider usage, with a default 7-day window, date filtering, summary cards, and daily charts.
+- Usage aggregation stays behind provider/plugin adapters instead of pushing provider-specific parsing into shared React surfaces.
 - Markdown rendering for final replies.
 - Installer-friendly macOS packaging through Tauri and PyInstaller.
 

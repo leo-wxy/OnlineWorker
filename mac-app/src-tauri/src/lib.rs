@@ -30,6 +30,7 @@ use commands::provider_sessions::{
     list_provider_sessions, read_provider_session, send_provider_session_message,
     start_provider_session_stream, stop_provider_session_stream,
 };
+use commands::provider_usage::get_provider_usage_summary;
 use commands::service::{
     check_cli, check_http_health, read_codex_mirror_status, service_restart, service_start,
     service_status, service_stop, shutdown_managed_processes_for_app_exit, snapshot_service_status,
@@ -249,6 +250,7 @@ pub fn run() {
             send_provider_session_message,
             start_provider_session_stream,
             stop_provider_session_stream,
+            get_provider_usage_summary,
             test_bot_token,
             test_group_access,
             test_bot_permissions,

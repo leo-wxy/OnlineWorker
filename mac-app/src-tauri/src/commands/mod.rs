@@ -7,6 +7,7 @@ pub mod config_provider;
 pub mod dashboard;
 pub mod logs;
 pub mod provider_sessions;
+pub mod provider_usage;
 pub mod service;
 pub mod session_state;
 pub mod telegram;

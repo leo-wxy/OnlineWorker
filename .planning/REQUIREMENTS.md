@@ -9,13 +9,13 @@ Requirements for the current brownfield improvement milestone. These focus on UI
 
 ### Visual System
 
-- [ ] **UI-01**: User can move between `Setup`, `Dashboard`, `Sessions`, and `Commands` without the app feeling visually inconsistent between screens.
-- [ ] **UI-02**: User can identify hierarchy and primary actions quickly because typography, spacing, and emphasis are consistent across major desktop surfaces.
+- [x] **UI-01**: User can move between `Setup`, `Dashboard`, `Sessions`, and `Commands` without the app feeling visually inconsistent between screens.
+- [x] **UI-02**: User can identify hierarchy and primary actions quickly because typography, spacing, and emphasis are consistent across major desktop surfaces.
 
-### Setup Experience
+### Provider Usage
 
-- [ ] **SET-01**: User can understand first-run setup order from the app UI without needing to read external docs first.
-- [ ] **SET-02**: User can confirm Telegram and CLI readiness from the `Setup` surface with clear status feedback.
+- [x] **USG-01**: User can open a first-class `Usage` page from the main app navigation and inspect daily token consumption without manually opening provider-specific logs, databases, or session files.
+- [x] **USG-02**: Provider usage data is exposed through provider/plugin-specific adapters so the shared `Usage` UI can switch between providers without embedding provider-specific parsing logic.
 
 ### Operations
 
@@ -58,10 +58,10 @@ Deferred to future release work after the current UI refinement milestone.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| UI-01 | Phase 1 | Pending |
-| UI-02 | Phase 1 | Pending |
-| SET-01 | Phase 2 | Pending |
-| SET-02 | Phase 2 | Pending |
+| UI-01 | Phase 1 | Completed (2026-05-10) |
+| UI-02 | Phase 1 | Completed (2026-05-10) |
+| USG-01 | Phase 2 | Completed (2026-05-12) |
+| USG-02 | Phase 2 | Completed (2026-05-12) |
 | OPS-01 | Phase 3 | Pending |
 | WRK-01 | Phase 4 | Pending |
 | WRK-02 | Phase 4 | Pending |

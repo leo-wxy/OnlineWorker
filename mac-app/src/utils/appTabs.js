@@ -1,4 +1,4 @@
-export const PRIMARY_APP_TABS = ["dashboard", "sessions", "commands", "setup"];
+export const PRIMARY_APP_TABS = ["dashboard", "sessions", "usage", "commands", "setup"];
 
 export const ALL_APP_TABS = [...PRIMARY_APP_TABS, "config"];
 

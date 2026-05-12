@@ -19,11 +19,12 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 - ✓ Builtin `codex` and `claude` providers are supported behind a shared provider registry/runtime boundary — existing
 - ✓ App-side session browsing and message sending are available from the desktop UI — existing
 - ✓ Tauri + PyInstaller packaging produces installable macOS artifacts — existing
+- ✓ Primary desktop workbench screens now share a stable shell baseline with collapsible navigation — Phase 1
+- ✓ A first-class `Usage` page now exposes daily `Codex / Claude` consumption through provider-specific adapters — Phase 2
 
 ### Active
 
-- [ ] Improve the Mac app visual hierarchy and consistency across the primary workbench screens
-- [ ] Make first-run and setup flows clearer without changing the underlying provider/runtime contract
+- [ ] Improve dashboard operational clarity and next-action visibility
 - [ ] Improve session and command ergonomics for repeated day-to-day use
 - [ ] Preserve packaged-app and release-path confidence while UI changes land
 
@@ -39,7 +40,8 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 - The codebase is split across Python runtime orchestration, Rust/Tauri host commands, and a React frontend.
 - Installed-app behavior matters more than source-only behavior; release confidence is tied to packaged-app validation.
 - The repo already includes provider abstraction boundaries, session/event tests, packaging scripts, and tag-driven DMG release automation.
-- Current user intent after public-repo preparation is to improve the visible UI quality of the desktop workbench rather than redesign the core product model.
+- Current user intent after public-repo preparation is to improve the visible desktop workbench, starting with shell ergonomics and a first-class provider Usage view rather than redesigning the core product model.
+- The current completed work now includes a dedicated `Usage` page wired through provider/plugin boundaries, so the next active UI focus shifts to dashboard readability and operational clarity.
 
 ## Constraints
 

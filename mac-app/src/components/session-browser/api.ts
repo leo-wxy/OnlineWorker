@@ -5,6 +5,8 @@ import type {
   CodexThreadCursor,
   CodexThreadReadResult,
   ProviderMetadata,
+  ProviderUsageQuery,
+  ProviderUsageSummary,
   SessionTurn,
 } from "../../types";
 import { limitSessionTurns } from "./shared";
@@ -65,6 +67,17 @@ export async function fetchCodexSessions(): Promise<CodexSession[]> {
 
 export async function fetchProviderMetadata(): Promise<ProviderMetadata[]> {
   return invoke<ProviderMetadata[]>("get_provider_metadata");
+}
+
+export async function fetchProviderUsageSummary(
+  providerId: string,
+  query: ProviderUsageQuery,
+): Promise<ProviderUsageSummary> {
+  return invoke<ProviderUsageSummary>("get_provider_usage_summary", {
+    providerId,
+    startDate: query.startDate,
+    endDate: query.endDate,
+  });
 }
 
 export async function fetchProviderSessions(providerId: string): Promise<unknown[]> {

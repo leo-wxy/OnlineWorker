@@ -346,6 +346,60 @@ async def test_turn_completed_marks_streamed_reply_as_synced_for_background_dedu
 
 
 @pytest.mark.asyncio
+async def test_turn_completed_html_not_modified_does_not_fallback_to_plain_text():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-123"] = ThreadInfo(
+        thread_id="tid-123",
+        topic_id=3794,
+        archived=False,
+        streaming_msg_id=5001,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    state.streaming_turns["tid-123"] = StreamingTurn(
+        message_id=5001,
+        topic_id=3794,
+        turn_id="turn-123",
+        buffer="明天是 **2026 年 5 月 13 日**。",
+        placeholder_deleted=True,
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock(side_effect=BadRequest("Message is not modified"))
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "tid-123",
+                    "turn": {"id": "turn-123", "status": "completed"},
+                },
+            },
+        },
+    )
+
+    assert bot.edit_message_text.await_count == 1
+    kwargs = bot.edit_message_text.await_args.kwargs
+    assert kwargs["parse_mode"] == "HTML"
+    assert "<b>2026 年 5 月 13 日</b>" in kwargs["text"]
+    assert "tid-123" not in state.streaming_turns
+    assert ws.threads["tid-123"].streaming_msg_id is None
+
+
+@pytest.mark.asyncio
 async def test_codex_turn_completed_keeps_single_stream_message_without_extra_stable_reply():
     ws = WorkspaceInfo(
         name="onlineWorker",

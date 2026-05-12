@@ -455,6 +455,14 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int):
                 )
                 return True
             except Exception as e:
+                err_str = str(e)
+                if "Message is not modified" in err_str:
+                    st.last_edit_time = time.monotonic()
+                    logger.info(
+                        f"[streaming] 最终回复 {'HTML' if parse_mode else 'plain text'} 已是最新，无需重复 edit "
+                        f"thread={thread_id[:8]} msg_id={st.message_id}"
+                    )
+                    return True
                 if parse_mode is not None:
                     logger.warning(
                         f"[streaming] 最终回复富文本 edit 失败，回退 plain text "
