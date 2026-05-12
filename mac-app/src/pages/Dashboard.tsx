@@ -2,6 +2,7 @@ import { startTransition, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useDashboardState } from "../hooks";
 import { useI18n, type AppTexts } from "../i18n";
+import { providerShowsPort, providerStatusValue } from "../utils/dashboardProviderStatus.js";
 import type {
   AlertLevel,
   ConnectionStatus,
@@ -617,8 +618,8 @@ export function Dashboard({ onOpenLogs, onOpenSetup, onOpenSessions }: Props) {
                       <p className="mt-1 text-sm font-mono text-gray-800">{provider.transport ?? "-"}</p>
                     </div>
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{provider.port ? (t.dashboard.portLabel ?? "Port") : "Status"}</p>
-                      <p className="mt-1 text-sm text-gray-800">{provider.port ?? providerDetail(provider, t)}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{providerShowsPort(provider) ? (t.dashboard.portLabel ?? "Port") : "Status"}</p>
+                      <p className="mt-1 text-sm text-gray-800">{providerStatusValue(provider, providerDetail(provider, t))}</p>
                     </div>
                     <div>
                       <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{t.dashboard.binaryLabel}</p>

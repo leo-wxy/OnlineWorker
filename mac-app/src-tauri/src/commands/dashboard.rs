@@ -3,6 +3,9 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
+use std::net::Shutdown;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -103,6 +106,14 @@ struct WorkspaceActivityCandidate {
     preview: Option<String>,
     updated_at: i64,
     active_thread_count: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OwnerBridgeRuntimeStatusResponse {
+    ok: bool,
+    health: Option<ServiceHealth>,
+    detail: Option<String>,
 }
 
 fn default_provider_snapshot(id: &str) -> ProviderConfigSnapshot {
@@ -380,6 +391,56 @@ fn provider_missing_cli_detail(provider: &ProviderConfigSnapshot) -> Option<Stri
     }
 }
 
+fn provider_owner_bridge_socket_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("provider_owner_bridge.sock")
+}
+
+fn read_provider_runtime_status_via_owner_bridge(
+    data_dir: &Path,
+    provider_id: &str,
+) -> Result<(ServiceHealth, Option<String>), String> {
+    let socket_path = provider_owner_bridge_socket_path(data_dir);
+    if !socket_path.exists() {
+        return Err(format!(
+            "provider owner bridge not ready: {}",
+            socket_path.display()
+        ));
+    }
+
+    let mut socket = UnixStream::connect(&socket_path)
+        .map_err(|e| format!("connect provider owner bridge failed: {e}"))?;
+    let payload = serde_json::json!({
+        "type": "runtime_status",
+        "provider_id": provider_id,
+    });
+    let raw_request = format!("{}\n", payload);
+    socket
+        .write_all(raw_request.as_bytes())
+        .map_err(|e| format!("write provider owner bridge request failed: {e}"))?;
+    socket
+        .shutdown(Shutdown::Write)
+        .map_err(|e| format!("shutdown provider owner bridge write failed: {e}"))?;
+
+    let mut response_line = String::new();
+    let mut reader = BufReader::new(socket);
+    reader
+        .read_line(&mut response_line)
+        .map_err(|e| format!("read provider owner bridge response failed: {e}"))?;
+
+    let response = serde_json::from_str::<OwnerBridgeRuntimeStatusResponse>(response_line.trim())
+        .map_err(|e| format!("parse provider owner bridge response failed: {e}"))?;
+    if !response.ok {
+        return Err(response
+            .detail
+            .unwrap_or_else(|| "provider owner bridge request failed".to_string()));
+    }
+
+    Ok((
+        response.health.unwrap_or(ServiceHealth::Unknown),
+        response.detail,
+    ))
+}
+
 fn build_provider_statuses(
     configs: Vec<ProviderConfigSnapshot>,
     data_dir: &Path,
@@ -401,10 +462,11 @@ fn build_provider_statuses(
                     "codex" => (derive_codex_health(service_running, mirror_status), None),
                     "claude" => derive_claude_health(service_running, &provider, data_dir),
                     _ => {
-                        if service_running {
-                            (ServiceHealth::Unknown, None)
-                        } else {
+                        if !service_running {
                             (ServiceHealth::Stopped, None)
+                        } else {
+                            read_provider_runtime_status_via_owner_bridge(data_dir, &provider.id)
+                                .unwrap_or((ServiceHealth::Unknown, None))
                         }
                     }
                 }
@@ -1159,7 +1221,11 @@ mod tests {
         SystemHealth, WorkspaceSnapshot,
     };
     use serde_json::json;
+    use std::fs;
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
     use std::collections::HashMap;
+    use std::thread;
     use std::time::{Duration, SystemTime};
 
     #[test]
@@ -1251,6 +1317,63 @@ mod tests {
             providers[0].detail.as_deref(),
             Some("CLI not found in PATH: /definitely/missing/onlineworker-test-codex")
         );
+    }
+
+    #[test]
+    fn build_provider_statuses_reads_overlay_provider_health_from_owner_bridge() {
+        let temp_dir = std::env::temp_dir().join(format!("ow-dashboard-status-{}", std::process::id()));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let socket_path = temp_dir.join("provider_owner_bridge.sock");
+        let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept owner bridge socket");
+            let mut request = String::new();
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            reader.read_line(&mut request).expect("read owner bridge request");
+            let payload: serde_json::Value =
+                serde_json::from_str(request.trim()).expect("parse owner bridge request");
+            assert_eq!(payload["type"], "runtime_status");
+            assert_eq!(payload["provider_id"], "overlay-tool");
+
+            let response = serde_json::json!({
+                "ok": true,
+                "health": "healthy",
+                "detail": "• overlay-tool：✅ 已连接",
+                "lines": ["• overlay-tool：✅ 已连接"],
+            });
+            writeln!(stream, "{response}").expect("write response");
+        });
+
+        let providers = build_provider_statuses(
+            vec![ProviderConfigSnapshot {
+                id: "overlay-tool".into(),
+                visible: true,
+                managed: true,
+                autostart: true,
+                transport: "http".into(),
+                live_transport: "http".into(),
+                port: Some(4096),
+                app_server_url: None,
+                control_mode: Some("app".into()),
+                bin: Some("/bin/sh".into()),
+            }],
+            &temp_dir,
+            true,
+            true,
+            Some(SystemTime::UNIX_EPOCH),
+            SystemTime::UNIX_EPOCH + Duration::from_secs(60),
+            None,
+        );
+
+        assert_eq!(providers[0].health, ServiceHealth::Healthy);
+        assert_eq!(
+            providers[0].detail.as_deref(),
+            Some("• overlay-tool：✅ 已连接")
+        );
+
+        server.join().expect("join owner bridge server");
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
