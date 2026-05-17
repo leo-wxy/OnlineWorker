@@ -685,3 +685,75 @@ async def test_message_handler_tracks_last_tg_user_message_id_per_thread():
     adapter.send_user_message.assert_awaited_once_with("dummy:demo", "tid-123", "hello")
     assert state.thread_last_tg_user_message_ids["tid-123"] == 321
     assert ws.threads["tid-123"].last_tg_user_message_id == 321
+
+
+@pytest.mark.asyncio
+async def test_message_handler_forwards_document_attachment_to_provider_runtime(tmp_path):
+    from bot.handlers.message import make_message_handler
+
+    state = AppState()
+    state.storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="demo",
+        path="/tmp/demo",
+        tool="dummy",
+        topic_id=50,
+        daemon_workspace_id="dummy:demo",
+    )
+    ws.threads["tid-attachment"] = ThreadInfo(thread_id="tid-attachment", topic_id=100, archived=False)
+    state.storage.workspaces["dummy:demo"] = ws
+
+    adapter = MagicMock()
+    adapter.connected = True
+    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.send_user_message = AsyncMock(return_value={})
+    state.set_adapter("dummy", adapter)
+
+    custom_send = AsyncMock()
+
+    import bot.handlers.message as message_module
+    original_get_provider = message_module.get_provider
+    message_module.get_provider = lambda name, *args, **kwargs: SimpleNamespace(  # type: ignore[assignment]
+        message_hooks=SimpleNamespace(
+            supports_photo=False,
+            supports_files=True,
+            ensure_connected=AsyncMock(return_value=adapter),
+            handle_local_owner=AsyncMock(return_value=False),
+            prepare_send=AsyncMock(return_value=True),
+            send=custom_send,
+        )
+    ) if name == "dummy" else original_get_provider(name, *args, **kwargs)
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.text = None
+    update.effective_message.caption = "请看附件"
+    update.effective_message.photo = None
+    update.effective_message.document = MagicMock(file_name="report.txt", mime_type="text/plain", file_id="doc-file-1")
+    update.effective_message.message_id = 654
+    update.effective_message.message_thread_id = 100
+
+    downloaded = tmp_path / "report.txt"
+    telegram_file = MagicMock()
+    telegram_file.download_to_drive = AsyncMock(return_value=downloaded)
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+    ctx.bot.get_file = AsyncMock(return_value=telegram_file)
+
+    handler = make_message_handler(state, GROUP_CHAT_ID)
+    try:
+        await handler(update, ctx)
+    finally:
+        message_module.get_provider = original_get_provider  # type: ignore[assignment]
+
+    ctx.bot.get_file.assert_awaited_once_with("doc-file-1")
+    telegram_file.download_to_drive.assert_awaited_once()
+    custom_send.assert_awaited_once()
+    send_kwargs = custom_send.await_args.kwargs
+    assert send_kwargs["text"] is None
+    assert len(send_kwargs["attachments"]) == 1
+    assert send_kwargs["attachments"][0]["kind"] == "file"
+    assert send_kwargs["attachments"][0]["path"] == str(downloaded)

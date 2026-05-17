@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { SessionTurn } from "../../types";
+import type { ComposerAttachment, SessionTurn } from "../../types";
 import {
   limitSessionTurns,
   mergeSessionTurns,
@@ -95,19 +95,33 @@ export function TurnBubble({
 export function SessionComposer({
   resetKey,
   sending,
+  stagingAttachments,
   disabled,
   placeholder,
   sendLabel,
   assistantLabel,
+  attachments,
+  onAttachmentsChange,
+  onPickFiles,
+  supportsAttachments = true,
+  attachmentButtonLabel,
+  imageButtonLabel,
   onSend,
 }: {
   resetKey: string;
   sending: boolean;
+  stagingAttachments?: boolean;
   disabled?: boolean;
   placeholder: string;
   sendLabel: string;
   assistantLabel?: string;
-  onSend: (text: string) => Promise<void>;
+  attachments: ComposerAttachment[];
+  onAttachmentsChange: (attachments: ComposerAttachment[]) => void;
+  onPickFiles: (kind: "file" | "image", files: FileList | File[]) => Promise<void>;
+  supportsAttachments?: boolean;
+  attachmentButtonLabel: string;
+  imageButtonLabel: string;
+  onSend: (text: string, attachments: ComposerAttachment[]) => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
 
@@ -117,13 +131,13 @@ export function SessionComposer({
 
   const handleSubmit = async () => {
     const text = draft.trim();
-    if (!text || sending || disabled) {
+    if ((!text && attachments.length === 0) || sending || stagingAttachments || disabled) {
       return;
     }
 
     setDraft("");
     try {
-      await onSend(text);
+      await onSend(text, attachments);
     } catch (error) {
       setDraft((current) => current || text);
       throw error;
@@ -149,14 +163,90 @@ export function SessionComposer({
             rows={1}
           ></textarea>
 
+          {attachments.length > 0 ? (
+            <div className="flex flex-wrap gap-2 border-t border-slate-100 px-3 py-3">
+              {attachments.map((attachment) => (
+                <div
+                  key={attachment.id}
+                  className="inline-flex max-w-full items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+                >
+                  <span className="truncate font-medium text-slate-700">{attachment.name}</span>
+                  <span className="shrink-0 text-[11px] text-slate-400">
+                    {attachment.kind === "image" ? "image" : "file"}
+                  </span>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-700"
+                    title={attachment.name}
+                    onClick={() =>
+                      onAttachmentsChange(attachments.filter((item) => item.id !== attachment.id))
+                    }
+                    disabled={sending || stagingAttachments || disabled}
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-3 py-2.5">
             <div className="flex items-center gap-1.5">
-              <button className="rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700" title="Attach File">
-                <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
-              </button>
-              <button className="rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700" title="Screenshot Selection">
-                <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-              </button>
+              {supportsAttachments ? (
+                <>
+                  <label
+                    className={`rounded-xl p-2 text-slate-400 transition-colors ${
+                      sending || stagingAttachments || disabled
+                        ? "cursor-not-allowed opacity-40"
+                        : "cursor-pointer hover:bg-slate-100 hover:text-slate-700"
+                    }`}
+                    title={attachmentButtonLabel}
+                  >
+                    <input
+                      type="file"
+                      multiple
+                      className="sr-only"
+                      disabled={sending || stagingAttachments || disabled}
+                      onChange={(event) => {
+                        const files = event.target.files;
+                        if (!files || files.length === 0) {
+                          return;
+                        }
+                        void onPickFiles("file", files);
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                    <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
+                  </label>
+                  <label
+                    className={`rounded-xl p-2 text-slate-400 transition-colors ${
+                      sending || stagingAttachments || disabled
+                        ? "cursor-not-allowed opacity-40"
+                        : "cursor-pointer hover:bg-slate-100 hover:text-slate-700"
+                    }`}
+                    title={imageButtonLabel}
+                  >
+                    <input
+                      type="file"
+                      multiple
+                      accept="image/*"
+                      className="sr-only"
+                      disabled={sending || stagingAttachments || disabled}
+                      onChange={(event) => {
+                        const files = event.target.files;
+                        if (!files || files.length === 0) {
+                          return;
+                        }
+                        void onPickFiles("image", files);
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                    <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                  </label>
+                </>
+              ) : null}
               {assistantLabel && (
                 <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-blue-700">
                   {assistantLabel}
@@ -166,7 +256,7 @@ export function SessionComposer({
 
             <button
               onClick={() => void handleSubmit()}
-              disabled={sending || disabled || !draft.trim()}
+              disabled={sending || stagingAttachments || disabled || (!draft.trim() && attachments.length === 0)}
               className="ow-btn-primary inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-40"
             >
               {sendLabel}

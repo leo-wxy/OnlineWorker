@@ -1,4 +1,6 @@
 use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use base64::Engine;
 use std::io::{BufRead, BufReader, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
@@ -13,7 +15,7 @@ use tauri::ipc::Channel;
 
 use super::claude::{list_claude_sessions, read_claude_session, send_claude_session_message};
 use super::codex::{
-    list_codex_threads, read_codex_thread, read_codex_thread_updates, send_codex_thread_message,
+    list_codex_threads, read_codex_thread_updates, send_codex_thread_message,
     CodexThreadCursor,
 };
 use super::config::read_provider_metadata_from_disk;
@@ -22,6 +24,27 @@ use super::config::ensure_data_dir;
 
 static PROVIDER_SESSION_STREAM_GENERATION: OnceLock<Arc<AtomicU64>> = OnceLock::new();
 const PROVIDER_OVERLAY_ENV: &str = "ONLINEWORKER_PROVIDER_OVERLAY";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposerAttachment {
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    pub mime_type: Option<String>,
+    pub size_bytes: u64,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StagedComposerAttachmentInput {
+    pub path: String,
+    pub name: Option<String>,
+    pub mime_type: Option<String>,
+    pub size_bytes: Option<u64>,
+    pub base64_data: Option<String>,
+}
 
 fn provider_session_stream_generation() -> Arc<AtomicU64> {
     PROVIDER_SESSION_STREAM_GENERATION
@@ -101,11 +124,35 @@ fn provider_owner_bridge_socket_path(data_dir: &Path) -> std::path::PathBuf {
     data_dir.join("provider_owner_bridge.sock")
 }
 
+fn provider_session_read_uses_owner_bridge(runtime_id: &str) -> bool {
+    runtime_id.trim() != "claude"
+}
+
+fn composer_attachment_staging_dir(data_dir: &Path) -> std::path::PathBuf {
+    data_dir.join("composer-attachments")
+}
+
+fn infer_attachment_kind(name: &str, mime_type: Option<&str>) -> String {
+    let mime = mime_type.unwrap_or_default().trim().to_ascii_lowercase();
+    if mime.starts_with("image/") {
+        return "image".to_string();
+    }
+    let lower_name = name.trim().to_ascii_lowercase();
+    if [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".heic"]
+        .iter()
+        .any(|suffix| lower_name.ends_with(suffix))
+    {
+        return "image".to_string();
+    }
+    "file".to_string()
+}
+
 fn send_provider_session_message_via_owner_bridge(
     data_dir: &Path,
     provider_id: &str,
     session_id: &str,
     text: &str,
+    attachments: &[ComposerAttachment],
     workspace_dir: Option<&str>,
 ) -> Result<bool, String> {
     let socket_path = provider_owner_bridge_socket_path(data_dir);
@@ -122,6 +169,10 @@ fn send_provider_session_message_via_owner_bridge(
         "thread_id": session_id,
         "text": text,
     });
+    if !attachments.is_empty() {
+        payload["attachments"] = serde_json::to_value(attachments)
+            .map_err(|e| format!("serialize attachments failed: {e}"))?;
+    }
     if let Some(workspace_dir) = workspace_dir.map(str::trim).filter(|value| !value.is_empty()) {
         payload["workspace_dir"] = Value::String(workspace_dir.to_string());
     }
@@ -265,6 +316,7 @@ fn send_provider_session_message_via_owner_bridge_with_retry(
     provider_id: &str,
     session_id: &str,
     text: &str,
+    attachments: &[ComposerAttachment],
     workspace_dir: Option<&str>,
     timeout: std::time::Duration,
 ) -> Result<(), String> {
@@ -282,6 +334,7 @@ fn send_provider_session_message_via_owner_bridge_with_retry(
             provider_id,
             session_id,
             text,
+            attachments,
             workspace_dir,
         ) {
             Ok(true) => return Ok(()),
@@ -395,23 +448,28 @@ pub async fn read_provider_session(
     workspace_dir: Option<String>,
 ) -> Result<Value, String> {
     let provider = require_runtime_provider(&provider_id)?;
-    match provider.runtime_id.as_str() {
-        "codex" => {
-            serde_json::to_value(read_codex_thread(session_id)?).map_err(|error| error.to_string())
-        }
-        "claude" => serde_json::to_value(read_claude_session(session_id, workspace_dir)?)
-            .map_err(|error| error.to_string()),
-        _ => {
-            let _ = app;
-            let data_dir = ensure_data_dir()?;
-            read_provider_session_via_owner_bridge(
-                &data_dir,
+    if provider_session_read_uses_owner_bridge(provider.runtime_id.as_str()) {
+        let data_dir = ensure_data_dir()?;
+        match read_provider_session_via_owner_bridge(
+            &data_dir,
+            &provider.id,
+            &session_id,
+            workspace_dir.as_deref(),
+            20,
+        ) {
+            Ok(value) => Ok(value),
+            Err(_) => run_provider_session_bridge(
+                &app,
                 &provider.id,
-                &session_id,
+                "read",
+                Some(&session_id),
                 workspace_dir.as_deref(),
-                20,
             )
+            .await,
         }
+    } else {
+        serde_json::to_value(read_claude_session(session_id, workspace_dir)?)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -421,17 +479,20 @@ pub async fn send_provider_session_message(
     provider_id: String,
     session_id: String,
     text: String,
+    attachments: Option<Vec<ComposerAttachment>>,
     workspace_dir: Option<String>,
 ) -> Result<Value, String> {
     let provider = require_runtime_provider(&provider_id)?;
+    let attachments = attachments.unwrap_or_default();
     match provider.runtime_id.as_str() {
         "codex" => {
-            send_codex_thread_message(session_id, text, workspace_dir).await?;
+            send_codex_thread_message(session_id, text, attachments, workspace_dir).await?;
             Ok(Value::Null)
         }
         "claude" => serde_json::to_value(send_claude_session_message(
             session_id,
             text,
+            attachments,
             workspace_dir,
         )?)
         .map_err(|error| error.to_string()),
@@ -439,7 +500,7 @@ pub async fn send_provider_session_message(
             let _ = app;
             let data_dir = ensure_data_dir()?;
             let trimmed = text.trim().to_string();
-            if trimmed.is_empty() {
+            if trimmed.is_empty() && attachments.is_empty() {
                 return Err("message is empty".to_string());
             }
             send_provider_session_message_via_owner_bridge_with_retry(
@@ -447,12 +508,69 @@ pub async fn send_provider_session_message(
                 &provider.id,
                 &session_id,
                 &trimmed,
+                &attachments,
                 workspace_dir.as_deref(),
                 std::time::Duration::from_secs(8),
             )?;
             Ok(Value::Null)
         }
     }
+}
+
+#[tauri::command]
+pub async fn stage_session_composer_attachments(
+    files: Vec<StagedComposerAttachmentInput>,
+) -> Result<Vec<ComposerAttachment>, String> {
+    let data_dir = ensure_data_dir()?;
+    let staging_dir = composer_attachment_staging_dir(&data_dir);
+    std::fs::create_dir_all(&staging_dir)
+        .map_err(|e| format!("create composer attachment dir failed: {e}"))?;
+
+    let mut staged = Vec::new();
+    for file in files {
+        let raw_name = file
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                std::path::Path::new(&file.path)
+                    .file_name()
+                    .and_then(|value| value.to_str())
+            })
+            .unwrap_or("attachment.bin")
+            .to_string();
+        let safe_name = raw_name
+            .chars()
+            .map(|ch| if ch == '/' || ch == '\\' { '_' } else { ch })
+            .collect::<String>();
+        let attachment_id = uuid::Uuid::new_v4().to_string();
+        let target_path = staging_dir.join(format!("{attachment_id}-{safe_name}"));
+
+        if let Some(base64_data) = file.base64_data.as_deref().filter(|value| !value.trim().is_empty()) {
+            let bytes = base64::engine::general_purpose::STANDARD.decode(base64_data.trim())
+                .map_err(|e| format!("decode attachment base64 failed: {e}"))?;
+            std::fs::write(&target_path, &bytes)
+                .map_err(|e| format!("write staged attachment failed: {e}"))?;
+        } else {
+            std::fs::copy(&file.path, &target_path)
+                .map_err(|e| format!("copy staged attachment failed: {e}"))?;
+        }
+
+        let metadata = std::fs::metadata(&target_path)
+            .map_err(|e| format!("stat staged attachment failed: {e}"))?;
+        let mime_type = file.mime_type.clone().filter(|value| !value.trim().is_empty());
+        staged.push(ComposerAttachment {
+            id: attachment_id,
+            kind: infer_attachment_kind(&safe_name, mime_type.as_deref()),
+            name: raw_name,
+            mime_type,
+            size_bytes: file.size_bytes.unwrap_or(metadata.len()),
+            path: target_path.to_string_lossy().to_string(),
+        });
+    }
+
+    Ok(staged)
 }
 
 #[tauri::command]
@@ -525,8 +643,10 @@ pub async fn stop_provider_session_stream(
 #[cfg(test)]
 mod tests {
     use super::{
+        ComposerAttachment,
         provider_not_enabled_message, provider_owner_bridge_socket_path,
-        provider_session_bridge_env, provider_session_bridge_path, send_provider_session_message_via_owner_bridge,
+        provider_session_bridge_env, provider_session_bridge_path, provider_session_read_uses_owner_bridge,
+        send_provider_session_message_via_owner_bridge,
         send_provider_session_message_via_owner_bridge_with_retry, PROVIDER_OVERLAY_ENV,
     };
     use crate::commands::config_provider::provider_metadata_from_raw;
@@ -535,6 +655,13 @@ mod tests {
     use std::os::unix::net::UnixListener;
     use std::thread;
     use std::time::Duration;
+
+    #[test]
+    fn codex_provider_session_reads_use_owner_bridge() {
+        assert!(provider_session_read_uses_owner_bridge("codex"));
+        assert!(!provider_session_read_uses_owner_bridge("claude"));
+        assert!(provider_session_read_uses_owner_bridge("overlay-tool"));
+    }
 
     #[test]
     fn disabled_overlay_message_uses_provider_not_enabled_prefix() {
@@ -585,6 +712,7 @@ mod tests {
             std::process::id()
         ));
         fs::create_dir_all(&dir).expect("create data dir");
+        std::env::remove_var(PROVIDER_OVERLAY_ENV);
         fs::write(
             dir.join(".env"),
             "ONLINEWORKER_PROVIDER_OVERLAY=/tmp/provider-overlay-from-file\n",
@@ -621,16 +749,28 @@ mod tests {
             assert_eq!(payload["thread_id"], "tid-1");
             assert_eq!(payload["text"], "hello");
             assert_eq!(payload["workspace_dir"], "/tmp/workspace");
+            assert_eq!(payload["attachments"][0]["kind"], "image");
+            assert_eq!(payload["attachments"][0]["path"], "/tmp/workspace/image.png");
 
             let response = serde_json::json!({ "ok": true, "accepted": true });
             writeln!(stream, "{response}").expect("write response");
         });
+
+        let attachments = vec![ComposerAttachment {
+            id: "att-1".to_string(),
+            kind: "image".to_string(),
+            name: "image.png".to_string(),
+            mime_type: Some("image/png".to_string()),
+            size_bytes: 128,
+            path: "/tmp/workspace/image.png".to_string(),
+        }];
 
         let used_bridge = send_provider_session_message_via_owner_bridge(
             &temp_dir,
             "overlay-tool",
             "tid-1",
             "hello",
+            &attachments,
             Some("/tmp/workspace"),
         )
         .expect("send via owner bridge");
@@ -667,6 +807,7 @@ mod tests {
             "overlay-tool",
             "tid-1",
             "hello",
+            &[],
             Some("/tmp/workspace"),
             Duration::from_secs(2),
         )

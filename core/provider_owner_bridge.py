@@ -288,7 +288,6 @@ class ProviderOwnerBridge:
     async def _handle_read_session(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
         session_id = str(request.get("session_id") or request.get("thread_id") or "").strip()
-        workspace_dir = str(request.get("workspace_dir") or "").strip() or None
         try:
             limit = int(request.get("limit") or 20)
         except (TypeError, ValueError):
@@ -313,7 +312,6 @@ class ProviderOwnerBridge:
             turns = facts.read_thread_history(
                 session_id,
                 limit=limit,
-                sessions_dir=workspace_dir,
             )
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -356,12 +354,13 @@ class ProviderOwnerBridge:
         thread_id = str(request.get("thread_id") or "").strip()
         text = str(request.get("text") or "").strip()
         workspace_dir = str(request.get("workspace_dir") or "").strip()
+        attachments = request.get("attachments") or []
 
         if not provider_id:
             return {"ok": False, "error": "缺少 provider_id"}
         if not thread_id:
             return {"ok": False, "error": "缺少 thread_id"}
-        if not text:
+        if not text and not attachments:
             return {"ok": False, "error": "空消息，拒绝发送"}
 
         provider = get_provider(provider_id, getattr(self.state, "config", None))
@@ -419,6 +418,7 @@ class ProviderOwnerBridge:
                 src_topic_id=None,
                 text=text,
                 has_photo=False,
+                attachments=attachments,
             )
             if should_continue is False:
                 return {
@@ -440,6 +440,7 @@ class ProviderOwnerBridge:
                 src_topic_id=None,
                 text=text,
                 has_photo=False,
+                attachments=attachments,
             )
         except Exception as exc:
             return {"ok": False, "error": str(exc)}

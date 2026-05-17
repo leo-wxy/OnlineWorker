@@ -71,6 +71,8 @@ def create_provider_descriptor() -> ProviderDescriptor:
                 sessions=True,
                 send=True,
                 approvals=True,
+                photos=True,
+                files=True,
                 commands=True,
                 command_wrappers=("model", "review"),
                 control_modes=("app", "tui", "hybrid"),
@@ -95,7 +97,8 @@ def create_provider_descriptor() -> ProviderDescriptor:
             prepare_send=runtime.prepare_send,
             send=runtime.send_message,
             handle_local_owner=runtime.handle_local_owner,
-            supports_photo=False,
+            supports_photo=True,
+            supports_files=True,
         ),
         interactions=ProviderInteractionHooks(
             build_approval_reply=runtime.build_approval_reply,

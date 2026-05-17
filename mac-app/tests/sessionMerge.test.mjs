@@ -55,3 +55,27 @@ test("mergeSessionTurns deduplicates optimistic user turn before final snapshot"
     ],
   );
 });
+
+test("mergeSessionTurns replaces optimistic user turn with attachment-enriched snapshot", () => {
+  const existing = [
+    { role: "user", content: "图片里面主要是什么内容" },
+    { role: "assistant", content: "等待中...", pending: true },
+  ];
+  const incoming = [
+    {
+      role: "user",
+      content: "图片里面主要是什么内容\n[Attached image] Image #1",
+    },
+    { role: "assistant", content: "图片主色调是偏青绿色。", displayMode: "markdown" },
+  ];
+
+  const merged = mergeSessionTurns(existing, incoming);
+
+  assert.deepEqual(
+    merged.map((turn) => [turn.role, turn.content]),
+    [
+      ["user", "图片里面主要是什么内容\n[Attached image] Image #1"],
+      ["assistant", "图片主色调是偏青绿色。"],
+    ],
+  );
+});

@@ -249,6 +249,10 @@ export interface AppTexts {
     workspaceFallback: string;
     claudeConnectionError: string;
     codexConnectionError: string;
+    attachFile: string;
+    attachImage: string;
+    stagingAttachments: string;
+    attachmentUnsupported: string;
   };
   usage: {
     title: string;

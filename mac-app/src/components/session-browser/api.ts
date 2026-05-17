@@ -1,7 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ClaudeSession,
+  ComposerAttachment,
   CodexSession,
+  CodexSendResult,
   CodexThreadCursor,
   CodexThreadReadResult,
   ProviderMetadata,
@@ -101,12 +103,14 @@ export async function sendProviderSessionMessage(
   providerId: string,
   sessionId: string,
   text: string,
+  attachments: ComposerAttachment[] = [],
   workspaceDir?: string | null,
 ): Promise<unknown> {
   return invoke("send_provider_session_message", {
     providerId,
     sessionId,
     text,
+    attachments,
     workspaceDir: workspaceDir ?? null,
   });
 }
@@ -130,10 +134,16 @@ export async function fetchCodexThreadUpdates(
   };
 }
 
-export async function sendCodexMessage(threadId: string, text: string, cwd?: string | null): Promise<void> {
-  await invoke("send_codex_thread_message", {
+export async function sendCodexMessage(
+  threadId: string,
+  text: string,
+  attachments: ComposerAttachment[] = [],
+  cwd?: string | null,
+): Promise<CodexSendResult> {
+  return invoke<CodexSendResult>("send_codex_thread_message", {
     threadId,
     text,
+    attachments,
     cwd: cwd ?? null,
   });
 }
@@ -165,11 +175,27 @@ export async function fetchClaudeMessages(
 export async function sendClaudeMessage(
   sessionId: string,
   text: string,
+  attachments: ComposerAttachment[] = [],
   workspaceDir?: string | null,
 ): Promise<ClaudeSendResult> {
   return invoke<ClaudeSendResult>("send_claude_session_message", {
     sessionId,
     text,
+    attachments,
     workspaceDir: workspaceDir ?? null,
+  });
+}
+
+export async function stageComposerAttachments(
+  files: Array<{
+    path: string;
+    name?: string | null;
+    mimeType?: string | null;
+    sizeBytes?: number | null;
+    base64Data?: string | null;
+  }>,
+): Promise<ComposerAttachment[]> {
+  return invoke<ComposerAttachment[]>("stage_session_composer_attachments", {
+    files,
   });
 }

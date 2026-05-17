@@ -28,6 +28,7 @@ use commands::dashboard::get_dashboard_state;
 use commands::logs::{get_log_file_path, start_log_tail, stop_log_tail};
 use commands::provider_sessions::{
     list_provider_sessions, read_provider_session, send_provider_session_message,
+    stage_session_composer_attachments,
     start_provider_session_stream, stop_provider_session_stream,
 };
 use commands::provider_usage::get_provider_usage_summary;
@@ -248,6 +249,7 @@ pub fn run() {
             list_provider_sessions,
             read_provider_session,
             send_provider_session_message,
+            stage_session_composer_attachments,
             start_provider_session_stream,
             stop_provider_session_stream,
             get_provider_usage_summary,

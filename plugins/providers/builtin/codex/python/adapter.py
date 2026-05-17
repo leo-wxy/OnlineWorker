@@ -273,7 +273,11 @@ class CodexAdapter:
         if thread_id and workspace_id:
             self._thread_workspace_map[thread_id] = workspace_id
             logger.debug(f"[thread_map] 记录映射：thread={thread_id[:12]}… → workspace={workspace_id}")
-        return await self._call("thread/resume", {"threadId": thread_id})
+        params: dict[str, Any] = {"threadId": thread_id}
+        cwd = self._workspace_cwd_map.get(workspace_id)
+        if cwd:
+            params["cwd"] = cwd
+        return await self._call("thread/resume", params)
 
     async def archive_thread(self, workspace_id: str, thread_id: str) -> dict:
         return await self._call("thread/archive", {"threadId": thread_id})
@@ -283,6 +287,7 @@ class CodexAdapter:
         workspace_id: str,
         thread_id: str,
         text: str,
+        attachments: list[dict[str, Any]] | None = None,
         *,
         approval_policy: Any | None = None,
         approvals_reviewer: str | None = None,
@@ -291,10 +296,23 @@ class CodexAdapter:
         """发送用户消息。注意 input 是数组格式（Pitfall 8）。"""
         if thread_id and workspace_id:
             self._thread_workspace_map[thread_id] = workspace_id
+        input_items: list[dict[str, Any]] = []
+        if text:
+            input_items.append({"type": "text", "text": text})
+        for attachment in attachments or []:
+            if not isinstance(attachment, dict):
+                continue
+            kind = str(attachment.get("kind") or "").strip().lower()
+            path = str(attachment.get("path") or "").strip()
+            if kind == "image" and path:
+                input_items.append({"type": "localImage", "path": path})
         params: dict[str, Any] = {
             "threadId": thread_id,
-            "input": [{"type": "text", "text": text}],
+            "input": input_items,
         }
+        cwd = self._workspace_cwd_map.get(workspace_id)
+        if cwd:
+            params["cwd"] = cwd
         if approval_policy is not None:
             params["approvalPolicy"] = approval_policy
         if approvals_reviewer is not None:

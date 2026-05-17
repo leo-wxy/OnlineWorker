@@ -415,6 +415,68 @@ def test_read_thread_history_preserves_phase_from_session_jsonl(tmp_path):
     ]
 
 
+def test_read_thread_history_normalizes_codex_image_wrapper_and_deduplicates_user_turn(tmp_path):
+    sessions_dir = tmp_path / "sessions"
+    day_dir = sessions_dir / "2026" / "05" / "17"
+    day_dir.mkdir(parents=True)
+    session_path = day_dir / "rollout-2026-05-17T12-30-00-thread-image.jsonl"
+
+    lines = [
+        {
+            "timestamp": "2026-05-17T12:36:52Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "图片里面主要是什么内容"},
+                    {"type": "input_text", "text": "<image name=[Image #1]>"},
+                    {"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA"},
+                    {"type": "input_text", "text": "</image>"},
+                ],
+            },
+        },
+        {
+            "timestamp": "2026-05-17T12:36:52Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "user_message",
+                "message": "图片里面主要是什么内容",
+                "local_images": ["/Users/wxy/Projects/onlineWorker/docs/screenshots/setup.png"],
+            },
+        },
+        {
+            "timestamp": "2026-05-17T12:37:05Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "agent_message",
+                "message": "图片主要是一个设置页面。",
+            },
+        },
+    ]
+
+    with open(session_path, "w", encoding="utf-8") as f:
+        for line in lines:
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+
+    history = read_thread_history("thread-image", sessions_dir=str(sessions_dir), limit=10)
+
+    assert history == [
+        {
+            "role": "user",
+            "text": "图片里面主要是什么内容\n[Attached image] Image #1",
+            "timestamp": "2026-05-17T12:36:52Z",
+            "phase": "",
+        },
+        {
+            "role": "assistant",
+            "text": "图片主要是一个设置页面。",
+            "timestamp": "2026-05-17T12:37:05Z",
+            "phase": "",
+        },
+    ]
+
+
 def test_read_codex_turn_terminal_message_reads_task_complete_last_agent_message(tmp_path):
     sessions_dir = tmp_path / "sessions"
     day_dir = sessions_dir / "2026" / "04" / "10"

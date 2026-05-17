@@ -34,3 +34,4 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 ureq = { version = "2", features = ["json", "proxy-from-env", "socks-proxy"] }
 tungstenite = "0.24"
 uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"

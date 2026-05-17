@@ -24,9 +24,9 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 
 ### Active
 
-- [ ] Improve dashboard operational clarity and next-action visibility
-- [ ] Improve session and command ergonomics for repeated day-to-day use
-- [ ] Preserve packaged-app and release-path confidence while UI changes land
+- [ ] Add first-class file and image attachment support across Telegram and desktop workflows
+- [ ] Keep attachment routing inside the existing provider/plugin boundaries
+- [ ] Preserve packaged-app build and launch confidence while attachment support lands
 
 ### Out of Scope
 
@@ -40,8 +40,8 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 - The codebase is split across Python runtime orchestration, Rust/Tauri host commands, and a React frontend.
 - Installed-app behavior matters more than source-only behavior; release confidence is tied to packaged-app validation.
 - The repo already includes provider abstraction boundaries, session/event tests, packaging scripts, and tag-driven DMG release automation.
-- Current user intent after public-repo preparation is to improve the visible desktop workbench, starting with shell ergonomics and a first-class provider Usage view rather than redesigning the core product model.
-- The current completed work now includes a dedicated `Usage` page wired through provider/plugin boundaries, so the next active UI focus shifts to dashboard readability and operational clarity.
+- Current user intent after public-repo preparation is to extend the shipped workflow with first-class file and image support rather than redesigning the core product model.
+- The current completed work now includes a dedicated `Usage` page wired through provider/plugin boundaries, and the next active phase is attachment support across Telegram and desktop surfaces.
 
 ## Constraints
 

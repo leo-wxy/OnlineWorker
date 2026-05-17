@@ -74,6 +74,8 @@ def create_provider_descriptor() -> ProviderDescriptor:
                 send=True,
                 approvals=True,
                 questions=True,
+                photos=False,
+                files=False,
                 commands=True,
                 control_modes=("app",),
             ),
@@ -92,6 +94,7 @@ def create_provider_descriptor() -> ProviderDescriptor:
             prepare_send=runtime.prepare_send,
             send=send_default_message,
             supports_photo=False,
+            supports_files=False,
         ),
         interactions=ProviderInteractionHooks(
             build_approval_reply=runtime.build_approval_reply,

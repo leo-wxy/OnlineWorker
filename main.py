@@ -75,6 +75,8 @@ def _run_provider_session_bridge(
     session_id: str | None = None,
     workspace_dir: str | None = None,
     limit: int = 50,
+    text: str | None = None,
+    attachments: list[dict] | None = None,
 ) -> int:
     from core.provider_session_bridge import (
         list_provider_session_rows,
@@ -111,11 +113,16 @@ def _run_provider_session_bridge(
         normalized_session_id = str(session_id or "").strip()
         if not normalized_session_id:
             raise ValueError("session_id is required for send operation")
+        normalized_text = str(text or "").strip()
+        if not normalized_text and not attachments:
+            raise ValueError("text or attachments are required for send operation")
         asyncio.run(
             send_provider_session_message(
                 normalized_provider,
                 normalized_session_id,
-                session_id if False else "",  # unreachable placeholder removed below
+                normalized_text,
+                workspace_dir=workspace_dir,
+                attachments=attachments or [],
             )
         )
         _print_provider_session_bridge_result({"ok": True})

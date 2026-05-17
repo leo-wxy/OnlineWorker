@@ -332,6 +332,10 @@ export const zhTexts: AppTexts = {
       workspaceFallback: "（未知）",
       claudeConnectionError: "无法连接到 claude",
       codexConnectionError: "无法连接到 codex",
+      attachFile: "添加文件",
+      attachImage: "添加图片",
+      stagingAttachments: "正在准备附件...",
+      attachmentUnsupported: "当前 provider 会话暂不支持附件发送。",
     },
     usage: {
       title: "用量",

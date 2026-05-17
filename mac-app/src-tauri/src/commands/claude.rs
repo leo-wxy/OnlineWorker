@@ -10,6 +10,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use super::config::data_dir;
+use super::provider_sessions::ComposerAttachment;
 
 const CLAUDE_SESSION_PREVIEW_TURNS: usize = 50;
 const CLAUDE_CONTINUATION_CONTEXT_CHAR_LIMIT: usize = 12_000;
@@ -415,10 +416,36 @@ pub fn read_claude_session(
 pub fn send_claude_session_message(
     session_id: String,
     text: String,
+    attachments: Vec<ComposerAttachment>,
     workspace_dir: Option<String>,
 ) -> Result<ClaudeSendResult, String> {
     let trimmed = text.trim();
-    if trimmed.is_empty() {
+    let attachment_prompt = attachments
+        .iter()
+        .filter_map(|attachment| {
+            let name = attachment.name.trim();
+            let path = attachment.path.trim();
+            if name.is_empty() && path.is_empty() {
+                return None;
+            }
+            let label = if attachment.kind == "image" { "Attached image" } else { "Attached file" };
+            let title = if !name.is_empty() { name } else { path };
+            let mut block = format!("[{label}] {title}");
+            if !path.is_empty() {
+                block.push_str(&format!("\nPath: {path}"));
+            }
+            Some(block)
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let final_text = match (trimmed.is_empty(), attachment_prompt.is_empty()) {
+        (true, true) => return Err("message is empty".to_string()),
+        (false, true) => trimmed.to_string(),
+        (true, false) => attachment_prompt,
+        (false, false) => format!("{trimmed}\n\n{attachment_prompt}"),
+    };
+
+    if final_text.trim().is_empty() {
         return Err("message is empty".to_string());
     }
 
@@ -445,7 +472,7 @@ pub fn send_claude_session_message(
         .unwrap_or_default();
     let command_env = load_claude_command_env();
 
-    let argv = build_claude_send_argv("claude", &session_id, trimmed, session_exists);
+    let argv = build_claude_send_argv("claude", &session_id, &final_text, session_exists);
     let (program, args) = argv
         .split_first()
         .ok_or("claude argv is empty".to_string())?;
@@ -460,7 +487,7 @@ pub fn send_claude_session_message(
             let fallback_argv = build_claude_compact_send_argv(
                 "claude",
                 &new_session_id,
-                trimmed,
+                &final_text,
                 continuation_prompt.as_deref(),
             );
             let (fallback_program, fallback_args) = fallback_argv

@@ -48,7 +48,106 @@ def _resolve_workspace_id(state, adapter, thread_id: str, cwd: str) -> Optional[
             continue
         return getattr(ws, "daemon_workspace_id", None) or storage_key
 
-    return None
+    return f"codex:{normalized_cwd}"
+
+
+def _extract_started_thread_id(result: object) -> str:
+    thread_id = result.get("id") if isinstance(result, dict) else None
+    if not thread_id and isinstance(result, dict):
+        thread = result.get("thread", {})
+        if isinstance(thread, dict):
+            thread_id = thread.get("id")
+    if not thread_id:
+        raise RuntimeError(f"Codex start_thread 返回无效 thread id：{result}")
+    return str(thread_id)
+
+
+def _ensure_storage_workspace(state, workspace_id: str, cwd: str):
+    from core.storage import AppStorage, WorkspaceInfo
+
+    if getattr(state, "storage", None) is None:
+        state.storage = AppStorage()
+
+    storage = state.storage
+    ws_info = storage.workspaces.get(workspace_id)
+    if ws_info is None:
+        ws_info = WorkspaceInfo(
+            name=os.path.basename(cwd) or cwd,
+            path=cwd,
+            tool="codex",
+            daemon_workspace_id=workspace_id,
+        )
+        storage.workspaces[workspace_id] = ws_info
+    else:
+        if cwd:
+            ws_info.path = cwd
+        ws_info.tool = "codex"
+        ws_info.daemon_workspace_id = workspace_id
+    return ws_info
+
+
+def _persist_storage(state, data_dir: Optional[str]) -> None:
+    from core.storage import STORAGE_PATH, save_storage
+
+    storage = getattr(state, "storage", None)
+    if storage is None:
+        return
+
+    if data_dir:
+        save_storage(storage, path=os.path.join(data_dir, STORAGE_PATH))
+    else:
+        save_storage(storage)
+
+
+async def _send_on_thread(adapter, workspace_id: str, thread_id: str, text: str, attachments):
+    from bot.handlers.common import is_codex_unmaterialized_error
+
+    try:
+        await adapter.resume_thread(workspace_id, thread_id)
+    except Exception as exc:
+        if not is_codex_unmaterialized_error(exc):
+            raise
+    await adapter.send_user_message(workspace_id, thread_id, text, attachments=attachments)
+
+
+async def _remap_unmaterialized_thread_for_app_send(
+    state,
+    adapter,
+    *,
+    workspace_id: str,
+    cwd: str,
+    requested_thread_id: str,
+    preview: str | None,
+    data_dir: Optional[str],
+) -> str:
+    from core.storage import ThreadInfo
+
+    result = await adapter.start_thread(workspace_id)
+    new_thread_id = _extract_started_thread_id(result)
+    if new_thread_id == requested_thread_id:
+        raise RuntimeError("Codex start_thread 返回了与原 thread 相同的 thread id")
+
+    ws_info = _ensure_storage_workspace(state, workspace_id, cwd)
+    existing_thread = ws_info.threads.get(requested_thread_id)
+    if existing_thread is not None:
+        existing_thread.is_active = False
+
+    ws_info.threads[new_thread_id] = ThreadInfo(
+        thread_id=new_thread_id,
+        preview=preview,
+        archived=False,
+        is_active=True,
+        source="app",
+    )
+    adapter._thread_workspace_map[new_thread_id] = workspace_id
+    _persist_storage(state, data_dir)
+    logger.info(
+        "[codex-owner-bridge] 旧 thread 物化失败，切换到新 app thread old=%s new=%s workspace=%s",
+        requested_thread_id[:12],
+        new_thread_id[:12],
+        workspace_id,
+    )
+    return new_thread_id
 
 
 class CodexOwnerBridge:
@@ -119,10 +218,11 @@ class CodexOwnerBridge:
         thread_id = str(request.get("thread_id") or "").strip()
         text = str(request.get("text") or "").strip()
         cwd = str(request.get("cwd") or "").strip()
+        attachments = request.get("attachments") or []
 
         if not thread_id:
             return {"ok": False, "error": "缺少 thread_id"}
-        if not text:
+        if not text and not attachments:
             return {"ok": False, "error": "空消息，拒绝发送"}
 
         adapter = self.state.get_adapter("codex")
@@ -131,7 +231,23 @@ class CodexOwnerBridge:
 
         workspace_id = _resolve_workspace_id(self.state, adapter, thread_id, cwd)
         if workspace_id:
+            register_workspace_cwd = getattr(adapter, "register_workspace_cwd", None)
+            if cwd and callable(register_workspace_cwd):
+                register_workspace_cwd(workspace_id, cwd)
             adapter._thread_workspace_map[thread_id] = workspace_id
+
+        tracked_thread = None
+        if hasattr(self.state, "find_thread_by_id_global"):
+            found = self.state.find_thread_by_id_global(thread_id)
+            if found is not None:
+                _, tracked_thread = found
+        preview = getattr(tracked_thread, "preview", None)
+        can_remap = bool(cwd) and (
+            tracked_thread is None or getattr(tracked_thread, "source", "unknown") != "app"
+        )
+        requested_thread_id = thread_id
+        effective_thread_id = thread_id
+        created_new_thread = False
         logger.info(
             "[codex-owner-bridge] send_message thread=%s workspace=%s cwd=%s",
             thread_id,
@@ -140,35 +256,74 @@ class CodexOwnerBridge:
         )
 
         try:
-            codex_state.mark_send_started(self.state, thread_id)
+            codex_state.mark_send_started(self.state, effective_thread_id)
             if workspace_id:
                 try:
-                    await adapter.resume_thread(workspace_id, thread_id)
+                    await _send_on_thread(adapter, workspace_id, effective_thread_id, text, attachments)
                 except Exception as exc:
-                    if not is_codex_unmaterialized_error(exc):
+                    if not (can_remap and is_codex_unmaterialized_error(exc)):
                         raise
-                await adapter.send_user_message(workspace_id, thread_id, text)
+                    effective_thread_id = await _remap_unmaterialized_thread_for_app_send(
+                        self.state,
+                        adapter,
+                        workspace_id=workspace_id,
+                        cwd=cwd,
+                        requested_thread_id=requested_thread_id,
+                        preview=preview,
+                        data_dir=self.data_dir,
+                    )
+                    created_new_thread = effective_thread_id != requested_thread_id
+                    codex_state.mark_send_started(self.state, effective_thread_id)
+                    await _send_on_thread(
+                        adapter,
+                        workspace_id,
+                        effective_thread_id,
+                        text,
+                        attachments,
+                    )
             else:
                 try:
                     await adapter._call("thread/resume", {"threadId": thread_id})
                 except Exception as exc:
                     if not is_codex_unmaterialized_error(exc):
                         raise
+                input_items = []
+                if text:
+                    input_items.append({"type": "text", "text": text})
+                for attachment in attachments:
+                    if not isinstance(attachment, dict):
+                        continue
+                    kind = str(attachment.get("kind") or "").strip().lower()
+                    path = str(attachment.get("path") or "").strip()
+                    name = str(attachment.get("name") or "").strip()
+                    if kind == "image" and path:
+                        input_items.append({"type": "localImage", "path": path})
+                    elif kind == "file":
+                        summary = f"[Attached file] {name or path}"
+                        if path:
+                            summary = f"{summary}\nPath: {path}"
+                        input_items.append({"type": "text", "text": summary})
                 await adapter._call(
                     "turn/start",
                     {
                         "threadId": thread_id,
-                        "input": [{"type": "text", "text": text}],
+                        "input": input_items,
                     },
                 )
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+        if workspace_id and cwd:
+            _ensure_storage_workspace(self.state, workspace_id, cwd)
+            _persist_storage(self.state, self.data_dir)
+
         return {
             "ok": True,
             "accepted": True,
-            "thread_id": thread_id,
+            "requested_thread_id": requested_thread_id,
+            "thread_id": effective_thread_id,
             "workspace_id": workspace_id,
+            "created_new_thread": created_new_thread,
         }
 
 

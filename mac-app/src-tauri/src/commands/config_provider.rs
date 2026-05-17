@@ -83,6 +83,8 @@ pub(crate) struct ProviderCapabilitiesEntry {
     pub(crate) questions: bool,
     #[serde(default)]
     pub(crate) photos: bool,
+    #[serde(default)]
+    pub(crate) files: bool,
     #[serde(default, alias = "command_wrappers")]
     pub(crate) command_wrappers: Vec<String>,
     #[serde(default, alias = "control_modes")]

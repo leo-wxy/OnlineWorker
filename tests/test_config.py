@@ -120,6 +120,20 @@ def test_builtin_provider_plugin_manifests_define_public_defaults():
     assert "customprovider" not in ids
 
 
+def test_builtin_provider_defaults_expose_attachment_capabilities():
+    from config import _default_provider_blueprint
+
+    codex = _default_provider_blueprint("codex")
+    claude = _default_provider_blueprint("claude")
+
+    assert codex["capabilities"]["photos"] is True
+    assert claude["capabilities"]["photos"] is False
+    assert "files" in codex["capabilities"]
+    assert "files" in claude["capabilities"]
+    assert codex["capabilities"]["files"] is True
+    assert claude["capabilities"]["files"] is False
+
+
 def test_config_yaml_example_uses_public_provider_schema():
     example_path = Path(__file__).resolve().parents[1] / "config.yaml.example"
     source = example_path.read_text(encoding="utf-8")

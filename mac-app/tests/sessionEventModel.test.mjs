@@ -18,6 +18,22 @@ test("applySessionStreamEvent appends assistant turn", () => {
   assert.equal(next[1].content, "我先检查一下。");
 });
 
+test("applySessionStreamEvent replaces optimistic user turn with attachment-enriched user message", () => {
+  const initial = [{ role: "user", content: "图片里面主要是什么内容" }];
+  const next = applySessionStreamEvent(initial, {
+    kind: "user_message",
+    turn: {
+      role: "user",
+      content: "图片里面主要是什么内容\n[Attached image] Image #1",
+      displayMode: "plain",
+    },
+  });
+
+  assert.equal(next.length, 1);
+  assert.equal(next[0].role, "user");
+  assert.equal(next[0].content, "图片里面主要是什么内容\n[Attached image] Image #1");
+});
+
 test("applySessionStreamEvent keeps codex commentary in the same pending assistant turn", () => {
   const initial = [
     { role: "user", content: "继续" },

@@ -13,6 +13,7 @@ import {
   sendClaudeMessage,
   sendCodexMessage,
   sendProviderSessionMessage,
+  stageComposerAttachments,
 } from "../components/session-browser/api";
 import {
   BACKGROUND_REPLY_POLL,
@@ -43,12 +44,43 @@ import {
 import { shouldClearReplyWatch } from "../utils/replyWatch.js";
 import type {
   ClaudeSession,
+  ComposerAttachment,
   CodexSession,
   CodexThreadCursor,
   CodexThreadStreamEvent,
   ProviderMetadata,
   SessionTurn,
 } from "../types";
+
+async function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read attachment"));
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const commaIndex = result.indexOf(",");
+      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function stageBrowserFiles(files: File[]): Promise<ComposerAttachment[]> {
+  const payload = await Promise.all(
+    files.map(async (file) => ({
+      path: "",
+      name: file.name,
+      mimeType: file.type || null,
+      sizeBytes: file.size,
+      base64Data: await readFileAsBase64(file),
+    })),
+  );
+  return stageComposerAttachments(payload);
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
 
 type GenericProviderSessionRaw = {
   id?: string;
@@ -113,17 +145,33 @@ function CodexSessionBadges({ session, compact = false }: { session: CodexSessio
 function CodexChat({ session }: { session: UnifiedSession }) {
   const { t } = useI18n();
   const rawSession = session.raw as CodexSession;
+  const providerSupportsAttachments = true;
+  const [activeSession, setActiveSession] = useState<CodexSession>(rawSession);
   
   const [turns, setTurns] = useState<SessionTurn[]>([]);
   const [turnsLoading, setTurnsLoading] = useState(false);
   const [turnsError, setTurnsError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [stagingAttachments, setStagingAttachments] = useState(false);
   const [replyWatchState, setReplyWatchState] = useState<ReplyWatchState | null>(null);
   const turnsEndRef = useRef<HTMLDivElement>(null);
   const replyWatchTokenRef = useRef(0);
   const turnsRef = useRef<SessionTurn[]>([]);
   const codexCursorRef = useRef<CodexThreadCursor | null>(null);
   const [codexStreamCursor, setCodexStreamCursor] = useState<CodexThreadCursor | null>(null);
+
+  const resolveCodexSessionByThreadId = useCallback(async (threadId: string) => {
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const sessions = await fetchCodexSessions();
+      const matched = sessions.find((item) => item.threadId === threadId);
+      if (matched?.rolloutPath) {
+        return matched;
+      }
+      await sleepMs(100);
+    }
+    throw new Error(`Failed to resolve remapped Codex session: ${threadId}`);
+  }, []);
 
   const cancelReplyWatch = useCallback(() => {
     replyWatchTokenRef.current += 1;
@@ -138,10 +186,13 @@ function CodexChat({ session }: { session: UnifiedSession }) {
     codexCursorRef.current = null;
     setCodexStreamCursor(null);
     try {
-      const snapshot = await fetchCodexThreadState(rawSession.rolloutPath ?? "");
+      const [history, snapshot] = await Promise.all([
+        fetchProviderSession("codex", activeSession.threadId, activeSession.cwd),
+        fetchCodexThreadState(activeSession.rolloutPath ?? ""),
+      ]);
       codexCursorRef.current = snapshot.cursor;
-      turnsRef.current = snapshot.turns;
-      setTurns(snapshot.turns);
+      turnsRef.current = history;
+      setTurns(history);
       setCodexStreamCursor(snapshot.cursor);
       setReplyWatchState((current) => (current === "expired" ? null : current));
     } catch (loadError) {
@@ -149,15 +200,30 @@ function CodexChat({ session }: { session: UnifiedSession }) {
     } finally {
       setTurnsLoading(false);
     }
-  }, [rawSession.rolloutPath]);
+  }, [activeSession.rolloutPath]);
+
+  useEffect(() => {
+    setActiveSession(rawSession);
+  }, [
+    session.id,
+    rawSession.rolloutPath,
+    rawSession.threadId,
+    rawSession.cwd,
+    rawSession.title,
+    rawSession.archived,
+    rawSession.modelProvider,
+    rawSession.source,
+    rawSession.isSmoke,
+  ]);
 
   useEffect(() => {
     cancelReplyWatch();
+    setAttachments([]);
     void loadTurns();
     return () => {
       replyWatchTokenRef.current += 1;
     };
-  }, [session.id, loadTurns, cancelReplyWatch]);
+  }, [session.id, activeSession.rolloutPath, loadTurns, cancelReplyWatch]);
 
   useEffect(() => {
     turnsRef.current = turns;
@@ -188,20 +254,20 @@ function CodexChat({ session }: { session: UnifiedSession }) {
   }, [cancelReplyWatch]);
 
   useCodexThreadStream({
-    enabled: Boolean(rawSession.rolloutPath && codexStreamCursor),
-    rolloutPath: rawSession.rolloutPath ?? null,
+    enabled: Boolean(activeSession.rolloutPath && codexStreamCursor),
+    rolloutPath: activeSession.rolloutPath ?? null,
     cursor: codexStreamCursor,
     onEvent: handleCodexStreamEvent,
   });
 
-  const handleSend = async (text: string) => {
-    if (!rawSession.rolloutPath || !text.trim() || sending) {
+  const handleSend = async (text: string, nextAttachments: ComposerAttachment[]) => {
+    if (!activeSession.rolloutPath || (!text.trim() && nextAttachments.length === 0) || sending) {
       return;
     }
 
     const trimmedText = text.trim();
-    const rolloutPath = rawSession.rolloutPath;
-    const threadId = rawSession.threadId;
+    let rolloutPath = activeSession.rolloutPath;
+    const threadId = activeSession.threadId;
     const previousTurns = turnsRef.current;
     const baselineAssistantCount = countAssistantEntries(previousTurns);
     const replyWatchToken = replyWatchTokenRef.current + 1;
@@ -219,30 +285,41 @@ function CodexChat({ session }: { session: UnifiedSession }) {
     setTurns(optimisticTurns);
 
     try {
-      await sendCodexMessage(threadId, trimmedText, rawSession.cwd);
+      const sendResult = await sendCodexMessage(threadId, trimmedText, nextAttachments, activeSession.cwd);
+      let effectiveThreadId = threadId;
+      let effectiveWorkspaceCwd = activeSession.cwd;
+      if (sendResult.threadId && sendResult.threadId !== threadId) {
+        const remappedSession = await resolveCodexSessionByThreadId(sendResult.threadId);
+        setActiveSession(remappedSession);
+        rolloutPath = remappedSession.rolloutPath ?? "";
+        effectiveThreadId = remappedSession.threadId;
+        effectiveWorkspaceCwd = remappedSession.cwd;
+      } else if (sendResult.threadId) {
+        effectiveThreadId = sendResult.threadId;
+      }
+      setAttachments([]);
 
       const shouldContinue = () => replyWatchTokenRef.current === replyWatchToken;
       const loadSnapshot = async () => {
         const currentCursor = codexCursorRef.current;
-        const result = currentCursor
+        const cursorResult = currentCursor
           ? await fetchCodexThreadUpdates(rolloutPath, currentCursor)
           : await fetchCodexThreadState(rolloutPath);
         if (shouldContinue()) {
-          codexCursorRef.current = result.cursor;
+          codexCursorRef.current = cursorResult.cursor;
         }
-        const baseTurns = turnsRef.current;
-        const nextTurns = result.replace
-          ? limitSessionTurns(result.turns)
-          : mergeSessionTurns(baseTurns, result.turns);
+        const nextTurns = await fetchProviderSession("codex", effectiveThreadId, effectiveWorkspaceCwd);
+        const mergedTurns = mergeSessionTurns(previousTurns, nextTurns);
         if (shouldContinue()) {
-          turnsRef.current = nextTurns;
+          turnsRef.current = mergedTurns;
         }
-        return nextTurns;
+        return mergedTurns;
       };
       const applySnapshot = (snapshot: SessionTurn[]) => {
+        const nextTurns = mergeSessionTurns(previousTurns, snapshot);
         if (shouldContinue()) {
-          turnsRef.current = snapshot;
-          setTurns(snapshot);
+          turnsRef.current = nextTurns;
+          setTurns(nextTurns);
         }
       };
 
@@ -316,11 +393,11 @@ function CodexChat({ session }: { session: UnifiedSession }) {
                 Codex
               </span>
               <span className="rounded-full border border-slate-200 bg-white/88 px-2.5 py-1 font-mono text-[10px] text-slate-500">
-                {session.id.slice(0, 12)}
+                {activeSession.threadId.slice(0, 12)}
               </span>
             </div>
-            <h3 className="truncate text-base font-bold tracking-[-0.02em] text-gray-950">{session.title}</h3>
-            <CodexSessionBadges session={rawSession} />
+            <h3 className="truncate text-base font-bold tracking-[-0.02em] text-gray-950">{activeSession.title || session.title}</h3>
+            <CodexSessionBadges session={activeSession} />
           </div>
 
           <button
@@ -362,10 +439,32 @@ function CodexChat({ session }: { session: UnifiedSession }) {
       <SessionComposer
         resetKey={session.id}
         sending={sending}
-        disabled={!rawSession.rolloutPath}
+        stagingAttachments={stagingAttachments}
+        disabled={!activeSession.rolloutPath}
         placeholder={t.sessions.sendPlaceholder}
         sendLabel={t.sessions.send}
         assistantLabel="Codex"
+        attachments={attachments}
+        onAttachmentsChange={setAttachments}
+        supportsAttachments={providerSupportsAttachments}
+        onPickFiles={async (_kind, files) => {
+          if (!providerSupportsAttachments) {
+            setTurnsError(t.sessions.attachmentUnsupported);
+            return;
+          }
+          setStagingAttachments(true);
+          try {
+            const staged = await stageBrowserFiles(Array.from(files as FileList));
+            setTurnsError(null);
+            setAttachments((current) => [...current, ...staged]);
+          } catch (error) {
+            setTurnsError((error as Error).message);
+          } finally {
+            setStagingAttachments(false);
+          }
+        }}
+        attachmentButtonLabel={t.sessions.attachFile}
+        imageButtonLabel={t.sessions.attachImage}
         onSend={handleSend}
       />
     </div>
@@ -380,6 +479,9 @@ function ClaudeChat({ session, refreshSessions }: { session: UnifiedSession; ref
   const [msgLoading, setMsgLoading] = useState(false);
   const [msgError, setMsgError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [stagingAttachments, setStagingAttachments] = useState(false);
+  const providerSupportsAttachments = true;
   const [replyWatchState, setReplyWatchState] = useState<ReplyWatchState | null>(null);
   const msgEndRef = useRef<HTMLDivElement>(null);
   const replyWatchTokenRef = useRef(0);
@@ -409,6 +511,7 @@ function ClaudeChat({ session, refreshSessions }: { session: UnifiedSession; ref
 
   useEffect(() => {
     cancelReplyWatch();
+    setAttachments([]);
     void loadMessages();
     return () => {
       replyWatchTokenRef.current += 1;
@@ -423,8 +526,8 @@ function ClaudeChat({ session, refreshSessions }: { session: UnifiedSession; ref
     msgEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSend = async (text: string) => {
-    if (!text.trim() || sending) {
+  const handleSend = async (text: string, nextAttachments: ComposerAttachment[]) => {
+    if ((!text.trim() && nextAttachments.length === 0) || sending) {
       return;
     }
 
@@ -451,8 +554,10 @@ function ClaudeChat({ session, refreshSessions }: { session: UnifiedSession; ref
       const sendResult = await sendClaudeMessage(
         originalSessionId,
         trimmedText,
+        nextAttachments,
         rawSession.workspace,
       );
+      setAttachments([]);
       const activeSessionId = sendResult.sessionId || originalSessionId;
       const bridgePrefix = activeSessionId === originalSessionId ? [] : previousMessages;
 
@@ -598,9 +703,31 @@ function ClaudeChat({ session, refreshSessions }: { session: UnifiedSession; ref
       <SessionComposer
         resetKey={session.id}
         sending={sending}
+        stagingAttachments={stagingAttachments}
         placeholder={t.sessions.sendPlaceholder}
         sendLabel={t.sessions.send}
         assistantLabel="Claude"
+        attachments={attachments}
+        onAttachmentsChange={setAttachments}
+        supportsAttachments={providerSupportsAttachments}
+        onPickFiles={async (_kind, files) => {
+          if (!providerSupportsAttachments) {
+            setMsgError(t.sessions.attachmentUnsupported);
+            return;
+          }
+          setStagingAttachments(true);
+          try {
+            const staged = await stageBrowserFiles(Array.from(files as FileList));
+            setMsgError(null);
+            setAttachments((current) => [...current, ...staged]);
+          } catch (error) {
+            setMsgError((error as Error).message);
+          } finally {
+            setStagingAttachments(false);
+          }
+        }}
+        attachmentButtonLabel={t.sessions.attachFile}
+        imageButtonLabel={t.sessions.attachImage}
         onSend={handleSend}
       />
     </div>
@@ -614,6 +741,8 @@ function GenericProviderChat({ session }: { session: UnifiedSession }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [stagingAttachments, setStagingAttachments] = useState(false);
   const [replyWatchState, setReplyWatchState] = useState<ReplyWatchState | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const replyWatchTokenRef = useRef(0);
@@ -643,6 +772,7 @@ function GenericProviderChat({ session }: { session: UnifiedSession }) {
 
   useEffect(() => {
     cancelReplyWatch();
+    setAttachments([]);
     void loadMessages();
     return () => {
       replyWatchTokenRef.current += 1;
@@ -657,8 +787,10 @@ function GenericProviderChat({ session }: { session: UnifiedSession }) {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSend = async (trimmedText: string) => {
-    if (!trimmedText.trim()) {
+  const providerSupportsAttachments = false;
+
+  const handleSend = async (trimmedText: string, nextAttachments: ComposerAttachment[]) => {
+    if (!trimmedText.trim() && nextAttachments.length === 0) {
       return;
     }
 
@@ -685,7 +817,8 @@ function GenericProviderChat({ session }: { session: UnifiedSession }) {
     const baselineAssistantCount = countAssistantEntries(previousMessages);
 
     try {
-      await sendProviderSessionMessage(session.type, session.id, trimmedText, session.workspace);
+      await sendProviderSessionMessage(session.type, session.id, trimmedText, nextAttachments, session.workspace);
+      setAttachments([]);
 
       const loadSnapshot = async () => {
         const snapshot = await fetchProviderSession(session.type, session.id, session.workspace);
@@ -823,6 +956,28 @@ function GenericProviderChat({ session }: { session: UnifiedSession }) {
         placeholder={t.sessions.sendPlaceholder}
         sendLabel={t.sessions.send}
         assistantLabel={providerLabel}
+        stagingAttachments={stagingAttachments}
+        attachments={attachments}
+        onAttachmentsChange={setAttachments}
+        supportsAttachments={providerSupportsAttachments}
+        onPickFiles={async (_kind, files) => {
+          if (!providerSupportsAttachments) {
+            setError(t.sessions.attachmentUnsupported);
+            return;
+          }
+          setStagingAttachments(true);
+          try {
+            const staged = await stageBrowserFiles(Array.from(files as FileList));
+            setError(null);
+            setAttachments((current) => [...current, ...staged]);
+          } catch (error) {
+            setError((error as Error).message);
+          } finally {
+            setStagingAttachments(false);
+          }
+        }}
+        attachmentButtonLabel={t.sessions.attachFile}
+        imageButtonLabel={t.sessions.attachImage}
         onSend={handleSend}
       />
     </div>

@@ -25,6 +25,7 @@ provider:
     approvals: true
     questions: true
     photos: false
+    files: false
     commands: true
     command_wrappers: []
     control_modes:

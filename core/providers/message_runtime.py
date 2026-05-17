@@ -45,6 +45,7 @@ async def prepare_default_send(
     src_topic_id,
     text,
     has_photo: bool,
+    attachments=None,
 ) -> bool:
     workspace_id = ws_info.daemon_workspace_id
     await adapter.resume_thread(workspace_id, thread_info.thread_id)
@@ -63,5 +64,14 @@ async def send_default_message(
     src_topic_id,
     text,
     has_photo: bool,
+    attachments=None,
 ) -> None:
+    if attachments:
+        await adapter.send_user_message(
+            ws_info.daemon_workspace_id,
+            thread_info.thread_id,
+            text,
+            attachments=attachments,
+        )
+        return
     await adapter.send_user_message(ws_info.daemon_workspace_id, thread_info.thread_id, text)

@@ -6,6 +6,50 @@ export function limitSessionTurns(turns) {
     : turns.slice(-SESSION_BROWSER_VISIBLE_TURNS);
 }
 
+function hasAttachmentWrapperMarkers(content) {
+  const text = String(content ?? "");
+  return /<image\b[^>]*>|<\/image>|\[Attached (?:image|file)\]/i.test(text);
+}
+
+function normalizeAttachmentNoise(content) {
+  return String(content ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) {
+        return false;
+      }
+      if (/^<image\b[^>]*>$/i.test(line)) {
+        return false;
+      }
+      if (/^<\/image>$/i.test(line)) {
+        return false;
+      }
+      if (/^\[Attached (?:image|file)\]/i.test(line)) {
+        return false;
+      }
+      if (/^Path:\s*/i.test(line)) {
+        return false;
+      }
+      return true;
+    })
+    .join("\n")
+    .trim();
+}
+
+function isSameLogicalTurn(left, right) {
+  if (!left || !right || left.role !== right.role) {
+    return false;
+  }
+  if (left.content === right.content) {
+    return true;
+  }
+  if (!(hasAttachmentWrapperMarkers(left.content) || hasAttachmentWrapperMarkers(right.content))) {
+    return false;
+  }
+  return normalizeAttachmentNoise(left.content) === normalizeAttachmentNoise(right.content);
+}
+
 export function mergeSessionTurns(existing, incoming) {
   if (incoming.length === 0) {
     return existing;
@@ -26,7 +70,11 @@ export function mergeSessionTurns(existing, incoming) {
       };
       continue;
     }
-    if (last && last.role === turn.role && last.content === turn.content) {
+    if (last && isSameLogicalTurn(last, turn)) {
+      merged[merged.length - 1] = {
+        ...turn,
+        pending: Boolean(turn.pending),
+      };
       continue;
     }
     merged.push(turn);

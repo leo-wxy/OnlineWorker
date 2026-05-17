@@ -282,6 +282,45 @@ async def test_send_user_message_records_thread_mapping_before_turn_start():
 
 
 @pytest.mark.asyncio
+async def test_resume_thread_passes_registered_workspace_cwd():
+    adapter = CodexAdapter()
+    adapter._workspace_cwd_map["codex:onlineWorker"] = "/Users/example/Projects/onlineWorker"
+    adapter._call = AsyncMock(return_value={"id": "tid-live"})
+
+    result = await adapter.resume_thread("codex:onlineWorker", "tid-live")
+
+    adapter._call.assert_awaited_once_with(
+        "thread/resume",
+        {
+            "threadId": "tid-live",
+            "cwd": "/Users/example/Projects/onlineWorker",
+        },
+    )
+    assert result == {"id": "tid-live"}
+    assert adapter._thread_workspace_map["tid-live"] == "codex:onlineWorker"
+
+
+@pytest.mark.asyncio
+async def test_send_user_message_passes_registered_workspace_cwd():
+    adapter = CodexAdapter()
+    adapter._workspace_cwd_map["codex:onlineWorker"] = "/Users/example/Projects/onlineWorker"
+    adapter._call = AsyncMock(return_value={"ok": True})
+
+    result = await adapter.send_user_message("codex:onlineWorker", "tid-live", "hello")
+
+    adapter._call.assert_awaited_once_with(
+        "turn/start",
+        {
+            "threadId": "tid-live",
+            "cwd": "/Users/example/Projects/onlineWorker",
+            "input": [{"type": "text", "text": "hello"}],
+        },
+    )
+    assert result == {"ok": True}
+    assert adapter._thread_workspace_map["tid-live"] == "codex:onlineWorker"
+
+
+@pytest.mark.asyncio
 async def test_send_user_message_can_override_approval_policy():
     adapter = CodexAdapter()
     adapter._call = AsyncMock(return_value={"ok": True})

@@ -14,6 +14,8 @@ use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::ipc::Channel;
 
+use super::provider_sessions::ComposerAttachment;
+
 use super::config::ensure_data_dir;
 use super::session_state::load_local_thread_overlays;
 
@@ -61,6 +63,21 @@ pub struct CodexThreadStreamEvent {
     pub reason: Option<String>,
     pub error: Option<String>,
     pub session_tab_visible_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexSendResult {
+    pub thread_id: String,
+    pub requested_thread_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub created_new_thread: bool,
+}
+
+#[derive(Debug)]
+enum CodexOwnerBridgeSendAttempt {
+    NotReady,
+    Accepted(CodexSendResult),
 }
 
 static CODEX_THREAD_STREAM_GENERATION: OnceLock<Arc<AtomicU64>> = OnceLock::new();
@@ -462,21 +479,30 @@ fn send_codex_thread_message_via_owner_bridge(
     data_dir: &Path,
     thread_id: &str,
     text: &str,
+    attachments: &[ComposerAttachment],
     cwd: Option<&str>,
-) -> Result<bool, String> {
+) -> Result<CodexOwnerBridgeSendAttempt, String> {
     let socket_path = codex_owner_bridge_socket_path(data_dir);
     if !socket_path.exists() {
-        return Ok(false);
+        return Ok(CodexOwnerBridgeSendAttempt::NotReady);
     }
 
-    let mut socket = UnixStream::connect(&socket_path)
-        .map_err(|e| format!("connect codex owner bridge failed: {e}"))?;
+    let mut socket = UnixStream::connect(&socket_path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused => {
+            format!("__OWNER_BRIDGE_NOT_READY__:{e}")
+        }
+        _ => format!("connect codex owner bridge failed: {e}"),
+    })?;
 
     let mut payload = json!({
         "type": "send_message",
         "thread_id": thread_id,
         "text": text,
     });
+    if !attachments.is_empty() {
+        payload["attachments"] = serde_json::to_value(attachments)
+            .map_err(|e| format!("serialize codex attachments failed: {e}"))?;
+    }
     if let Some(cwd) = cwd.map(str::trim).filter(|cwd| !cwd.is_empty()) {
         payload["cwd"] = Value::String(cwd.to_string());
     }
@@ -498,7 +524,35 @@ fn send_codex_thread_message_via_owner_bridge(
     let response = serde_json::from_str::<Value>(response_line.trim())
         .map_err(|e| format!("parse codex owner bridge response failed: {e}"))?;
     if response.get("ok").and_then(Value::as_bool) == Some(true) {
-        return Ok(true);
+        let actual_thread_id = response
+            .get("thread_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(thread_id)
+            .to_string();
+        let requested_thread_id = response
+            .get("requested_thread_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned);
+        let workspace_id = response
+            .get("workspace_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned);
+        let created_new_thread = response
+            .get("created_new_thread")
+            .and_then(Value::as_bool)
+            .unwrap_or(actual_thread_id != thread_id);
+        return Ok(CodexOwnerBridgeSendAttempt::Accepted(CodexSendResult {
+            thread_id: actual_thread_id,
+            requested_thread_id,
+            workspace_id,
+            created_new_thread,
+        }));
     }
 
     Err(response
@@ -512,22 +566,31 @@ fn send_codex_thread_message_via_owner_bridge_with_retry(
     data_dir: &Path,
     thread_id: &str,
     text: &str,
+    attachments: &[ComposerAttachment],
     cwd: Option<&str>,
     timeout: Duration,
-) -> Result<(), String> {
+) -> Result<CodexSendResult, String> {
     let started_at = Instant::now();
     let poll_interval = Duration::from_millis(100);
     let socket_path = codex_owner_bridge_socket_path(data_dir);
     let mut last_error = format!("codex owner bridge not ready: {}", socket_path.display());
 
     loop {
-        match send_codex_thread_message_via_owner_bridge(data_dir, thread_id, text, cwd) {
-            Ok(true) => return Ok(()),
-            Ok(false) => {
+        match send_codex_thread_message_via_owner_bridge(data_dir, thread_id, text, attachments, cwd) {
+            Ok(CodexOwnerBridgeSendAttempt::Accepted(result)) => return Ok(result),
+            Ok(CodexOwnerBridgeSendAttempt::NotReady) => {
                 last_error = format!("codex owner bridge not ready: {}", socket_path.display());
             }
             Err(error) => {
-                last_error = error;
+                if error.starts_with("__OWNER_BRIDGE_NOT_READY__:") {
+                    last_error = error.trim_start_matches("__OWNER_BRIDGE_NOT_READY__:").to_string();
+                    if started_at.elapsed() >= timeout {
+                        return Err(last_error);
+                    }
+                    sleep(poll_interval);
+                    continue;
+                }
+                return Err(error);
             }
         }
 
@@ -542,10 +605,11 @@ fn send_codex_thread_message_via_owner_bridge_with_retry(
 fn send_codex_thread_message_blocking(
     thread_id: &str,
     text: &str,
+    attachments: &[ComposerAttachment],
     cwd: Option<&str>,
-) -> Result<(), String> {
+) -> Result<CodexSendResult, String> {
     let trimmed = text.trim();
-    if trimmed.is_empty() {
+    if trimmed.is_empty() && attachments.is_empty() {
         return Err("message is empty".to_string());
     }
 
@@ -554,6 +618,7 @@ fn send_codex_thread_message_blocking(
         &data_dir,
         thread_id,
         trimmed,
+        attachments,
         cwd,
         Duration::from_secs(8),
     )
@@ -597,6 +662,28 @@ fn is_codex_control_user_message(role: &str, content: &str) -> bool {
         || trimmed.starts_with("<skill>")
 }
 
+fn is_codex_image_wrapper_open(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if !trimmed.starts_with("<image") || !trimmed.ends_with('>') {
+        return None;
+    }
+
+    let name_marker = "name=[";
+    let start = trimmed.find(name_marker)? + name_marker.len();
+    let rest = &trimmed[start..];
+    let end = rest.find(']')?;
+    let label = rest[..end].trim();
+    if label.is_empty() {
+        None
+    } else {
+        Some(label.to_string())
+    }
+}
+
+fn is_codex_image_wrapper_close(text: &str) -> bool {
+    text.trim() == "</image>"
+}
+
 fn push_codex_turn(turns: &mut Vec<CodexTurn>, role: &str, content: String) {
     let Some(content) = normalize_codex_turn_text(&content) else {
         return;
@@ -635,6 +722,38 @@ fn extract_codex_text_value(value: &Value) -> Option<String> {
     }
 }
 
+fn extract_codex_image_summary(item: &Value, image_label: Option<&str>) -> Option<String> {
+    let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+    if !item_type.to_ascii_lowercase().contains("image") {
+        return None;
+    }
+
+    let image_ref = item
+        .get("image_url")
+        .and_then(Value::as_str)
+        .or_else(|| item.get("imageUrl").and_then(Value::as_str))
+        .or_else(|| item.get("path").and_then(Value::as_str))?;
+    let normalized_ref = image_ref
+        .strip_prefix("file://")
+        .unwrap_or(image_ref);
+    if normalized_ref.starts_with("data:") {
+        let fallback_label = image_label
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("image");
+        return Some(format!("[Attached image] {fallback_label}"));
+    }
+
+    let file_name = normalized_ref
+        .rsplit('/')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| image_label.map(str::trim).filter(|value| !value.is_empty()))?;
+
+    Some(format!("[Attached image] {file_name}"))
+}
+
 fn extract_codex_response_item_text(payload: &Value) -> Option<(String, String)> {
     if payload.get("type").and_then(Value::as_str) != Some("message") {
         return None;
@@ -648,14 +767,31 @@ fn extract_codex_response_item_text(payload: &Value) -> Option<(String, String)>
     let content = payload.get("content").and_then(Value::as_array)?;
     let text_parts = content
         .iter()
-        .filter_map(|item| {
+        .scan(None::<String>, |pending_image_label, item| {
             let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
-            if !item_type.ends_with("text") {
-                return None;
+            if item_type.ends_with("text") {
+                let text = extract_codex_text_value(item.get("text").unwrap_or(&Value::Null))
+                    .and_then(|text| normalize_codex_turn_text(&text));
+                if let Some(text) = text {
+                    if let Some(label) = is_codex_image_wrapper_open(&text) {
+                        *pending_image_label = Some(label);
+                        return Some(None);
+                    }
+                    if is_codex_image_wrapper_close(&text) {
+                        *pending_image_label = None;
+                        return Some(None);
+                    }
+                    return Some(Some(text));
+                }
+                return Some(None);
             }
-            extract_codex_text_value(item.get("text").unwrap_or(&Value::Null))
+            let summary = extract_codex_image_summary(item, pending_image_label.as_deref());
+            if summary.is_some() {
+                *pending_image_label = None;
+            }
+            Some(summary)
         })
-        .filter_map(|text| normalize_codex_turn_text(&text))
+        .flatten()
         .collect::<Vec<_>>();
 
     if text_parts.is_empty() {
@@ -663,6 +799,43 @@ fn extract_codex_response_item_text(payload: &Value) -> Option<(String, String)>
     }
 
     Some((role.to_string(), text_parts.join("\n")))
+}
+
+fn extract_codex_event_user_message(payload: &Value) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    let message = payload
+        .get("message")
+        .and_then(Value::as_str)
+        .and_then(normalize_codex_turn_text);
+    if let Some(message) = message {
+        if !is_codex_control_user_message("user", &message) {
+            parts.push(message);
+        }
+    }
+
+    for key in ["local_images", "images"] {
+        if let Some(entries) = payload.get(key).and_then(Value::as_array) {
+            for entry in entries {
+                let image_ref = entry.as_str().unwrap_or_default().trim();
+                if image_ref.is_empty() {
+                    continue;
+                }
+                let file_name = image_ref
+                    .rsplit('/')
+                    .next()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("image");
+                parts.push(format!("[Attached image] {file_name}"));
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n"))
+    }
 }
 
 fn build_codex_stream_turn_event(
@@ -759,6 +932,9 @@ fn parse_codex_stream_events(line: &str, cursor: CodexThreadCursor) -> Vec<Codex
             }
 
             if let Some((role, content)) = extract_codex_response_item_text(&parsed.payload) {
+                if role == "user" {
+                    return Vec::new();
+                }
                 let phase = parsed
                     .payload
                     .get("phase")
@@ -809,12 +985,12 @@ fn parse_codex_stream_events(line: &str, cursor: CodexThreadCursor) -> Vec<Codex
                     )];
                 }
                 "user_message" => {
-                    if let Some(msg) = parsed.payload.get("message").and_then(Value::as_str) {
+                    if let Some(msg) = extract_codex_event_user_message(&parsed.payload) {
                         return build_codex_stream_turn_event(
                             "user_message",
                             None,
                             "user",
-                            msg.to_string(),
+                            msg,
                             cursor,
                         )
                         .into_iter()
@@ -1029,10 +1205,11 @@ pub fn read_codex_thread(rollout_path: String) -> Result<Vec<CodexTurn>, String>
 pub async fn send_codex_thread_message(
     thread_id: String,
     text: String,
+    attachments: Vec<ComposerAttachment>,
     cwd: Option<String>,
-) -> Result<(), String> {
+) -> Result<CodexSendResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        send_codex_thread_message_blocking(&thread_id, &text, cwd.as_deref())
+        send_codex_thread_message_blocking(&thread_id, &text, &attachments, cwd.as_deref())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1110,6 +1287,7 @@ mod tests {
         read_codex_thread_state, read_codex_thread_updates,
         send_codex_thread_message_via_owner_bridge,
         send_codex_thread_message_via_owner_bridge_with_retry, CodexThreadCursor,
+        CodexOwnerBridgeSendAttempt,
     };
     use rusqlite::{params, Connection};
     use serde_json::json;
@@ -1160,11 +1338,19 @@ mod tests {
             &temp_dir,
             "tid-1",
             "hello owner",
+            &[],
             Some("/tmp/onlineWorker"),
         )
         .expect("send via owner bridge");
 
-        assert!(used_bridge);
+        match used_bridge {
+            CodexOwnerBridgeSendAttempt::Accepted(result) => {
+                assert_eq!(result.thread_id, "tid-1");
+                assert_eq!(result.workspace_id, None);
+                assert!(!result.created_new_thread);
+            }
+            CodexOwnerBridgeSendAttempt::NotReady => panic!("owner bridge should accept request"),
+        }
 
         server.join().expect("join server thread");
         let _ = std::fs::remove_file(&socket_path);
@@ -1197,7 +1383,7 @@ mod tests {
                 .expect("write response");
         });
 
-        let error = send_codex_thread_message_via_owner_bridge(&temp_dir, "tid-1", "hello", None)
+        let error = send_codex_thread_message_via_owner_bridge(&temp_dir, "tid-1", "hello", &[], None)
             .expect_err("owner bridge should return error");
 
         assert!(error.contains("owner adapter unavailable"));
@@ -1240,14 +1426,18 @@ mod tests {
                 .expect("write response");
         });
 
-        send_codex_thread_message_via_owner_bridge_with_retry(
+        let result = send_codex_thread_message_via_owner_bridge_with_retry(
             &temp_dir,
             "tid-wait",
             "hello after wait",
+            &[],
             None,
             Duration::from_secs(1),
         )
         .expect("owner bridge should become ready within timeout");
+
+        assert_eq!(result.thread_id, "tid-wait");
+        assert!(!result.created_new_thread);
 
         server.join().expect("join server thread");
         let _ = std::fs::remove_file(&socket_path);
@@ -1271,6 +1461,7 @@ mod tests {
             &temp_dir,
             "tid-timeout",
             "hello timeout",
+            &[],
             None,
             Duration::from_millis(250),
         )
@@ -1279,6 +1470,53 @@ mod tests {
         assert!(error.contains("codex owner bridge not ready"));
         assert!(!error.contains("127.0.0.1:4722"));
 
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn send_codex_thread_message_does_not_retry_owner_bridge_business_errors() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+        use std::time::{Duration, Instant};
+
+        let temp_dir = std::path::PathBuf::from(format!(
+            "/tmp/ow-codex-hard-err-{:x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let socket_path = temp_dir.join("codex_owner_bridge.sock");
+        let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept owner bridge socket");
+            let mut line = String::new();
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            reader.read_line(&mut line).expect("read request");
+            stream
+                .write_all(b"{\"ok\":false,\"error\":\"no rollout found for thread id tid-hard\"}\n")
+                .expect("write response");
+            std::thread::sleep(Duration::from_millis(250));
+        });
+
+        let started_at = Instant::now();
+        let error = send_codex_thread_message_via_owner_bridge_with_retry(
+            &temp_dir,
+            "tid-hard",
+            "hello",
+            &[],
+            None,
+            Duration::from_secs(1),
+        )
+        .expect_err("business error should surface immediately");
+
+        assert!(error.contains("no rollout found for thread id tid-hard"));
+        assert!(started_at.elapsed() < Duration::from_millis(150));
+
+        server.join().expect("join server thread");
+        let _ = std::fs::remove_file(&socket_path);
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
@@ -1915,6 +2153,111 @@ mod tests {
     }
 
     #[test]
+    fn read_codex_thread_includes_input_image_summary_in_user_message() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "onlineworker-codex-read-image-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let rollout_path = temp_dir.join("rollout.jsonl");
+
+        std::fs::write(
+            &rollout_path,
+            concat!(
+                "{\"timestamp\":\"2026-04-13T10:00:02.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"请看这张图\"},{\"type\":\"input_image\",\"image_url\":\"file:///tmp/captures/screenshot.png\"}]}}\n",
+                "{\"timestamp\":\"2026-04-13T10:00:03.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"我先看截图。\"}]}}\n"
+            ),
+        )
+        .expect("write rollout");
+
+        let turns = read_codex_thread(rollout_path.to_string_lossy().to_string())
+            .expect("read codex thread");
+
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].role, "user");
+        assert_eq!(turns[0].content, "请看这张图\n[Attached image] screenshot.png");
+        assert_eq!(turns[1].role, "assistant");
+        assert_eq!(turns[1].content, "我先看截图。");
+
+        let _ = std::fs::remove_file(&rollout_path);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn read_codex_thread_includes_local_image_summary_in_user_message() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "onlineworker-codex-read-local-image-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let rollout_path = temp_dir.join("rollout.jsonl");
+
+        std::fs::write(
+            &rollout_path,
+            concat!(
+                "{\"timestamp\":\"2026-04-13T10:00:02.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"请看这张图\"},{\"type\":\"localImage\",\"path\":\"/tmp/captures/screenshot.png\"}]}}\n",
+                "{\"timestamp\":\"2026-04-13T10:00:03.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"我先看截图。\"}]}}\n"
+            ),
+        )
+        .expect("write rollout");
+
+        let turns = read_codex_thread(rollout_path.to_string_lossy().to_string())
+            .expect("read codex thread");
+
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].role, "user");
+        assert_eq!(turns[0].content, "请看这张图\n[Attached image] screenshot.png");
+        assert_eq!(turns[1].role, "assistant");
+        assert_eq!(turns[1].content, "我先看截图。");
+
+        let _ = std::fs::remove_file(&rollout_path);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn read_codex_thread_strips_image_wrapper_text_and_uses_inline_image_label() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "onlineworker-codex-read-inline-image-label-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let rollout_path = temp_dir.join("rollout.jsonl");
+
+        std::fs::write(
+            &rollout_path,
+            concat!(
+                "{\"timestamp\":\"2026-05-17T12:36:52.161Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"图片里面主要是什么内容\"},{\"type\":\"input_text\",\"text\":\"<image name=[Image #1]>\"},{\"type\":\"input_image\",\"image_url\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA\"},{\"type\":\"input_text\",\"text\":\"</image>\"}]}}\n",
+                "{\"timestamp\":\"2026-05-17T12:37:05.022Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"图片主要是一个设置页面。\"}}\n"
+            ),
+        )
+        .expect("write rollout");
+
+        let turns = read_codex_thread(rollout_path.to_string_lossy().to_string())
+            .expect("read codex thread");
+
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].role, "user");
+        assert_eq!(
+            turns[0].content,
+            "图片里面主要是什么内容\n[Attached image] Image #1"
+        );
+        assert_eq!(turns[1].role, "assistant");
+        assert_eq!(turns[1].content, "图片主要是一个设置页面。");
+
+        let _ = std::fs::remove_file(&rollout_path);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
     fn read_codex_thread_deduplicates_adjacent_duplicate_messages() {
         let temp_dir = std::env::temp_dir().join(format!(
             "onlineworker-codex-read-dedupe-test-{}",
@@ -2118,6 +2461,32 @@ mod tests {
             Some("我先排查链路。")
         );
         assert_eq!(events[0].cursor.offset, 144);
+    }
+
+    #[test]
+    fn parse_codex_stream_events_ignores_response_item_user_messages() {
+        let events = parse_codex_stream_events(
+            "{\"timestamp\":\"2026-04-13T10:00:03.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"请顺手看图\"},{\"type\":\"input_image\",\"image_url\":\"file:///tmp/demo/failure.png\"}]}}",
+            CodexThreadCursor { offset: 176 },
+        );
+
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn parse_codex_stream_events_emits_user_message_from_event_msg_with_local_image_summary() {
+        let events = parse_codex_stream_events(
+            "{\"timestamp\":\"2026-04-13T10:00:03.000Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"请顺手看图\",\"local_images\":[\"/tmp/demo/failure.png\"]}}",
+            CodexThreadCursor { offset: 176 },
+        );
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "user_message");
+        assert_eq!(
+            events[0].turn.as_ref().map(|turn| turn.content.as_str()),
+            Some("请顺手看图\n[Attached image] failure.png")
+        );
+        assert_eq!(events[0].cursor.offset, 176);
     }
 
     #[test]

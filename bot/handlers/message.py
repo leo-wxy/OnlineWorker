@@ -15,6 +15,7 @@
     → onlineWorker 控制：通过本地线程命令或 thread 控制卡片触发
 """
 import logging
+import os
 from typing import Callable, Optional
 from plugins.providers.builtin.codex.python.tui_bridge import (
     enqueue_codex_tui_message,
@@ -46,6 +47,61 @@ from bot.handlers.common import (
 from bot.handlers.thread import handle_thread_control_callback
 
 logger = logging.getLogger(__name__)
+
+
+def _attachment_download_dir() -> str:
+    from config import get_data_dir
+
+    data_dir = get_data_dir()
+    if data_dir:
+        target = os.path.join(data_dir, "attachments")
+    else:
+        target = os.path.join(os.getcwd(), ".codex", "attachments")
+    os.makedirs(target, exist_ok=True)
+    return target
+
+
+async def _download_message_attachments(msg, bot) -> list[dict]:
+    attachments: list[dict] = []
+
+    raw_photos = getattr(msg, "photo", None)
+    if isinstance(raw_photos, (list, tuple)) and len(raw_photos) > 0:
+        photo = raw_photos[-1]
+        file_id = str(getattr(photo, "file_id", "") or "").strip()
+        if file_id:
+            telegram_file = await bot.get_file(file_id)
+            destination = os.path.join(_attachment_download_dir(), f"{file_id}.jpg")
+            downloaded = await telegram_file.download_to_drive(destination)
+            attachments.append(
+                {
+                    "kind": "image",
+                    "path": str(downloaded),
+                    "name": os.path.basename(str(downloaded)),
+                    "mime_type": "image/jpeg",
+                    "source": "telegram",
+                }
+            )
+
+    document = getattr(msg, "document", None)
+    document_file_id = getattr(document, "file_id", None)
+    if isinstance(document_file_id, str) and document_file_id.strip():
+        file_id = document_file_id.strip()
+        file_name = str(getattr(document, "file_name", "") or "").strip() or file_id
+        mime_type = str(getattr(document, "mime_type", "") or "").strip()
+        telegram_file = await bot.get_file(file_id)
+        destination = os.path.join(_attachment_download_dir(), file_name)
+        downloaded = await telegram_file.download_to_drive(destination)
+        attachments.append(
+            {
+                "kind": "file",
+                "path": str(downloaded),
+                "name": file_name,
+                "mime_type": mime_type,
+                "source": "telegram",
+            }
+        )
+
+    return attachments
 
 
 def _provider_unavailable_message(state: AppState, tool_name: str) -> str | None:
@@ -142,6 +198,7 @@ async def _dispatch_thread_message(
     text: str | None,
     has_photo: bool,
     caption: str | None = None,
+    attachments: list[dict] | None = None,
 ) -> None:
     unavailable = _provider_unavailable_message(state, ws_info.tool)
     if unavailable:
@@ -159,8 +216,11 @@ async def _dispatch_thread_message(
     original_streaming_msg_id = getattr(thread_info, "streaming_msg_id", None)
     original_last_tg_user_message_id = getattr(thread_info, "last_tg_user_message_id", None)
 
+    has_files = any(str(item.get("kind") or "").strip().lower() == "file" for item in (attachments or []))
     if has_photo and not (message_hooks and message_hooks.supports_photo):
         raise RuntimeError(f"当前 {ws_info.tool} thread 不支持图片消息。")
+    if has_files and not (message_hooks and getattr(message_hooks, "supports_files", False)):
+        raise RuntimeError(f"当前 {ws_info.tool} thread 不支持文件消息。")
     if thread_info.archived and clear_stale_thread_archive_if_active(state, ws_info, thread_info):
         if state.storage is not None:
             save_storage(state.storage)
@@ -188,6 +248,7 @@ async def _dispatch_thread_message(
             src_topic_id=src_topic_id,
             text=text,
             has_photo=has_photo,
+            attachments=attachments,
         )
         if handled:
             return
@@ -209,17 +270,22 @@ async def _dispatch_thread_message(
     should_continue = True
     try:
         if message_hooks is not None:
-            should_continue = await message_hooks.prepare_send(
-                state,
-                adapter,
-                ws_info,
-                thread_info,
+            prepare_kwargs = dict(
                 update=update,
                 context=context,
                 group_chat_id=group_chat_id,
                 src_topic_id=src_topic_id,
                 text=text,
                 has_photo=has_photo,
+            )
+            if attachments:
+                prepare_kwargs["attachments"] = attachments
+            should_continue = await message_hooks.prepare_send(
+                state,
+                adapter,
+                ws_info,
+                thread_info,
+                **prepare_kwargs,
             )
         else:
             await adapter.resume_thread(workspace_id, thread_info.thread_id)
@@ -228,11 +294,7 @@ async def _dispatch_thread_message(
             return
 
         if message_hooks is not None:
-            await message_hooks.send(
-                state,
-                adapter,
-                ws_info,
-                thread_info,
+            send_kwargs = dict(
                 update=update,
                 context=context,
                 group_chat_id=group_chat_id,
@@ -240,8 +302,25 @@ async def _dispatch_thread_message(
                 text=text,
                 has_photo=has_photo,
             )
+            if attachments:
+                send_kwargs["attachments"] = attachments
+            await message_hooks.send(
+                state,
+                adapter,
+                ws_info,
+                thread_info,
+                **send_kwargs,
+            )
         else:
-            await adapter.send_user_message(workspace_id, thread_info.thread_id, text)
+            if attachments:
+                await adapter.send_user_message(
+                    workspace_id,
+                    thread_info.thread_id,
+                    text,
+                    attachments=attachments,
+                )
+            else:
+                await adapter.send_user_message(workspace_id, thread_info.thread_id, text)
     except Exception:
         if thread_info.thread_id != original_thread_id:
             ws_info.threads.pop(thread_info.thread_id, None)
@@ -338,7 +417,11 @@ def make_message_handler(state: AppState, group_chat_id: int) -> Callable:
         text = msg.text
         raw_photos = getattr(msg, "photo", None)
         has_photo = isinstance(raw_photos, (list, tuple)) and len(raw_photos) > 0
-        if not text and not has_photo:
+        raw_document = getattr(msg, "document", None)
+        has_document = isinstance(getattr(raw_document, "file_id", None), str) and bool(
+            getattr(raw_document, "file_id", "").strip()
+        )
+        if not text and not has_photo and not has_document:
             return
 
         src_topic_id: Optional[int] = msg.message_thread_id
@@ -353,7 +436,7 @@ def make_message_handler(state: AppState, group_chat_id: int) -> Callable:
         else:
             logger.info(
                 f"[message_handler] 收到消息：topic_id={src_topic_id} "
-                f"text={text[:50]!r}… from={update.effective_user.id if update.effective_user else 'None'}"
+                f"text={((text or msg.caption or '[附件]')[:50])!r}… from={update.effective_user.id if update.effective_user else 'None'}"
             )
 
         # ── 层级判断 ──────────────────────────────────────────────────────
@@ -511,6 +594,7 @@ def make_message_handler(state: AppState, group_chat_id: int) -> Callable:
                     return
 
             try:
+                attachments = await _download_message_attachments(msg, context.bot)
                 await _dispatch_thread_message(
                     state,
                     ws_info,
@@ -522,6 +606,7 @@ def make_message_handler(state: AppState, group_chat_id: int) -> Callable:
                     text=text,
                     has_photo=has_photo,
                     caption=msg.caption,
+                    attachments=attachments,
                 )
             except Exception as e:
                 logger.error(f"发送消息失败：{e}")

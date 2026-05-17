@@ -46,6 +46,7 @@ async def test_provider_owner_bridge_uses_registry_message_hooks(monkeypatch, tm
             ws_info.daemon_workspace_id,
             thread_info.thread_id,
             kwargs["text"],
+            kwargs.get("attachments"),
         )
 
     monkeypatch.setattr(
@@ -68,6 +69,13 @@ async def test_provider_owner_bridge_uses_registry_message_hooks(monkeypatch, tm
             "thread_id": "tid-1",
             "text": "hello owner bridge",
             "workspace_dir": "/tmp/project-a",
+            "attachments": [
+                {
+                    "kind": "image",
+                    "path": "/tmp/project-a/image.png",
+                    "name": "image.png",
+                }
+            ],
         }
     )
 
@@ -84,6 +92,13 @@ async def test_provider_owner_bridge_uses_registry_message_hooks(monkeypatch, tm
         "overlay-tool:/tmp/project-a",
         "tid-1",
         "hello owner bridge",
+        [
+            {
+                "kind": "image",
+                "path": "/tmp/project-a/image.png",
+                "name": "image.png",
+            }
+        ],
     )
     assert state.get_provider_runtime("overlay-tool").thread_pending_send_started_at["tid-1"] > 0
 
@@ -189,7 +204,56 @@ async def test_provider_owner_bridge_reads_latest_session_turns_via_provider_fac
     assert observed == {
         "session_id": "tid-77",
         "limit": 12,
-        "sessions_dir": "/tmp/project-a",
+        "sessions_dir": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_does_not_treat_workspace_dir_as_sessions_dir(
+    monkeypatch, tmp_path
+):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    observed = {}
+    state = AppState(storage=AppStorage())
+
+    class Facts:
+        @staticmethod
+        def read_thread_history(session_id, limit=20, sessions_dir=None):
+            observed["session_id"] = session_id
+            observed["limit"] = limit
+            observed["sessions_dir"] = sessions_dir
+            return [
+                {"role": "user", "text": "图片主色调是什么？"},
+                {"role": "assistant", "text": "偏青绿色"},
+            ]
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(facts=Facts) if name == "codex" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_read_session(
+        {
+            "provider_id": "codex",
+            "session_id": "tid-codex",
+            "workspace_dir": "/Users/example/project/subdir",
+            "limit": 8,
+        }
+    )
+
+    assert response == {
+        "ok": True,
+        "session": [
+            {"role": "user", "content": "图片主色调是什么？"},
+            {"role": "assistant", "content": "偏青绿色"},
+        ],
+    }
+    assert observed == {
+        "session_id": "tid-codex",
+        "limit": 8,
+        "sessions_dir": None,
     }
 
 

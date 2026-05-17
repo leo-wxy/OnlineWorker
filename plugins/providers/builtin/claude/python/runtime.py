@@ -119,6 +119,7 @@ async def prepare_send(
     src_topic_id,
     text,
     has_photo: bool,
+    attachments=None,
 ) -> bool:
     workspace_id = ws_info.daemon_workspace_id
     active_turn = state.streaming_turns.get(thread_info.thread_id)

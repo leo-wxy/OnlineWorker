@@ -84,6 +84,39 @@ def _provider_facts(provider_id: str):
     return facts
 
 
+async def _invoke_message_hook_send(send_hook, *, adapter, ws_info, thread_info, text, attachments):
+    underlying = getattr(send_hook, "__func__", None)
+    if underlying is not None:
+        await underlying(
+            None,
+            adapter,
+            ws_info,
+            thread_info,
+            update=None,
+            context=None,
+            group_chat_id=0,
+            src_topic_id=None,
+            text=text,
+            has_photo=False,
+            attachments=attachments,
+        )
+        return
+
+    await send_hook(
+        None,
+        adapter,
+        ws_info,
+        thread_info,
+        update=None,
+        context=None,
+        group_chat_id=0,
+        src_topic_id=None,
+        text=text,
+        has_photo=False,
+        attachments=attachments,
+    )
+
+
 def _workspace_id(provider_id: str, workspace_path: str) -> str:
     normalized_provider_id = str(provider_id or "").strip()
     normalized_workspace = str(workspace_path or "").strip()
@@ -248,6 +281,7 @@ async def send_provider_session_message(
     text: str,
     *,
     workspace_dir: str | None = None,
+    attachments: list[dict[str, Any]] | None = None,
 ) -> None:
     descriptor = _load_provider_descriptor(provider_id)
     message_hooks = getattr(descriptor, "message_hooks", None)
@@ -259,8 +293,9 @@ async def send_provider_session_message(
         raise ValueError("session_id is required")
 
     trimmed_text = str(text or "").strip()
-    if not trimmed_text:
-        raise ValueError("text is required")
+    normalized_attachments = attachments or []
+    if not trimmed_text and not normalized_attachments:
+        raise ValueError("text or attachments is required")
 
     workspace_path = str(workspace_dir or "").strip()
     if not workspace_path:
@@ -281,15 +316,11 @@ async def send_provider_session_message(
         "thread_id": normalized_session_id,
     }
 
-    await message_hooks.send(
-        state=None,
+    await _invoke_message_hook_send(
+        message_hooks.send,
         adapter=adapter,
         ws_info=ws_info,
         thread_info=thread_info,
-        update=None,
-        context=None,
-        group_chat_id=0,
-        src_topic_id=None,
         text=trimmed_text,
-        has_photo=False,
+        attachments=normalized_attachments,
     )

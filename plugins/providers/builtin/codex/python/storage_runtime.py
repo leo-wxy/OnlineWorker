@@ -124,6 +124,147 @@ def _read_codex_first_user_preview_from_file(fpath: str) -> Optional[str]:
     return None
 
 
+def _normalize_turn_text(text: str) -> str:
+    return str(text or "").strip()
+
+
+def _is_wrapper_open(text: str) -> Optional[str]:
+    normalized = _normalize_turn_text(text)
+    if not normalized.startswith("<image") or not normalized.endswith(">"):
+        return None
+    marker = "name=["
+    start = normalized.find(marker)
+    if start < 0:
+        return None
+    remainder = normalized[start + len(marker):]
+    end = remainder.find("]")
+    if end < 0:
+        return None
+    label = remainder[:end].strip()
+    return label or None
+
+
+def _is_wrapper_close(text: str) -> bool:
+    return _normalize_turn_text(text) == "</image>"
+
+
+def _image_summary_from_value(item: dict, pending_label: Optional[str] = None) -> Optional[str]:
+    item_type = str(item.get("type") or "").strip().lower()
+    if "image" not in item_type:
+        return None
+
+    image_ref = (
+        item.get("image_url")
+        or item.get("imageUrl")
+        or item.get("path")
+        or ""
+    )
+    normalized_ref = str(image_ref or "").strip()
+    if not normalized_ref:
+        return None
+
+    if normalized_ref.startswith("data:"):
+        label = (pending_label or "").strip() or "image"
+        return f"[Attached image] {label}"
+
+    if normalized_ref.startswith("file://"):
+        normalized_ref = normalized_ref[len("file://"):]
+
+    file_name = os.path.basename(normalized_ref.strip())
+    label = file_name or (pending_label or "").strip()
+    if not label:
+        return None
+    return f"[Attached image] {label}"
+
+
+def _build_user_text_from_response_items(content: list[dict]) -> str:
+    parts: list[str] = []
+    pending_label: Optional[str] = None
+
+    for item in content:
+        item_type = str(item.get("type") or "").strip().lower()
+        if item_type.endswith("text"):
+            text = _normalize_turn_text(item.get("text") or "")
+            if not text:
+                continue
+            label = _is_wrapper_open(text)
+            if label is not None:
+                pending_label = label
+                continue
+            if _is_wrapper_close(text):
+                pending_label = None
+                continue
+            if text.startswith("#") or text.startswith("<"):
+                continue
+            parts.append(text)
+            continue
+
+        summary = _image_summary_from_value(item, pending_label)
+        if summary:
+            parts.append(summary)
+            pending_label = None
+
+    return "\n".join(part for part in parts if part).strip()
+
+
+def _build_user_text_from_event_payload(payload: dict) -> str:
+    parts: list[str] = []
+    message = _normalize_turn_text(payload.get("message") or "")
+    if message and not message.startswith("#") and not message.startswith("<"):
+        parts.append(message)
+
+    image_refs = []
+    for key in ("local_images", "images"):
+        raw_values = payload.get(key)
+        if isinstance(raw_values, list):
+            image_refs.extend(raw_values)
+
+    for image_ref in image_refs:
+        normalized_ref = str(image_ref or "").strip()
+        if not normalized_ref:
+            continue
+        file_name = os.path.basename(normalized_ref)
+        label = file_name or "image"
+        parts.append(f"[Attached image] {label}")
+
+    return "\n".join(part for part in parts if part).strip()
+
+
+def _push_turn(turns: list[dict], *, role: str, text: str, timestamp: str, phase: str) -> None:
+    normalized_text = _normalize_turn_text(text)
+    if not normalized_text:
+        return
+
+    next_turn = {
+        "role": role,
+        "text": normalized_text,
+        "timestamp": timestamp,
+        "phase": phase,
+    }
+    if turns and turns[-1]["role"] == role:
+        previous_text = turns[-1]["text"]
+        if previous_text == normalized_text:
+            turns[-1] = next_turn
+            return
+
+        def _logical_base(value: str) -> str:
+            lines = [
+                line.strip()
+                for line in str(value or "").splitlines()
+                if line.strip() and not line.strip().startswith("[Attached ")
+            ]
+            return "\n".join(lines).strip()
+
+        if role == "user" and _logical_base(previous_text) == _logical_base(normalized_text):
+            previous_has_attachment = "[Attached " in previous_text
+            next_has_attachment = "[Attached " in normalized_text
+            if not previous_has_attachment and next_has_attachment:
+                turns[-1] = next_turn
+            return
+
+    turns.append(next_turn)
+
+
 def list_codex_session_meta_threads_by_cwd(
     cwd: str,
     sessions_dir: Optional[str] = None,
@@ -252,40 +393,58 @@ def read_thread_history(
                 except json.JSONDecodeError:
                     continue
 
-                if obj.get("type") != "response_item":
+                timestamp = obj.get("timestamp", "")
+                event_type = obj.get("type")
+                payload = obj.get("payload", {})
+                phase = str(payload.get("phase") or "")
+
+                if event_type == "response_item":
+                    role = payload.get("role")
+                    if role == "user":
+                        text = _build_user_text_from_response_items(payload.get("content", []))
+                        _push_turn(
+                            turns,
+                            role="user",
+                            text=text,
+                            timestamp=timestamp,
+                            phase=phase,
+                        )
+                    elif role == "assistant":
+                        for c in payload.get("content", []):
+                            if c.get("type") not in ("output_text", "text"):
+                                continue
+                            text = _normalize_turn_text(c.get("text", ""))
+                            if text:
+                                _push_turn(
+                                    turns,
+                                    role="assistant",
+                                    text=text,
+                                    timestamp=timestamp,
+                                    phase=phase,
+                                )
+                                break
                     continue
 
-                payload = obj.get("payload", {})
-                role = payload.get("role")
-                timestamp = obj.get("timestamp", "")
-                phase = payload.get("phase", "")
-
-                if role == "user":
-                    for c in payload.get("content", []):
-                        if c.get("type") != "input_text":
-                            continue
-                        text = c.get("text", "")
-                        if text.startswith("#") or text.startswith("<"):
-                            continue
-                        turns.append(
-                            {"role": "user", "text": text, "timestamp": timestamp, "phase": phase}
+                if event_type == "event_msg":
+                    payload_type = payload.get("type")
+                    if payload_type == "user_message":
+                        text = _build_user_text_from_event_payload(payload)
+                        _push_turn(
+                            turns,
+                            role="user",
+                            text=text,
+                            timestamp=timestamp,
+                            phase=phase,
                         )
-                        break
-                elif role == "assistant":
-                    for c in payload.get("content", []):
-                        if c.get("type") not in ("output_text", "text"):
-                            continue
-                        text = c.get("text", "")
-                        if text:
-                            turns.append(
-                                {
-                                    "role": "assistant",
-                                    "text": text,
-                                    "timestamp": timestamp,
-                                    "phase": phase,
-                                }
-                            )
-                            break
+                    elif payload_type == "agent_message":
+                        text = _normalize_turn_text(payload.get("message") or "")
+                        _push_turn(
+                            turns,
+                            role="assistant",
+                            text=text,
+                            timestamp=timestamp,
+                            phase=phase,
+                        )
     except Exception:
         return []
 

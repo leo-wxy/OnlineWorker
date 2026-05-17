@@ -5,16 +5,16 @@
 See: `.planning/PROJECT.md` (updated 2026-05-10)
 
 **Core value:** Developers can reliably control local AI coding CLI workflows from an installed Mac app while still receiving remote final results through Telegram.
-**Current focus:** Phase 3 — Dashboard Clarity
+**Current focus:** Phase 3 — File and Image Support
 
 ## Current Position
 
-Phase: 3 of 5 (Dashboard Clarity)
-Plan: 0 of 2 in current phase
-Status: Ready to plan
-Last activity: 2026-05-12 — Closed Phase 2 with installed-app validation, Usage UI final pass, and Telegram final-reply rendering fix
+Phase: 3 of 3 (File and Image Support)
+Plan: 2 of 2 in current phase
+Status: Ready to execute
+Last activity: 2026-05-13 — Planned Phase 3 file and image attachment support
 
-Progress: [████░░░░░░] 40%
+Progress: [██████░░░░] 67%
 
 ## Performance Metrics
 
@@ -49,12 +49,18 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-- Plan Phase 3: dashboard operational hierarchy, provider runtime health clarity, and next-action emphasis
+- Execute Phase 3 plan 03-01: shared attachment contract + Telegram attachment routing
+- Execute Phase 3 plan 03-02: desktop attachment send flow + packaged-app verification
 
 ### Blockers/Concerns
 
-- Provider-neutral boundaries in shared surfaces should remain intact while dashboard work continues
-- `Usage` 页当前已稳定在按日窗口与 provider 级聚合，不要在 Phase 3 里把 provider-specific 统计细节拉回共享 React 层
+- Provider-neutral boundaries in shared surfaces should remain intact while attachment work lands
+- `Usage` 页当前已稳定在按日窗口与 provider 级聚合，不要在后续阶段里把 provider-specific 统计细节拉回共享 React 层
+- Attachment support will need to respect existing provider/plugin routing and not bypass current Telegram delivery flows
+
+### Roadmap Evolution
+
+- Phase 3 replaced: removed placeholder Phases 3/4/5 and promoted file/image support into the next active phase
 
 ## Deferred Items
 

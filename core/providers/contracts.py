@@ -5,6 +5,15 @@ from typing import Callable, Optional
 
 
 @dataclass(frozen=True)
+class ProviderAttachment:
+    kind: str
+    path: str
+    name: str = ""
+    mime_type: str = ""
+    source: str = ""
+
+
+@dataclass(frozen=True)
 class ProviderFactsHooks:
     scan_workspaces: Callable
     list_threads: Callable
@@ -20,6 +29,7 @@ class ProviderMessageHooks:
     send: Callable
     handle_local_owner: Optional[Callable] = None
     supports_photo: bool = False
+    supports_files: bool = False
 
 
 @dataclass(frozen=True)
@@ -51,6 +61,7 @@ class ProviderManifestCapabilities:
     approvals: bool = False
     questions: bool = False
     photos: bool = False
+    files: bool = False
     commands: bool = False
     command_wrappers: tuple[str, ...] = ()
     control_modes: tuple[str, ...] = ("app",)

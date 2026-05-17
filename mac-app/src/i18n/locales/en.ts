@@ -337,6 +337,10 @@ export const enTexts: AppTexts = {
       workspaceFallback: "(unknown)",
       claudeConnectionError: "Cannot connect to claude",
       codexConnectionError: "Cannot connect to codex",
+      attachFile: "Attach file",
+      attachImage: "Attach image",
+      stagingAttachments: "Preparing attachments...",
+      attachmentUnsupported: "This provider session does not support attachments yet.",
     },
     usage: {
       title: "Usage",

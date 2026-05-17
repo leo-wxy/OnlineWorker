@@ -28,8 +28,18 @@ export interface ProviderCapabilitiesMetadata {
   approvals: boolean;
   questions: boolean;
   photos: boolean;
+  files: boolean;
   commandWrappers: string[];
   controlModes: string[];
+}
+
+export interface ComposerAttachment {
+  id: string;
+  kind: "image" | "file";
+  name: string;
+  mimeType?: string | null;
+  sizeBytes: number;
+  path: string;
 }
 
 export interface ProviderInstallMetadata {
@@ -186,6 +196,13 @@ export interface CodexThreadReadResult {
   turns: SessionTurn[];
   cursor: CodexThreadCursor;
   replace: boolean;
+}
+
+export interface CodexSendResult {
+  threadId: string;
+  requestedThreadId?: string | null;
+  workspaceId?: string | null;
+  createdNewThread: boolean;
 }
 
 export interface SessionStreamEvent {

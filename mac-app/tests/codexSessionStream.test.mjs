@@ -28,7 +28,9 @@ test("applyCodexStreamEvent appends assistant turn and deduplicates adjacent dup
     kind: "assistant_completed",
     turn: { role: "assistant", content: "再补测试。" },
   });
-  assert.deepEqual(deduped, appended);
+  assert.equal(deduped.length, 3);
+  assert.equal(deduped.at(-1)?.content, "再补测试。");
+  assert.equal(deduped.at(-1)?.pending, false);
 });
 
 test("buildCodexAbortedTurn hides abort notice without partial text", () => {

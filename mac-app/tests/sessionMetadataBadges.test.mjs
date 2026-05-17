@@ -21,7 +21,7 @@ test("codex session metadata badges are wired through the session browser", () =
   assert.match(api, /isSmoke:\s*Boolean\(thread\.is_smoke\)/);
 
   assert.match(sessionBrowser, /function CodexSessionBadges/);
-  assert.match(sessionBrowser, /<CodexSessionBadges session=\{rawSession\} \/>/);
+  assert.match(sessionBrowser, /<CodexSessionBadges session=\{activeSession\} \/>/);
   assert.match(sessionBrowser, /<CodexSessionBadges session=\{session\.raw as CodexSession\} compact \/>/);
 });
 
@@ -33,7 +33,10 @@ test("generic provider sessions render a reusable chat surface with composer wir
   assert.match(api, /export async function sendProviderSessionMessage\(/);
   assert.match(sessionBrowser, /function GenericProviderChat/);
   assert.match(sessionBrowser, /const turns = await fetchProviderSession\(session\.type, session\.id, session\.workspace\)/);
-  assert.match(sessionBrowser, /await sendProviderSessionMessage\(session\.type, session\.id, trimmedText, session\.workspace\)/);
+  assert.match(
+    sessionBrowser,
+    /await sendProviderSessionMessage\(session\.type,\s*session\.id,\s*trimmedText,\s*nextAttachments,\s*session\.workspace\)/,
+  );
   assert.match(sessionBrowser, /<SessionComposer/);
   assert.doesNotMatch(sessionBrowser, /chat is not available/);
 });

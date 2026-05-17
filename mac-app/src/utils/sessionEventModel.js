@@ -1,3 +1,7 @@
+import {
+  mergeSessionTurns,
+} from "./sessionTurnMerge.js";
+
 function normalizeSessionTurn(turn) {
   if (!turn?.role || !turn?.content) {
     return null;
@@ -29,14 +33,7 @@ function appendSessionTurn(turns, turn) {
   }
 
   const last = turns[turns.length - 1];
-  if (
-    last?.role === normalizedTurn.role &&
-    last?.content === normalizedTurn.content
-  ) {
-    return turns;
-  }
-
-  return [...turns, normalizedTurn];
+  return mergeSessionTurns(turns, [normalizedTurn]);
 }
 
 function replaceLastSessionTurn(turns, turn) {

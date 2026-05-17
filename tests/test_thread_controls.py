@@ -256,6 +256,57 @@ async def test_thread_topic_message_uses_provider_local_owner_hook_for_custom_pr
 
 
 @pytest.mark.asyncio
+async def test_thread_topic_document_message_reports_provider_file_unsupported(monkeypatch):
+    from bot.handlers.message import make_message_handler
+
+    state = _build_state(tool="custom")
+    ws = state.storage.workspaces["custom:onlineWorker"]
+    ws.threads["custom-1"] = ThreadInfo(thread_id="custom-1", topic_id=100, archived=False)
+
+    adapter = MagicMock()
+    adapter.connected = True
+    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.send_user_message = AsyncMock(return_value={})
+    state.set_adapter("custom", adapter)
+
+    monkeypatch.setattr(
+        "bot.handlers.message.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            message_hooks=SimpleNamespace(
+                supports_photo=False,
+                supports_files=False,
+                ensure_connected=AsyncMock(return_value=adapter),
+                handle_local_owner=AsyncMock(return_value=False),
+                prepare_send=AsyncMock(return_value=True),
+                send=AsyncMock(),
+            )
+        ) if name == "custom" else None,
+    )
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.text = None
+    update.effective_message.caption = "请看文件"
+    update.effective_message.photo = None
+    update.effective_message.document = MagicMock(file_name="a.txt", mime_type="text/plain", file_id="doc-1")
+    update.effective_message.message_thread_id = 100
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+    ctx.bot.get_file = AsyncMock()
+
+    handler = make_message_handler(state, GROUP_CHAT_ID)
+    await handler(update, ctx)
+
+    adapter.resume_thread.assert_not_awaited()
+    adapter.send_user_message.assert_not_awaited()
+    ctx.bot.send_message.assert_awaited_once()
+    assert "不支持文件消息" in ctx.bot.send_message.await_args.kwargs["text"]
+
+
+@pytest.mark.asyncio
 async def test_new_thread_handler_uses_provider_thread_hooks_for_custom_provider(monkeypatch):
     from bot.handlers.thread import make_new_thread_handler
 

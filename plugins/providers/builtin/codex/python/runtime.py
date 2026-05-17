@@ -6,6 +6,7 @@ import os
 import tomllib
 import urllib.error
 import urllib.request
+from dataclasses import replace
 from typing import TYPE_CHECKING, Optional
 
 from core.telegram_formatting import format_telegram_assistant_final_text
@@ -111,6 +112,55 @@ def build_approval_reply(approval, action: str) -> tuple[str, dict]:
         return "✅ 已总是允许", {"decision": "acceptForSession"}
 
     return "✅ 已允许", {"decision": "accept"}
+
+
+def _extract_started_thread_id(result: object) -> str:
+    thread_id = result.get("id") if isinstance(result, dict) else None
+    if not thread_id and isinstance(result, dict):
+        thread = result.get("thread", {})
+        if isinstance(thread, dict):
+            thread_id = thread.get("id")
+    if not thread_id:
+        raise RuntimeError(f"Codex start_thread 返回无效 thread id：{result}")
+    return str(thread_id)
+
+
+async def _detach_imported_thread_for_app_send(adapter, ws_info, thread_info):
+    workspace_id = ws_info.daemon_workspace_id
+    old_thread_id = thread_info.thread_id
+    old_topic_id = thread_info.topic_id
+
+    result = await adapter.start_thread(workspace_id)
+    new_thread_id = _extract_started_thread_id(result)
+    if new_thread_id == old_thread_id:
+        raise RuntimeError("Codex start_thread 返回了与 imported thread 相同的 thread id")
+
+    imported_record = replace(
+        thread_info,
+        thread_id=old_thread_id,
+        topic_id=None,
+        streaming_msg_id=None,
+        last_tg_user_message_id=None,
+    )
+    ws_info.threads[old_thread_id] = imported_record
+
+    thread_info.thread_id = new_thread_id
+    thread_info.topic_id = old_topic_id
+    thread_info.source = "app"
+    thread_info.is_active = True
+    thread_info.streaming_msg_id = None
+    thread_info.history_sync_cursor = None
+    thread_info.last_tg_user_message_id = None
+    ws_info.threads[new_thread_id] = thread_info
+
+    logger.info(
+        "[provider-message] codex imported thread 已拆分为 app session "
+        "old=%s new=%s topic=%s",
+        old_thread_id[:8],
+        new_thread_id[:8],
+        old_topic_id,
+    )
+    return thread_info
 
 
 def _load_codex_defaults(config_path: str | None = None) -> tuple[str | None, str | None]:
@@ -568,6 +618,7 @@ async def handle_local_owner(
     src_topic_id,
     text,
     has_photo: bool,
+    attachments=None,
 ) -> bool:
     from bot.handlers.common import _send_to_group, tg_processing_ack_text, tg_send_failed_text
     from bot.handlers import message as message_handler
@@ -621,10 +672,18 @@ async def prepare_send(
     src_topic_id,
     text,
     has_photo: bool,
+    attachments=None,
 ) -> bool:
     from bot.handlers.common import is_codex_unmaterialized_error
 
     workspace_id = ws_info.daemon_workspace_id
+    thread_source = str(getattr(thread_info, "source", "") or "unknown").strip().lower()
+    if thread_source == "imported":
+        thread_info = await _detach_imported_thread_for_app_send(
+            adapter,
+            ws_info,
+            thread_info,
+        )
     try:
         await adapter.resume_thread(workspace_id, thread_info.thread_id)
     except Exception as e:
@@ -657,8 +716,17 @@ async def send_message(
     src_topic_id,
     text,
     has_photo: bool,
+    attachments=None,
 ) -> None:
     codex_state.mark_send_started(state, thread_info.thread_id)
+    if attachments:
+        await adapter.send_user_message(
+            ws_info.daemon_workspace_id,
+            thread_info.thread_id,
+            text,
+            attachments=attachments,
+        )
+        return
     await adapter.send_user_message(ws_info.daemon_workspace_id, thread_info.thread_id, text)
 
 
