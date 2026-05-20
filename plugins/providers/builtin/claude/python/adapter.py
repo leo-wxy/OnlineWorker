@@ -10,7 +10,6 @@ import shlex
 import shutil
 import sys
 import time
-from urllib.parse import urlparse
 import uuid
 from typing import Any, Awaitable, Callable
 
@@ -107,61 +106,6 @@ def _message_has_tool_use(message: Any) -> bool:
         if str(block.get("type") or "").strip() == "tool_use":
             return True
     return False
-
-
-def _normalize_attachment_path(path: Any) -> str:
-    raw = str(path or "").strip()
-    if not raw:
-        return ""
-    return os.path.abspath(os.path.expanduser(raw))
-
-
-def _collect_attachment_parent_dirs(attachments: list[dict[str, Any]] | None) -> list[str]:
-    parent_dirs: list[str] = []
-    seen: set[str] = set()
-    for attachment in attachments or []:
-        if not isinstance(attachment, dict):
-            continue
-        normalized_path = _normalize_attachment_path(attachment.get("path"))
-        if not normalized_path:
-            continue
-        parent_dir = os.path.dirname(normalized_path) or normalized_path
-        if parent_dir in seen:
-            continue
-        seen.add(parent_dir)
-        parent_dirs.append(parent_dir)
-    return parent_dirs
-
-
-def _build_attachment_prompt(attachments: list[dict[str, Any]] | None) -> str:
-    rows: list[str] = []
-    for attachment in attachments or []:
-        if not isinstance(attachment, dict):
-            continue
-        normalized_path = _normalize_attachment_path(attachment.get("path"))
-        if not normalized_path:
-            continue
-        kind = str(attachment.get("kind") or "").strip().lower()
-        label = "image" if kind == "image" else "file"
-        name = str(attachment.get("name") or "").strip() or os.path.basename(normalized_path) or normalized_path
-        rows.append(f"- [{label}] {name}\n  path: {normalized_path}")
-    if not rows:
-        return ""
-    return (
-        "Attachments for this turn:\n"
-        f"{chr(10).join(rows)}\n\n"
-        "Read or inspect these local attachment paths directly when relevant."
-    )
-
-
-def _build_message_input_text(text: str, attachments: list[dict[str, Any]] | None) -> str:
-    trimmed = str(text or "").strip()
-    attachment_prompt = _build_attachment_prompt(attachments)
-    if trimmed and attachment_prompt:
-        return f"{trimmed}\n\n{attachment_prompt}"
-    if trimmed:
-        return trimmed
-    return attachment_prompt
 
 
 def _normalize_hook_tool_input(payload: dict[str, Any]) -> dict[str, Any]:
@@ -521,31 +465,6 @@ def resolve_preferred_node_bin_dir() -> str | None:
     return None
 
 
-async def _probe_proxy_base_url(base_url: str, timeout_s: float = 1.0) -> tuple[bool, str]:
-    parsed = urlparse(str(base_url or "").strip())
-    if parsed.scheme not in {"http", "https"}:
-        return False, f"unsupported scheme: {parsed.scheme or '<missing>'}"
-
-    host = parsed.hostname
-    if not host:
-        return False, "missing host"
-
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    try:
-        _, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout_s)
-    except asyncio.TimeoutError:
-        return False, "timeout"
-    except Exception as e:
-        return False, str(e)
-
-    try:
-        writer.close()
-        await writer.wait_closed()
-    except Exception:
-        pass
-    return True, ""
-
-
 class ClaudeAdapter:
     """Claude CLI 本地 adapter。
 
@@ -560,7 +479,6 @@ class ClaudeAdapter:
         self._connected = False
         self._auth_ready: bool | None = None
         self._auth_method: str = ""
-        self._use_proxy_env = False
         self._event_callbacks: list[EventCallback] = []
         self._server_request_callbacks: list[ServerRequestCallback] = []
         self._disconnect_callbacks: list[Callable[[], None]] = []
@@ -838,24 +756,10 @@ class ClaudeAdapter:
     def _proxy_model(self) -> str:
         return (os.environ.get("ANTHROPIC_MODEL") or "").strip()
 
-    def _proxy_auth_token(self) -> str:
-        return (os.environ.get("ANTHROPIC_AUTH_TOKEN") or "").strip()
-
     def _build_claude_env(self) -> dict[str, str]:
         env = dict(os.environ)
         base_url = self._proxy_base_url()
-        if base_url and not self._use_proxy_env:
-            env.pop("ANTHROPIC_BASE_URL", None)
-            env.pop("ANTHROPIC_AUTH_TOKEN", None)
-            api_key = str(env.get("ANTHROPIC_API_KEY") or "").strip()
-            if not api_key or api_key == "dummy":
-                env.pop("ANTHROPIC_API_KEY", None)
-        if (
-            self._use_proxy_env
-            and base_url
-            and not (env.get("ANTHROPIC_AUTH_TOKEN") or "").strip()
-            and not (env.get("ANTHROPIC_API_KEY") or "").strip()
-        ):
+        if base_url and not (env.get("ANTHROPIC_API_KEY") or "").strip():
             # Claude CLI 在代理模式下仍要求一个非空 key 形状；本地代理链通常接受占位值。
             env["ANTHROPIC_API_KEY"] = "dummy"
         for key in PARENT_SESSION_ENV_VARS:
@@ -873,12 +777,7 @@ class ClaudeAdapter:
             env["NVM_BIN"] = preferred_node_bin
         return env
 
-    def _build_send_argv(
-        self,
-        thread_id: str,
-        text: str,
-        attachments: list[dict[str, Any]] | None = None,
-    ) -> list[str]:
+    def _build_send_argv(self, thread_id: str, text: str) -> list[str]:
         base_args = [
             self.claude_bin,
             "-p",
@@ -894,14 +793,21 @@ class ClaudeAdapter:
                 "--settings",
                 self._hook_settings_path,
             ])
-        for parent_dir in _collect_attachment_parent_dirs(attachments):
-            base_args.extend(["--add-dir", parent_dir])
-        final_text = _build_message_input_text(text, attachments)
         if _find_claude_project_session_file(thread_id):
-            return [*base_args, "--resume", thread_id, final_text]
-        return [*base_args, "--session-id", thread_id, final_text]
+            return [*base_args, "--resume", thread_id, text]
+        return [*base_args, "--session-id", thread_id, text]
 
-    async def _read_cli_auth_status(self) -> dict:
+    async def refresh_auth_status(self) -> dict:
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            self._auth_ready = True
+            self._auth_method = "apiKeyEnv"
+            return {"loggedIn": True, "authMethod": self._auth_method}
+
+        if self._proxy_base_url():
+            self._auth_ready = True
+            self._auth_method = "proxyEnv"
+            return {"loggedIn": True, "authMethod": self._auth_method}
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 self.claude_bin,
@@ -913,97 +819,42 @@ class ClaudeAdapter:
             stdout, stderr = await proc.communicate()
         except Exception as e:
             logger.warning(f"读取 Claude auth 状态失败：{e}")
+            self._auth_ready = None
+            self._auth_method = ""
             return {"loggedIn": None, "authMethod": "", "error": str(e)}
 
         out_text = _to_text(stdout).strip()
         err_text = _to_text(stderr).strip()
         payload = out_text or err_text
         if not payload:
+            self._auth_ready = None
+            self._auth_method = ""
             return {"loggedIn": None, "authMethod": ""}
 
         try:
             status = json.loads(payload)
         except Exception:
             logged_in = "not logged in" not in payload.lower()
-            return {"loggedIn": True if logged_in else False, "authMethod": "" if logged_in else "none"}
+            self._auth_ready = True if logged_in else False
+            self._auth_method = "" if logged_in else "none"
+            return {"loggedIn": self._auth_ready, "authMethod": self._auth_method}
 
         if isinstance(status, dict):
-            return status
-
-        return {"loggedIn": None, "authMethod": ""}
-
-    async def refresh_auth_status(self) -> dict:
-        api_key = str(os.environ.get("ANTHROPIC_API_KEY") or "").strip()
-        auth_token = self._proxy_auth_token()
-        base_url = self._proxy_base_url()
-        self._use_proxy_env = False
-
-        if base_url:
-            reachable, probe_error = await _probe_proxy_base_url(base_url)
-            if reachable:
-                self._auth_ready = True
-                self._auth_method = "proxyEnv"
-                self._use_proxy_env = True
-                return {"loggedIn": True, "authMethod": self._auth_method}
-
-            logger.warning("Claude proxy unavailable base_url=%s err=%s", base_url, probe_error or "unknown")
-            self._auth_ready = False
-            self._auth_method = "proxyEnv"
-            error = (
-                f"Claude 代理不可达：{base_url} ({probe_error or 'unknown error'})。"
-                "当前已显式配置 `ANTHROPIC_BASE_URL`，因此不会自动回退到 "
-                "`ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN` 或 `claude auth login`。"
-                "请修复该端点，或移除 `ANTHROPIC_BASE_URL` 后再使用其他鉴权方式。"
-            )
-            return {
-                "loggedIn": False,
-                "authMethod": self._auth_method,
-                "error": error,
-            }
-
-        if api_key:
-            self._auth_ready = True
-            self._auth_method = "apiKeyEnv"
-            return {"loggedIn": True, "authMethod": self._auth_method}
-
-        if auth_token:
-            self._auth_ready = True
-            self._auth_method = "authTokenEnv"
-            return {"loggedIn": True, "authMethod": self._auth_method}
-
-        status = await self._read_cli_auth_status()
-        logged_in = status.get("loggedIn")
-        if logged_in is True:
-            self._auth_ready = True
+            self._auth_ready = status.get("loggedIn")
             self._auth_method = str(status.get("authMethod") or "")
             return status
-        if logged_in is False:
-            self._auth_ready = False
-            self._auth_method = str(status.get("authMethod") or "none")
-            return status
 
-        self._auth_ready = False
+        self._auth_ready = None
         self._auth_method = ""
-        return {
-            "loggedIn": False,
-            "authMethod": "",
-            "error": (
-                "无法确认 Claude CLI 鉴权状态。请先在本机终端执行 `claude auth login`，"
-                "或配置 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`；若走代理，"
-                "再补 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_MODEL`。"
-            ),
-        }
+        return {"loggedIn": None, "authMethod": ""}
 
     async def _ensure_auth_ready(self) -> None:
         status = await self.refresh_auth_status()
-        if status.get("loggedIn") is not True:
+        if status.get("loggedIn") is False:
             raise RuntimeError(
-                str(status.get("error") or "").strip()
-                or (
-                    "Claude CLI 未鉴权。请先在本机终端执行 `claude auth login`，"
-                    "或配置 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`；若走代理，"
-                    "再补 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_MODEL`。"
-                )
+                "Claude CLI 未鉴权。请先在本机终端执行 `claude auth login`，"
+                "或配置 `ANTHROPIC_API_KEY`；若走代理，再补 `ANTHROPIC_BASE_URL` "
+                "和 `ANTHROPIC_MODEL`。"
             )
 
     async def _emit_event(self, workspace_id: str, method: str, params: dict) -> None:
@@ -1099,13 +950,7 @@ class ClaudeAdapter:
             future.set_result(response)
         return response
 
-    async def send_user_message(
-        self,
-        workspace_id: str,
-        thread_id: str,
-        text: str,
-        attachments: list[dict[str, Any]] | None = None,
-    ) -> dict:
+    async def send_user_message(self, workspace_id: str, thread_id: str, text: str) -> dict:
         if not self._connected:
             raise RuntimeError("Claude 未连接")
 
@@ -1129,7 +974,7 @@ class ClaudeAdapter:
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                *self._build_send_argv(thread_id, text, attachments=attachments),
+                *self._build_send_argv(thread_id, text),
                 cwd=cwd,
                 env=self._build_claude_env(),
                 stdin=asyncio.subprocess.DEVNULL,

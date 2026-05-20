@@ -57,7 +57,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [x] 03-01: Upgrade the shared message contract and wire Telegram attachments into provider runtimes
+- [ ] 03-01: Upgrade the shared message contract and wire Telegram attachments into provider runtimes
 - [ ] 03-02: Add desktop attachment send support and validate the packaged app flow
 
 ## Progress
@@ -69,4 +69,4 @@ Phases execute in numeric order: 1 → 2 → 3
 |-------|----------------|--------|-----------|
 | 1. UI Foundation | 2/2 | Completed | 2026-05-10 |
 | 2. Provider Usage Explorer | 2/2 | Completed | 2026-05-12 |
-| 3. File and Image Support | 1/2 | In progress | - |
+| 3. File and Image Support | 0/2 | Planned | - |

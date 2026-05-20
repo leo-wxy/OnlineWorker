@@ -29,7 +29,6 @@ providers:
       type: "stdio"
     auth:
       key: ""
-      auth_token: ""
       base_url: ""
       model: ""
 

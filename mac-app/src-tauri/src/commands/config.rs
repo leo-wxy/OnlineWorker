@@ -369,14 +369,12 @@ mod tests {
         assert!(template.contains("GROUP_CHAT_ID="));
         assert!(!template.contains("ANTHROPIC_API_KEY="));
         assert!(!template.contains("ANTHROPIC_BASE_URL="));
-        assert!(!template.contains("ANTHROPIC_AUTH_TOKEN="));
         assert!(!template.contains("ANTHROPIC_MODEL="));
     }
 
     #[test]
     fn api_key_fields_are_masked() {
         assert!(is_sensitive_key("ANTHROPIC_API_KEY"));
-        assert!(is_sensitive_key("ANTHROPIC_AUTH_TOKEN"));
         assert!(is_sensitive_key("OPENAI_API_KEY"));
     }
 }

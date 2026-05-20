@@ -1029,7 +1029,7 @@ tools:
 enabled: true
 codex_bin: "codex"
 "#;
-        let env_raw = "ANTHROPIC_API_KEY=dummy\nANTHROPIC_AUTH_TOKEN=token-123\nANTHROPIC_BASE_URL=http://localhost:3031\nANTHROPIC_MODEL=claude-opus-4-6\n";
+        let env_raw = "ANTHROPIC_API_KEY=dummy\nANTHROPIC_BASE_URL=http://localhost:3031\nANTHROPIC_MODEL=claude-opus-4-6\n";
 
         let doc =
             normalize_provider_document_with_env(raw, Some(env_raw)).expect("normalized config");
@@ -1037,10 +1037,6 @@ codex_bin: "codex"
         let claude = providers.get("claude").expect("claude");
         let auth = claude.auth.as_ref().expect("claude auth");
         assert_eq!(auth.get("key").map(String::as_str), Some("dummy"));
-        assert_eq!(
-            auth.get("auth_token").map(String::as_str),
-            Some("token-123")
-        );
         assert_eq!(
             auth.get("base_url").map(String::as_str),
             Some("http://localhost:3031")
@@ -1061,11 +1057,10 @@ managed: false
 autostart: false
 auth:
   key: ""
-  auth_token: ""
   base_url: "   "
   model: ""
 "#;
-        let env_raw = "ANTHROPIC_API_KEY=dummy\nANTHROPIC_AUTH_TOKEN=token-123\nANTHROPIC_BASE_URL=http://localhost:3031\nANTHROPIC_MODEL=claude-opus-4-6\n";
+        let env_raw = "ANTHROPIC_API_KEY=dummy\nANTHROPIC_BASE_URL=http://localhost:3031\nANTHROPIC_MODEL=claude-opus-4-6\n";
 
         let doc =
             normalize_provider_document_with_env(raw, Some(env_raw)).expect("normalized config");
@@ -1073,10 +1068,6 @@ auth:
         let claude = providers.get("claude").expect("claude");
         let auth = claude.auth.as_ref().expect("claude auth");
         assert_eq!(auth.get("key").map(String::as_str), Some("dummy"));
-        assert_eq!(
-            auth.get("auth_token").map(String::as_str),
-            Some("token-123")
-        );
         assert_eq!(
             auth.get("base_url").map(String::as_str),
             Some("http://localhost:3031")

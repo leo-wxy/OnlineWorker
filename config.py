@@ -178,8 +178,8 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
                 "send": True,
                 "approvals": True,
                 "questions": False,
-                "photos": True,
-                "files": True,
+                "photos": False,
+                "files": False,
                 "commands": True,
                 "command_wrappers": ["model", "review"],
                 "control_modes": ["app", "tui", "hybrid"],
@@ -208,8 +208,8 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
                 "send": True,
                 "approvals": True,
                 "questions": True,
-                "photos": True,
-                "files": True,
+                "photos": False,
+                "files": False,
                 "commands": True,
                 "command_wrappers": [],
                 "control_modes": ["app"],
@@ -220,7 +220,6 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
             "health": {},
             "auth": {
                 "key": "",
-                "auth_token": "",
                 "base_url": "",
                 "model": "",
             },
@@ -371,12 +370,11 @@ def _normalize_claude_auth(raw_auth: Any) -> dict[str, str]:
     raw = raw_auth if isinstance(raw_auth, dict) else {}
     env_fallback = {
         "key": (os.environ.get("ANTHROPIC_API_KEY") or "").strip(),
-        "auth_token": (os.environ.get("ANTHROPIC_AUTH_TOKEN") or "").strip(),
         "base_url": (os.environ.get("ANTHROPIC_BASE_URL") or "").strip(),
         "model": (os.environ.get("ANTHROPIC_MODEL") or "").strip(),
     }
     auth: dict[str, str] = {}
-    for key in ("key", "auth_token", "base_url", "model"):
+    for key in ("key", "base_url", "model"):
         explicit_value = str(raw.get(key) or "").strip()
         auth[key] = explicit_value or env_fallback[key]
     return auth
@@ -385,7 +383,6 @@ def _normalize_claude_auth(raw_auth: Any) -> dict[str, str]:
 def _apply_claude_auth_env(auth: dict[str, str]) -> None:
     env_map = {
         "key": "ANTHROPIC_API_KEY",
-        "auth_token": "ANTHROPIC_AUTH_TOKEN",
         "base_url": "ANTHROPIC_BASE_URL",
         "model": "ANTHROPIC_MODEL",
     }

@@ -167,7 +167,7 @@ export const zhTexts: AppTexts = {
       claudeAuthDescription:
         "如果你希望 OnlineWorker 驱动 Claude Code，可以走官方登录，也可以直接在这里配置 API 和代理参数。",
       claudeAuthHint:
-        "如果你只使用 codex，可以留空。官方链路通常执行 `claude auth login`；如果你走 Raven、Langbase 或其他代理，可以填写 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN` 与 `ANTHROPIC_MODEL`。没有 auth token 且 `ANTHROPIC_API_KEY` 留空时，OnlineWorker 会自动补一个 dummy 占位值给 Claude CLI。这些 Claude 环境变量一旦修改，需要重启 OnlineWorker 服务后才会生效。",
+        "如果你只使用 codex，可以留空。官方链路通常执行 `claude auth login`；如果你走 Raven、Langbase 或其他代理，可以只填写 `ANTHROPIC_BASE_URL` 与 `ANTHROPIC_MODEL`，`ANTHROPIC_API_KEY` 留空时，OnlineWorker 会自动补一个 dummy 占位值给 Claude CLI。这些 Claude 环境变量一旦修改，需要重启 OnlineWorker 服务后才会生效。",
       step2Title: "获取你的用户 ID",
       step2Description: "只允许指定用户向 Bot 发送指令。",
       step2Instructions: [

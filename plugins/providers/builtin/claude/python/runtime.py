@@ -291,7 +291,7 @@ def build_status_lines(state) -> list[str]:
     if adapter is not None and adapter.connected:
         if getattr(adapter, "auth_ready", None) is False:
             return ["• claude CLI：⚠️ 已连接，但未鉴权"]
-        if getattr(adapter, "auth_method", "") in ("apiKeyEnv", "authTokenEnv", "proxyEnv"):
+        if getattr(adapter, "auth_method", "") in ("apiKeyEnv", "proxyEnv"):
             return ["• claude CLI：✅ 已连接（API/Proxy）"]
         return ["• claude CLI：✅ 已连接"]
     if adapter is not None:

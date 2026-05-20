@@ -170,7 +170,7 @@ export const enTexts: AppTexts = {
       claudeAuthDescription:
         "If you want OnlineWorker to drive Claude Code, you can either sign in with the official Claude CLI flow, or fill in API and proxy settings here.",
       claudeAuthHint:
-        "Leaving this empty is fine if you only use codex. Official flow usually uses `claude auth login`. Proxy or gateway mode can set `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, and `ANTHROPIC_MODEL`; if no auth token is set and `ANTHROPIC_API_KEY` is left empty, OnlineWorker will inject a dummy placeholder for Claude CLI. Any change to these Claude env values takes effect after restarting the OnlineWorker service.",
+        "Leaving this empty is fine if you only use codex. Official flow usually uses `claude auth login`. Proxy or gateway mode can set `ANTHROPIC_BASE_URL` and `ANTHROPIC_MODEL`; if `ANTHROPIC_API_KEY` is left empty, OnlineWorker will inject a dummy placeholder for Claude CLI. Any change to these Claude env values takes effect after restarting the OnlineWorker service.",
       step2Title: "Get Your User ID",
       step2Description: "Only the specified user is allowed to send commands.",
       step2Instructions: [
