@@ -24,8 +24,8 @@ provider:
     send: true
     approvals: true
     questions: true
-    photos: false
-    files: false
+    photos: true
+    files: true
     commands: true
     command_wrappers: []
     control_modes:
@@ -35,10 +35,12 @@ provider:
   health: {}
   auth:
     key: ""
+    auth_token: ""
     base_url: ""
     model: ""
   auth_env:
     key: ANTHROPIC_API_KEY
+    auth_token: ANTHROPIC_AUTH_TOKEN
     base_url: ANTHROPIC_BASE_URL
     model: ANTHROPIC_MODEL
   commands:

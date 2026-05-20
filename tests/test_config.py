@@ -37,6 +37,7 @@ providers:
       type: "stdio"
     auth:
       key: ""
+      auth_token: ""
       base_url: "http://localhost:3031"
       model: "claude-opus-4-6"
 
@@ -127,11 +128,11 @@ def test_builtin_provider_defaults_expose_attachment_capabilities():
     claude = _default_provider_blueprint("claude")
 
     assert codex["capabilities"]["photos"] is True
-    assert claude["capabilities"]["photos"] is False
+    assert claude["capabilities"]["photos"] is True
     assert "files" in codex["capabilities"]
     assert "files" in claude["capabilities"]
     assert codex["capabilities"]["files"] is True
-    assert claude["capabilities"]["files"] is False
+    assert claude["capabilities"]["files"] is True
 
 
 def test_config_yaml_example_uses_public_provider_schema():
@@ -330,6 +331,7 @@ def test_load_config_from_provider_schema(tmp_path, monkeypatch):
     monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
 
     from config import load_config
@@ -354,6 +356,7 @@ def test_load_config_from_provider_schema(tmp_path, monkeypatch):
     assert claude.codex_bin == "claude"
     assert claude.protocol == "stdio"
     assert claude.auth["key"] == ""
+    assert claude.auth["auth_token"] == ""
     assert claude.auth["base_url"] == "http://localhost:3031"
     assert claude.auth["model"] == "claude-opus-4-6"
     assert cfg.log_level == "DEBUG"
@@ -430,6 +433,7 @@ providers:
       type: "stdio"
     auth:
       key: ""
+      auth_token: ""
       base_url: ""
       model: ""
 """,
@@ -440,6 +444,7 @@ providers:
     monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "dummy")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://localhost:3031")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "token-123")
     monkeypatch.setenv("ANTHROPIC_MODEL", "claude-opus-4-6")
 
     from config import load_config
@@ -448,6 +453,7 @@ providers:
     claude = cfg.get_provider("claude")
     assert claude is not None
     assert claude.auth["key"] == "dummy"
+    assert claude.auth["auth_token"] == "token-123"
     assert claude.auth["base_url"] == "http://localhost:3031"
     assert claude.auth["model"] == "claude-opus-4-6"
 

@@ -53,8 +53,8 @@ Deferred to future release work after the current UI refinement milestone.
 | UI-02 | Phase 1 | Completed (2026-05-10) |
 | USG-01 | Phase 2 | Completed (2026-05-12) |
 | USG-02 | Phase 2 | Completed (2026-05-12) |
-| ATT-01 | Phase 3 | Pending |
-| ATT-02 | Phase 3 | Pending |
+| ATT-01 | Phase 3 | In progress |
+| ATT-02 | Phase 3 | In progress |
 
 **Coverage:**
 - v1 requirements: 6 total

@@ -9,7 +9,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 
 use super::claude::{
@@ -778,10 +778,25 @@ fn check_cli_available_sync(bin: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn claude_env_auth_ready(env_raw: &str) -> bool {
-    let api_key = read_env_key(env_raw, "ANTHROPIC_API_KEY").unwrap_or_default();
-    let base_url = read_env_key(env_raw, "ANTHROPIC_BASE_URL").unwrap_or_default();
-    !api_key.trim().is_empty() || !base_url.trim().is_empty()
+fn claude_env_api_key(env_raw: &str) -> String {
+    read_env_key(env_raw, "ANTHROPIC_API_KEY")
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn claude_env_auth_token(env_raw: &str) -> String {
+    read_env_key(env_raw, "ANTHROPIC_AUTH_TOKEN")
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn claude_env_base_url(env_raw: &str) -> String {
+    read_env_key(env_raw, "ANTHROPIC_BASE_URL")
+        .unwrap_or_default()
+        .trim()
+        .to_string()
 }
 
 fn parse_claude_auth_status_payload(payload: &str) -> Option<bool> {
@@ -821,6 +836,59 @@ fn read_claude_auth_status(bin: &str) -> Option<bool> {
     })
 }
 
+fn probe_claude_base_url_reachable(base_url: &str) -> bool {
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_millis(500))
+        .timeout_read(Duration::from_millis(500))
+        .timeout_write(Duration::from_millis(500))
+        .build();
+
+    match agent.get(base_url).call() {
+        Ok(_) => true,
+        Err(ureq::Error::Status(_, _)) => true,
+        Err(_) => false,
+    }
+}
+
+fn derive_claude_health_from_auth_sources(
+    proxy_base_url: Option<&str>,
+    cli_auth_status: Option<bool>,
+    proxy_reachable: Option<bool>,
+    has_api_key: bool,
+    has_auth_token: bool,
+) -> (ServiceHealth, Option<String>) {
+    if let Some(base_url) = proxy_base_url.filter(|value| !value.trim().is_empty()) {
+        match proxy_reachable {
+            Some(true) => return (ServiceHealth::Healthy, None),
+            Some(false) => {
+                return (
+                    ServiceHealth::Degraded,
+                    Some(format!(
+                        "Configured Claude proxy is unreachable ({base_url}); explicit base_url disables fallback"
+                    )),
+                );
+            }
+            None => {}
+        }
+    }
+
+    if has_api_key || has_auth_token {
+        return (ServiceHealth::Healthy, None);
+    }
+
+    match cli_auth_status {
+        Some(true) => (ServiceHealth::Healthy, None),
+        Some(false) => (
+            ServiceHealth::Degraded,
+            Some("Claude CLI not authenticated".to_string()),
+        ),
+        None => (
+            ServiceHealth::Unknown,
+            Some("Claude auth status unavailable".to_string()),
+        ),
+    }
+}
+
 fn derive_claude_health(
     service_running: bool,
     provider: &ProviderConfigSnapshot,
@@ -839,21 +907,34 @@ fn derive_claude_health(
     }
 
     let env_raw = read_dashboard_env_raw(data_dir);
-    if claude_env_auth_ready(&env_raw) {
-        return (ServiceHealth::Healthy, None);
-    }
+    let api_key = claude_env_api_key(&env_raw);
+    let auth_token = claude_env_auth_token(&env_raw);
+    let base_url = claude_env_base_url(&env_raw);
+    let proxy_reachable = if base_url.is_empty() {
+        None
+    } else {
+        Some(probe_claude_base_url_reachable(&base_url))
+    };
+    let auth_status = if (!base_url.is_empty() && proxy_reachable == Some(true))
+        || !api_key.is_empty()
+        || !auth_token.is_empty()
+    {
+        None
+    } else {
+        read_claude_auth_status(bin)
+    };
 
-    match read_claude_auth_status(bin) {
-        Some(true) => (ServiceHealth::Healthy, None),
-        Some(false) => (
-            ServiceHealth::Degraded,
-            Some("Claude CLI not authenticated".to_string()),
-        ),
-        None => (
-            ServiceHealth::Unknown,
-            Some("Claude auth status unavailable".to_string()),
-        ),
-    }
+    derive_claude_health_from_auth_sources(
+        if base_url.is_empty() {
+            None
+        } else {
+            Some(base_url.as_str())
+        },
+        auth_status,
+        proxy_reachable,
+        !api_key.is_empty(),
+        !auth_token.is_empty(),
+    )
 }
 
 fn codex_db_path() -> Option<PathBuf> {
@@ -1214,7 +1295,8 @@ fn extract_thread_summary(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_dashboard_state, build_provider_statuses, extract_thread_summary,
+        build_dashboard_state, build_provider_statuses, derive_claude_health_from_auth_sources,
+        extract_thread_summary,
         read_claude_workspace_activity, read_env_key, read_recent_activity_summary,
         resolve_builtin_provider_snapshots, AlertLevel, DashboardComputationInput,
         ProviderConfigSnapshot, ProviderDashboardStatus, RecentActivitySummary, ServiceHealth,
@@ -1524,6 +1606,85 @@ mod tests {
             .alerts
             .iter()
             .any(|alert| alert.code == "claude_degraded"));
+    }
+
+    #[test]
+    fn derive_claude_health_from_auth_sources_prefers_reachable_proxy() {
+        let (health, detail) = derive_claude_health_from_auth_sources(
+            Some("http://localhost:3031"),
+            Some(true),
+            Some(true),
+            false,
+            false,
+        );
+
+        assert_eq!(health, ServiceHealth::Healthy);
+        assert_eq!(detail, None);
+    }
+
+    #[test]
+    fn derive_claude_health_from_auth_sources_degrades_when_explicit_proxy_is_unreachable_even_with_api_key() {
+        let (health, detail) = derive_claude_health_from_auth_sources(
+            Some("http://localhost:3031"),
+            Some(false),
+            Some(false),
+            true,
+            false,
+        );
+
+        assert_eq!(health, ServiceHealth::Degraded);
+        assert!(detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("proxy is unreachable"));
+    }
+
+    #[test]
+    fn derive_claude_health_from_auth_sources_degrades_when_explicit_proxy_is_unreachable_even_with_cli_auth() {
+        let (health, detail) = derive_claude_health_from_auth_sources(
+            Some("http://localhost:3031"),
+            Some(true),
+            Some(false),
+            false,
+            false,
+        );
+
+        assert_eq!(health, ServiceHealth::Degraded);
+        assert!(detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("proxy is unreachable"));
+    }
+
+    #[test]
+    fn derive_claude_health_from_auth_sources_degrades_when_proxy_is_unreachable_and_no_fallback_exists() {
+        let (health, detail) = derive_claude_health_from_auth_sources(
+            Some("http://localhost:3031"),
+            Some(false),
+            Some(false),
+            false,
+            false,
+        );
+
+        assert_eq!(health, ServiceHealth::Degraded);
+        assert!(detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("proxy is unreachable"));
+    }
+
+    #[test]
+    fn derive_claude_health_from_auth_sources_accepts_auth_token_without_proxy() {
+        let (health, detail) = derive_claude_health_from_auth_sources(
+            None,
+            None,
+            None,
+            false,
+            true,
+        );
+
+        assert_eq!(health, ServiceHealth::Healthy);
+        assert_eq!(detail, None);
     }
 
     #[test]

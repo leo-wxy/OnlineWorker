@@ -1,7 +1,7 @@
 # Phase 3: File and Image Support - Context
 
 **Gathered:** 2026-05-13
-**Status:** Ready for planning
+**Status:** In execution, refined 2026-05-20
 
 <domain>
 ## Phase Boundary
@@ -41,8 +41,9 @@
 - **D-09:** 图片与通用文件要在共享数据模型里显式区分，不能继续只保留 `supports_photo` / `photos` 这种单能力位。
 
 ### Builtin providers
-- **D-10:** `codex` 与 `claude` 都纳入第一版范围；如果某一侧底层 CLI 无法原生携带二进制附件，需要通过既有工作流允许的文本引用 / 文件路径上下文方式接入，但这种差异必须留在 provider 层。
+- **D-10:** `codex` 与 `claude` 都纳入第一版范围；`claude` 第一版附件策略以**本地路径访问**为主，通过 CLI `--add-dir` 放开附件目录访问，并在 prompt 中显式声明本轮附件路径；只有在路径访问被证明不足时，才考虑额外的内容提取 fallback。
 - **D-11:** builtin provider manifest 与 descriptor 需要公开声明附件能力，避免共享层靠 runtime id 猜测。
+- **D-12:** Claude 的运行时鉴权必须兼容多种接入形态，但要尊重配置所有权：如果显式配置了 `ANTHROPIC_BASE_URL`，则该值就是当前会话唯一生效的目标端点；系统只负责探测可达性并在不可达时快速报错，不自动回退到其他目标端点。代理模式下认证可以来自 `ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY`；只有在未配置 `ANTHROPIC_BASE_URL` 时，才允许在 API key、auth token 与官方登录态之间选择。
 
 ### the agent's Discretion
 - 附件在桌面端 UI 中的具体展示样式
@@ -59,10 +60,13 @@
   - “都做”——Telegram 和桌面端都要支持
   - 图片和通用文件都要支持
   - 仍然要按 plugin/provider 边界接入
+  - Claude 附件主路径按本地路径传递，不先上重文档解析器
 - 当前现场约束：
   - `bot/handlers/message.py` 已能识别 Telegram `photo`，但还不能处理 `document`
   - provider contract 只有 `supports_photo`，还没有通用 attachment contract
   - `SessionComposer` 里已有附件图标，但现在只是视觉按钮，没有实际发送链路
+  - 安装态可能保留历史 `ANTHROPIC_BASE_URL=http://localhost:3031` 配置，因此 Claude provider 不能把“有 base_url”直接视为可发送状态；必须先做代理可达性探测，并在不可达时明确提示“显式端点当前不可用”
+  - Raven / Langbase 链路的最小可用环境是 `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_MODEL`；单独依赖 dummy `ANTHROPIC_API_KEY` 会被 Claude CLI 判为 invalid API key
 
 </specifics>
 
@@ -132,6 +136,8 @@
 - 当前 contract 只有 `supports_photo` / `photos`，无法描述通用文件能力。
 - Telegram 侧还没有 `document` 下载和本地持久化链路。
 - 桌面端 composer 的附件图标还没有实际行为。
+- Claude staged attachments 往往落在 workspace 之外，因此附件目录访问必须通过 provider 层额外显式放开，不能只依赖 `cwd`
+- Claude 运行时之前把 `ANTHROPIC_BASE_URL` 的存在直接当作鉴权成功，这会让坏掉的本地代理配置阻塞真实发送；需要在 provider 边界内完成“代理探测 + 快速失败”，但不能绕过用户显式配置的目标端点。对 Raven / Langbase 这类链路，需要保留 `ANTHROPIC_AUTH_TOKEN`，不能在已有 auth token 时再注入 dummy API key
 
 </code_context>
 
@@ -142,6 +148,7 @@
 - 图片预览、缩略图墙、拖拽上传
 - 非 thread 场景的附件管理面板
 - 附件 OCR、图像理解增强、模型自动切换
+- 自定义重文档解析器作为 Claude 第一版主路径
 
 </deferred>
 

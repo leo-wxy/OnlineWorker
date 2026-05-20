@@ -11,10 +11,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-10)
 
 Phase: 3 of 3 (File and Image Support)
 Plan: 2 of 2 in current phase
-Status: Ready to execute
-Last activity: 2026-05-13 — Planned Phase 3 file and image attachment support
+Status: In progress
+Last activity: 2026-05-20 — Refined Claude attachment support to use local file paths plus `--add-dir` access, tightened explicit `ANTHROPIC_BASE_URL` routing, and added `ANTHROPIC_AUTH_TOKEN` support for Raven / Langbase-style Claude gateways
 
-Progress: [██████░░░░] 67%
+Progress: [████████░░] 83%
 
 ## Performance Metrics
 
@@ -49,14 +49,14 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-- Execute Phase 3 plan 03-01: shared attachment contract + Telegram attachment routing
-- Execute Phase 3 plan 03-02: desktop attachment send flow + packaged-app verification
+- Finish Phase 3 plan 03-02: rerun packaged-app rebuild/reinstall and attachment smoke verification after the Claude path-access refinement and explicit-base-url auth routing update
 
 ### Blockers/Concerns
 
 - Provider-neutral boundaries in shared surfaces should remain intact while attachment work lands
 - `Usage` 页当前已稳定在按日窗口与 provider 级聚合，不要在后续阶段里把 provider-specific 统计细节拉回共享 React 层
 - Attachment support will need to respect existing provider/plugin routing and not bypass current Telegram delivery flows
+- Claude attachment support should stay path-access based by default; do not overbuild custom document parsing before a concrete gap is observed
 
 ### Roadmap Evolution
 

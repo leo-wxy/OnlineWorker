@@ -1,6 +1,6 @@
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -74,14 +74,22 @@ fn read_env_key(raw: &str, key: &str) -> Option<String> {
 
 fn build_claude_command_env_from_env_raw(env_raw: &str) -> HashMap<String, String> {
     let mut env_map = HashMap::new();
-    for key in ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL"] {
+    for key in [
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_MODEL",
+    ] {
         let value = read_env_key(env_raw, key).unwrap_or_default();
         if !value.trim().is_empty() {
             env_map.insert(key.to_string(), value);
         }
     }
 
-    if env_map.contains_key("ANTHROPIC_BASE_URL") && !env_map.contains_key("ANTHROPIC_API_KEY") {
+    if env_map.contains_key("ANTHROPIC_BASE_URL")
+        && !env_map.contains_key("ANTHROPIC_API_KEY")
+        && !env_map.contains_key("ANTHROPIC_AUTH_TOKEN")
+    {
         env_map.insert("ANTHROPIC_API_KEY".to_string(), "dummy".to_string());
     }
 
@@ -139,6 +147,7 @@ fn build_claude_compact_send_argv(
     session_id: &str,
     text: &str,
     system_prompt: Option<&str>,
+    add_dirs: &[String],
 ) -> Vec<String> {
     let mut argv = vec![
         claude_bin.to_string(),
@@ -150,6 +159,14 @@ fn build_claude_compact_send_argv(
         "--session-id".to_string(),
         session_id.to_string(),
     ];
+    for dir in add_dirs {
+        let normalized = dir.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        argv.push("--add-dir".to_string());
+        argv.push(normalized.to_string());
+    }
     if let Some(prompt) = system_prompt.filter(|value| !value.trim().is_empty()) {
         argv.push("--append-system-prompt".to_string());
         argv.push(prompt.to_string());
@@ -368,6 +385,7 @@ fn build_claude_send_argv(
     session_id: &str,
     text: &str,
     session_exists: bool,
+    add_dirs: &[String],
 ) -> Vec<String> {
     let mut argv = vec![
         claude_bin.to_string(),
@@ -377,6 +395,14 @@ fn build_claude_send_argv(
         "stream-json".to_string(),
         "--include-partial-messages".to_string(),
     ];
+    for dir in add_dirs {
+        let normalized = dir.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        argv.push("--add-dir".to_string());
+        argv.push(normalized.to_string());
+    }
     if session_exists {
         argv.push("--resume".to_string());
     } else {
@@ -385,6 +411,75 @@ fn build_claude_send_argv(
     argv.push(session_id.to_string());
     argv.push(text.to_string());
     argv
+}
+
+fn normalize_claude_attachment_path(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    PathBuf::from(trimmed).to_string_lossy().to_string()
+}
+
+fn collect_claude_attachment_dirs(attachments: &[ComposerAttachment]) -> Vec<String> {
+    let mut dirs = BTreeSet::new();
+    for attachment in attachments {
+        let normalized_path = normalize_claude_attachment_path(&attachment.path);
+        if normalized_path.is_empty() {
+            continue;
+        }
+        let Some(parent) = Path::new(&normalized_path).parent() else {
+            continue;
+        };
+        let parent_text = parent.to_string_lossy().trim().to_string();
+        if parent_text.is_empty() {
+            continue;
+        }
+        dirs.insert(parent_text);
+    }
+    dirs.into_iter().collect()
+}
+
+fn build_claude_attachment_prompt(attachments: &[ComposerAttachment]) -> String {
+    let rows = attachments
+        .iter()
+        .filter_map(|attachment| {
+            let normalized_path = normalize_claude_attachment_path(&attachment.path);
+            if normalized_path.is_empty() {
+                return None;
+            }
+            let label = if attachment.kind.trim() == "image" { "image" } else { "file" };
+            let title = if attachment.name.trim().is_empty() {
+                normalized_path.as_str()
+            } else {
+                attachment.name.trim()
+            };
+            Some(format!("- [{label}] {title}\n  path: {normalized_path}"))
+        })
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        return String::new();
+    }
+    format!(
+        "Attachments for this turn:\n{}\n\nRead or inspect these local attachment paths directly when relevant.",
+        rows.join("\n")
+    )
+}
+
+fn build_claude_send_text(text: &str, attachments: &[ComposerAttachment]) -> Result<String, String> {
+    let trimmed = text.trim();
+    let attachment_prompt = build_claude_attachment_prompt(attachments);
+    let final_text = match (trimmed.is_empty(), attachment_prompt.is_empty()) {
+        (true, true) => return Err("message is empty".to_string()),
+        (false, true) => trimmed.to_string(),
+        (true, false) => attachment_prompt,
+        (false, false) => format!("{trimmed}\n\n{attachment_prompt}"),
+    };
+
+    if final_text.trim().is_empty() {
+        return Err("message is empty".to_string());
+    }
+    Ok(final_text)
 }
 
 #[tauri::command]
@@ -419,35 +514,7 @@ pub fn send_claude_session_message(
     attachments: Vec<ComposerAttachment>,
     workspace_dir: Option<String>,
 ) -> Result<ClaudeSendResult, String> {
-    let trimmed = text.trim();
-    let attachment_prompt = attachments
-        .iter()
-        .filter_map(|attachment| {
-            let name = attachment.name.trim();
-            let path = attachment.path.trim();
-            if name.is_empty() && path.is_empty() {
-                return None;
-            }
-            let label = if attachment.kind == "image" { "Attached image" } else { "Attached file" };
-            let title = if !name.is_empty() { name } else { path };
-            let mut block = format!("[{label}] {title}");
-            if !path.is_empty() {
-                block.push_str(&format!("\nPath: {path}"));
-            }
-            Some(block)
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    let final_text = match (trimmed.is_empty(), attachment_prompt.is_empty()) {
-        (true, true) => return Err("message is empty".to_string()),
-        (false, true) => trimmed.to_string(),
-        (true, false) => attachment_prompt,
-        (false, false) => format!("{trimmed}\n\n{attachment_prompt}"),
-    };
-
-    if final_text.trim().is_empty() {
-        return Err("message is empty".to_string());
-    }
+    let final_text = build_claude_send_text(&text, &attachments)?;
 
     let projects_dir = default_claude_projects_dir();
     let (cwd, session_exists) = resolve_claude_send_context(
@@ -455,6 +522,7 @@ pub fn send_claude_session_message(
         projects_dir.as_deref(),
         workspace_dir.as_deref(),
     )?;
+    let attachment_dirs = collect_claude_attachment_dirs(&attachments);
 
     let history_path = default_claude_history_path();
     let session_turns = projects_dir
@@ -472,7 +540,7 @@ pub fn send_claude_session_message(
         .unwrap_or_default();
     let command_env = load_claude_command_env();
 
-    let argv = build_claude_send_argv("claude", &session_id, &final_text, session_exists);
+    let argv = build_claude_send_argv("claude", &session_id, &final_text, session_exists, &attachment_dirs);
     let (program, args) = argv
         .split_first()
         .ok_or("claude argv is empty".to_string())?;
@@ -489,6 +557,7 @@ pub fn send_claude_session_message(
                 &new_session_id,
                 &final_text,
                 continuation_prompt.as_deref(),
+                &attachment_dirs,
             );
             let (fallback_program, fallback_args) = fallback_argv
                 .split_first()
@@ -1271,9 +1340,11 @@ fn resolve_claude_send_context(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_claude_command_env_from_env_raw, build_claude_continuation_system_prompt,
-        build_claude_send_argv, is_claude_prompt_too_long_text, list_claude_sessions_from_paths,
-        read_claude_session_from_paths, resolve_claude_send_context, ClaudeSession, ClaudeTurn,
+        build_claude_attachment_prompt, build_claude_command_env_from_env_raw,
+        build_claude_continuation_system_prompt, build_claude_send_argv,
+        collect_claude_attachment_dirs, is_claude_prompt_too_long_text,
+        list_claude_sessions_from_paths, read_claude_session_from_paths,
+        resolve_claude_send_context, ClaudeSession, ClaudeTurn, ComposerAttachment,
     };
     use serde_json::json;
     use std::fs;
@@ -1877,7 +1948,28 @@ mod tests {
     }
 
     #[test]
-    fn build_claude_command_env_from_env_raw_injects_dummy_key_for_proxy_mode() {
+    fn build_claude_command_env_from_env_raw_preserves_auth_token_for_proxy_mode() {
+        let env_map = build_claude_command_env_from_env_raw(
+            "ANTHROPIC_BASE_URL=https://langbase.netease.com/langbase\nANTHROPIC_AUTH_TOKEN=token-123\nANTHROPIC_MODEL=claude-opus-4-6\n",
+        );
+
+        assert_eq!(
+            env_map.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://langbase.netease.com/langbase")
+        );
+        assert_eq!(
+            env_map.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("token-123")
+        );
+        assert_eq!(
+            env_map.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("claude-opus-4-6")
+        );
+        assert!(!env_map.contains_key("ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn build_claude_command_env_from_env_raw_injects_dummy_key_for_proxy_mode_without_auth_token() {
         let env_map = build_claude_command_env_from_env_raw(
             "ANTHROPIC_BASE_URL=http://localhost:3031\nANTHROPIC_MODEL=claude-opus-4-6\n",
         );
@@ -1899,7 +1991,7 @@ mod tests {
     #[test]
     fn build_claude_command_env_from_env_raw_skips_empty_values() {
         let env_map = build_claude_command_env_from_env_raw(
-            "ANTHROPIC_API_KEY=\nANTHROPIC_BASE_URL=\nANTHROPIC_MODEL=   \n",
+            "ANTHROPIC_API_KEY=\nANTHROPIC_BASE_URL=\nANTHROPIC_AUTH_TOKEN=\nANTHROPIC_MODEL=   \n",
         );
 
         assert!(env_map.is_empty());
@@ -1947,7 +2039,13 @@ mod tests {
     #[test]
     fn build_claude_send_argv_switches_between_resume_and_session_id() {
         assert_eq!(
-            build_claude_send_argv("claude", "ses-existing", "继续", true),
+            build_claude_send_argv(
+                "claude",
+                "ses-existing",
+                "继续",
+                true,
+                &["/tmp/claude-attachments".to_string()],
+            ),
             vec![
                 "claude".to_string(),
                 "-p".to_string(),
@@ -1955,13 +2053,15 @@ mod tests {
                 "--output-format".to_string(),
                 "stream-json".to_string(),
                 "--include-partial-messages".to_string(),
+                "--add-dir".to_string(),
+                "/tmp/claude-attachments".to_string(),
                 "--resume".to_string(),
                 "ses-existing".to_string(),
                 "继续".to_string(),
             ]
         );
         assert_eq!(
-            build_claude_send_argv("claude", "ses-new", "继续", false),
+            build_claude_send_argv("claude", "ses-new", "继续", false, &[]),
             vec![
                 "claude".to_string(),
                 "-p".to_string(),
@@ -1972,6 +2072,73 @@ mod tests {
                 "--session-id".to_string(),
                 "ses-new".to_string(),
                 "继续".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_claude_attachment_prompt_includes_paths_and_instruction() {
+        let prompt = build_claude_attachment_prompt(&[
+            ComposerAttachment {
+                id: "att-1".to_string(),
+                kind: "image".to_string(),
+                name: "screen.png".to_string(),
+                mime_type: Some("image/png".to_string()),
+                size_bytes: 12,
+                path: "/tmp/claude-attachments/screen.png".to_string(),
+            },
+            ComposerAttachment {
+                id: "att-2".to_string(),
+                kind: "file".to_string(),
+                name: "README.md".to_string(),
+                mime_type: Some("text/markdown".to_string()),
+                size_bytes: 34,
+                path: "/tmp/claude-attachments/README.md".to_string(),
+            },
+        ]);
+
+        assert!(prompt.contains("Attachments for this turn:"));
+        assert!(prompt.contains("- [image] screen.png"));
+        assert!(prompt.contains("/tmp/claude-attachments/screen.png"));
+        assert!(prompt.contains("- [file] README.md"));
+        assert!(prompt.contains("/tmp/claude-attachments/README.md"));
+        assert!(prompt.contains("Read or inspect these local attachment paths directly when relevant."));
+    }
+
+    #[test]
+    fn collect_claude_attachment_dirs_deduplicates_parents() {
+        let dirs = collect_claude_attachment_dirs(&[
+            ComposerAttachment {
+                id: "att-1".to_string(),
+                kind: "file".to_string(),
+                name: "README.md".to_string(),
+                mime_type: Some("text/markdown".to_string()),
+                size_bytes: 34,
+                path: "/tmp/claude-attachments/README.md".to_string(),
+            },
+            ComposerAttachment {
+                id: "att-2".to_string(),
+                kind: "image".to_string(),
+                name: "screen.png".to_string(),
+                mime_type: Some("image/png".to_string()),
+                size_bytes: 12,
+                path: "/tmp/claude-attachments/screen.png".to_string(),
+            },
+            ComposerAttachment {
+                id: "att-3".to_string(),
+                kind: "file".to_string(),
+                name: "sheet.csv".to_string(),
+                mime_type: Some("text/csv".to_string()),
+                size_bytes: 18,
+                path: "/tmp/claude-data/sheet.csv".to_string(),
+            },
+        ]);
+
+        assert_eq!(
+            dirs,
+            vec![
+                "/tmp/claude-attachments".to_string(),
+                "/tmp/claude-data".to_string(),
             ]
         );
     }
