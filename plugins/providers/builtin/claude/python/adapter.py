@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import shlex
+import subprocess
 import sys
 import time
 import uuid
@@ -494,6 +495,51 @@ def _detect_claude_runtime_env(base_env: dict[str, str] | None = None) -> dict[s
     }
     if _claude_runtime_env_is_usable(current):
         return current
+    active = _scan_active_claude_process_env()
+    if _claude_runtime_env_is_usable(active):
+        return active
+    return {}
+
+
+def _extract_env_from_process_command(raw: str) -> dict[str, str]:
+    env: dict[str, str] = {}
+    try:
+        parts = shlex.split(raw)
+    except ValueError:
+        parts = raw.split()
+    for part in parts:
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        if key in CLAUDE_ENV_VARS and value.strip():
+            env[key] = value.strip()
+    return env
+
+
+def _scan_active_claude_process_env() -> dict[str, str]:
+    try:
+        raw_pids = subprocess.check_output(
+            ["pgrep", "-x", "claude"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=1,
+        )
+    except Exception:
+        return {}
+
+    for pid in [line.strip() for line in raw_pids.splitlines() if line.strip()]:
+        try:
+            raw_command = subprocess.check_output(
+                ["ps", "eww", "-p", pid, "-o", "command="],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                timeout=1,
+            )
+        except Exception:
+            continue
+        env = _extract_env_from_process_command(raw_command)
+        if _claude_runtime_env_is_usable(env):
+            return env
     return {}
 
 
