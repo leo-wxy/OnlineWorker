@@ -7,6 +7,9 @@ runtime_id: claude
 label: Claude
 description: Anthropic Claude Code CLI sessions
 default_visible: true
+icon:
+  path: icon.svg
+  source: https://simpleicons.org/icons/claude.svg
 
 provider:
   visible: true

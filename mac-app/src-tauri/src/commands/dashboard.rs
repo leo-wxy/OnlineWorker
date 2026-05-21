@@ -18,7 +18,7 @@ use super::claude::{
     should_skip_claude_session_from_workspace_list,
 };
 use super::config::ensure_data_dir;
-use super::config_provider::{provider_metadata_from_raw, ProviderMetadata};
+use super::config_provider::{provider_metadata_from_raw, ProviderIconEntry, ProviderMetadata};
 use super::service::{ensure_service_running_if_needed, snapshot_service_status, BotState};
 use super::session_state::{load_local_thread_overlays, LocalThreadOverlay};
 
@@ -76,6 +76,7 @@ struct LegacyToolConfig {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ProviderConfigSnapshot {
     id: String,
+    icon: Option<ProviderIconEntry>,
     visible: bool,
     managed: bool,
     autostart: bool,
@@ -106,10 +107,14 @@ struct WorkspaceActivityCandidate {
     active_thread_count: u32,
 }
 
-#[derive(Clone, Debug)]
-struct RecentActivityCacheEntry {
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct RecentActivityCacheKey {
     data_dir: PathBuf,
     codex_db: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug)]
+struct RecentActivityCacheEntry {
     cached_at: SystemTime,
     summary: Option<RecentActivitySummary>,
 }
@@ -132,6 +137,7 @@ fn default_provider_snapshot(id: &str) -> ProviderConfigSnapshot {
     match id {
         "codex" => ProviderConfigSnapshot {
             id: "codex".to_string(),
+            icon: None,
             visible: true,
             managed: true,
             autostart: true,
@@ -144,6 +150,7 @@ fn default_provider_snapshot(id: &str) -> ProviderConfigSnapshot {
         },
         "claude" => ProviderConfigSnapshot {
             id: "claude".to_string(),
+            icon: None,
             visible: true,
             managed: false,
             autostart: false,
@@ -156,6 +163,7 @@ fn default_provider_snapshot(id: &str) -> ProviderConfigSnapshot {
         },
         other => ProviderConfigSnapshot {
             id: other.to_string(),
+            icon: None,
             visible: true,
             managed: false,
             autostart: false,
@@ -172,6 +180,7 @@ fn default_provider_snapshot(id: &str) -> ProviderConfigSnapshot {
 fn provider_snapshot_from_metadata(provider: ProviderMetadata) -> ProviderConfigSnapshot {
     ProviderConfigSnapshot {
         id: provider.id,
+        icon: provider.icon,
         visible: provider.visible,
         managed: provider.managed,
         autostart: provider.autostart,
@@ -492,6 +501,7 @@ fn build_provider_statuses(
 
             ProviderDashboardStatus {
                 id: provider.id,
+                icon: provider.icon,
                 managed: provider.managed,
                 autostart: provider.autostart,
                 health,
@@ -1047,9 +1057,11 @@ fn read_recent_activity_summary(data_dir: &Path) -> Option<RecentActivitySummary
     read_recent_activity_summary_cached_with_now(data_dir, codex_db.as_deref(), SystemTime::now())
 }
 
-fn recent_activity_cache() -> &'static StdMutex<Option<RecentActivityCacheEntry>> {
-    static CACHE: OnceLock<StdMutex<Option<RecentActivityCacheEntry>>> = OnceLock::new();
-    CACHE.get_or_init(|| StdMutex::new(None))
+fn recent_activity_cache(
+) -> &'static StdMutex<HashMap<RecentActivityCacheKey, RecentActivityCacheEntry>> {
+    static CACHE: OnceLock<StdMutex<HashMap<RecentActivityCacheKey, RecentActivityCacheEntry>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| StdMutex::new(HashMap::new()))
 }
 
 fn read_recent_activity_summary_cached_with_now(
@@ -1057,14 +1069,17 @@ fn read_recent_activity_summary_cached_with_now(
     codex_db: Option<&Path>,
     now: SystemTime,
 ) -> Option<RecentActivitySummary> {
-    let codex_db_buf = codex_db.map(Path::to_path_buf);
+    let cache_key = RecentActivityCacheKey {
+        data_dir: data_dir.to_path_buf(),
+        codex_db: codex_db.map(Path::to_path_buf),
+    };
     if let Ok(cache) = recent_activity_cache().lock() {
-        if let Some(entry) = cache.as_ref() {
+        if let Some(entry) = cache.get(&cache_key) {
             let fresh = now
                 .duration_since(entry.cached_at)
                 .map(|age| age < RECENT_ACTIVITY_CACHE_TTL)
                 .unwrap_or(false);
-            if fresh && entry.data_dir == data_dir && entry.codex_db == codex_db_buf {
+            if fresh {
                 return entry.summary.clone();
             }
         }
@@ -1072,12 +1087,13 @@ fn read_recent_activity_summary_cached_with_now(
 
     let summary = read_recent_activity_summary_from_paths(data_dir, codex_db);
     if let Ok(mut cache) = recent_activity_cache().lock() {
-        *cache = Some(RecentActivityCacheEntry {
-            data_dir: data_dir.to_path_buf(),
-            codex_db: codex_db_buf,
-            cached_at: now,
-            summary: summary.clone(),
-        });
+        cache.insert(
+            cache_key,
+            RecentActivityCacheEntry {
+                cached_at: now,
+                summary: summary.clone(),
+            },
+        );
     }
     summary
 }
@@ -1112,9 +1128,9 @@ fn read_recent_activity_summary_from_paths(
         .filter_map(|(workspace_id, workspace)| parse_workspace_snapshot(workspace_id, workspace))
         .filter_map(|workspace| match workspace.tool.as_str() {
             "codex" => read_codex_workspace_activity(&workspace, codex_db, &codex_overlays),
-            "claude" => claude_index
-                .as_ref()
-                .and_then(|index| read_claude_workspace_activity(&workspace, &claude_overlays, index)),
+            "claude" => claude_index.as_ref().and_then(|index| {
+                read_claude_workspace_activity(&workspace, &claude_overlays, index)
+            }),
             _ => None,
         })
         .max_by_key(|candidate| candidate.updated_at);
@@ -1175,11 +1191,11 @@ mod tests {
     use super::{
         build_claude_activity_index, build_dashboard_state, build_provider_statuses,
         extract_thread_summary, read_claude_workspace_activity, read_env_key,
-        read_provider_runtime_status_via_owner_bridge_with_timeout,
-        read_recent_activity_summary, read_recent_activity_summary_cached_with_now,
-        resolve_builtin_provider_snapshots, AlertLevel, DashboardComputationInput,
-        ProviderConfigSnapshot, ProviderDashboardStatus, RecentActivitySummary,
-        ServiceHealth, SystemHealth, WorkspaceSnapshot, RECENT_ACTIVITY_CACHE_TTL,
+        read_provider_runtime_status_via_owner_bridge_with_timeout, read_recent_activity_summary,
+        read_recent_activity_summary_cached_with_now, resolve_builtin_provider_snapshots,
+        AlertLevel, DashboardComputationInput, ProviderConfigSnapshot, ProviderDashboardStatus,
+        RecentActivitySummary, ServiceHealth, SystemHealth, WorkspaceSnapshot,
+        RECENT_ACTIVITY_CACHE_TTL,
     };
     use serde_json::json;
     use std::collections::HashMap;
@@ -1231,6 +1247,7 @@ mod tests {
             service_pid: Some(4321),
             providers: vec![ProviderDashboardStatus {
                 id: "codex".into(),
+                icon: None,
                 managed: true,
                 autostart: true,
                 health: ServiceHealth::Degraded,
@@ -1255,6 +1272,7 @@ mod tests {
         let providers = build_provider_statuses(
             vec![ProviderConfigSnapshot {
                 id: "codex".into(),
+                icon: None,
                 visible: true,
                 managed: true,
                 autostart: true,
@@ -1311,6 +1329,7 @@ mod tests {
         let providers = build_provider_statuses(
             vec![ProviderConfigSnapshot {
                 id: "overlay-tool".into(),
+                icon: None,
                 visible: true,
                 managed: true,
                 autostart: true,
@@ -1370,6 +1389,7 @@ mod tests {
         let providers = build_provider_statuses(
             vec![ProviderConfigSnapshot {
                 id: "codex".into(),
+                icon: None,
                 visible: true,
                 managed: true,
                 autostart: true,
@@ -1426,6 +1446,7 @@ mod tests {
         let providers = build_provider_statuses(
             vec![ProviderConfigSnapshot {
                 id: "claude".into(),
+                icon: None,
                 visible: true,
                 managed: true,
                 autostart: true,
@@ -1471,6 +1492,7 @@ mod tests {
         let providers = build_provider_statuses(
             vec![ProviderConfigSnapshot {
                 id: "runtime-tool".into(),
+                icon: None,
                 visible: true,
                 managed: true,
                 autostart: true,
@@ -1536,6 +1558,7 @@ mod tests {
             providers: vec![
                 ProviderDashboardStatus {
                     id: "codex".into(),
+                    icon: None,
                     managed: true,
                     autostart: true,
                     health: ServiceHealth::Healthy,
@@ -1548,6 +1571,7 @@ mod tests {
                 },
                 ProviderDashboardStatus {
                     id: "claude".into(),
+                    icon: None,
                     managed: false,
                     autostart: false,
                     health: ServiceHealth::Stopped,
@@ -1601,6 +1625,7 @@ mod tests {
             providers: vec![
                 ProviderDashboardStatus {
                     id: "codex".into(),
+                    icon: None,
                     managed: true,
                     autostart: true,
                     health: ServiceHealth::Healthy,
@@ -1613,6 +1638,7 @@ mod tests {
                 },
                 ProviderDashboardStatus {
                     id: "custom".into(),
+                    icon: None,
                     managed: true,
                     autostart: false,
                     health: ServiceHealth::Stopped,
@@ -1642,6 +1668,7 @@ mod tests {
             providers: vec![
                 ProviderDashboardStatus {
                     id: "codex".into(),
+                    icon: None,
                     managed: true,
                     autostart: true,
                     health: ServiceHealth::Healthy,
@@ -1654,6 +1681,7 @@ mod tests {
                 },
                 ProviderDashboardStatus {
                     id: "claude".into(),
+                    icon: None,
                     managed: true,
                     autostart: true,
                     health: ServiceHealth::Degraded,

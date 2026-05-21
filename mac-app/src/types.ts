@@ -50,6 +50,12 @@ export interface ProviderProcessMetadata {
   cleanupMatchers?: string[];
 }
 
+export interface ProviderIconMetadata {
+  path?: string;
+  url?: string;
+  source?: string;
+}
+
 export interface ProviderMetadata {
   id: string;
   runtimeId: string;
@@ -65,6 +71,7 @@ export interface ProviderMetadata {
   capabilities: ProviderCapabilitiesMetadata;
   install?: ProviderInstallMetadata;
   process?: ProviderProcessMetadata;
+  icon?: ProviderIconMetadata | null;
 }
 
 export interface DashboardAlert {
@@ -89,6 +96,7 @@ export interface ProviderDashboardStatus {
   label?: string | null;
   description?: string | null;
   capabilities?: ProviderCapabilitiesMetadata | null;
+  icon?: ProviderIconMetadata | null;
   managed: boolean;
   autostart: boolean;
   health: ServiceHealth;

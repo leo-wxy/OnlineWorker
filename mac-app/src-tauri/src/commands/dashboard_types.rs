@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::commands::config_provider::ProviderIconEntry;
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum SystemHealth {
@@ -60,6 +62,7 @@ pub struct BotDashboardStatus {
 #[serde(rename_all = "camelCase")]
 pub struct ProviderDashboardStatus {
     pub id: String,
+    pub icon: Option<ProviderIconEntry>,
     pub managed: bool,
     pub autostart: bool,
     pub health: ServiceHealth,

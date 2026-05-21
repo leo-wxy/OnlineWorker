@@ -299,7 +299,12 @@ function providerAccent(provider: ProviderDashboardStatus) {
   return providerAccentOptions[stableProviderIndex(provider.id)];
 }
 
-function ProviderIcon() {
+function ProviderIcon({ provider }: { provider: ProviderDashboardStatus }) {
+  const iconUrl = provider.icon?.url?.trim();
+  if (iconUrl) {
+    return <img src={iconUrl} alt="" aria-hidden="true" className="h-5 w-5 object-contain" />;
+  }
+
   return (
     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
@@ -584,7 +589,7 @@ export function Dashboard({ onOpenLogs, onOpenSetup, onOpenSessions }: Props) {
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex min-w-0 items-center gap-4">
                       <div className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl border ${accent.icon}`}>
-                        <ProviderIcon />
+                        <ProviderIcon provider={provider} />
                       </div>
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">

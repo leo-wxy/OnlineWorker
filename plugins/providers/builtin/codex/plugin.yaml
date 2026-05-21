@@ -7,6 +7,9 @@ runtime_id: codex
 label: Codex
 description: OpenAI Codex CLI sessions
 default_visible: true
+icon:
+  path: icon.svg
+  source: https://simpleicons.org/icons/openai.svg
 
 provider:
   visible: true

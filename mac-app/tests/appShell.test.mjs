@@ -73,3 +73,14 @@ test("settings exposes attachment cache controls under a maintenance section", (
   assert.match(zh, /附件缓存/);
   assert.match(en, /Attachment Cache/);
 });
+
+test("dashboard renders provider icons from provider metadata", () => {
+  const dashboard = readFileSync(join(root, "src", "pages", "Dashboard.tsx"), "utf8");
+  const types = readFileSync(join(root, "src", "types.ts"), "utf8");
+
+  assert.match(types, /export interface ProviderIconMetadata/);
+  assert.match(types, /icon\?: ProviderIconMetadata \| null;/);
+  assert.match(dashboard, /provider\.icon\?\.url\?\.trim\(\)/);
+  assert.match(dashboard, /<ProviderIcon provider=\{provider\} \/>/);
+  assert.equal(dashboard.includes("function ProviderIcon()"), false);
+});

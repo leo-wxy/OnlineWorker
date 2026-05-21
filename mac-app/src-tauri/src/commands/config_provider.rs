@@ -1,3 +1,4 @@
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -10,6 +11,10 @@ const BUILTIN_CODEX_PLUGIN_MANIFEST: &str =
     include_str!("../../../../plugins/providers/builtin/codex/plugin.yaml");
 const BUILTIN_CLAUDE_PLUGIN_MANIFEST: &str =
     include_str!("../../../../plugins/providers/builtin/claude/plugin.yaml");
+const BUILTIN_CODEX_PLUGIN_ICON: &str =
+    include_str!("../../../../plugins/providers/builtin/codex/icon.svg");
+const BUILTIN_CLAUDE_PLUGIN_ICON: &str =
+    include_str!("../../../../plugins/providers/builtin/claude/icon.svg");
 const PROVIDER_OVERLAY_ENV: &str = "ONLINEWORKER_PROVIDER_OVERLAY";
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
@@ -66,6 +71,8 @@ pub(crate) struct ProviderConfigEntry {
     pub(crate) install: Option<ProviderInstallEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) process: Option<ProviderProcessEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) icon: Option<ProviderIconEntry>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
@@ -105,6 +112,19 @@ pub(crate) struct ProviderProcessEntry {
     pub(crate) cleanup_matchers: Vec<String>,
 }
 
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderIconEntry {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) path: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) source: String,
+    #[serde(skip)]
+    pub(crate) generated_url: bool,
+}
+
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProviderTransportMetadata {
@@ -133,6 +153,7 @@ pub(crate) struct ProviderMetadata {
     pub(crate) capabilities: ProviderCapabilitiesEntry,
     pub(crate) install: ProviderInstallEntry,
     pub(crate) process: ProviderProcessEntry,
+    pub(crate) icon: Option<ProviderIconEntry>,
 }
 
 fn normalize_transport_kind(raw: Option<&str>) -> Option<String> {
@@ -220,6 +241,9 @@ struct ProviderPluginManifest {
     label: Option<String>,
     description: Option<String>,
     default_visible: Option<bool>,
+    icon: Option<ProviderIconEntry>,
+    #[serde(skip)]
+    manifest_path: Option<PathBuf>,
     provider: Option<ProviderPluginConfig>,
 }
 
@@ -247,6 +271,12 @@ struct ProviderPluginDefault {
     config: ProviderConfigEntry,
 }
 
+#[derive(Clone, Debug)]
+struct ProviderPluginManifestSource {
+    source: String,
+    path: PathBuf,
+}
+
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -255,7 +285,13 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn read_manifest_files_from_group(group_dir: &Path) -> Vec<String> {
+fn manifest_source_from_path(path: PathBuf) -> Option<ProviderPluginManifestSource> {
+    fs::read_to_string(&path)
+        .ok()
+        .map(|source| ProviderPluginManifestSource { source, path })
+}
+
+fn read_manifest_files_from_group(group_dir: &Path) -> Vec<ProviderPluginManifestSource> {
     let Ok(entries) = fs::read_dir(group_dir) else {
         return Vec::new();
     };
@@ -267,14 +303,13 @@ fn read_manifest_files_from_group(group_dir: &Path) -> Vec<String> {
     paths.sort();
     paths
         .into_iter()
-        .filter_map(|path| fs::read_to_string(path).ok())
+        .filter_map(manifest_source_from_path)
         .collect()
 }
 
-fn read_manifest_files_from_overlay_path(overlay_path: &Path) -> Vec<String> {
+fn read_manifest_files_from_overlay_path(overlay_path: &Path) -> Vec<ProviderPluginManifestSource> {
     if overlay_path.is_file() {
-        return fs::read_to_string(overlay_path)
-            .ok()
+        return manifest_source_from_path(overlay_path.to_path_buf())
             .map(|source| vec![source])
             .unwrap_or_default();
     }
@@ -289,7 +324,7 @@ fn read_manifest_files_from_overlay_path(overlay_path: &Path) -> Vec<String> {
             continue;
         }
         if path.file_name().and_then(|name| name.to_str()) == Some("plugin.yaml") {
-            if let Ok(source) = fs::read_to_string(path) {
+            if let Some(source) = manifest_source_from_path(path) {
                 manifests.push(source);
             }
         }
@@ -297,7 +332,7 @@ fn read_manifest_files_from_overlay_path(overlay_path: &Path) -> Vec<String> {
     manifests
 }
 
-fn read_manifest_files_from_overlay_env() -> Vec<String> {
+fn read_manifest_files_from_overlay_env() -> Vec<ProviderPluginManifestSource> {
     let Some(raw) = read_overlay_env_spec() else {
         return Vec::new();
     };
@@ -339,7 +374,7 @@ fn read_overlay_env_spec() -> Option<String> {
         .or_else(read_overlay_env_spec_from_app_env)
 }
 
-pub(crate) fn provider_plugin_manifest_sources() -> Vec<String> {
+fn provider_plugin_manifest_sources_with_paths() -> Vec<ProviderPluginManifestSource> {
     let plugin_root = workspace_root().join("plugins").join("providers");
     let mut sources = Vec::new();
     sources.extend(read_manifest_files_from_group(&plugin_root.join("builtin")));
@@ -348,9 +383,64 @@ pub(crate) fn provider_plugin_manifest_sources() -> Vec<String> {
         return sources;
     }
     vec![
-        BUILTIN_CLAUDE_PLUGIN_MANIFEST.to_string(),
-        BUILTIN_CODEX_PLUGIN_MANIFEST.to_string(),
+        ProviderPluginManifestSource {
+            source: BUILTIN_CLAUDE_PLUGIN_MANIFEST.to_string(),
+            path: plugin_root
+                .join("builtin")
+                .join("claude")
+                .join("plugin.yaml"),
+        },
+        ProviderPluginManifestSource {
+            source: BUILTIN_CODEX_PLUGIN_MANIFEST.to_string(),
+            path: plugin_root
+                .join("builtin")
+                .join("codex")
+                .join("plugin.yaml"),
+        },
     ]
+}
+
+pub(crate) fn provider_plugin_manifest_sources() -> Vec<String> {
+    provider_plugin_manifest_sources_with_paths()
+        .into_iter()
+        .map(|manifest| manifest.source)
+        .collect()
+}
+
+fn resolve_provider_icon(
+    mut icon: Option<ProviderIconEntry>,
+    manifest_path: Option<&Path>,
+    provider_id: &str,
+) -> Option<ProviderIconEntry> {
+    let mut icon = icon.take()?;
+    if icon.url.trim().is_empty() && !icon.path.trim().is_empty() {
+        let file_bytes = manifest_path
+            .and_then(Path::parent)
+            .map(|dir| dir.join(icon.path.trim()))
+            .filter(|path| path.is_file())
+            .and_then(|path| fs::read(path).ok());
+        let fallback_bytes = file_bytes.or_else(|| {
+            if icon.path.trim() == "icon.svg" {
+                builtin_provider_icon_svg(provider_id).map(|svg| svg.as_bytes().to_vec())
+            } else {
+                None
+            }
+        });
+        if let Some(svg) = fallback_bytes {
+            let encoded = base64::engine::general_purpose::STANDARD.encode(svg);
+            icon.url = format!("data:image/svg+xml;base64,{encoded}");
+            icon.generated_url = true;
+        }
+    }
+    Some(icon)
+}
+
+fn builtin_provider_icon_svg(provider_id: &str) -> Option<&'static str> {
+    match provider_id {
+        "codex" => Some(BUILTIN_CODEX_PLUGIN_ICON),
+        "claude" => Some(BUILTIN_CLAUDE_PLUGIN_ICON),
+        _ => None,
+    }
 }
 
 fn plugin_manifest_to_default(manifest: ProviderPluginManifest) -> Option<ProviderPluginDefault> {
@@ -409,6 +499,11 @@ fn plugin_manifest_to_default(manifest: ProviderPluginManifest) -> Option<Provid
                 cli_names: vec![install_cli_name],
             }),
             process: Some(provider.process.unwrap_or_default()),
+            icon: resolve_provider_icon(
+                manifest.icon,
+                manifest.manifest_path.as_deref(),
+                &provider_id,
+            ),
             ..ProviderConfigEntry::default()
         },
     })
@@ -416,10 +511,13 @@ fn plugin_manifest_to_default(manifest: ProviderPluginManifest) -> Option<Provid
 
 fn provider_plugin_default_list() -> Vec<ProviderPluginDefault> {
     let mut defaults = Vec::new();
-    for source in provider_plugin_manifest_sources() {
-        let Ok(manifest) = serde_yaml::from_str::<ProviderPluginManifest>(&source) else {
+    for manifest_source in provider_plugin_manifest_sources_with_paths() {
+        let Ok(mut manifest) =
+            serde_yaml::from_str::<ProviderPluginManifest>(&manifest_source.source)
+        else {
             continue;
         };
+        manifest.manifest_path = Some(manifest_source.path);
         if let Some(default) = plugin_manifest_to_default(manifest) {
             defaults.push(default);
         }
@@ -595,6 +693,30 @@ fn normalize_provider_entry(provider_id: &str, provider: &mut ProviderConfigEntr
     provider.capabilities = provider.capabilities.take().or(defaults.capabilities);
     provider.install = provider.install.take().or(defaults.install);
     provider.process = provider.process.take().or(defaults.process);
+    provider.icon = merge_provider_icon(provider.icon.take(), defaults.icon);
+}
+
+fn merge_provider_icon(
+    icon: Option<ProviderIconEntry>,
+    default_icon: Option<ProviderIconEntry>,
+) -> Option<ProviderIconEntry> {
+    match (icon, default_icon) {
+        (Some(mut icon), Some(default_icon)) => {
+            if icon.path.trim().is_empty() {
+                icon.path = default_icon.path;
+            }
+            if icon.url.trim().is_empty() {
+                icon.url = default_icon.url;
+                icon.generated_url = default_icon.generated_url;
+            }
+            if icon.source.trim().is_empty() {
+                icon.source = default_icon.source;
+            }
+            Some(icon)
+        }
+        (Some(icon), None) => Some(icon),
+        (None, default_icon) => default_icon,
+    }
 }
 
 fn legacy_tool_to_provider(tool: LegacyToolConfig) -> ProviderConfigEntry {
@@ -731,6 +853,7 @@ fn provider_metadata_from_entry(
         capabilities: provider.capabilities.clone().unwrap_or_default(),
         install: provider.install.clone().unwrap_or_default(),
         process: provider.process.clone().unwrap_or_default(),
+        icon: provider.icon.clone(),
         transport: ProviderTransportMetadata {
             owner: owner.clone(),
             live: provider.live_transport.clone().unwrap_or_else(|| {
@@ -821,7 +944,22 @@ pub(super) fn serialize_config_document_for_persistence(
     raw: &str,
 ) -> Result<String, String> {
     prune_implicit_hidden_providers(&mut doc, raw);
+    prune_runtime_icon_urls(&mut doc);
     serde_yaml::to_string(&doc).map_err(|e| format!("Cannot serialize config.yaml: {}", e))
+}
+
+fn prune_runtime_icon_urls(doc: &mut ProviderConfigDocument) {
+    let Some(providers) = doc.providers.as_mut() else {
+        return;
+    };
+    for provider in providers.values_mut() {
+        if let Some(icon) = provider.icon.as_mut() {
+            if icon.generated_url {
+                icon.url.clear();
+                icon.generated_url = false;
+            }
+        }
+    }
 }
 
 pub(super) fn serialize_normalized_config_with_env(
@@ -936,7 +1074,8 @@ ONLINEWORKER_PROVIDER_OVERLAY=  /tmp/private-overlay:/tmp/other-overlay
 
         let manifests = read_manifest_files_from_overlay_path(&dir);
         assert_eq!(manifests.len(), 1);
-        assert!(manifests[0].contains("id: overlay-tool"));
+        assert!(manifests[0].source.contains("id: overlay-tool"));
+        assert_eq!(manifests[0].path, plugin_dir.join("plugin.yaml"));
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -1112,6 +1251,34 @@ codex_bin: "codex"
     }
 
     #[test]
+    fn serialize_normalized_config_omits_generated_icon_data_urls() {
+        let rendered = serialize_normalized_config_with_env("", None).expect("rendered yaml");
+
+        assert!(rendered.contains("icon:"));
+        assert!(rendered.contains("path: icon.svg"));
+        assert!(rendered.contains("source: https://simpleicons.org/icons/openai.svg"));
+        assert!(!rendered.contains("data:image/svg+xml;base64,"));
+    }
+
+    #[test]
+    fn serialize_normalized_config_preserves_explicit_icon_urls() {
+        let raw = r#"
+schema_version: 2
+providers:
+  custom:
+    managed: true
+    autostart: false
+    bin: "custom"
+    icon:
+      url: "https://example.test/custom.svg"
+"#;
+
+        let rendered = serialize_normalized_config_with_env(raw, None).expect("rendered yaml");
+
+        assert!(rendered.contains("https://example.test/custom.svg"));
+    }
+
+    #[test]
     fn provider_metadata_exposes_manifest_runtime_id() {
         let providers = provider_metadata_from_raw("", None).expect("metadata");
         let codex = providers
@@ -1120,6 +1287,29 @@ codex_bin: "codex"
             .expect("codex");
 
         assert_eq!(codex.runtime_id, "codex");
+    }
+
+    #[test]
+    fn provider_metadata_exposes_manifest_icon_data_urls() {
+        let providers = provider_metadata_from_raw("", None).expect("metadata");
+        let codex = providers
+            .iter()
+            .find(|provider| provider.id == "codex")
+            .expect("codex");
+        let claude = providers
+            .iter()
+            .find(|provider| provider.id == "claude")
+            .expect("claude");
+
+        let codex_icon = codex.icon.as_ref().expect("codex icon");
+        assert_eq!(codex_icon.path, "icon.svg");
+        assert!(codex_icon.url.starts_with("data:image/svg+xml;base64,"));
+        assert!(codex_icon.source.contains("simpleicons"));
+
+        let claude_icon = claude.icon.as_ref().expect("claude icon");
+        assert_eq!(claude_icon.path, "icon.svg");
+        assert!(claude_icon.url.starts_with("data:image/svg+xml;base64,"));
+        assert!(claude_icon.source.contains("simpleicons"));
     }
 
     #[test]
