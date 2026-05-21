@@ -2,6 +2,8 @@
 
 Provider plugins describe AI coding backends through metadata and capability declarations. The manifest is the stable boundary consumed by config, UI, and verification.
 
+Development rules and the reference manifest are documented in [DEVELOPMENT.md](DEVELOPMENT.md).
+
 ## Layout
 
 ```text
