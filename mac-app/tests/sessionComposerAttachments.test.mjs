@@ -28,6 +28,8 @@ test("session composer exposes attachment staging and selected attachment render
   assert.match(shared, /void onPickFiles\("file", files\)/);
   assert.match(shared, /void onPickFiles\("image", files\)/);
   assert.match(shared, /onAttachmentsChange\(attachments\.filter/);
+  assert.match(shared, /onAttachmentsChange\(\[\]\);\s*try\s*{\s*await onSend\(text, attachments\);/s);
+  assert.match(shared, /onAttachmentsChange\(attachments\);\s*setDraft\(\(current\) => current \|\| text\);/);
   assert.match(shared, /\{supportsAttachments \? \(/);
   assert.match(sessionBrowser, /const sendResult = await sendCodexMessage/);
   assert.match(sessionBrowser, /if \(sendResult\.threadId && sendResult\.threadId !== threadId\)/);

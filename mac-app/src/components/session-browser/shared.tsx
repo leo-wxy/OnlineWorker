@@ -136,9 +136,11 @@ export function SessionComposer({
     }
 
     setDraft("");
+    onAttachmentsChange([]);
     try {
       await onSend(text, attachments);
     } catch (error) {
+      onAttachmentsChange(attachments);
       setDraft((current) => current || text);
       throw error;
     }

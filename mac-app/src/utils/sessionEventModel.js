@@ -47,6 +47,28 @@ function replaceLastSessionTurn(turns, turn) {
   return next;
 }
 
+function replaceTrailingUserTurnBeforePendingAssistant(turns, turn) {
+  const normalizedTurn = normalizeSessionTurn(turn);
+  if (!normalizedTurn || normalizedTurn.role !== "user" || turns.length < 2) {
+    return null;
+  }
+
+  const last = turns[turns.length - 1];
+  const previous = turns[turns.length - 2];
+  if (!isPendingAssistantTurn(last) || previous?.role !== "user") {
+    return null;
+  }
+
+  const candidate = mergeSessionTurns([previous], [normalizedTurn]);
+  if (candidate.length !== 1) {
+    return null;
+  }
+
+  const next = [...turns];
+  next[next.length - 2] = candidate[0];
+  return next;
+}
+
 function isPendingAssistantTurn(turn) {
   return turn?.role === "assistant" && turn?.pending === true;
 }
@@ -107,6 +129,16 @@ export function applySessionStreamEvent(turns, event) {
         pending: false,
       });
     case "user_message":
+      {
+        const replaced = replaceTrailingUserTurnBeforePendingAssistant(turns, {
+          ...event.turn,
+          displayMode: "plain",
+          pending: false,
+        });
+        if (replaced) {
+          return replaced;
+        }
+      }
       return appendSessionTurn(turns, {
         ...event.turn,
         displayMode: "plain",

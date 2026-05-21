@@ -38,6 +38,7 @@ English version: [README.md](README.md)
 - Telegram 作为远程任务入口和最终状态回传通道。
 - 基于 provider 的配置方式，支持已接入的 CLI 后端。
 - 可在 App 内浏览会话并发送消息。
+- Session Browser 支持从桌面端发送文本 + 图片/文件附件，并且每次发送只显示为一条用户消息。
 - 提供独立的 `Usage / 用量` 页面，默认查看近 7 天数据，并支持日期筛选、汇总卡和每日图表。
 - 用量统计仍然收口在 provider/plugin 适配层之后，不把 provider-specific 解析逻辑扩散到共享 React 页面。
 - 最终回复支持 Markdown 渲染。

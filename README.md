@@ -38,6 +38,7 @@ See also:
 - Telegram entry point for remote task submission and final updates.
 - Provider-driven configuration for supported CLI backends.
 - Session browsing and message sending from the app.
+- Session Browser supports text plus image/file attachment sends from the desktop app, with one user message shown per send.
 - A dedicated `Usage` page for recent provider usage, with a default 7-day window, date filtering, summary cards, and daily charts.
 - Usage aggregation stays behind provider/plugin adapters instead of pushing provider-specific parsing into shared React surfaces.
 - Markdown rendering for final replies.
