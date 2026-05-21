@@ -344,10 +344,16 @@ def _resolve_topic_id(
                 thread_found = True
                 topic_id = t.topic_id  # 可能为 None（按需创建模式）
                 thread_waiting_for_topic = topic_id is None
-                logger.debug(
-                    f"[resolve_topic] 全局找到 thread：ws={ws.name} tool={ws.tool} "
-                    f"thread={thread_id[:12]}… topic={topic_id}"
-                )
+                if topic_id is not None:
+                    logger.debug(
+                        f"[resolve_topic] 全局找到 thread：ws={ws.name} tool={ws.tool} "
+                        f"thread={thread_id[:12]}… topic={topic_id}"
+                    )
+                else:
+                    logger.debug(
+                        f"[resolve_topic] 全局找到 thread 但 topic_id 为空：ws={ws.name} tool={ws.tool} "
+                        f"thread={thread_id[:12]}…，等待按需创建"
+                    )
 
     # 策略 2：thread 未知但有 ws_daemon_id，尝试查找 workspace topic
     if not thread_found and ws_daemon_id:
@@ -374,7 +380,7 @@ def _resolve_topic_id(
             f"[resolve_topic] thread 已注册但 topic_id 为空，等待按需 materialize："
             f"thread={thread_id or 'N/A'} ws_daemon_id={ws_daemon_id or 'N/A'}"
         )
-    elif topic_id is None and (thread_id or ws_daemon_id):
+    if topic_id is None and (thread_id or ws_daemon_id) and not thread_found:
         logger.error(
             f"[resolve_topic] 无法解析 topic_id：thread={thread_id or 'N/A'} "
             f"ws_daemon_id={ws_daemon_id or 'N/A'} - 事件可能被丢弃"

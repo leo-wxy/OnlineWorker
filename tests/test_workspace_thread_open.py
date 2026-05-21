@@ -607,6 +607,42 @@ async def test_thread_open_existing_claude_topic_only_syncs_turns_after_cursor(m
 
 
 @pytest.mark.asyncio
+async def test_replay_thread_history_accepts_iso_timestamp_cursor(monkeypatch):
+    from bot.handlers.workspace import _replay_thread_history
+
+    history = [
+        {"role": "user", "text": "看图", "timestamp": "2026-05-17T12:36:52Z"},
+        {"role": "assistant", "text": "已收到", "timestamp": "2026-05-17T12:37:05Z"},
+    ]
+
+    monkeypatch.setattr(
+        "bot.handlers.workspace.read_provider_thread_history",
+        lambda tool_name, thread_id, limit=10, sessions_dir=None: history,
+    )
+    send_to_group = AsyncMock()
+    monkeypatch.setattr(
+        "bot.handlers.workspace._send_to_group",
+        send_to_group,
+    )
+
+    cursor = await _replay_thread_history(
+        MagicMock(),
+        GROUP_CHAT_ID,
+        5457,
+        "ses-phase16",
+        sessions_dir=None,
+        tool_name="codex",
+    )
+
+    messages = [call.args[2] for call in send_to_group.await_args_list]
+    combined = "\n".join(messages)
+    assert messages[0].startswith("📜 历史记录")
+    assert "👤 看图" in combined
+    assert "🤖 已收到" in combined
+    assert cursor is not None
+
+
+@pytest.mark.asyncio
 async def test_thread_open_customprovider_status_message_avoids_markdown_parse_risk(monkeypatch):
     storage = AppStorage()
     ws = WorkspaceInfo(

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from core.providers.overlay import iter_overlay_manifest_paths, load_manifest
+from core.providers.registry import get_provider
 
 
 def _workspace_path(workspace: Any) -> str:
@@ -56,6 +57,10 @@ def _load_provider_descriptor(provider_id: str):
     normalized_provider_id = str(provider_id or "").strip()
     if not normalized_provider_id:
         raise ValueError("provider_id is required")
+
+    registry_descriptor = get_provider(normalized_provider_id)
+    if registry_descriptor is not None:
+        return registry_descriptor
 
     for manifest_path in _iter_manifest_paths():
         manifest = load_manifest(manifest_path)

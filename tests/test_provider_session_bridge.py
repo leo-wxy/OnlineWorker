@@ -1,6 +1,46 @@
 from core import provider_session_bridge as bridge
 
 
+def test_load_provider_descriptor_prefers_registry_for_bundled_provider(monkeypatch):
+    descriptor = object()
+
+    monkeypatch.setattr(bridge, "get_provider", lambda provider_id: descriptor if provider_id == "codex" else None)
+    monkeypatch.setattr(bridge, "_iter_manifest_paths", lambda: [])
+
+    assert bridge._load_provider_descriptor("codex") is descriptor
+
+
+def test_load_provider_descriptor_falls_back_to_manifest_scan(monkeypatch, tmp_path):
+    overlay_dir = tmp_path / "provider-plugins" / "overlay-tool"
+    overlay_dir.mkdir(parents=True)
+    module_name = "bridge_overlay_manifest_entry"
+    (overlay_dir / "plugin.yaml").write_text(
+        """
+schema_version: 1
+id: overlay-tool
+kind: provider
+label: Overlay Tool
+entrypoints:
+  python_descriptor: {module_name}:create_provider_descriptor
+""".format(module_name=module_name).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "provider-plugins" / f"{module_name}.py").write_text(
+        """
+def create_provider_descriptor():
+    return {"name": "overlay-tool"}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(bridge, "get_provider", lambda provider_id: None)
+    monkeypatch.setattr(bridge, "_iter_manifest_paths", lambda: [overlay_dir / "plugin.yaml"])
+
+    assert bridge._load_provider_descriptor("overlay-tool") == {"name": "overlay-tool"}
+
+
 def test_list_provider_session_rows_merges_workspaces_and_sorts(monkeypatch):
     class Facts:
         @staticmethod

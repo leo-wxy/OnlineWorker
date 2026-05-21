@@ -191,11 +191,14 @@ class TestResolveTopicId:
         result = _resolve_topic_id(state, "daemon-001", "nonexistent-thread", {})
         assert result == 100
 
-    def test_thread_without_topic_does_not_fall_back_to_workspace_topic(self):
+    def test_thread_without_topic_does_not_fall_back_to_workspace_topic(self, monkeypatch):
         thread = ThreadInfo(thread_id="tid-001", topic_id=None, archived=False)
         state, ws = make_state_with_workspace(threads={"tid-001": thread})
+        error_mock = MagicMock()
+        monkeypatch.setattr("bot.events.logger.error", error_mock)
         result = _resolve_topic_id(state, "daemon-001", "tid-001", {})
         assert result is None
+        error_mock.assert_not_called()
 
     def test_thread_without_topic_does_not_log_error_before_materialize(self, caplog):
         thread = ThreadInfo(thread_id="tid-001", topic_id=None, archived=False)

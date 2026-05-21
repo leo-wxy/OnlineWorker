@@ -16,6 +16,7 @@
 """
 import logging
 import hashlib
+from datetime import datetime
 from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
@@ -113,10 +114,29 @@ def _make_thread_open_token(value: str) -> str:
 
 def _history_turn_signature(turn: dict) -> str:
     role = str(turn.get("role") or "").strip()
-    timestamp = int(turn.get("timestamp") or 0)
+    timestamp = _normalize_history_turn_timestamp(turn.get("timestamp"))
     text = str(turn.get("text") or "").strip()
     payload = f"{role}\n{timestamp}\n{text}".encode("utf-8")
     return hashlib.blake2s(payload, digest_size=16).hexdigest()
+
+
+def _normalize_history_turn_timestamp(value) -> int | str:
+    if isinstance(value, (int, float)):
+        return int(value)
+
+    text = str(value or "").strip()
+    if not text:
+        return 0
+
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        return int(datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp() * 1000)
+    except (TypeError, ValueError):
+        return text
 
 
 def _format_history_turn_message(turn: dict) -> Optional[str]:
