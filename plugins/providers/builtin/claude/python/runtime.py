@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 
 from core.providers.interaction_runtime import reply_question_via_adapter
 from core.providers.lifecycle_runtime import (
@@ -9,7 +8,7 @@ from core.providers.lifecycle_runtime import (
     _sync_provider_threads_from_facts,
     resolve_default_reconnect_topic_id,
 )
-from core.providers.message_runtime import _interrupt_active_turn, send_default_message
+from core.providers.message_runtime import send_default_message
 from core.providers.thread_runtime import (
     activate_default_new_thread,
     archive_default_thread,
@@ -17,21 +16,16 @@ from core.providers.thread_runtime import (
     resolve_default_thread_adapter,
 )
 from core.providers.workspace_runtime import default_normalize_server_threads
-from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter, resolve_claude_bin
+from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
 from plugins.providers.builtin.claude.python.storage_runtime import infer_claude_thread_source_from_logs
 
 logger = logging.getLogger(__name__)
 
 
-def _extract_started_thread_id(result: object) -> str:
-    thread_id = result.get("id") if isinstance(result, dict) else None
-    if not thread_id and isinstance(result, dict):
-        thread = result.get("thread", {})
-        if isinstance(thread, dict):
-            thread_id = thread.get("id")
-    if not thread_id:
-        raise RuntimeError(f"Claude start_thread 返回无效 thread id：{result}")
-    return str(thread_id)
+def should_materialize_unbound_thread_topic(state, ws_info, thread_info) -> bool:
+    # App/Session Tab-created Claude sessions stay inside the desktop app until
+    # a TG topic is explicitly bound.
+    return getattr(thread_info, "topic_id", None) is not None
 
 
 def build_approval_reply(approval, action: str) -> tuple[str, dict]:
@@ -44,67 +38,42 @@ def build_approval_reply(approval, action: str) -> tuple[str, dict]:
     return "✅ 已允许", {"behavior": "allow"}
 
 
-async def _maybe_remap_imported_thread(state, adapter, ws_info, thread_info):
+async def _refresh_inferred_thread_source(ws_info, thread_info) -> None:
     if ws_info.tool != "claude":
-        return thread_info
+        return
 
     thread_source = str(getattr(thread_info, "source", "") or "unknown").strip().lower()
-    if thread_source == "unknown":
-        inferred_source = infer_claude_thread_source_from_logs(
-            thread_info.thread_id,
+    if thread_source != "unknown":
+        return
+
+    inferred_source = infer_claude_thread_source_from_logs(
+        thread_info.thread_id,
+        thread_info.topic_id,
+    )
+    if inferred_source != "unknown":
+        thread_info.source = inferred_source
+        logger.info(
+            "[provider-message] 已根据历史日志识别 claude thread 来源 "
+            "thread=%s source=%s topic=%s",
+            thread_info.thread_id[:8],
+            inferred_source,
             thread_info.topic_id,
         )
-        if inferred_source != "unknown":
-            thread_info.source = inferred_source
-            thread_source = inferred_source
-            logger.info(
-                "[provider-message] 已根据历史日志识别 claude thread 来源 "
-                "thread=%s source=%s topic=%s",
-                thread_info.thread_id[:8],
-                inferred_source,
-                thread_info.topic_id,
-            )
-
-    return thread_info
 
 
-async def _detach_imported_thread_for_app_send(adapter, ws_info, thread_info):
-    """Move a TG topic from an imported history session to a fresh app-owned session."""
-    workspace_id = ws_info.daemon_workspace_id
-    old_thread_id = thread_info.thread_id
-    old_topic_id = thread_info.topic_id
+async def _reject_if_external_thread_busy(adapter, thread_id: str) -> None:
+    inspect_thread_activity = getattr(adapter, "inspect_thread_activity", None)
+    if not callable(inspect_thread_activity):
+        return
 
-    result = await adapter.start_thread(workspace_id)
-    new_thread_id = _extract_started_thread_id(result)
-    if new_thread_id == old_thread_id:
-        raise RuntimeError("Claude start_thread 返回了与 imported thread 相同的 thread id")
+    activity = await inspect_thread_activity(thread_id)
+    if not isinstance(activity, dict) or not activity.get("busy"):
+        return
 
-    imported_record = replace(
-        thread_info,
-        thread_id=old_thread_id,
-        topic_id=None,
-        streaming_msg_id=None,
-        last_tg_user_message_id=None,
-    )
-    ws_info.threads[old_thread_id] = imported_record
-
-    thread_info.thread_id = new_thread_id
-    thread_info.topic_id = old_topic_id
-    thread_info.source = "app"
-    thread_info.is_active = True
-    thread_info.streaming_msg_id = None
-    thread_info.history_sync_cursor = None
-    thread_info.last_tg_user_message_id = None
-    ws_info.threads[new_thread_id] = thread_info
-
-    logger.info(
-        "[provider-message] claude imported thread 已拆分为 app session "
-        "old=%s new=%s topic=%s",
-        old_thread_id[:8],
-        new_thread_id[:8],
-        old_topic_id,
-    )
-    return thread_info
+    message = str(activity.get("message") or "").strip()
+    if not message:
+        message = "当前 Claude session 正在本地执行，请等待结束或显式 fork。"
+    raise RuntimeError(message)
 
 
 async def prepare_send(
@@ -126,49 +95,24 @@ async def prepare_send(
     has_active_owned_turn = bool(
         active_turn is not None and active_turn.turn_id and not active_turn.completed
     )
-    await _interrupt_active_turn(
-        state,
-        adapter,
-        workspace_id,
-        thread_info.thread_id,
-        label="claude",
-    )
 
     if not has_active_owned_turn:
-        thread_info = await _maybe_remap_imported_thread(
-            state,
-            adapter,
-            ws_info,
-            thread_info,
-        )
-        thread_source = str(getattr(thread_info, "source", "") or "unknown").strip().lower()
-        if thread_source == "imported":
-            thread_info = await _detach_imported_thread_for_app_send(
-                adapter,
-                ws_info,
-                thread_info,
-            )
+        await _refresh_inferred_thread_source(ws_info, thread_info)
+        await _reject_if_external_thread_busy(adapter, thread_info.thread_id)
     await adapter.resume_thread(workspace_id, thread_info.thread_id)
     return True
 
 
 async def start_runtime(manager, bot, tool_cfg) -> None:
     """Start Claude local adapter backed by the provider-owned CLI runtime."""
-    resolved_claude_bin = resolve_claude_bin(tool_cfg.codex_bin)
-    if resolved_claude_bin != tool_cfg.codex_bin:
-        logger.info(
-            "[claude] 运行时二进制已解析：configured=%s resolved=%s",
-            tool_cfg.codex_bin,
-            resolved_claude_bin,
-        )
-    adapter = ClaudeAdapter(claude_bin=resolved_claude_bin)
+    configured_claude_bin = str(tool_cfg.codex_bin or "claude").strip() or "claude"
+    adapter = ClaudeAdapter(claude_bin=configured_claude_bin)
     await adapter.connect()
     data_dir = manager.state.config.data_dir if manager.state.config is not None else None
     if data_dir:
-        await adapter.start_hook_bridge(data_dir)
+        adapter.configure_hook_bridge(data_dir)
     else:
-        logger.info("[claude] 缺少 data_dir，跳过 hook bridge 启动")
-    await adapter.refresh_auth_status()
+        logger.info("[claude] 缺少 data_dir，跳过 hook bridge 配置")
     manager.state.set_adapter("claude", adapter)
     await setup_connection(manager, bot, adapter)
 
@@ -291,8 +235,6 @@ def build_status_lines(state) -> list[str]:
     if adapter is not None and adapter.connected:
         if getattr(adapter, "auth_ready", None) is False:
             return ["• claude CLI：⚠️ 已连接，但未鉴权"]
-        if getattr(adapter, "auth_method", "") in ("apiKeyEnv", "proxyEnv"):
-            return ["• claude CLI：✅ 已连接（API/Proxy）"]
         return ["• claude CLI：✅ 已连接"]
     if adapter is not None:
         return ["• claude CLI：❌ 已断开"]

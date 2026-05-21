@@ -67,11 +67,10 @@ async def send_default_message(
     attachments=None,
 ) -> None:
     if attachments:
-        await adapter.send_user_message(
+        return await adapter.send_user_message(
             ws_info.daemon_workspace_id,
             thread_info.thread_id,
             text,
             attachments=attachments,
         )
-        return
-    await adapter.send_user_message(ws_info.daemon_workspace_id, thread_info.thread_id, text)
+    return await adapter.send_user_message(ws_info.daemon_workspace_id, thread_info.thread_id, text)

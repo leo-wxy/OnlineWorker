@@ -235,7 +235,6 @@ struct ProviderPluginConfig {
     control_mode: Option<String>,
     transport: Option<ProviderTransportEntry>,
     auth: Option<BTreeMap<String, String>>,
-    auth_env: Option<BTreeMap<String, String>>,
     capabilities: Option<ProviderCapabilitiesEntry>,
     process: Option<ProviderProcessEntry>,
 }
@@ -245,7 +244,6 @@ struct ProviderPluginDefault {
     id: String,
     visibility: String,
     order: u32,
-    auth_env: BTreeMap<String, String>,
     config: ProviderConfigEntry,
 }
 
@@ -384,7 +382,6 @@ fn plugin_manifest_to_default(manifest: ProviderPluginManifest) -> Option<Provid
         id: provider_id.clone(),
         visibility: manifest.visibility.unwrap_or_else(|| "private".to_string()),
         order: manifest.order.unwrap_or(u32::MAX),
-        auth_env: provider.auth_env.unwrap_or_default(),
         config: ProviderConfigEntry {
             visible: Some(
                 provider
@@ -534,37 +531,6 @@ fn read_env_key(raw: &str, key: &str) -> Option<String> {
     })
 }
 
-fn provider_auth_from_env_raw(
-    provider_id: &str,
-    env_raw: Option<&str>,
-) -> BTreeMap<String, String> {
-    let raw = env_raw.unwrap_or("");
-    let auth_env = provider_plugin_defaults()
-        .remove(provider_id)
-        .map(|default| default.auth_env)
-        .unwrap_or_default();
-    auth_env
-        .into_iter()
-        .map(|(auth_key, env_key)| (auth_key, read_env_key(raw, &env_key).unwrap_or_default()))
-        .collect()
-}
-
-fn merge_provider_auth_from_env(
-    provider: &mut ProviderConfigEntry,
-    env_auth: &BTreeMap<String, String>,
-) {
-    let auth = provider.auth.get_or_insert_with(BTreeMap::new);
-    for key in env_auth.keys() {
-        let current = auth.get(key).map(|value| value.trim()).unwrap_or("");
-        if current.is_empty() {
-            let fallback = env_auth.get(key).map(|value| value.trim()).unwrap_or("");
-            if !fallback.is_empty() {
-                auth.insert(key.to_string(), fallback.to_string());
-            }
-        }
-    }
-}
-
 fn normalize_provider_entry(provider_id: &str, provider: &mut ProviderConfigEntry) {
     let defaults = default_provider_config(provider_id);
     let managed = provider.managed.or(defaults.managed).unwrap_or(false);
@@ -586,7 +552,11 @@ fn normalize_provider_entry(provider_id: &str, provider: &mut ProviderConfigEntr
         .or(provider.codex_bin.take())
         .or(defaults.bin);
     let control_mode = provider.control_mode.take().or(defaults.control_mode);
-    provider.auth = provider.auth.take().or(defaults.auth);
+    provider.auth = if provider_id == "claude" {
+        None
+    } else {
+        provider.auth.take().or(defaults.auth)
+    };
 
     let mut transport = provider.transport.take().unwrap_or_default();
     let default_transport = defaults.transport.unwrap_or_default();
@@ -689,7 +659,7 @@ fn legacy_tool_to_provider(tool: LegacyToolConfig) -> ProviderConfigEntry {
 
 pub(super) fn normalize_provider_document_with_env(
     raw: &str,
-    env_raw: Option<&str>,
+    _env_raw: Option<&str>,
 ) -> Result<ProviderConfigDocument, String> {
     let mut doc: ProviderConfigDocument = if raw.trim().is_empty() {
         ProviderConfigDocument::default()
@@ -712,8 +682,6 @@ pub(super) fn normalize_provider_document_with_env(
     let providers = doc.providers.get_or_insert_with(BTreeMap::new);
     for (provider_id, provider) in providers.iter_mut() {
         normalize_provider_entry(provider_id, provider);
-        let env_auth = provider_auth_from_env_raw(provider_id, env_raw);
-        merge_provider_auth_from_env(provider, &env_auth);
     }
     for builtin in public_default_provider_ids() {
         providers
@@ -723,8 +691,6 @@ pub(super) fn normalize_provider_document_with_env(
     for builtin in public_default_provider_ids() {
         if let Some(provider) = providers.get_mut(&builtin) {
             normalize_provider_entry(&builtin, provider);
-            let env_auth = provider_auth_from_env_raw(&builtin, env_raw);
-            merge_provider_auth_from_env(provider, &env_auth);
         }
     }
 
@@ -894,6 +860,7 @@ pub(super) fn set_provider_flags_in_document(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::fs;
 
     use super::{
@@ -1022,60 +989,43 @@ app_server_port: 4722
     }
 
     #[test]
-    fn normalize_provider_document_backfills_claude_auth_from_legacy_env() {
+    fn normalize_provider_document_does_not_backfill_claude_auth_from_legacy_env() {
         let raw = r#"
 tools:
   - name: codex
 enabled: true
 codex_bin: "codex"
 "#;
-        let env_raw = "ANTHROPIC_API_KEY=dummy\nANTHROPIC_BASE_URL=http://localhost:3031\nANTHROPIC_MODEL=claude-opus-4-6\n";
+        let env_raw = "ANTHROPIC_API_KEY=dummy\nANTHROPIC_AUTH_TOKEN=token-123\nANTHROPIC_BASE_URL=https://runtime.example.test/langbase\nANTHROPIC_MODEL=claude-opus-4-6\n";
 
         let doc =
             normalize_provider_document_with_env(raw, Some(env_raw)).expect("normalized config");
         let providers = doc.providers.expect("providers");
         let claude = providers.get("claude").expect("claude");
-        let auth = claude.auth.as_ref().expect("claude auth");
-        assert_eq!(auth.get("key").map(String::as_str), Some("dummy"));
-        assert_eq!(
-            auth.get("base_url").map(String::as_str),
-            Some("http://localhost:3031")
-        );
-        assert_eq!(
-            auth.get("model").map(String::as_str),
-            Some("claude-opus-4-6")
-        );
+        assert!(claude.auth.as_ref().map(BTreeMap::is_empty).unwrap_or(true));
     }
 
     #[test]
-    fn normalize_provider_document_backfills_empty_claude_auth_fields_from_env() {
+    fn normalize_provider_document_removes_legacy_claude_auth_fields() {
         let raw = r#"
 schema_version: 2
 providers:
   claude:
-managed: false
-autostart: false
-auth:
-  key: ""
-  base_url: "   "
-  model: ""
+    managed: false
+    autostart: false
+    auth:
+      key: ""
+      auth_token: ""
+      base_url: "   "
+      model: ""
 "#;
-        let env_raw = "ANTHROPIC_API_KEY=dummy\nANTHROPIC_BASE_URL=http://localhost:3031\nANTHROPIC_MODEL=claude-opus-4-6\n";
+        let env_raw = "ANTHROPIC_API_KEY=dummy\nANTHROPIC_AUTH_TOKEN=token-123\nANTHROPIC_BASE_URL=https://runtime.example.test/langbase\nANTHROPIC_MODEL=claude-opus-4-6\n";
 
         let doc =
             normalize_provider_document_with_env(raw, Some(env_raw)).expect("normalized config");
         let providers = doc.providers.expect("providers");
         let claude = providers.get("claude").expect("claude");
-        let auth = claude.auth.as_ref().expect("claude auth");
-        assert_eq!(auth.get("key").map(String::as_str), Some("dummy"));
-        assert_eq!(
-            auth.get("base_url").map(String::as_str),
-            Some("http://localhost:3031")
-        );
-        assert_eq!(
-            auth.get("model").map(String::as_str),
-            Some("claude-opus-4-6")
-        );
+        assert!(claude.auth.as_ref().map(BTreeMap::is_empty).unwrap_or(true));
     }
 
     #[test]

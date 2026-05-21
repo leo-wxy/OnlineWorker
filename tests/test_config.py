@@ -35,10 +35,6 @@ providers:
     bin: "claude"
     transport:
       type: "stdio"
-    auth:
-      key: ""
-      base_url: "http://localhost:3031"
-      model: "claude-opus-4-6"
 
 telegram:
   delete_archived_topics: false
@@ -127,11 +123,11 @@ def test_builtin_provider_defaults_expose_attachment_capabilities():
     claude = _default_provider_blueprint("claude")
 
     assert codex["capabilities"]["photos"] is True
-    assert claude["capabilities"]["photos"] is False
+    assert claude["capabilities"]["photos"] is True
     assert "files" in codex["capabilities"]
     assert "files" in claude["capabilities"]
     assert codex["capabilities"]["files"] is True
-    assert claude["capabilities"]["files"] is False
+    assert claude["capabilities"]["files"] is True
 
 
 def test_config_yaml_example_uses_public_provider_schema():
@@ -330,6 +326,7 @@ def test_load_config_from_provider_schema(tmp_path, monkeypatch):
     monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
 
     from config import load_config
@@ -353,9 +350,7 @@ def test_load_config_from_provider_schema(tmp_path, monkeypatch):
     assert claude.autostart is False
     assert claude.codex_bin == "claude"
     assert claude.protocol == "stdio"
-    assert claude.auth["key"] == ""
-    assert claude.auth["base_url"] == "http://localhost:3031"
-    assert claude.auth["model"] == "claude-opus-4-6"
+    assert claude.auth == {}
     assert cfg.log_level == "DEBUG"
     assert cfg.delete_archived_topics is False
 
@@ -416,7 +411,7 @@ def test_load_config_backfills_disabled_claude_provider_when_missing(tmp_path, m
     assert cfg.get_tool("claude") is None
 
 
-def test_load_config_uses_env_fallback_for_empty_claude_auth_fields(tmp_path, monkeypatch):
+def test_load_config_does_not_copy_anthropic_env_into_claude_provider_auth(tmp_path, monkeypatch):
     p = tmp_path / "config.yaml"
     p.write_text(
         """
@@ -430,6 +425,7 @@ providers:
       type: "stdio"
     auth:
       key: ""
+      auth_token: ""
       base_url: ""
       model: ""
 """,
@@ -439,7 +435,8 @@ providers:
     monkeypatch.setenv("ALLOWED_USER_ID", "456789")
     monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "dummy")
-    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://localhost:3031")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://runtime.example.test/langbase")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "token-123")
     monkeypatch.setenv("ANTHROPIC_MODEL", "claude-opus-4-6")
 
     from config import load_config
@@ -447,9 +444,51 @@ providers:
     cfg = load_config(str(p))
     claude = cfg.get_provider("claude")
     assert claude is not None
-    assert claude.auth["key"] == "dummy"
-    assert claude.auth["base_url"] == "http://localhost:3031"
-    assert claude.auth["model"] == "claude-opus-4-6"
+    assert claude.auth == {}
+
+
+def test_load_config_preserves_external_claude_runtime_env(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text(PROVIDER_YAML, encoding="utf-8")
+    monkeypatch.setenv("TELEGRAM_TOKEN", "123:abc")
+    monkeypatch.setenv("ALLOWED_USER_ID", "456789")
+    monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://process.example.test/langbase")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "process-token")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "process-model")
+
+    from config import load_config
+
+    load_config(str(p))
+
+    assert os.environ["ANTHROPIC_BASE_URL"] == "https://process.example.test/langbase"
+    assert os.environ["ANTHROPIC_AUTH_TOKEN"] == "process-token"
+    assert os.environ["ANTHROPIC_MODEL"] == "process-model"
+
+
+def test_load_config_removes_data_dir_env_claude_runtime_pollution(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(PROVIDER_YAML, encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        "TELEGRAM_TOKEN=123:abc\n"
+        "ALLOWED_USER_ID=456789\n"
+        "GROUP_CHAT_ID=-100987654321\n"
+        "ANTHROPIC_BASE_URL=https://env.example.test/langbase\n"
+        "ANTHROPIC_AUTH_TOKEN=stale-token\n"
+        "ANTHROPIC_MODEL=stale-model\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+
+    from config import load_config
+
+    load_config(data_dir=str(tmp_path))
+
+    assert "ANTHROPIC_BASE_URL" not in os.environ
+    assert "ANTHROPIC_AUTH_TOKEN" not in os.environ
+    assert "ANTHROPIC_MODEL" not in os.environ
 
 def test_load_config_ignores_legacy_unknown_fields(tmp_path, monkeypatch):
     p = tmp_path / "config.yaml"

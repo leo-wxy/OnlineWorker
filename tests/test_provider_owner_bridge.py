@@ -104,6 +104,166 @@ async def test_provider_owner_bridge_uses_registry_message_hooks(monkeypatch, tm
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_persists_new_workspace_for_event_routing(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    class _FakeAdapter:
+        connected = True
+
+        def register_workspace_cwd(self, workspace_id: str, cwd: str) -> None:
+            self.workspace_id = workspace_id
+            self.cwd = cwd
+
+    async def send(state_obj, current_adapter, ws_info, thread_info, **kwargs):
+        return {"threadId": thread_info.thread_id, "turnId": "turn-1", "status": "completed"}
+
+    state = AppState(storage=AppStorage())
+    state.set_adapter("claude", _FakeAdapter())
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            message_hooks=SimpleNamespace(
+                ensure_connected=AsyncMock(return_value=state.get_adapter(name)),
+                prepare_send=AsyncMock(return_value=True),
+                send=send,
+            )
+        )
+        if name == "claude"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_send_message(
+        {
+            "provider_id": "claude",
+            "thread_id": "tid-new",
+            "text": "hello",
+            "workspace_dir": "/tmp/new-workspace",
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["workspace_id"] == "claude:/tmp/new-workspace"
+    assert state.find_workspace_by_daemon_id("claude:/tmp/new-workspace") is not None
+    found = state.find_thread_by_id_global("tid-new")
+    assert found is not None
+    assert found[0].path == "/tmp/new-workspace"
+    assert found[1].source == "imported"
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_returns_send_error(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    class _FakeAdapter:
+        connected = True
+
+    async def send(state_obj, current_adapter, ws_info, thread_info, **kwargs):
+        return {"threadId": thread_info.thread_id, "turnId": "turn-1", "status": "error", "error": "boom"}
+
+    state = AppState(storage=AppStorage())
+    state.set_adapter("claude", _FakeAdapter())
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            message_hooks=SimpleNamespace(
+                ensure_connected=AsyncMock(return_value=state.get_adapter(name)),
+                prepare_send=AsyncMock(return_value=True),
+                send=send,
+            )
+        )
+        if name == "claude"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_send_message(
+        {
+            "provider_id": "claude",
+            "thread_id": "tid-new",
+            "text": "hello",
+            "workspace_dir": "/tmp/new-workspace",
+        }
+    )
+
+    assert response == {
+        "ok": False,
+        "error": "boom",
+        "provider_id": "claude",
+        "thread_id": "tid-new",
+        "workspace_id": "claude:/tmp/new-workspace",
+    }
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_rolls_back_remapped_thread_when_send_errors(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    class _FakeAdapter:
+        connected = True
+
+        def register_workspace_cwd(self, workspace_id: str, cwd: str) -> None:
+            pass
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="claude",
+        daemon_workspace_id="claude:onlineWorker",
+        threads={
+            "ses-imported": ThreadInfo(
+                thread_id="ses-imported",
+                source="imported",
+                preview="历史导入 thread",
+            )
+        },
+    )
+    storage.workspaces["claude:onlineWorker"] = ws
+    state = AppState(storage=storage)
+    state.set_adapter("claude", _FakeAdapter())
+
+    async def prepare_send(state_obj, current_adapter, ws_info, thread_info, **kwargs):
+        ws_info.threads.pop(thread_info.thread_id)
+        thread_info.thread_id = "ses-app-new"
+        thread_info.source = "app"
+        ws_info.threads[thread_info.thread_id] = thread_info
+        return True
+
+    async def send(state_obj, current_adapter, ws_info, thread_info, **kwargs):
+        return {"threadId": thread_info.thread_id, "turnId": "turn-1", "status": "error", "error": "boom"}
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            message_hooks=SimpleNamespace(
+                ensure_connected=AsyncMock(return_value=state.get_adapter(name)),
+                prepare_send=prepare_send,
+                send=send,
+            )
+        )
+        if name == "claude"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_send_message(
+        {
+            "provider_id": "claude",
+            "thread_id": "ses-imported",
+            "text": "hello",
+            "workspace_dir": "/Users/example/Projects/onlineWorker",
+        }
+    )
+
+    assert response["ok"] is False
+    assert set(ws.threads) == {"ses-imported"}
+    assert ws.threads["ses-imported"].thread_id == "ses-imported"
+    assert ws.threads["ses-imported"].source == "imported"
+    assert ws.threads["ses-imported"].preview == "历史导入 thread"
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_prefers_existing_workspace_thread_binding(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 

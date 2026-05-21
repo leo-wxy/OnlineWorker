@@ -66,6 +66,70 @@ export function buildSnapshotSignature(snapshot) {
   return JSON.stringify(snapshot);
 }
 
+export function hasSessionSnapshotChanged(
+  currentSnapshot,
+  nextSnapshot,
+  getSignature = buildSnapshotSignature,
+) {
+  return getSignature(currentSnapshot ?? []) !== getSignature(nextSnapshot ?? []);
+}
+
+export function startActiveSessionRefresh({
+  intervalMs = 3000,
+  getCurrentSnapshot,
+  loadSnapshot,
+  onSnapshot,
+  shouldSkip = () => false,
+  setTimer = (callback, timeoutMs) => setTimeout(callback, timeoutMs),
+  clearTimer = (timer) => clearTimeout(timer),
+  onError = (error) => {
+    console.warn("active session refresh failed", error);
+  },
+}) {
+  let stopped = false;
+  let timer = null;
+
+  const schedule = () => {
+    if (stopped) {
+      return;
+    }
+    timer = setTimer(tick, intervalMs);
+  };
+
+  const tick = async () => {
+    if (stopped) {
+      return;
+    }
+
+    try {
+      if (!shouldSkip()) {
+        const nextSnapshot = await loadSnapshot();
+        if (
+          !stopped &&
+          hasSessionSnapshotChanged(getCurrentSnapshot(), nextSnapshot)
+        ) {
+          onSnapshot(nextSnapshot);
+        }
+      }
+    } catch (error) {
+      if (!stopped) {
+        onError(error);
+      }
+    } finally {
+      schedule();
+    }
+  };
+
+  schedule();
+
+  return () => {
+    stopped = true;
+    if (timer !== null) {
+      clearTimer(timer);
+    }
+  };
+}
+
 /**
  * 轮询 assistant 回复，并返回“是否真正稳定收到回复”的状态。
  *

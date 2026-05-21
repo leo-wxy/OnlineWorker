@@ -2,14 +2,14 @@ use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Mutex as StdMutex, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 
 use super::claude::{
@@ -19,9 +19,7 @@ use super::claude::{
 };
 use super::config::ensure_data_dir;
 use super::config_provider::{provider_metadata_from_raw, ProviderMetadata};
-use super::service::{
-    ensure_service_running_if_needed, read_codex_mirror_status, snapshot_service_status, BotState,
-};
+use super::service::{ensure_service_running_if_needed, snapshot_service_status, BotState};
 use super::session_state::{load_local_thread_overlays, LocalThreadOverlay};
 
 #[path = "dashboard_types.rs"]
@@ -29,7 +27,7 @@ mod dashboard_types;
 pub use self::dashboard_types::*;
 
 const REQUIRED_ENV_KEYS: &[&str] = &["TELEGRAM_TOKEN", "ALLOWED_USER_ID", "GROUP_CHAT_ID"];
-const CODEX_MIRROR_STALE_SECONDS: f64 = 15.0;
+const RECENT_ACTIVITY_CACHE_TTL: Duration = Duration::from_secs(15);
 
 #[derive(Deserialize, Default)]
 struct DashboardConfigDocument {
@@ -106,6 +104,20 @@ struct WorkspaceActivityCandidate {
     preview: Option<String>,
     updated_at: i64,
     active_thread_count: u32,
+}
+
+#[derive(Clone, Debug)]
+struct RecentActivityCacheEntry {
+    data_dir: PathBuf,
+    codex_db: Option<PathBuf>,
+    cached_at: SystemTime,
+    summary: Option<RecentActivitySummary>,
+}
+
+#[derive(Default)]
+struct ClaudeActivityIndex {
+    sessions: HashMap<String, super::claude::ClaudeStoredSession>,
+    history: HashMap<String, super::claude::ClaudeHistoryInfo>,
 }
 
 #[derive(Deserialize)]
@@ -395,9 +407,23 @@ fn provider_owner_bridge_socket_path(data_dir: &Path) -> PathBuf {
     data_dir.join("provider_owner_bridge.sock")
 }
 
+const PROVIDER_OWNER_BRIDGE_STATUS_TIMEOUT: Duration = Duration::from_millis(1200);
+
 fn read_provider_runtime_status_via_owner_bridge(
     data_dir: &Path,
     provider_id: &str,
+) -> Result<(ServiceHealth, Option<String>), String> {
+    read_provider_runtime_status_via_owner_bridge_with_timeout(
+        data_dir,
+        provider_id,
+        PROVIDER_OWNER_BRIDGE_STATUS_TIMEOUT,
+    )
+}
+
+fn read_provider_runtime_status_via_owner_bridge_with_timeout(
+    data_dir: &Path,
+    provider_id: &str,
+    timeout: Duration,
 ) -> Result<(ServiceHealth, Option<String>), String> {
     let socket_path = provider_owner_bridge_socket_path(data_dir);
     if !socket_path.exists() {
@@ -409,6 +435,12 @@ fn read_provider_runtime_status_via_owner_bridge(
 
     let mut socket = UnixStream::connect(&socket_path)
         .map_err(|e| format!("connect provider owner bridge failed: {e}"))?;
+    socket
+        .set_read_timeout(Some(timeout))
+        .map_err(|e| format!("set provider owner bridge read timeout failed: {e}"))?;
+    socket
+        .set_write_timeout(Some(timeout))
+        .map_err(|e| format!("set provider owner bridge write timeout failed: {e}"))?;
     let payload = serde_json::json!({
         "type": "runtime_status",
         "provider_id": provider_id,
@@ -448,28 +480,14 @@ fn build_provider_statuses(
     _managed_service_running: bool,
     _last_started_at: Option<SystemTime>,
     _now: SystemTime,
-    mirror_status: Option<&super::service::CodexMirrorStatus>,
 ) -> Vec<ProviderDashboardStatus> {
     configs
         .into_iter()
         .map(|provider| {
             let (health, detail) = if !provider.managed || !provider.autostart {
                 (ServiceHealth::Stopped, provider_stopped_detail(&provider))
-            } else if let Some(detail) = provider_missing_cli_detail(&provider) {
-                (ServiceHealth::Stopped, Some(detail))
             } else {
-                match provider.id.as_str() {
-                    "codex" => (derive_codex_health(service_running, mirror_status), None),
-                    "claude" => derive_claude_health(service_running, &provider, data_dir),
-                    _ => {
-                        if !service_running {
-                            (ServiceHealth::Stopped, None)
-                        } else {
-                            read_provider_runtime_status_via_owner_bridge(data_dir, &provider.id)
-                                .unwrap_or((ServiceHealth::Unknown, None))
-                        }
-                    }
-                }
+                derive_provider_health(service_running, &provider, data_dir)
             };
 
             ProviderDashboardStatus {
@@ -516,7 +534,6 @@ pub(crate) async fn compute_dashboard_state(
         (bot.running, bot.last_started_at)
     };
     let (config_ready, missing_config_fields) = read_config_readiness(&dir)?;
-    let mirror_status = read_codex_mirror_status().await.ok().flatten();
     let provider_configs = read_provider_snapshots(&dir)?;
     let providers = build_provider_statuses(
         provider_configs,
@@ -525,7 +542,6 @@ pub(crate) async fn compute_dashboard_state(
         managed_service_running,
         last_started_at,
         now,
-        mirror_status.as_ref(),
     );
 
     Ok(build_dashboard_state(DashboardComputationInput {
@@ -556,8 +572,6 @@ pub(crate) fn build_dashboard_state(input: DashboardComputationInput) -> Dashboa
     } else {
         ServiceHealth::Stopped
     };
-    let codex = provider_tool_status(&visible_providers, "codex");
-
     let mut alerts = Vec::new();
 
     if !input.config_ready {
@@ -580,30 +594,25 @@ pub(crate) fn build_dashboard_state(input: DashboardComputationInput) -> Dashboa
         });
     }
 
-    if input.service_running && active_provider_problem(&visible_providers, "codex") {
-        alerts.push(Alert {
-            level: AlertLevel::Warning,
-            code: "codex_degraded".to_string(),
-            title: "codex status degraded".to_string(),
-            detail: "Codex runtime looks stale or unavailable from the app diagnostics view"
-                .to_string(),
-            action: Some("Open Logs".to_string()),
-            action_code: Some("open_logs".to_string()),
-            missing_fields: Vec::new(),
-        });
-    }
-
-    if input.service_running && active_provider_problem(&visible_providers, "claude") {
-        alerts.push(Alert {
-            level: AlertLevel::Warning,
-            code: "claude_degraded".to_string(),
-            title: "claude status degraded".to_string(),
-            detail: "Claude CLI is unavailable or not authenticated from the app diagnostics view"
-                .to_string(),
-            action: Some("Open Setup".to_string()),
-            action_code: Some("open_setup".to_string()),
-            missing_fields: Vec::new(),
-        });
+    if input.service_running {
+        for provider in visible_providers.iter().filter(|provider| {
+            provider.managed && provider.autostart && has_subservice_problem(&provider.health)
+        }) {
+            alerts.push(Alert {
+                level: AlertLevel::Warning,
+                code: "provider_degraded".to_string(),
+                title: format!("{} status degraded", provider.id),
+                detail: provider.detail.clone().unwrap_or_else(|| {
+                    format!(
+                        "{} runtime looks unavailable from the app diagnostics view",
+                        provider.id
+                    )
+                }),
+                action: Some("Open Logs".to_string()),
+                action_code: Some("open_logs".to_string()),
+                missing_fields: Vec::new(),
+            });
+        }
     }
 
     if input.service_running && telegram == ConnectionStatus::Disconnected {
@@ -623,9 +632,9 @@ pub(crate) fn build_dashboard_state(input: DashboardComputationInput) -> Dashboa
         SystemHealth::Misconfigured
     } else if !input.service_running {
         SystemHealth::Stopped
-    } else if active_provider_problem(&visible_providers, "codex")
-        || active_provider_problem(&visible_providers, "claude")
-        || telegram == ConnectionStatus::Disconnected
+    } else if visible_providers.iter().any(|provider| {
+        provider.managed && provider.autostart && has_subservice_problem(&provider.health)
+    }) || telegram == ConnectionStatus::Disconnected
     {
         SystemHealth::Degraded
     } else {
@@ -641,7 +650,6 @@ pub(crate) fn build_dashboard_state(input: DashboardComputationInput) -> Dashboa
             last_heartbeat: None,
         },
         providers: visible_providers,
-        codex,
         alerts,
         recent_activity: input.recent_activity,
         generated_at_epoch: SystemTime::now()
@@ -655,54 +663,33 @@ fn has_subservice_problem(health: &ServiceHealth) -> bool {
     matches!(health, ServiceHealth::Degraded | ServiceHealth::Stopped)
 }
 
-fn provider_tool_status(providers: &[ProviderDashboardStatus], id: &str) -> ToolDashboardStatus {
-    providers
-        .iter()
-        .find(|provider| provider.id == id)
-        .map(|provider| ToolDashboardStatus {
-            health: provider.health.clone(),
-            port: provider.port,
-            detail: provider.detail.clone(),
-        })
-        .unwrap_or(ToolDashboardStatus {
-            health: ServiceHealth::Unknown,
-            port: None,
-            detail: None,
-        })
-}
-
-fn active_provider_problem(providers: &[ProviderDashboardStatus], id: &str) -> bool {
-    providers
-        .iter()
-        .find(|provider| provider.id == id)
-        .map(|provider| {
-            provider.managed && provider.autostart && has_subservice_problem(&provider.health)
-        })
-        .unwrap_or(false)
-}
-
-fn derive_codex_health(
+fn derive_provider_health(
     service_running: bool,
-    mirror_status: Option<&super::service::CodexMirrorStatus>,
-) -> ServiceHealth {
+    provider: &ProviderConfigSnapshot,
+    data_dir: &Path,
+) -> (ServiceHealth, Option<String>) {
     if !service_running {
-        return ServiceHealth::Stopped;
+        return (ServiceHealth::Stopped, None);
     }
 
-    if let Some(mirror) = mirror_status {
-        let now_epoch = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs_f64();
-        let age = now_epoch - mirror.generated_at_epoch;
-        if age > CODEX_MIRROR_STALE_SECONDS {
-            ServiceHealth::Degraded
-        } else {
-            ServiceHealth::Healthy
-        }
+    let owner_bridge_ready = provider_owner_bridge_socket_path(data_dir).exists();
+    if owner_bridge_ready {
+        return match read_provider_runtime_status_via_owner_bridge(data_dir, &provider.id) {
+            Ok(status) => status,
+            Err(error) => (
+                ServiceHealth::Unknown,
+                Some(format!(
+                    "{} runtime status unavailable: {}",
+                    provider.id, error
+                )),
+            ),
+        };
+    }
+
+    if let Some(detail) = provider_missing_cli_detail(provider) {
+        (ServiceHealth::Stopped, Some(detail))
     } else {
-        // App-owned codex runtime can be healthy even without legacy mirror snapshots.
-        ServiceHealth::Healthy
+        (ServiceHealth::Unknown, None)
     }
 }
 
@@ -743,10 +730,6 @@ fn read_env_key(raw: &str, key: &str) -> Option<String> {
     })
 }
 
-fn read_dashboard_env_raw(data_dir: &Path) -> String {
-    fs::read_to_string(data_dir.join(".env")).unwrap_or_default()
-}
-
 fn dashboard_rich_path() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
     format!(
@@ -776,84 +759,6 @@ fn check_cli_available_sync(bin: &str) -> bool {
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
-}
-
-fn claude_env_auth_ready(env_raw: &str) -> bool {
-    let api_key = read_env_key(env_raw, "ANTHROPIC_API_KEY").unwrap_or_default();
-    let base_url = read_env_key(env_raw, "ANTHROPIC_BASE_URL").unwrap_or_default();
-    !api_key.trim().is_empty() || !base_url.trim().is_empty()
-}
-
-fn parse_claude_auth_status_payload(payload: &str) -> Option<bool> {
-    let trimmed = payload.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
-        return parsed.get("loggedIn").and_then(Value::as_bool);
-    }
-
-    let lowered = trimmed.to_lowercase();
-    if lowered.contains("not logged in") {
-        return Some(false);
-    }
-    if lowered.contains("logged in") {
-        return Some(true);
-    }
-    None
-}
-
-fn read_claude_auth_status(bin: &str) -> Option<bool> {
-    let resolved = resolve_cli_bin(bin);
-    let output = Command::new(&resolved)
-        .arg("auth")
-        .arg("status")
-        .env("PATH", dashboard_rich_path())
-        .output()
-        .ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    parse_claude_auth_status_payload(if stdout.trim().is_empty() {
-        &stderr
-    } else {
-        &stdout
-    })
-}
-
-fn derive_claude_health(
-    service_running: bool,
-    provider: &ProviderConfigSnapshot,
-    data_dir: &Path,
-) -> (ServiceHealth, Option<String>) {
-    if !service_running {
-        return (ServiceHealth::Stopped, None);
-    }
-
-    let bin = provider.bin.as_deref().unwrap_or("claude");
-    if !check_cli_available_sync(bin) {
-        return (
-            ServiceHealth::Degraded,
-            Some(format!("Claude CLI not found in PATH: {bin}")),
-        );
-    }
-
-    let env_raw = read_dashboard_env_raw(data_dir);
-    if claude_env_auth_ready(&env_raw) {
-        return (ServiceHealth::Healthy, None);
-    }
-
-    match read_claude_auth_status(bin) {
-        Some(true) => (ServiceHealth::Healthy, None),
-        Some(false) => (
-            ServiceHealth::Degraded,
-            Some("Claude CLI not authenticated".to_string()),
-        ),
-        None => (
-            ServiceHealth::Unknown,
-            Some("Claude auth status unavailable".to_string()),
-        ),
-    }
 }
 
 fn codex_db_path() -> Option<PathBuf> {
@@ -979,22 +884,11 @@ fn read_codex_workspace_activity(
 fn read_claude_workspace_activity(
     workspace: &WorkspaceSnapshot,
     overlays: &HashMap<String, LocalThreadOverlay>,
-    projects_dir: Option<&Path>,
-    history_path: Option<&Path>,
+    index: &ClaudeActivityIndex,
 ) -> Option<WorkspaceActivityCandidate> {
-    let default_projects_dir = default_claude_projects_dir();
-    let projects_dir = projects_dir.or(default_projects_dir.as_deref())?;
-    let stored_sessions = load_claude_project_sessions_from_dir(projects_dir);
-    let history_index = build_claude_history_index(history_path);
-
-    let session_by_id = stored_sessions
-        .into_iter()
-        .map(|session| (session.id.clone(), session))
-        .collect::<HashMap<_, _>>();
-
-    let mut session_ids = session_by_id.keys().cloned().collect::<Vec<_>>();
-    for session_id in history_index.keys() {
-        if !session_by_id.contains_key(session_id) {
+    let mut session_ids = index.sessions.keys().cloned().collect::<Vec<_>>();
+    for session_id in index.history.keys() {
+        if !index.sessions.contains_key(session_id) {
             session_ids.push(session_id.clone());
         }
     }
@@ -1011,8 +905,8 @@ fn read_claude_workspace_activity(
             continue;
         }
 
-        let stored = session_by_id.get(&session_id);
-        let history = history_index.get(&session_id);
+        let stored = index.sessions.get(&session_id);
+        let history = index.history.get(&session_id);
         if stored
             .and_then(|item| item.session_file.as_deref())
             .map(should_skip_claude_session_from_workspace_list)
@@ -1074,6 +968,25 @@ fn read_claude_workspace_activity(
     })
 }
 
+fn build_claude_activity_index(
+    projects_dir: Option<&Path>,
+    history_path: Option<&Path>,
+) -> ClaudeActivityIndex {
+    let default_projects_dir = default_claude_projects_dir();
+    let projects_dir = projects_dir.or(default_projects_dir.as_deref());
+    let sessions = projects_dir
+        .map(load_claude_project_sessions_from_dir)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|session| (session.id.clone(), session))
+        .collect::<HashMap<_, _>>();
+
+    ClaudeActivityIndex {
+        sessions,
+        history: build_claude_history_index(history_path),
+    }
+}
+
 fn build_recent_activity_summary_from_candidate(
     candidate: WorkspaceActivityCandidate,
 ) -> RecentActivitySummary {
@@ -1131,7 +1044,42 @@ fn read_recent_activity_summary_from_state(
 
 fn read_recent_activity_summary(data_dir: &Path) -> Option<RecentActivitySummary> {
     let codex_db = codex_db_path();
-    read_recent_activity_summary_from_paths(data_dir, codex_db.as_deref())
+    read_recent_activity_summary_cached_with_now(data_dir, codex_db.as_deref(), SystemTime::now())
+}
+
+fn recent_activity_cache() -> &'static StdMutex<Option<RecentActivityCacheEntry>> {
+    static CACHE: OnceLock<StdMutex<Option<RecentActivityCacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| StdMutex::new(None))
+}
+
+fn read_recent_activity_summary_cached_with_now(
+    data_dir: &Path,
+    codex_db: Option<&Path>,
+    now: SystemTime,
+) -> Option<RecentActivitySummary> {
+    let codex_db_buf = codex_db.map(Path::to_path_buf);
+    if let Ok(cache) = recent_activity_cache().lock() {
+        if let Some(entry) = cache.as_ref() {
+            let fresh = now
+                .duration_since(entry.cached_at)
+                .map(|age| age < RECENT_ACTIVITY_CACHE_TTL)
+                .unwrap_or(false);
+            if fresh && entry.data_dir == data_dir && entry.codex_db == codex_db_buf {
+                return entry.summary.clone();
+            }
+        }
+    }
+
+    let summary = read_recent_activity_summary_from_paths(data_dir, codex_db);
+    if let Ok(mut cache) = recent_activity_cache().lock() {
+        *cache = Some(RecentActivityCacheEntry {
+            data_dir: data_dir.to_path_buf(),
+            codex_db: codex_db_buf,
+            cached_at: now,
+            summary: summary.clone(),
+        });
+    }
+    summary
 }
 
 fn read_recent_activity_summary_from_paths(
@@ -1144,18 +1092,29 @@ fn read_recent_activity_summary_from_paths(
     let workspaces = parsed.get("workspaces")?.as_object()?;
     let codex_overlays = load_local_thread_overlays(&path, "codex");
     let claude_overlays = load_local_thread_overlays(&path, "claude");
+    let claude_index = if workspaces.values().any(|workspace| {
+        workspace
+            .get("tool")
+            .and_then(Value::as_str)
+            .map(|tool| tool == "claude")
+            .unwrap_or(false)
+    }) {
+        Some(build_claude_activity_index(
+            None,
+            default_claude_history_path().as_deref(),
+        ))
+    } else {
+        None
+    };
 
     let latest = workspaces
         .iter()
         .filter_map(|(workspace_id, workspace)| parse_workspace_snapshot(workspace_id, workspace))
         .filter_map(|workspace| match workspace.tool.as_str() {
             "codex" => read_codex_workspace_activity(&workspace, codex_db, &codex_overlays),
-            "claude" => read_claude_workspace_activity(
-                &workspace,
-                &claude_overlays,
-                default_claude_projects_dir().as_deref(),
-                default_claude_history_path().as_deref(),
-            ),
+            "claude" => claude_index
+                .as_ref()
+                .and_then(|index| read_claude_workspace_activity(&workspace, &claude_overlays, index)),
             _ => None,
         })
         .max_by_key(|candidate| candidate.updated_at);
@@ -1214,17 +1173,19 @@ fn extract_thread_summary(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_dashboard_state, build_provider_statuses, extract_thread_summary,
-        read_claude_workspace_activity, read_env_key, read_recent_activity_summary,
+        build_claude_activity_index, build_dashboard_state, build_provider_statuses,
+        extract_thread_summary, read_claude_workspace_activity, read_env_key,
+        read_provider_runtime_status_via_owner_bridge_with_timeout,
+        read_recent_activity_summary, read_recent_activity_summary_cached_with_now,
         resolve_builtin_provider_snapshots, AlertLevel, DashboardComputationInput,
-        ProviderConfigSnapshot, ProviderDashboardStatus, RecentActivitySummary, ServiceHealth,
-        SystemHealth, WorkspaceSnapshot,
+        ProviderConfigSnapshot, ProviderDashboardStatus, RecentActivitySummary,
+        ServiceHealth, SystemHealth, WorkspaceSnapshot, RECENT_ACTIVITY_CACHE_TTL,
     };
     use serde_json::json;
+    use std::collections::HashMap;
     use std::fs;
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixListener;
-    use std::collections::HashMap;
     use std::thread;
     use std::time::{Duration, SystemTime};
 
@@ -1285,7 +1246,7 @@ mod tests {
         });
 
         assert_eq!(state.overall, SystemHealth::Degraded);
-        assert_eq!(state.codex.health, ServiceHealth::Degraded);
+        assert_eq!(state.providers[0].health, ServiceHealth::Degraded);
         assert_eq!(state.bot.process, ServiceHealth::Healthy);
     }
 
@@ -1309,7 +1270,6 @@ mod tests {
             true,
             Some(SystemTime::UNIX_EPOCH),
             SystemTime::UNIX_EPOCH + Duration::from_secs(60),
-            None,
         );
 
         assert_eq!(providers[0].health, ServiceHealth::Stopped);
@@ -1321,7 +1281,8 @@ mod tests {
 
     #[test]
     fn build_provider_statuses_reads_overlay_provider_health_from_owner_bridge() {
-        let temp_dir = std::env::temp_dir().join(format!("ow-dashboard-status-{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("ow-dashboard-status-{}", std::process::id()));
         fs::create_dir_all(&temp_dir).expect("create temp dir");
         let socket_path = temp_dir.join("provider_owner_bridge.sock");
         let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
@@ -1330,7 +1291,9 @@ mod tests {
             let (mut stream, _) = listener.accept().expect("accept owner bridge socket");
             let mut request = String::new();
             let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
-            reader.read_line(&mut request).expect("read owner bridge request");
+            reader
+                .read_line(&mut request)
+                .expect("read owner bridge request");
             let payload: serde_json::Value =
                 serde_json::from_str(request.trim()).expect("parse owner bridge request");
             assert_eq!(payload["type"], "runtime_status");
@@ -1363,7 +1326,6 @@ mod tests {
             true,
             Some(SystemTime::UNIX_EPOCH),
             SystemTime::UNIX_EPOCH + Duration::from_secs(60),
-            None,
         );
 
         assert_eq!(providers[0].health, ServiceHealth::Healthy);
@@ -1371,6 +1333,194 @@ mod tests {
             providers[0].detail.as_deref(),
             Some("• overlay-tool：✅ 已连接")
         );
+
+        server.join().expect("join owner bridge server");
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn build_provider_statuses_reads_codex_health_from_owner_bridge() {
+        let temp_dir =
+            std::path::PathBuf::from("/tmp").join(format!("ow-cdx-status-{}", std::process::id()));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let socket_path = temp_dir.join("provider_owner_bridge.sock");
+        let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept owner bridge socket");
+            let mut request = String::new();
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            reader
+                .read_line(&mut request)
+                .expect("read owner bridge request");
+            let payload: serde_json::Value =
+                serde_json::from_str(request.trim()).expect("parse owner bridge request");
+            assert_eq!(payload["type"], "runtime_status");
+            assert_eq!(payload["provider_id"], "codex");
+
+            let response = serde_json::json!({
+                "ok": true,
+                "health": "degraded",
+                "detail": "• codex：连接不可用",
+                "lines": ["• codex：连接不可用"],
+            });
+            writeln!(stream, "{response}").expect("write response");
+        });
+
+        let providers = build_provider_statuses(
+            vec![ProviderConfigSnapshot {
+                id: "codex".into(),
+                visible: true,
+                managed: true,
+                autostart: true,
+                transport: "stdio".into(),
+                live_transport: "owner_bridge".into(),
+                port: None,
+                app_server_url: None,
+                control_mode: Some("app".into()),
+                bin: Some("/bin/sh".into()),
+            }],
+            &temp_dir,
+            true,
+            true,
+            Some(SystemTime::UNIX_EPOCH),
+            SystemTime::UNIX_EPOCH + Duration::from_secs(60),
+        );
+
+        assert_eq!(providers[0].health, ServiceHealth::Degraded);
+        assert_eq!(providers[0].detail.as_deref(), Some("• codex：连接不可用"));
+
+        server.join().expect("join owner bridge server");
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn build_provider_statuses_reads_claude_health_from_owner_bridge() {
+        let temp_dir = std::path::PathBuf::from("/tmp")
+            .join(format!("ow-dashboard-claude-status-{}", std::process::id()));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let socket_path = temp_dir.join("provider_owner_bridge.sock");
+        let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept owner bridge socket");
+            let mut request = String::new();
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            reader
+                .read_line(&mut request)
+                .expect("read owner bridge request");
+            let payload: serde_json::Value =
+                serde_json::from_str(request.trim()).expect("parse owner bridge request");
+            assert_eq!(payload["type"], "runtime_status");
+            assert_eq!(payload["provider_id"], "claude");
+
+            let response = serde_json::json!({
+                "ok": true,
+                "health": "healthy",
+                "detail": "• claude CLI：✅ 已连接",
+                "lines": ["• claude CLI：✅ 已连接"],
+            });
+            writeln!(stream, "{response}").expect("write response");
+        });
+
+        let providers = build_provider_statuses(
+            vec![ProviderConfigSnapshot {
+                id: "claude".into(),
+                visible: true,
+                managed: true,
+                autostart: true,
+                transport: "stdio".into(),
+                live_transport: "stdio".into(),
+                port: None,
+                app_server_url: None,
+                control_mode: Some("app".into()),
+                bin: Some("claude".into()),
+            }],
+            &temp_dir,
+            true,
+            true,
+            Some(SystemTime::UNIX_EPOCH),
+            SystemTime::UNIX_EPOCH + Duration::from_secs(60),
+        );
+
+        assert_eq!(providers[0].health, ServiceHealth::Healthy);
+        assert_eq!(
+            providers[0].detail.as_deref(),
+            Some("• claude CLI：✅ 已连接")
+        );
+
+        server.join().expect("join owner bridge server");
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn provider_status_does_not_fall_back_to_cli_when_owner_bridge_times_out() {
+        let temp_dir = std::path::PathBuf::from("/tmp").join(format!(
+            "ow-dashboard-claude-timeout-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let socket_path = temp_dir.join("provider_owner_bridge.sock");
+        let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
+
+        let server = thread::spawn(move || {
+            let (_stream, _) = listener.accept().expect("accept owner bridge socket");
+            thread::sleep(Duration::from_millis(250));
+        });
+
+        let providers = build_provider_statuses(
+            vec![ProviderConfigSnapshot {
+                id: "runtime-tool".into(),
+                visible: true,
+                managed: true,
+                autostart: true,
+                transport: "stdio".into(),
+                live_transport: "stdio".into(),
+                port: None,
+                app_server_url: None,
+                control_mode: Some("app".into()),
+                bin: Some("/definitely/missing/onlineworker-test-runtime-tool".into()),
+            }],
+            &temp_dir,
+            true,
+            true,
+            Some(SystemTime::UNIX_EPOCH),
+            SystemTime::UNIX_EPOCH + Duration::from_secs(60),
+        );
+
+        assert_eq!(providers[0].health, ServiceHealth::Unknown);
+        assert!(providers[0]
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("runtime-tool runtime status unavailable"));
+
+        server.join().expect("join owner bridge server");
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn owner_bridge_runtime_status_read_respects_short_timeout() {
+        let temp_dir = std::path::PathBuf::from("/tmp").join(format!(
+            "ow-dashboard-status-timeout-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let socket_path = temp_dir.join("provider_owner_bridge.sock");
+        let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
+
+        let server = thread::spawn(move || {
+            let (_stream, _) = listener.accept().expect("accept owner bridge socket");
+            thread::sleep(Duration::from_millis(250));
+        });
+
+        let result = read_provider_runtime_status_via_owner_bridge_with_timeout(
+            &temp_dir,
+            "claude",
+            Duration::from_millis(20),
+        );
+
+        assert!(result.is_err());
 
         server.join().expect("join owner bridge server");
         let _ = fs::remove_dir_all(&temp_dir);
@@ -1523,7 +1673,8 @@ mod tests {
         assert!(state
             .alerts
             .iter()
-            .any(|alert| alert.code == "claude_degraded"));
+            .any(|alert| alert.code == "provider_degraded"
+                && alert.title == "claude status degraded"));
     }
 
     #[test]
@@ -1673,6 +1824,70 @@ providers:
     }
 
     #[test]
+    fn read_recent_activity_summary_cache_reuses_recent_snapshot_until_ttl() {
+        let dir = std::env::temp_dir().join(format!(
+            "onlineworker-dashboard-cache-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let state_path = dir.join("onlineworker_state.json");
+
+        let write_preview = |preview: &str| {
+            let payload = json!({
+                "active_workspace": "codex:onlineWorker",
+                "workspaces": {
+                    "codex:onlineWorker": {
+                        "name": "onlineWorker",
+                        "tool": "codex",
+                        "threads": {
+                            "t1": {"preview": preview, "archived": false, "is_active": true}
+                        }
+                    }
+                }
+            });
+            std::fs::write(&state_path, serde_json::to_string(&payload).unwrap()).unwrap();
+        };
+
+        let base = std::time::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        write_preview("first snapshot");
+        let first = read_recent_activity_summary_cached_with_now(&dir, None, base)
+            .expect("first recent activity");
+        assert_eq!(
+            first.highlighted_thread_preview.as_deref(),
+            Some("first snapshot")
+        );
+
+        write_preview("second snapshot");
+        let cached = read_recent_activity_summary_cached_with_now(
+            &dir,
+            None,
+            base + Duration::from_secs(RECENT_ACTIVITY_CACHE_TTL.as_secs() / 2),
+        )
+        .expect("cached recent activity");
+        assert_eq!(
+            cached.highlighted_thread_preview.as_deref(),
+            Some("first snapshot")
+        );
+
+        let refreshed = read_recent_activity_summary_cached_with_now(
+            &dir,
+            None,
+            base + RECENT_ACTIVITY_CACHE_TTL + Duration::from_secs(1),
+        )
+        .expect("refreshed recent activity");
+        assert_eq!(
+            refreshed.highlighted_thread_preview.as_deref(),
+            Some("second snapshot")
+        );
+
+        let _ = std::fs::remove_file(state_path);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn read_claude_workspace_activity_reads_local_session_store() {
         let dir = std::env::temp_dir().join(format!(
             "onlineworker-dashboard-claude-activity-test-{}",
@@ -1732,6 +1947,7 @@ providers:
             .join("\n");
         std::fs::write(&history_path, format!("{history_content}\n")).unwrap();
 
+        let index = build_claude_activity_index(Some(&projects_dir), Some(&history_path));
         let candidate = read_claude_workspace_activity(
             &WorkspaceSnapshot {
                 id: "claude:onlineWorker".into(),
@@ -1740,8 +1956,7 @@ providers:
                 path: workspace_path.into(),
             },
             &HashMap::new(),
-            Some(&projects_dir),
-            Some(&history_path),
+            &index,
         )
         .expect("claude activity");
 
@@ -1862,6 +2077,7 @@ providers:
         )
         .unwrap();
 
+        let index = build_claude_activity_index(Some(&projects_dir), Some(&history_path));
         let candidate = read_claude_workspace_activity(
             &WorkspaceSnapshot {
                 id: "claude:onlineWorker".into(),
@@ -1870,8 +2086,7 @@ providers:
                 path: workspace_path.into(),
             },
             &HashMap::new(),
-            Some(&projects_dir),
-            Some(&history_path),
+            &index,
         )
         .expect("claude activity");
 

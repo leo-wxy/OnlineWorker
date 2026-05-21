@@ -52,3 +52,24 @@ test("app shell exposes a first-class usage tab in navigation and routing", () =
   assert.match(app, /<UsageBrowser \/>/);
   assert.match(pages, /export \{ UsageBrowser \} from "\.\/UsageBrowser";/);
 });
+
+test("settings exposes attachment cache controls under a maintenance section", () => {
+  const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
+  const setup = readFileSync(join(root, "src", "pages", "SetupWizard.tsx"), "utf8");
+  const maintenance = readFileSync(join(root, "src", "components", "MaintenanceSettingsPanel.tsx"), "utf8");
+  const components = readFileSync(join(root, "src", "components", "index.ts"), "utf8");
+  const types = readFileSync(join(root, "src", "i18n", "types.ts"), "utf8");
+  const zh = readFileSync(join(root, "src", "i18n", "locales", "zh.ts"), "utf8");
+  const en = readFileSync(join(root, "src", "i18n", "locales", "en.ts"), "utf8");
+
+  assert.match(app, /"maintenance"/);
+  assert.match(app, /<MaintenanceSettingsPanel \/>/);
+  assert.match(components, /export \{ MaintenanceSettingsPanel \}/);
+  assert.equal(setup.includes("get_attachment_cache_stats"), false);
+  assert.equal(setup.includes("clear_attachment_cache"), false);
+  assert.match(maintenance, /get_attachment_cache_stats/);
+  assert.match(maintenance, /clear_attachment_cache/);
+  assert.match(types, /attachmentCacheTitle:\s*string/);
+  assert.match(zh, /附件缓存/);
+  assert.match(en, /Attachment Cache/);
+});

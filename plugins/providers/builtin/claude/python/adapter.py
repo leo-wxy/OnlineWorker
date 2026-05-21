@@ -7,7 +7,6 @@ import logging
 import os
 import re
 import shlex
-import shutil
 import sys
 import time
 import uuid
@@ -37,12 +36,18 @@ PARENT_SESSION_ENV_VARS = (
     "CLAUDE_AGENT_SDK_VERSION",
     "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING",
 )
-
-PREFERRED_CLAUDE_BINARIES = (
-    "/opt/homebrew/bin/claude",
-    "/usr/local/bin/claude",
+CLAUDE_ENV_VARS = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_MODEL",
 )
+STALE_CLAUDE_BASE_URLS = {
+    "http://localhost:3031",
+    "http://127.0.0.1:3031",
+}
 MIN_SUPPORTED_HOOK_NODE_MAJOR = 20
+CLAUDE_STREAM_BUFFER_LIMIT = 10 * 1024 * 1024
 _PRETOOL_PERMISSION_TOOLS = frozenset(
     {"Bash", "Edit", "Write", "AskUserQuestion", "ExitPlanMode"}
 )
@@ -413,23 +418,24 @@ def resolve_claude_bin(claude_bin: str) -> str:
     if os.path.sep in raw:
         return expanded
 
-    # 仅对裸 `claude` 命令做优先级修正，避免吃到 ~/.local/bin 中的陈旧版本。
-    if raw != "claude":
-        return expanded
-
-    for candidate in PREFERRED_CLAUDE_BINARIES:
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-
-    local_candidate = os.path.expanduser("~/.local/bin/claude")
-    if os.path.isfile(local_candidate) and os.access(local_candidate, os.X_OK):
-        return local_candidate
-
-    which_result = shutil.which("claude")
-    if which_result:
-        return which_result
-
+    # 裸命令交给运行时 PATH 解析，保持 TG provider 与 App Session Tab 行为一致。
     return expanded
+
+
+def resolve_claude_command_prefix(claude_command: str) -> list[str]:
+    raw = str(claude_command or "claude").strip() or "claude"
+    try:
+        parts = shlex.split(raw)
+    except ValueError:
+        parts = [raw]
+    if not parts:
+        parts = ["claude"]
+
+    command = os.path.expanduser(parts[0])
+    if len(parts) == 1:
+        command = resolve_claude_bin(command)
+    parts[0] = command
+    return parts
 
 
 def _parse_node_semver(version_name: str) -> tuple[int, int, int] | None:
@@ -465,6 +471,32 @@ def resolve_preferred_node_bin_dir() -> str | None:
     return None
 
 
+def _is_stale_claude_base_url(value: str) -> bool:
+    return str(value or "").strip().rstrip("/").lower() in STALE_CLAUDE_BASE_URLS
+
+
+def _claude_runtime_env_is_usable(env: dict[str, str]) -> bool:
+    base_url = str(env.get("ANTHROPIC_BASE_URL") or "").strip()
+    if _is_stale_claude_base_url(base_url):
+        return False
+    return any(
+        str(env.get(key) or "").strip()
+        for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
+    )
+
+
+def _detect_claude_runtime_env(base_env: dict[str, str] | None = None) -> dict[str, str]:
+    source = base_env or os.environ
+    current = {
+        key: str(source.get(key) or "").strip()
+        for key in CLAUDE_ENV_VARS
+        if str(source.get(key) or "").strip()
+    }
+    if _claude_runtime_env_is_usable(current):
+        return current
+    return {}
+
+
 class ClaudeAdapter:
     """Claude CLI 本地 adapter。
 
@@ -474,8 +506,11 @@ class ClaudeAdapter:
     - 输出归一化成现有 app-server event 结构
     """
 
-    def __init__(self, claude_bin: str = "claude"):
-        self.claude_bin = claude_bin
+    def __init__(self, claude_bin: str = "claude", auth: dict[str, str] | None = None):
+        self._claude_command_prefix = resolve_claude_command_prefix(claude_bin)
+        self.claude_bin = self._claude_command_prefix[0]
+        # auth is accepted for descriptor compatibility only. Claude CLI owns
+        # provider/auth configuration; OnlineWorker treats it as a black-box CLI.
         self._connected = False
         self._auth_ready: bool | None = None
         self._auth_method: str = ""
@@ -485,6 +520,7 @@ class ClaudeAdapter:
         self._workspace_cwd_map: dict[str, str] = {}
         self._thread_workspace_map: dict[str, str] = {}
         self._active_processes: dict[str, asyncio.subprocess.Process] = {}
+        self._send_locks: dict[str, asyncio.Lock] = {}
         self._cancelled_threads: set[str] = set()
         self._hook_server: asyncio.base_events.Server | None = None
         self._hook_data_dir: str | None = None
@@ -536,6 +572,13 @@ class ClaudeAdapter:
     def register_workspace_cwd(self, workspace_id: str, cwd: str) -> None:
         self._workspace_cwd_map[workspace_id] = cwd
 
+    def _send_lock_for_thread(self, thread_id: str) -> asyncio.Lock:
+        lock = self._send_locks.get(thread_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._send_locks[thread_id] = lock
+        return lock
+
     @property
     def hook_socket_path(self) -> str | None:
         return self._hook_socket_path
@@ -543,6 +586,16 @@ class ClaudeAdapter:
     @property
     def hook_settings_path(self) -> str | None:
         return self._hook_settings_path
+
+    def configure_hook_bridge(self, data_dir: str) -> None:
+        self._hook_data_dir = data_dir
+
+    async def _ensure_hook_bridge_started(self) -> None:
+        if self._hook_server is not None:
+            return
+        if not self._hook_data_dir:
+            return
+        await self.start_hook_bridge(self._hook_data_dir)
 
     async def start_hook_bridge(self, data_dir: str) -> None:
         if self._hook_server is not None:
@@ -750,23 +803,23 @@ class ClaudeAdapter:
         finally:
             self._pending_hook_questions.pop(question_id, None)
 
-    def _proxy_base_url(self) -> str:
-        return (os.environ.get("ANTHROPIC_BASE_URL") or "").strip()
-
-    def _proxy_model(self) -> str:
-        return (os.environ.get("ANTHROPIC_MODEL") or "").strip()
-
     def _build_claude_env(self) -> dict[str, str]:
         env = dict(os.environ)
-        base_url = self._proxy_base_url()
-        if base_url and not (env.get("ANTHROPIC_API_KEY") or "").strip():
-            # Claude CLI 在代理模式下仍要求一个非空 key 形状；本地代理链通常接受占位值。
-            env["ANTHROPIC_API_KEY"] = "dummy"
+        runtime_env = _detect_claude_runtime_env(env)
         for key in PARENT_SESSION_ENV_VARS:
             env.pop(key, None)
         for key in tuple(env.keys()):
             if key.startswith("CODEX_"):
                 env.pop(key, None)
+            elif key.upper().startswith("ANTHROPIC_"):
+                env.pop(key, None)
+        env.update(runtime_env)
+        if (
+            env.get("ANTHROPIC_BASE_URL")
+            and not str(env.get("ANTHROPIC_AUTH_TOKEN") or "").strip()
+            and not str(env.get("ANTHROPIC_API_KEY") or "").strip()
+        ):
+            env["ANTHROPIC_API_KEY"] = "dummy"
 
         preferred_node_bin = resolve_preferred_node_bin_dir()
         if preferred_node_bin:
@@ -779,7 +832,7 @@ class ClaudeAdapter:
 
     def _build_send_argv(self, thread_id: str, text: str) -> list[str]:
         base_args = [
-            self.claude_bin,
+            *self._claude_command_prefix,
             "-p",
             "--verbose",
             "--output-format",
@@ -798,23 +851,32 @@ class ClaudeAdapter:
         return [*base_args, "--session-id", thread_id, text]
 
     async def refresh_auth_status(self) -> dict:
-        if os.environ.get("ANTHROPIC_API_KEY"):
+        runtime_env = _detect_claude_runtime_env()
+        if runtime_env:
             self._auth_ready = True
-            self._auth_method = "apiKeyEnv"
+            self._auth_method = (
+                "proxyEnv"
+                if runtime_env.get("ANTHROPIC_BASE_URL")
+                else "apiKeyEnv"
+                if runtime_env.get("ANTHROPIC_API_KEY")
+                else "authTokenEnv"
+            )
             return {"loggedIn": True, "authMethod": self._auth_method}
 
-        if self._proxy_base_url():
-            self._auth_ready = True
-            self._auth_method = "proxyEnv"
-            return {"loggedIn": True, "authMethod": self._auth_method}
+        status = await self._refresh_auth_status_for_prefix(self._claude_command_prefix)
+        return status
 
+    async def _refresh_auth_status_for_prefix(self, prefix: list[str]) -> dict:
         try:
             proc = await asyncio.create_subprocess_exec(
-                self.claude_bin,
+                *prefix,
                 "auth",
                 "status",
+                env=self._build_claude_env(),
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                limit=CLAUDE_STREAM_BUFFER_LIMIT,
             )
             stdout, stderr = await proc.communicate()
         except Exception as e:
@@ -847,15 +909,6 @@ class ClaudeAdapter:
         self._auth_ready = None
         self._auth_method = ""
         return {"loggedIn": None, "authMethod": ""}
-
-    async def _ensure_auth_ready(self) -> None:
-        status = await self.refresh_auth_status()
-        if status.get("loggedIn") is False:
-            raise RuntimeError(
-                "Claude CLI 未鉴权。请先在本机终端执行 `claude auth login`，"
-                "或配置 `ANTHROPIC_API_KEY`；若走代理，再补 `ANTHROPIC_BASE_URL` "
-                "和 `ANTHROPIC_MODEL`。"
-            )
 
     async def _emit_event(self, workspace_id: str, method: str, params: dict) -> None:
         envelope = {
@@ -950,28 +1003,97 @@ class ClaudeAdapter:
             future.set_result(response)
         return response
 
-    async def send_user_message(self, workspace_id: str, thread_id: str, text: str) -> dict:
+    def _render_text_with_attachments(
+        self,
+        text: str,
+        attachments: list[dict[str, Any]] | None,
+    ) -> str:
+        normalized: list[dict[str, str]] = []
+        for item in attachments or []:
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path") or "").strip()
+            if not path:
+                continue
+            kind = str(item.get("kind") or "file").strip().lower()
+            normalized.append(
+                {
+                    "kind": "image" if kind == "image" else "file",
+                    "path": path,
+                    "name": str(item.get("name") or "").strip(),
+                    "mime_type": str(item.get("mime_type") or "").strip(),
+                }
+            )
+        if not normalized:
+            return text
+
+        lines = [
+            "用户附带了以下本地附件。请按需读取这些路径，并基于附件内容回答。",
+            "",
+        ]
+        for index, item in enumerate(normalized, start=1):
+            label = "图片" if item["kind"] == "image" else "文件"
+            lines.append(f"{index}. {label}")
+            lines.append(f"   - path: {item['path']}")
+            if item["name"]:
+                lines.append(f"   - name: {item['name']}")
+            if item["mime_type"]:
+                lines.append(f"   - mime_type: {item['mime_type']}")
+            lines.append("")
+
+        user_text = str(text or "").strip()
+        lines.append("用户消息：")
+        lines.append(user_text or "请根据以上附件进行处理。")
+        return "\n".join(lines).strip()
+
+    async def send_user_message(
+        self,
+        workspace_id: str,
+        thread_id: str,
+        text: str,
+        attachments: list[dict[str, Any]] | None = None,
+    ) -> dict:
         if not self._connected:
             raise RuntimeError("Claude 未连接")
 
         cwd = self._workspace_cwd_map.get(workspace_id)
         if not cwd:
             raise RuntimeError("Claude workspace 未注册 cwd")
+        if not os.path.isdir(cwd):
+            raise RuntimeError(f"Claude workspace cwd 不存在：{cwd}")
 
-        await self._ensure_auth_ready()
-
+        await self._ensure_hook_bridge_started()
         self._thread_workspace_map[thread_id] = workspace_id
-        turn_id = str(uuid.uuid4())
+        rendered_text = self._render_text_with_attachments(text, attachments)
 
-        await self._emit_event(
-            workspace_id,
-            "turn/started",
-            {
-                "threadId": thread_id,
-                "turn": {"id": turn_id, "threadId": thread_id},
-            },
-        )
+        async with self._send_lock_for_thread(thread_id):
+            turn_id = str(uuid.uuid4())
 
+            await self._emit_event(
+                workspace_id,
+                "turn/started",
+                {
+                    "threadId": thread_id,
+                    "turn": {"id": turn_id, "threadId": thread_id},
+                },
+            )
+
+            return await self._send_user_message_once(
+                workspace_id,
+                thread_id,
+                rendered_text,
+                turn_id,
+                cwd,
+            )
+
+    async def _send_user_message_once(
+        self,
+        workspace_id: str,
+        thread_id: str,
+        text: str,
+        turn_id: str,
+        cwd: str,
+    ) -> dict:
         try:
             proc = await asyncio.create_subprocess_exec(
                 *self._build_send_argv(thread_id, text),
@@ -980,8 +1102,10 @@ class ClaudeAdapter:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                limit=CLAUDE_STREAM_BUFFER_LIMIT,
             )
         except Exception as e:
+            error_text = str(e)
             await self._emit_event(
                 workspace_id,
                 "turn/completed",
@@ -991,11 +1115,11 @@ class ClaudeAdapter:
                         "id": turn_id,
                         "threadId": thread_id,
                         "status": "error",
-                        "error": str(e),
+                        "error": error_text,
                     },
                 },
             )
-            return {"threadId": thread_id, "turnId": turn_id, "status": "error", "error": str(e)}
+            return {"threadId": thread_id, "turnId": turn_id, "status": "error", "error": error_text}
 
         self._active_processes[thread_id] = proc
         stderr_task = asyncio.create_task(_read_stream_text(proc.stderr))

@@ -104,13 +104,10 @@ xattr -cr /Applications/OnlineWorker.app
 TELEGRAM_TOKEN=your_bot_token_here
 ALLOWED_USER_ID=123456789
 GROUP_CHAT_ID=-1001234567890
-
-# 可选的 Claude 代理 / API 配置。
-# 如果使用标准 CLI 登录流程，这些值可以留空。
-ANTHROPIC_API_KEY=
-ANTHROPIC_BASE_URL=
-ANTHROPIC_MODEL=
 ```
+
+Claude 使用本机 Claude CLI 自己的鉴权和运行时配置。
+OnlineWorker 不再读取或写入 `ANTHROPIC_*` 代理、模型或密钥设置。
 
 ### `config.yaml`
 

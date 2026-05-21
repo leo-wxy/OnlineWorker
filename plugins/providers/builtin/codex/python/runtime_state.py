@@ -16,14 +16,6 @@ def get_runtime(state) -> ProviderRuntimeState:
     return state.get_provider_runtime(TOOL_NAME)
 
 
-def get_hook_bridge(state):
-    return get_runtime(state).hook_bridge
-
-
-def set_hook_bridge(state, bridge) -> None:
-    get_runtime(state).hook_bridge = bridge
-
-
 def get_owner_bridge(state):
     return get_runtime(state).owner_bridge
 

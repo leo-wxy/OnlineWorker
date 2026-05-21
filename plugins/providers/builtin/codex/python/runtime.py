@@ -6,7 +6,6 @@ import os
 import tomllib
 import urllib.error
 import urllib.request
-from dataclasses import replace
 from typing import TYPE_CHECKING, Optional
 
 from core.telegram_formatting import format_telegram_assistant_final_text
@@ -14,6 +13,7 @@ from core.providers.lifecycle_runtime import _save_storage_via_lifecycle
 from core.providers.message_runtime import _interrupt_active_turn
 from core.providers.thread_runtime import interrupt_default_thread
 from plugins.providers.builtin.codex.python.adapter import CodexAdapter
+from plugins.providers.builtin.codex.python.hook_cleanup import cleanup_onlineworker_codex_permission_hooks
 from plugins.providers.builtin.codex.python.process import AppServerProcess
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
 from plugins.providers.builtin.codex.python import storage_runtime
@@ -112,55 +112,6 @@ def build_approval_reply(approval, action: str) -> tuple[str, dict]:
         return "✅ 已总是允许", {"decision": "acceptForSession"}
 
     return "✅ 已允许", {"decision": "accept"}
-
-
-def _extract_started_thread_id(result: object) -> str:
-    thread_id = result.get("id") if isinstance(result, dict) else None
-    if not thread_id and isinstance(result, dict):
-        thread = result.get("thread", {})
-        if isinstance(thread, dict):
-            thread_id = thread.get("id")
-    if not thread_id:
-        raise RuntimeError(f"Codex start_thread 返回无效 thread id：{result}")
-    return str(thread_id)
-
-
-async def _detach_imported_thread_for_app_send(adapter, ws_info, thread_info):
-    workspace_id = ws_info.daemon_workspace_id
-    old_thread_id = thread_info.thread_id
-    old_topic_id = thread_info.topic_id
-
-    result = await adapter.start_thread(workspace_id)
-    new_thread_id = _extract_started_thread_id(result)
-    if new_thread_id == old_thread_id:
-        raise RuntimeError("Codex start_thread 返回了与 imported thread 相同的 thread id")
-
-    imported_record = replace(
-        thread_info,
-        thread_id=old_thread_id,
-        topic_id=None,
-        streaming_msg_id=None,
-        last_tg_user_message_id=None,
-    )
-    ws_info.threads[old_thread_id] = imported_record
-
-    thread_info.thread_id = new_thread_id
-    thread_info.topic_id = old_topic_id
-    thread_info.source = "app"
-    thread_info.is_active = True
-    thread_info.streaming_msg_id = None
-    thread_info.history_sync_cursor = None
-    thread_info.last_tg_user_message_id = None
-    ws_info.threads[new_thread_id] = thread_info
-
-    logger.info(
-        "[provider-message] codex imported thread 已拆分为 app session "
-        "old=%s new=%s topic=%s",
-        old_thread_id[:8],
-        new_thread_id[:8],
-        old_topic_id,
-    )
-    return thread_info
 
 
 def _load_codex_defaults(config_path: str | None = None) -> tuple[str | None, str | None]:
@@ -677,13 +628,6 @@ async def prepare_send(
     from bot.handlers.common import is_codex_unmaterialized_error
 
     workspace_id = ws_info.daemon_workspace_id
-    thread_source = str(getattr(thread_info, "source", "") or "unknown").strip().lower()
-    if thread_source == "imported":
-        thread_info = await _detach_imported_thread_for_app_send(
-            adapter,
-            ws_info,
-            thread_info,
-        )
     try:
         await adapter.resume_thread(workspace_id, thread_info.thread_id)
     except Exception as e:
@@ -1086,7 +1030,6 @@ async def prime_thread_mappings(manager, adapter) -> None:
 
 async def setup_connection(manager, bot, adapter, **kwargs) -> None:
     from bot.events import make_event_handler, make_server_request_handler
-    from plugins.providers.builtin.codex.python.hook_bridge import ensure_codex_hook_bridge_started
     from plugins.providers.builtin.codex.python.owner_bridge import ensure_codex_owner_bridge_started
     from core.storage import ThreadInfo
 
@@ -1095,10 +1038,6 @@ async def setup_connection(manager, bot, adapter, **kwargs) -> None:
     adapter.on_event(event_handler)
     adapter.on_server_request(make_server_request_handler(manager.state, bot, manager.gid))
     await prime_thread_mappings(manager, adapter)
-
-    data_dir = manager.state.config.data_dir if manager.state.config is not None else None
-    if data_dir:
-        await ensure_codex_hook_bridge_started(manager.state, data_dir=data_dir, event_handler=event_handler)
 
     if not manager.storage.workspaces:
         await ensure_codex_owner_bridge_started(manager.state)
@@ -1388,8 +1327,6 @@ async def monitor_process_health(
 
 
 async def start_runtime(manager, bot, tool_cfg) -> None:
-    from bot.events import make_event_handler
-    from plugins.providers.builtin.codex.python.hook_bridge import ensure_codex_hook_bridge_started
     from plugins.providers.builtin.codex.python.tui_bridge import (
         is_codex_local_owner_mode,
         start_codex_tui_sync_loop,
@@ -1397,20 +1334,14 @@ async def start_runtime(manager, bot, tool_cfg) -> None:
     )
     from plugins.providers.builtin.codex.python.tui_realtime_mirror import (
         start_codex_tui_realtime_mirror_loop,
-        write_codex_tui_diagnostics_snapshot,
+        touch_codex_tui_watch_state,
     )
+
+    if cleanup_onlineworker_codex_permission_hooks():
+        logger.info("[codex] 已清理 ~/.codex/hooks.json 中的 OnlineWorker PermissionRequest hook")
 
     control_mode = getattr(tool_cfg, "control_mode", "app")
     if is_codex_local_owner_mode(manager.state):
-        data_dir = manager.state.config.data_dir if manager.state.config is not None else None
-        if data_dir:
-            await ensure_codex_hook_bridge_started(
-                manager.state,
-                data_dir=data_dir,
-                event_handler=make_event_handler(manager.state, bot, manager.gid),
-            )
-        else:
-            logger.info("[codex] 缺少 data_dir，跳过 hook bridge 启动")
         if control_mode == "tui":
             logger.info("codex 运行于 TUI 本地主控模式：不启动 shared app-server，TG 通过本地 host/runtime 注入，输出由本地 mirror 同步")
         else:
@@ -1428,7 +1359,7 @@ async def start_runtime(manager, bot, tool_cfg) -> None:
             )
             manager.set_tui_mirror_task("codex", mirror_task)
             codex_state.get_runtime(manager.state).mirror_task = mirror_task
-            write_codex_tui_diagnostics_snapshot(manager.state)
+            touch_codex_tui_watch_state(manager.state)
         return
 
     data_dir = manager.state.config.data_dir if manager.state.config is not None else None
@@ -1466,16 +1397,11 @@ async def start_runtime(manager, bot, tool_cfg) -> None:
             )
             manager.set_tui_mirror_task("codex", mirror_task)
             codex_state.get_runtime(manager.state).mirror_task = mirror_task
-            write_codex_tui_diagnostics_snapshot(manager.state)
+            touch_codex_tui_watch_state(manager.state)
 
 
 async def shutdown_runtime(manager) -> None:
     from plugins.providers.builtin.codex.python.owner_bridge import stop_codex_owner_bridge
-    from plugins.providers.builtin.codex.python.hook_bridge import stop_codex_hook_bridge
-    from plugins.providers.builtin.codex.python.tui_realtime_mirror import (
-        clear_codex_tui_diagnostics_snapshot,
-    )
-
     sync_task = manager.get_tui_sync_task("codex")
     if sync_task and not sync_task.done():
         sync_task.cancel()
@@ -1488,13 +1414,10 @@ async def shutdown_runtime(manager) -> None:
         if not task.done():
             task.cancel()
     manager.get_stale_recovery_tasks("codex").clear()
-    clear_codex_tui_diagnostics_snapshot()
-
     tui_host = codex_state.get_tui_host(manager.state)
     if tui_host is not None:
         await tui_host.stop()
         codex_state.set_tui_host(manager.state, None)
-    await stop_codex_hook_bridge(manager.state)
     await stop_codex_owner_bridge(manager.state)
     adapter = manager.state.get_adapter("codex")
     if adapter:

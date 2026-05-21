@@ -107,10 +107,19 @@ export interface AppTexts {
     launching: string;
     launchSuccess: (message: string) => string;
     launchError: (error: string) => string;
+    maintenanceEyebrow: string;
+    maintenanceTitle: string;
+    maintenanceDescription: string;
+    storageTitle: string;
+    attachmentCacheTitle: string;
+    attachmentCacheDescription: string;
+    attachmentCacheSize: (size: string, count: number) => string;
+    attachmentCacheClear: string;
+    attachmentCacheClearing: string;
+    attachmentCacheCleared: (size: string, count: number) => string;
+    attachmentCacheError: (error: string) => string;
+    attachmentCachePartialError: (count: number) => string;
     tokenPlaceholder: string;
-    claudeApiKeyPlaceholder: string;
-    claudeBaseUrlPlaceholder: string;
-    claudeModelPlaceholder: string;
     userIdPlaceholder: string;
     groupChatIdPlaceholder: string;
     showToken: string;
@@ -131,9 +140,6 @@ export interface AppTexts {
     step1Title: string;
     step1Description: string;
     step1Instructions: readonly string[];
-    claudeAuthTitle: string;
-    claudeAuthDescription: string;
-    claudeAuthHint: string;
     step2Title: string;
     step2Description: string;
     step2Instructions: readonly string[];
@@ -344,9 +350,6 @@ export interface AppTexts {
     telegramLabel: string;
     pidLabel: string;
     codexTitle: string;
-    codexDescription: string;
-    codexFallbackDetail: string;
-    claudeDescription: string;
     providerUnmanagedDetail: string;
     providerAutostartDisabledDetail: string;
     portLabel: string;
@@ -382,14 +385,6 @@ export interface AppTexts {
       title: string;
       missingFiles: string;
       missingFields: (fields: string) => string;
-    };
-    codexDegraded: {
-      title: string;
-      detail: string;
-    };
-    claudeDegraded: {
-      title: string;
-      detail: string;
     };
     telegramUnavailable: {
       title: string;

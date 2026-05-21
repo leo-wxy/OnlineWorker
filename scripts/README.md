@@ -16,7 +16,6 @@
 ## Smoke / diagnostics
 
 - `claude_hook_smoke.py`：Claude hook smoke 脚本，已有 `tests/test_claude_hook_smoke.py` 保护。默认复用当前 Python 解释器；如需指定 bridge 解释器，可设置 `ONLINEWORKER_BRIDGE_PYTHON=/path/to/python`。
-- `cleanup_smoke_sessions.py`：面向本地 `~/.codex` 和 `~/.claude` 存储的固定 smoke 清理脚本，用于归档 Codex smoke thread 并删除对应的本地 session 文件。
 - `archive_roundtrip_check.py`：手动 archive 诊断脚本，会创建真实 codex thread；只在 archive 端到端链路排障时手工运行，不纳入日常回归。
 
 ## Excluded

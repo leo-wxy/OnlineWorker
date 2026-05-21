@@ -84,12 +84,6 @@ export interface BotDashboardStatus {
   lastHeartbeat?: string | null;
 }
 
-export interface ToolDashboardStatus {
-  health: ServiceHealth;
-  port?: number | null;
-  detail?: string | null;
-}
-
 export interface ProviderDashboardStatus {
   id: string;
   label?: string | null;
@@ -119,8 +113,7 @@ export interface RecentActivitySummary {
 export interface DashboardState {
   overall: SystemHealth;
   bot: BotDashboardStatus;
-  providers?: ProviderDashboardStatus[];
-  codex: ToolDashboardStatus;
+  providers: ProviderDashboardStatus[];
   alerts: DashboardAlert[];
   recentActivity?: RecentActivitySummary | null;
   generatedAtEpoch: number;

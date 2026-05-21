@@ -1,26 +1,25 @@
-use serde_json::Value;
-use serde::{Deserialize, Serialize};
 use base64::Engine;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use tauri::AppHandle;
-use tauri_plugin_shell::ShellExt;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, OnceLock,
 };
 use tauri::ipc::Channel;
+use tauri::AppHandle;
+use tauri_plugin_shell::ShellExt;
 
-use super::claude::{list_claude_sessions, read_claude_session, send_claude_session_message};
+use super::claude::{list_claude_sessions, read_claude_session};
 use super::codex::{
-    list_codex_threads, read_codex_thread_updates, send_codex_thread_message,
-    CodexThreadCursor,
+    list_codex_threads, read_codex_thread_updates, send_codex_thread_message, CodexThreadCursor,
 };
+use super::config::ensure_data_dir;
 use super::config::read_provider_metadata_from_disk;
 use super::config_provider::ProviderMetadata;
-use super::config::ensure_data_dir;
 
 static PROVIDER_SESSION_STREAM_GENERATION: OnceLock<Arc<AtomicU64>> = OnceLock::new();
 const PROVIDER_OVERLAY_ENV: &str = "ONLINEWORKER_PROVIDER_OVERLAY";
@@ -128,6 +127,10 @@ fn provider_session_read_uses_owner_bridge(runtime_id: &str) -> bool {
     runtime_id.trim() != "claude"
 }
 
+fn provider_session_send_uses_owner_bridge(runtime_id: &str) -> bool {
+    runtime_id.trim() != "codex"
+}
+
 fn composer_attachment_staging_dir(data_dir: &Path) -> std::path::PathBuf {
     data_dir.join("composer-attachments")
 }
@@ -138,9 +141,11 @@ fn infer_attachment_kind(name: &str, mime_type: Option<&str>) -> String {
         return "image".to_string();
     }
     let lower_name = name.trim().to_ascii_lowercase();
-    if [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".heic"]
-        .iter()
-        .any(|suffix| lower_name.ends_with(suffix))
+    if [
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".heic",
+    ]
+    .iter()
+    .any(|suffix| lower_name.ends_with(suffix))
     {
         return "image".to_string();
     }
@@ -173,7 +178,10 @@ fn send_provider_session_message_via_owner_bridge(
         payload["attachments"] = serde_json::to_value(attachments)
             .map_err(|e| format!("serialize attachments failed: {e}"))?;
     }
-    if let Some(workspace_dir) = workspace_dir.map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(workspace_dir) = workspace_dir
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         payload["workspace_dir"] = Value::String(workspace_dir.to_string());
     }
 
@@ -228,7 +236,10 @@ fn read_provider_session_via_owner_bridge(
         "session_id": session_id,
         "limit": limit,
     });
-    if let Some(workspace_dir) = workspace_dir.map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(workspace_dir) = workspace_dir
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         payload["workspace_dir"] = Value::String(workspace_dir.to_string());
     }
 
@@ -256,7 +267,10 @@ fn read_provider_session_via_owner_bridge(
             .to_string());
     }
 
-    Ok(response.get("session").cloned().unwrap_or(Value::Array(vec![])))
+    Ok(response
+        .get("session")
+        .cloned()
+        .unwrap_or(Value::Array(vec![])))
 }
 
 fn list_provider_sessions_via_owner_bridge(
@@ -323,10 +337,7 @@ fn send_provider_session_message_via_owner_bridge_with_retry(
     let started_at = std::time::Instant::now();
     let poll_interval = std::time::Duration::from_millis(100);
     let socket_path = provider_owner_bridge_socket_path(data_dir);
-    let mut last_error = format!(
-        "provider owner bridge not ready: {}",
-        socket_path.display()
-    );
+    let mut last_error = format!("provider owner bridge not ready: {}", socket_path.display());
 
     loop {
         match send_provider_session_message_via_owner_bridge(
@@ -339,10 +350,7 @@ fn send_provider_session_message_via_owner_bridge_with_retry(
         ) {
             Ok(true) => return Ok(()),
             Ok(false) => {
-                last_error = format!(
-                    "provider owner bridge not ready: {}",
-                    socket_path.display()
-                );
+                last_error = format!("provider owner bridge not ready: {}", socket_path.display());
             }
             Err(error) => {
                 last_error = error;
@@ -414,12 +422,8 @@ async fn run_provider_session_bridge(
         return Err(detail);
     }
 
-    serde_json::from_slice(&output.stdout).map_err(|error| {
-        format!(
-            "provider session bridge returned invalid JSON: {}",
-            error
-        )
-    })
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("provider session bridge returned invalid JSON: {}", error))
 }
 
 #[tauri::command]
@@ -458,14 +462,16 @@ pub async fn read_provider_session(
             20,
         ) {
             Ok(value) => Ok(value),
-            Err(_) => run_provider_session_bridge(
-                &app,
-                &provider.id,
-                "read",
-                Some(&session_id),
-                workspace_dir.as_deref(),
-            )
-            .await,
+            Err(_) => {
+                run_provider_session_bridge(
+                    &app,
+                    &provider.id,
+                    "read",
+                    Some(&session_id),
+                    workspace_dir.as_deref(),
+                )
+                .await
+            }
         }
     } else {
         serde_json::to_value(read_claude_session(session_id, workspace_dir)?)
@@ -489,14 +495,7 @@ pub async fn send_provider_session_message(
             send_codex_thread_message(session_id, text, attachments, workspace_dir).await?;
             Ok(Value::Null)
         }
-        "claude" => serde_json::to_value(send_claude_session_message(
-            session_id,
-            text,
-            attachments,
-            workspace_dir,
-        )?)
-        .map_err(|error| error.to_string()),
-        _ => {
+        runtime_id if provider_session_send_uses_owner_bridge(runtime_id) => {
             let _ = app;
             let data_dir = ensure_data_dir()?;
             let trimmed = text.trim().to_string();
@@ -514,6 +513,10 @@ pub async fn send_provider_session_message(
             )?;
             Ok(Value::Null)
         }
+        _ => Err(format!(
+            "Provider runtime '{}' has no session send implementation",
+            provider.runtime_id
+        )),
     }
 }
 
@@ -547,8 +550,13 @@ pub async fn stage_session_composer_attachments(
         let attachment_id = uuid::Uuid::new_v4().to_string();
         let target_path = staging_dir.join(format!("{attachment_id}-{safe_name}"));
 
-        if let Some(base64_data) = file.base64_data.as_deref().filter(|value| !value.trim().is_empty()) {
-            let bytes = base64::engine::general_purpose::STANDARD.decode(base64_data.trim())
+        if let Some(base64_data) = file
+            .base64_data
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(base64_data.trim())
                 .map_err(|e| format!("decode attachment base64 failed: {e}"))?;
             std::fs::write(&target_path, &bytes)
                 .map_err(|e| format!("write staged attachment failed: {e}"))?;
@@ -559,7 +567,10 @@ pub async fn stage_session_composer_attachments(
 
         let metadata = std::fs::metadata(&target_path)
             .map_err(|e| format!("stat staged attachment failed: {e}"))?;
-        let mime_type = file.mime_type.clone().filter(|value| !value.trim().is_empty());
+        let mime_type = file
+            .mime_type
+            .clone()
+            .filter(|value| !value.trim().is_empty());
         staged.push(ComposerAttachment {
             id: attachment_id,
             kind: infer_attachment_kind(&safe_name, mime_type.as_deref()),
@@ -643,24 +654,35 @@ pub async fn stop_provider_session_stream(
 #[cfg(test)]
 mod tests {
     use super::{
-        ComposerAttachment,
         provider_not_enabled_message, provider_owner_bridge_socket_path,
-        provider_session_bridge_env, provider_session_bridge_path, provider_session_read_uses_owner_bridge,
+        provider_session_bridge_env, provider_session_bridge_path,
+        provider_session_read_uses_owner_bridge, provider_session_send_uses_owner_bridge,
         send_provider_session_message_via_owner_bridge,
-        send_provider_session_message_via_owner_bridge_with_retry, PROVIDER_OVERLAY_ENV,
+        send_provider_session_message_via_owner_bridge_with_retry, ComposerAttachment,
+        PROVIDER_OVERLAY_ENV,
     };
     use crate::commands::config_provider::provider_metadata_from_raw;
     use std::fs;
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixListener;
+    use std::sync::Mutex;
     use std::thread;
     use std::time::Duration;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn codex_provider_session_reads_use_owner_bridge() {
         assert!(provider_session_read_uses_owner_bridge("codex"));
         assert!(!provider_session_read_uses_owner_bridge("claude"));
         assert!(provider_session_read_uses_owner_bridge("overlay-tool"));
+    }
+
+    #[test]
+    fn claude_provider_session_send_uses_owner_bridge() {
+        assert!(!provider_session_send_uses_owner_bridge("codex"));
+        assert!(provider_session_send_uses_owner_bridge("claude"));
+        assert!(provider_session_send_uses_owner_bridge("overlay-tool"));
     }
 
     #[test]
@@ -686,6 +708,7 @@ mod tests {
 
     #[test]
     fn provider_session_bridge_env_includes_overlay_from_process_env() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
         let dir = std::env::temp_dir().join(format!(
             "onlineworker-provider-session-env-process-{}",
             std::process::id()
@@ -707,6 +730,7 @@ mod tests {
 
     #[test]
     fn provider_session_bridge_env_reads_overlay_from_app_env_file() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
         let dir = std::env::temp_dir().join(format!(
             "onlineworker-provider-session-env-file-{}",
             std::process::id()
@@ -742,7 +766,9 @@ mod tests {
             let (mut stream, _) = listener.accept().expect("accept owner bridge socket");
             let mut request = String::new();
             let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
-            reader.read_line(&mut request).expect("read owner bridge request");
+            reader
+                .read_line(&mut request)
+                .expect("read owner bridge request");
             let payload: serde_json::Value =
                 serde_json::from_str(request.trim()).expect("parse owner bridge request");
             assert_eq!(payload["provider_id"], "overlay-tool");
@@ -750,7 +776,10 @@ mod tests {
             assert_eq!(payload["text"], "hello");
             assert_eq!(payload["workspace_dir"], "/tmp/workspace");
             assert_eq!(payload["attachments"][0]["kind"], "image");
-            assert_eq!(payload["attachments"][0]["path"], "/tmp/workspace/image.png");
+            assert_eq!(
+                payload["attachments"][0]["path"],
+                "/tmp/workspace/image.png"
+            );
 
             let response = serde_json::json!({ "ok": true, "accepted": true });
             writeln!(stream, "{response}").expect("write response");
@@ -794,7 +823,9 @@ mod tests {
             let (mut stream, _) = listener.accept().expect("accept owner bridge socket");
             let mut request = String::new();
             let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
-            reader.read_line(&mut request).expect("read owner bridge request");
+            reader
+                .read_line(&mut request)
+                .expect("read owner bridge request");
             let payload: serde_json::Value =
                 serde_json::from_str(request.trim()).expect("parse owner bridge request");
             assert_eq!(payload["provider_id"], "overlay-tool");
@@ -828,7 +859,9 @@ mod tests {
             let (mut stream, _) = listener.accept().expect("accept owner bridge socket");
             let mut request = String::new();
             let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
-            reader.read_line(&mut request).expect("read owner bridge request");
+            reader
+                .read_line(&mut request)
+                .expect("read owner bridge request");
             let payload: serde_json::Value =
                 serde_json::from_str(request.trim()).expect("parse owner bridge request");
             assert_eq!(payload["type"], "read_session");
@@ -879,7 +912,9 @@ mod tests {
             let (mut stream, _) = listener.accept().expect("accept owner bridge socket");
             let mut request = String::new();
             let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
-            reader.read_line(&mut request).expect("read owner bridge request");
+            reader
+                .read_line(&mut request)
+                .expect("read owner bridge request");
             let payload: serde_json::Value =
                 serde_json::from_str(request.trim()).expect("parse owner bridge request");
             assert_eq!(payload["type"], "list_sessions");
@@ -902,12 +937,8 @@ mod tests {
             writeln!(stream, "{response}").expect("write response");
         });
 
-        let result = super::list_provider_sessions_via_owner_bridge(
-            &temp_dir,
-            "overlay-tool",
-            100,
-        )
-        .expect("list via owner bridge");
+        let result = super::list_provider_sessions_via_owner_bridge(&temp_dir, "overlay-tool", 100)
+            .expect("list via owner bridge");
 
         assert_eq!(
             result,

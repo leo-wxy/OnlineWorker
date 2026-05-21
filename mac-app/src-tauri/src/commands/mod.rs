@@ -1,3 +1,4 @@
+pub mod attachment_cache;
 pub mod claude;
 pub mod codex;
 pub mod command_catalog;

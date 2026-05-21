@@ -180,7 +180,7 @@ async def test_status_handler_reports_claude_auth_missing_when_connected(state, 
 
 
 @pytest.mark.asyncio
-async def test_status_handler_reports_claude_proxy_auth_when_connected(state, mock_update, mock_context):
+async def test_status_handler_reports_claude_connected_without_provider_auth_detail(state, mock_update, mock_context):
     from bot.handlers import make_status_handler
 
     state.config = Config(
@@ -201,7 +201,7 @@ async def test_status_handler_reports_claude_proxy_auth_when_connected(state, mo
     claude_adapter = MagicMock()
     claude_adapter.connected = True
     claude_adapter.auth_ready = True
-    claude_adapter.auth_method = "proxyEnv"
+    claude_adapter.auth_method = "subscription"
     state.set_adapter("claude", claude_adapter)
 
     handler = make_status_handler(state, GROUP_CHAT_ID)
@@ -209,7 +209,8 @@ async def test_status_handler_reports_claude_proxy_auth_when_connected(state, mo
 
     text = mock_context.bot.send_message.call_args[1]["text"]
     assert "claude CLI" in text
-    assert "API/Proxy" in text
+    assert "已连接" in text
+    assert "API/Proxy" not in text
 
 
 @pytest.mark.asyncio
@@ -753,7 +754,21 @@ async def test_message_handler_forwards_document_attachment_to_provider_runtime(
     telegram_file.download_to_drive.assert_awaited_once()
     custom_send.assert_awaited_once()
     send_kwargs = custom_send.await_args.kwargs
-    assert send_kwargs["text"] is None
+    assert send_kwargs["text"] == "请看附件"
     assert len(send_kwargs["attachments"]) == 1
     assert send_kwargs["attachments"][0]["kind"] == "file"
     assert send_kwargs["attachments"][0]["path"] == str(downloaded)
+
+
+def test_attachment_download_dir_uses_onlineworker_data_dir_fallback(monkeypatch, tmp_path):
+    from bot.handlers import message as message_module
+
+    fallback_data_dir = tmp_path / "OnlineWorker"
+    monkeypatch.setattr("config.get_data_dir", lambda: None)
+    monkeypatch.setattr("config.default_data_dir", lambda: str(fallback_data_dir))
+
+    target = message_module._attachment_download_dir()
+
+    assert target == str(fallback_data_dir / "attachments")
+    assert ".codex" not in target
+    assert (fallback_data_dir / "attachments").is_dir()

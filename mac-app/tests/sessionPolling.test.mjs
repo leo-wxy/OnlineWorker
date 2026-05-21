@@ -4,8 +4,10 @@ import assert from "node:assert/strict";
 import {
   buildSnapshotSignature,
   countAssistantEntries,
+  hasSessionSnapshotChanged,
   pollAssistantReply,
   pollForSettledAssistantReply,
+  startActiveSessionRefresh,
 } from "../src/utils/sessionPolling.js";
 
 test("pollForSettledAssistantReply keeps polling past first codex commentary snapshot", async () => {
@@ -173,6 +175,97 @@ test("countAssistantEntries ignores pending assistant placeholder", () => {
   ];
 
   assert.equal(countAssistantEntries(snapshot), 1);
+});
+
+test("hasSessionSnapshotChanged detects externally appended assistant replies", () => {
+  const currentSnapshot = [
+    { role: "user", content: "old question" },
+    { role: "assistant", content: "old answer" },
+  ];
+  const refreshedSnapshot = [
+    ...currentSnapshot,
+    { role: "assistant", content: "answer from Telegram path" },
+  ];
+
+  assert.equal(hasSessionSnapshotChanged(currentSnapshot, refreshedSnapshot), true);
+  assert.equal(hasSessionSnapshotChanged(refreshedSnapshot, refreshedSnapshot), false);
+});
+
+test("startActiveSessionRefresh applies changed snapshots from external writers", async () => {
+  const currentSnapshot = [
+    { role: "user", content: "old question" },
+    { role: "assistant", content: "old answer" },
+  ];
+  const refreshedSnapshot = [
+    ...currentSnapshot,
+    { role: "assistant", content: "answer from Telegram path" },
+  ];
+
+  let scheduledCallback = null;
+  const clearedTimers = [];
+  const appliedSnapshots = [];
+  const cleanup = startActiveSessionRefresh({
+    intervalMs: 123,
+    getCurrentSnapshot: () => currentSnapshot,
+    loadSnapshot: async () => refreshedSnapshot,
+    onSnapshot: (snapshot) => {
+      appliedSnapshots.push(snapshot);
+    },
+    setTimer: (callback, timeoutMs) => {
+      scheduledCallback = callback;
+      return { timeoutMs };
+    },
+    clearTimer: (timer) => {
+      clearedTimers.push(timer);
+    },
+    onError: (error) => {
+      throw error;
+    },
+  });
+
+  assert.equal(typeof cleanup, "function");
+  assert.equal(typeof scheduledCallback, "function");
+  await scheduledCallback();
+
+  assert.equal(appliedSnapshots.length, 1);
+  assert.equal(appliedSnapshots[0].at(-1)?.content, "answer from Telegram path");
+
+  cleanup();
+  assert.equal(clearedTimers.length, 1);
+});
+
+test("startActiveSessionRefresh skips reads while another reply poll owns the session", async () => {
+  let scheduledCallback = null;
+  let loadCalls = 0;
+  let skip = true;
+
+  const cleanup = startActiveSessionRefresh({
+    getCurrentSnapshot: () => [],
+    loadSnapshot: async () => {
+      loadCalls += 1;
+      return [{ role: "assistant", content: "fresh" }];
+    },
+    onSnapshot: () => {},
+    shouldSkip: () => skip,
+    setTimer: (callback) => {
+      scheduledCallback = callback;
+      return callback;
+    },
+    clearTimer: () => {},
+    onError: (error) => {
+      throw error;
+    },
+  });
+
+  assert.equal(typeof cleanup, "function");
+  await scheduledCallback();
+  assert.equal(loadCalls, 0);
+
+  skip = false;
+  await scheduledCallback();
+  assert.equal(loadCalls, 1);
+
+  cleanup();
 });
 
 test("pollAssistantReply can settle after a later background-style retry window", async () => {

@@ -298,9 +298,7 @@ pub async fn test_bot_permissions(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_set_my_commands_payload, select_proxy_value, TelegramCommandScope,
-    };
+    use super::{build_set_my_commands_payload, select_proxy_value, TelegramCommandScope};
     use crate::commands::command_registry::TelegramPublishCommand;
 
     #[test]

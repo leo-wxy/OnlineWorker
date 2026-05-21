@@ -10,6 +10,7 @@ use std::{env, path::Path};
 use tauri::Manager;
 use tokio::sync::Mutex;
 
+use commands::attachment_cache::{clear_attachment_cache, get_attachment_cache_stats};
 use commands::claude::{list_claude_sessions, read_claude_session, send_claude_session_message};
 use commands::codex::{
     list_codex_threads, read_codex_thread, read_codex_thread_state, read_codex_thread_updates,
@@ -28,14 +29,14 @@ use commands::dashboard::get_dashboard_state;
 use commands::logs::{get_log_file_path, start_log_tail, stop_log_tail};
 use commands::provider_sessions::{
     list_provider_sessions, read_provider_session, send_provider_session_message,
-    stage_session_composer_attachments,
-    start_provider_session_stream, stop_provider_session_stream,
+    stage_session_composer_attachments, start_provider_session_stream,
+    stop_provider_session_stream,
 };
 use commands::provider_usage::get_provider_usage_summary;
 use commands::service::{
-    check_cli, check_http_health, read_codex_mirror_status, service_restart, service_start,
-    service_status, service_stop, shutdown_managed_processes_for_app_exit, snapshot_service_status,
-    start_service_internal, BotState, ServiceStatus,
+    check_cli, check_http_health, service_restart, service_start, service_status, service_stop,
+    shutdown_managed_processes_for_app_exit, snapshot_service_status, start_service_internal,
+    BotState, ServiceStatus,
 };
 use commands::telegram::{test_bot_permissions, test_bot_token, test_group_access};
 use commands::terminal::open_terminal;
@@ -44,6 +45,7 @@ use menubar::setup_menubar;
 #[derive(Default)]
 struct AppExitState {
     exiting: AtomicBool,
+    cleanup_started: AtomicBool,
 }
 
 impl AppExitState {
@@ -54,14 +56,37 @@ impl AppExitState {
     fn is_exiting(&self) -> bool {
         self.exiting.load(Ordering::SeqCst)
     }
+
+    fn begin_exit_cleanup(&self) -> bool {
+        if self
+            .cleanup_started
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return false;
+        }
+        self.mark_exiting();
+        true
+    }
 }
 
-fn should_hide_window_on_close(window_label: &str, app_is_exiting: bool) -> bool {
+fn should_exit_app_on_window_close(window_label: &str, app_is_exiting: bool) -> bool {
     window_label == "main" && !app_is_exiting
 }
 
 fn should_cleanup_on_destroy(app_is_exiting: bool) -> bool {
     app_is_exiting
+}
+
+pub(crate) fn cleanup_managed_processes_for_exit_once(app: &tauri::AppHandle) {
+    let exit_state = app.state::<AppExitState>();
+    if !exit_state.begin_exit_cleanup() {
+        return;
+    }
+    tauri::async_runtime::block_on(async {
+        let state = app.state::<Arc<Mutex<BotState>>>();
+        shutdown_managed_processes_for_app_exit(state.inner()).await;
+    });
 }
 
 fn should_restore_main_window_on_reopen(has_visible_windows: bool) -> bool {
@@ -218,9 +243,10 @@ pub fn run() {
             service_stop,
             service_status,
             get_dashboard_state,
-            read_codex_mirror_status,
             check_http_health,
             check_cli,
+            get_attachment_cache_stats,
+            clear_attachment_cache,
             get_log_file_path,
             start_log_tail,
             stop_log_tail,
@@ -264,21 +290,20 @@ pub fn run() {
             create_default_config,
         ])
         .on_window_event(|window, event| match event {
-            tauri::WindowEvent::CloseRequested { api, .. } => {
-                let exit_state = window.app_handle().state::<AppExitState>();
-                if should_hide_window_on_close(window.label(), exit_state.is_exiting()) {
-                    api.prevent_close();
-                    let _ = window.hide();
+            tauri::WindowEvent::CloseRequested { .. } => {
+                let app = window.app_handle().clone();
+                let exit_state = app.state::<AppExitState>();
+                if should_exit_app_on_window_close(window.label(), exit_state.is_exiting()) {
+                    exit_state.mark_exiting();
+                    cleanup_managed_processes_for_exit_once(&app);
+                    app.exit(0);
                 }
             }
             tauri::WindowEvent::Destroyed => {
                 let app = window.app_handle().clone();
                 let exit_state = app.state::<AppExitState>();
                 if should_cleanup_on_destroy(exit_state.is_exiting()) {
-                    tauri::async_runtime::block_on(async {
-                        let state = app.state::<Arc<Mutex<BotState>>>();
-                        shutdown_managed_processes_for_app_exit(state.inner()).await;
-                    });
+                    cleanup_managed_processes_for_exit_once(&app);
                 }
             }
             _ => {}
@@ -290,6 +315,10 @@ pub fn run() {
         tauri::RunEvent::ExitRequested { .. } => {
             let exit_state = app_handle.state::<AppExitState>();
             exit_state.mark_exiting();
+            cleanup_managed_processes_for_exit_once(app_handle);
+        }
+        tauri::RunEvent::Exit => {
+            cleanup_managed_processes_for_exit_once(app_handle);
         }
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen {
@@ -313,31 +342,40 @@ mod tests {
     use super::{
         default_provider_overlay_env, launch_service_self_check_delay,
         service_guard_check_interval, should_auto_start_service_after_launch,
-        should_auto_start_service_in_session, should_cleanup_on_destroy, should_hide_window_on_close,
-        should_restore_main_window_on_reopen,
+        should_auto_start_service_in_session, should_cleanup_on_destroy,
+        should_exit_app_on_window_close, should_restore_main_window_on_reopen, AppExitState,
     };
     use crate::commands::service::ServiceStatus;
     use std::{fs, time::Duration};
 
     #[test]
-    fn main_window_close_hides_to_background_when_app_is_not_exiting() {
-        assert!(should_hide_window_on_close("main", false));
+    fn main_window_close_requests_app_exit_when_app_is_not_exiting() {
+        assert!(should_exit_app_on_window_close("main", false));
     }
 
     #[test]
-    fn main_window_close_does_not_hide_when_app_is_already_exiting() {
-        assert!(!should_hide_window_on_close("main", true));
+    fn main_window_close_does_not_request_duplicate_exit_when_app_is_already_exiting() {
+        assert!(!should_exit_app_on_window_close("main", true));
     }
 
     #[test]
-    fn non_main_window_close_does_not_hide_to_background() {
-        assert!(!should_hide_window_on_close("settings", false));
+    fn non_main_window_close_does_not_request_app_exit() {
+        assert!(!should_exit_app_on_window_close("settings", false));
     }
 
     #[test]
     fn destroyed_window_only_triggers_cleanup_during_real_exit() {
         assert!(!should_cleanup_on_destroy(false));
         assert!(should_cleanup_on_destroy(true));
+    }
+
+    #[test]
+    fn exit_cleanup_can_start_even_when_exit_requested_was_not_observed() {
+        let exit_state = AppExitState::default();
+
+        assert!(exit_state.begin_exit_cleanup());
+        assert!(exit_state.is_exiting());
+        assert!(!exit_state.begin_exit_cleanup());
     }
 
     #[test]

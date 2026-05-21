@@ -22,10 +22,6 @@ providers:
     live_transport: "stdio"
     transport:
       type: "stdio"
-    auth:
-      key: ""
-      base_url: ""
-      model: ""
 
 logging:
   level: "INFO"

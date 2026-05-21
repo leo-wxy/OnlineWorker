@@ -134,10 +134,24 @@ export const enTexts: AppTexts = {
       launching: "Starting service...",
       launchSuccess: (message: string) => `Service started: ${message}`,
       launchError: (error: string) => `Failed to start service: ${error}`,
+      maintenanceEyebrow: "Maintenance",
+      maintenanceTitle: "Maintenance",
+      maintenanceDescription:
+        "Manage local runtime data after setup. This does not change first-run configuration, provider switches, or raw config files.",
+      storageTitle: "Storage",
+      attachmentCacheTitle: "Attachment Cache",
+      attachmentCacheDescription:
+        "Clear locally cached Telegram images and desktop session attachments. AI session history, config, and logs are kept.",
+      attachmentCacheSize: (size: string, count: number) =>
+        `Currently using ${size} across ${count} files`,
+      attachmentCacheClear: "Clear Attachment Cache",
+      attachmentCacheClearing: "Clearing...",
+      attachmentCacheCleared: (size: string, count: number) =>
+        `Cleared ${size} and deleted ${count} files`,
+      attachmentCacheError: (error: string) => `Attachment cache operation failed: ${error}`,
+      attachmentCachePartialError: (count: number) =>
+        `Attachment cache was partially cleared, but ${count} items failed. Check file permissions and try again.`,
       tokenPlaceholder: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-      claudeApiKeyPlaceholder: "your_api_key_here",
-      claudeBaseUrlPlaceholder: "https://your-gateway.example.com",
-      claudeModelPlaceholder: "claude-opus-4-6",
       userIdPlaceholder: "123456789",
       groupChatIdPlaceholder: "-1001234567890",
       showToken: "Show token",
@@ -166,11 +180,6 @@ export const enTexts: AppTexts = {
         "Choose a display name and a username ending in bot",
         "Copy the token BotFather gives you",
       ],
-      claudeAuthTitle: "Claude authentication (optional)",
-      claudeAuthDescription:
-        "If you want OnlineWorker to drive Claude Code, you can either sign in with the official Claude CLI flow, or fill in API and proxy settings here.",
-      claudeAuthHint:
-        "Leaving this empty is fine if you only use codex. Official flow usually uses `claude auth login`. Proxy or gateway mode can set `ANTHROPIC_BASE_URL` and `ANTHROPIC_MODEL`; if `ANTHROPIC_API_KEY` is left empty, OnlineWorker will inject a dummy placeholder for Claude CLI. Any change to these Claude env values takes effect after restarting the OnlineWorker service.",
       step2Title: "Get Your User ID",
       step2Description: "Only the specified user is allowed to send commands.",
       step2Instructions: [
@@ -457,10 +466,6 @@ export const enTexts: AppTexts = {
       telegramLabel: "Telegram",
       pidLabel: "PID",
       codexTitle: "codex",
-      codexDescription: "Current codex runtime managed by the app",
-      codexFallbackDetail:
-        "No extra diagnostics are available. The app-side runtime is treated as the default truth.",
-      claudeDescription: "Local Claude CLI session bridge managed through the bot runtime",
       providerUnmanagedDetail:
         "This provider is kept in config only and is excluded from app-managed startup and Telegram routing.",
       providerAutostartDisabledDetail:
@@ -499,16 +504,6 @@ export const enTexts: AppTexts = {
         title: "Configuration incomplete",
         missingFiles: "Missing required app configuration files.",
         missingFields: (fields: string) => `Missing required settings: ${fields}`,
-      },
-      codexDegraded: {
-        title: "codex status degraded",
-        detail:
-          "Codex runtime looks stale or unavailable from the app diagnostics view.",
-      },
-      claudeDegraded: {
-        title: "claude status degraded",
-        detail:
-          "Claude CLI is unavailable or not authenticated from the app diagnostics view.",
       },
       telegramUnavailable: {
         title: "Telegram connection unavailable",

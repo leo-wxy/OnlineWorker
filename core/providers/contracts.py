@@ -136,6 +136,7 @@ class ProviderRuntimeHooks:
 @dataclass(frozen=True)
 class ProviderSessionEventHooks:
     parse_semantic_event: Optional[Callable] = None
+    should_materialize_unbound_thread_topic: Optional[Callable] = None
 
 
 @dataclass(frozen=True)

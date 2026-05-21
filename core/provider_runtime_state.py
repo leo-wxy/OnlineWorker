@@ -62,12 +62,11 @@ class ProviderRunState:
 @dataclass
 class ProviderRuntimeState:
     """单个 provider 的运行时容器。"""
-    hook_bridge: Any = None
     owner_bridge: Any = None
     host: Any = None
     host_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     mirror_task: Optional[asyncio.Task] = None
-    last_diagnostics_write: float = 0.0
+    last_watch_state_touch: float = 0.0
     last_synced_assistant: dict[str, str] = field(default_factory=dict)
     runs: dict[str, ProviderRunState] = field(default_factory=dict)
     thread_current_runs: dict[str, str] = field(default_factory=dict)

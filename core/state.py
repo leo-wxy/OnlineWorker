@@ -39,7 +39,7 @@ class PendingApproval:
     amendment_decision: dict = field(default_factory=dict)
     # provider 名称，用于选择正确的 reply 格式
     tool_type: str = ""
-    # 审批请求来源：app_server | hook_bridge
+    # 审批请求来源：app_server
     approval_source: str = "app_server"
 
 

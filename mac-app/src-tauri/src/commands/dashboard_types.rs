@@ -58,14 +58,6 @@ pub struct BotDashboardStatus {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct ToolDashboardStatus {
-    pub health: ServiceHealth,
-    pub port: Option<u16>,
-    pub detail: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct ProviderDashboardStatus {
     pub id: String,
     pub managed: bool,
@@ -97,7 +89,6 @@ pub struct DashboardState {
     pub overall: SystemHealth,
     pub bot: BotDashboardStatus,
     pub providers: Vec<ProviderDashboardStatus>,
-    pub codex: ToolDashboardStatus,
     pub alerts: Vec<Alert>,
     pub recent_activity: Option<RecentActivitySummary>,
     pub generated_at_epoch: u64,

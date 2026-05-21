@@ -1,6 +1,7 @@
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
+use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -16,6 +17,13 @@ const CLAUDE_SESSION_PREVIEW_TURNS: usize = 50;
 const CLAUDE_CONTINUATION_CONTEXT_CHAR_LIMIT: usize = 12_000;
 const CLAUDE_DETACHED_SEND_GRACE_MS: u64 = 1_200;
 const CLAUDE_TAIL_READ_CHUNK_BYTES: usize = 64 * 1024;
+const CLAUDE_APP_OWNED_SESSION_DIR: &str = "claude-app-owned-sessions";
+const CLAUDE_RUNTIME_ENV_KEYS: [&str; 4] = [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_MODEL",
+];
 
 #[derive(Debug, Clone)]
 pub(crate) struct ClaudeStoredSession {
@@ -61,39 +69,6 @@ pub struct ClaudeSendResult {
     pub created_new_session: bool,
 }
 
-fn read_env_key(raw: &str, key: &str) -> Option<String> {
-    raw.lines().find_map(|line| {
-        let (line_key, value) = line.split_once('=')?;
-        if line_key.trim() == key {
-            Some(value.to_string())
-        } else {
-            None
-        }
-    })
-}
-
-fn build_claude_command_env_from_env_raw(env_raw: &str) -> HashMap<String, String> {
-    let mut env_map = HashMap::new();
-    for key in ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL"] {
-        let value = read_env_key(env_raw, key).unwrap_or_default();
-        if !value.trim().is_empty() {
-            env_map.insert(key.to_string(), value);
-        }
-    }
-
-    if env_map.contains_key("ANTHROPIC_BASE_URL") && !env_map.contains_key("ANTHROPIC_API_KEY") {
-        env_map.insert("ANTHROPIC_API_KEY".to_string(), "dummy".to_string());
-    }
-
-    env_map
-}
-
-fn load_claude_command_env() -> HashMap<String, String> {
-    let env_path = data_dir().join(".env");
-    let env_raw = fs::read_to_string(env_path).unwrap_or_default();
-    build_claude_command_env_from_env_raw(&env_raw)
-}
-
 fn is_claude_prompt_too_long_text(text: &str) -> bool {
     text.to_ascii_lowercase().contains("prompt is too long")
 }
@@ -135,13 +110,13 @@ End of transcript.",
 }
 
 fn build_claude_compact_send_argv(
-    claude_bin: &str,
+    claude_command: &[String],
     session_id: &str,
     text: &str,
     system_prompt: Option<&str>,
 ) -> Vec<String> {
-    let mut argv = vec![
-        claude_bin.to_string(),
+    let mut argv = claude_command_prefix_or_default(claude_command);
+    argv.extend([
         "-p".to_string(),
         "--verbose".to_string(),
         "--output-format".to_string(),
@@ -149,13 +124,275 @@ fn build_claude_compact_send_argv(
         "--include-partial-messages".to_string(),
         "--session-id".to_string(),
         session_id.to_string(),
-    ];
+    ]);
     if let Some(prompt) = system_prompt.filter(|value| !value.trim().is_empty()) {
         argv.push("--append-system-prompt".to_string());
         argv.push(prompt.to_string());
     }
     argv.push(text.to_string());
     argv
+}
+
+fn split_claude_command_prefix(raw: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+
+    for ch in raw.trim().chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+
+        if let Some(quote_char) = quote {
+            if ch == quote_char {
+                quote = None;
+            } else {
+                current.push(ch);
+            }
+            continue;
+        }
+
+        if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+            continue;
+        }
+
+        if ch.is_whitespace() {
+            if !current.is_empty() {
+                parts.push(current);
+                current = String::new();
+            }
+            continue;
+        }
+
+        current.push(ch);
+    }
+
+    if escaped {
+        current.push('\\');
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    if parts.is_empty() {
+        vec!["claude".to_string()]
+    } else {
+        parts
+    }
+}
+
+fn expand_home_path(value: &str) -> String {
+    if value == "~" {
+        return env::var("HOME").unwrap_or_else(|_| value.to_string());
+    }
+    if let Some(rest) = value.strip_prefix("~/") {
+        if let Ok(home) = env::var("HOME") {
+            return PathBuf::from(home).join(rest).to_string_lossy().to_string();
+        }
+    }
+    value.to_string()
+}
+
+fn claude_command_prefix_or_default(claude_command: &[String]) -> Vec<String> {
+    let mut parts = claude_command
+        .iter()
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        parts.push("claude".to_string());
+    }
+    parts[0] = expand_home_path(&parts[0]);
+    parts
+}
+
+fn read_claude_command_prefix_from_config_raw(raw: &str) -> Vec<String> {
+    let command = match serde_yaml::from_str::<serde_yaml::Value>(raw) {
+        Ok(doc) => {
+            let provider_command = doc
+                .get("providers")
+                .and_then(|providers| providers.get("claude"))
+                .and_then(|claude| {
+                    claude
+                        .get("bin")
+                        .or_else(|| claude.get("codex_bin"))
+                        .or_else(|| claude.get("codexBin"))
+                })
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
+            provider_command.or_else(|| {
+                doc.get("tools")
+                    .and_then(|tools| tools.as_sequence())
+                    .and_then(|tools| {
+                        tools.iter().find_map(|tool| {
+                            let name = tool.get("name").and_then(|value| value.as_str())?;
+                            if name != "claude" {
+                                return None;
+                            }
+                            tool.get("bin")
+                                .or_else(|| tool.get("codex_bin"))
+                                .or_else(|| tool.get("codexBin"))
+                                .and_then(|value| value.as_str())
+                                .map(str::to_string)
+                        })
+                    })
+            })
+        }
+        Err(_) => None,
+    };
+    let mut parts = split_claude_command_prefix(command.as_deref().unwrap_or("claude"));
+    if !parts.is_empty() {
+        parts[0] = expand_home_path(&parts[0]);
+    }
+    parts
+}
+
+fn read_claude_command_prefix_from_config() -> Vec<String> {
+    let config_path = data_dir().join("config.yaml");
+    match fs::read_to_string(config_path) {
+        Ok(raw) => read_claude_command_prefix_from_config_raw(&raw),
+        Err(_) => vec!["claude".to_string()],
+    }
+}
+
+fn parse_node_semver(version_name: &str) -> Option<(u32, u32, u32)> {
+    let trimmed = version_name.trim().trim_start_matches('v');
+    let mut parts = trimmed.split('.');
+    let major = parts.next()?.parse::<u32>().ok()?;
+    let minor = parts
+        .next()
+        .and_then(|part| part.parse::<u32>().ok())
+        .unwrap_or(0);
+    let patch = parts
+        .next()
+        .and_then(|part| part.parse::<u32>().ok())
+        .unwrap_or(0);
+    Some((major, minor, patch))
+}
+
+fn resolve_preferred_node_bin_dir() -> Option<PathBuf> {
+    let home = env::var("HOME").ok()?;
+    let versions_dir = PathBuf::from(home).join(".nvm/versions/node");
+    let mut candidates = fs::read_dir(versions_dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let version_name = entry.file_name().to_string_lossy().to_string();
+            let version = parse_node_semver(&version_name)?;
+            if version.0 < 20 {
+                return None;
+            }
+            let bin_dir = entry.path().join("bin");
+            if bin_dir.join("node").is_file() {
+                Some((version, bin_dir))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    candidates.sort_by(|left, right| right.0.cmp(&left.0));
+    if let Some((_, bin_dir)) = candidates.into_iter().next() {
+        return Some(bin_dir);
+    }
+
+    env::var("NVM_BIN")
+        .ok()
+        .map(PathBuf::from)
+        .filter(|bin_dir| bin_dir.join("node").is_file())
+}
+
+fn build_claude_launcher_env() -> HashMap<String, String> {
+    let mut values = HashMap::new();
+    if let Some(node_bin) = resolve_preferred_node_bin_dir() {
+        let node_bin = node_bin.to_string_lossy().to_string();
+        let current_path = env::var("PATH").unwrap_or_default();
+        let mut path_entries = vec![node_bin.clone()];
+        path_entries.extend(
+            current_path
+                .split(':')
+                .filter(|entry| !entry.is_empty() && *entry != node_bin)
+                .map(str::to_string),
+        );
+        values.insert("PATH".to_string(), path_entries.join(":"));
+        values.insert("NVM_BIN".to_string(), node_bin);
+    }
+    values.extend(detect_claude_runtime_env());
+    if values.contains_key("ANTHROPIC_BASE_URL")
+        && !values.contains_key("ANTHROPIC_AUTH_TOKEN")
+        && !values.contains_key("ANTHROPIC_API_KEY")
+    {
+        values.insert("ANTHROPIC_API_KEY".to_string(), "dummy".to_string());
+    }
+    values
+}
+
+fn is_stale_claude_base_url(value: &str) -> bool {
+    matches!(
+        value
+            .trim()
+            .trim_end_matches('/')
+            .to_ascii_lowercase()
+            .as_str(),
+        "http://localhost:3031" | "http://127.0.0.1:3031"
+    )
+}
+
+fn claude_runtime_env_is_usable(env_map: &HashMap<String, String>) -> bool {
+    if env_map
+        .get("ANTHROPIC_BASE_URL")
+        .map(|value| is_stale_claude_base_url(value))
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    CLAUDE_RUNTIME_ENV_KEYS.iter().any(|key| {
+        env_map
+            .get(*key)
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+    })
+}
+
+fn collect_claude_runtime_env_from_pairs<I, K, V>(pairs: I) -> HashMap<String, String>
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: AsRef<str>,
+    V: Into<String>,
+{
+    let mut values = HashMap::new();
+    for (key, value) in pairs {
+        let key = key.as_ref();
+        if !CLAUDE_RUNTIME_ENV_KEYS.contains(&key) {
+            continue;
+        }
+        let value = value.into();
+        if !value.trim().is_empty() {
+            values.insert(key.to_string(), value);
+        }
+    }
+    if claude_runtime_env_is_usable(&values) {
+        values
+    } else {
+        HashMap::new()
+    }
+}
+
+fn detect_claude_runtime_env() -> HashMap<String, String> {
+    collect_claude_runtime_env_from_pairs(
+        CLAUDE_RUNTIME_ENV_KEYS
+            .into_iter()
+            .filter_map(|key| env::var(key).ok().map(|value| (key, value))),
+    )
 }
 
 fn read_claude_command_log(path: &Path) -> String {
@@ -174,12 +411,7 @@ fn claude_project_dir_slug(cwd: &str) -> Option<String> {
     Some(trimmed.replace(std::path::MAIN_SEPARATOR, "-"))
 }
 
-fn run_claude_command_with_grace(
-    program: &str,
-    args: &[String],
-    cwd: &Path,
-    env: &HashMap<String, String>,
-) -> Result<(), String> {
+fn run_claude_command_with_grace(program: &str, args: &[String], cwd: &Path) -> Result<(), String> {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
@@ -199,7 +431,7 @@ fn run_claude_command_with_grace(
         .current_dir(cwd)
         .stdout(Stdio::from(stdout_file))
         .stderr(Stdio::from(stderr_file));
-    for (key, value) in env {
+    for (key, value) in build_claude_launcher_env() {
         command.env(key, value);
     }
 
@@ -364,19 +596,19 @@ fn read_claude_session_from_paths(
 }
 
 fn build_claude_send_argv(
-    claude_bin: &str,
+    claude_command: &[String],
     session_id: &str,
     text: &str,
     session_exists: bool,
 ) -> Vec<String> {
-    let mut argv = vec![
-        claude_bin.to_string(),
+    let mut argv = claude_command_prefix_or_default(claude_command);
+    argv.extend([
         "-p".to_string(),
         "--verbose".to_string(),
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--include-partial-messages".to_string(),
-    ];
+    ]);
     if session_exists {
         argv.push("--resume".to_string());
     } else {
@@ -385,6 +617,129 @@ fn build_claude_send_argv(
     argv.push(session_id.to_string());
     argv.push(text.to_string());
     argv
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ClaudeSessionSendPlan {
+    Direct {
+        send_session_id: String,
+        session_exists: bool,
+    },
+}
+
+fn build_claude_session_send_plan(
+    session_id: &str,
+    session_exists: bool,
+    _app_owned: bool,
+    _session_turns: &[ClaudeTurn],
+) -> ClaudeSessionSendPlan {
+    ClaudeSessionSendPlan::Direct {
+        send_session_id: session_id.to_string(),
+        session_exists,
+    }
+}
+
+fn claude_app_owned_session_marker_path_for_base(
+    base_dir: &Path,
+    session_id: &str,
+) -> Option<PathBuf> {
+    let safe_name = session_id
+        .trim()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if safe_name.is_empty() {
+        return None;
+    }
+    Some(
+        base_dir
+            .join(CLAUDE_APP_OWNED_SESSION_DIR)
+            .join(format!("{safe_name}.json")),
+    )
+}
+
+fn is_app_owned_claude_session(session_id: &str) -> bool {
+    is_app_owned_claude_session_in_dir(&data_dir(), session_id)
+}
+
+fn is_app_owned_claude_session_in_dir(base_dir: &Path, session_id: &str) -> bool {
+    claude_app_owned_session_marker_path_for_base(base_dir, session_id)
+        .map(|path| path.exists())
+        .unwrap_or(false)
+}
+
+fn mark_app_owned_claude_session(
+    session_id: &str,
+    branched_from: Option<&str>,
+) -> Result<(), String> {
+    mark_app_owned_claude_session_in_dir(&data_dir(), session_id, branched_from)
+}
+
+fn mark_app_owned_claude_session_in_dir(
+    base_dir: &Path,
+    session_id: &str,
+    branched_from: Option<&str>,
+) -> Result<(), String> {
+    let path = claude_app_owned_session_marker_path_for_base(base_dir, session_id)
+        .ok_or_else(|| "claude session id is empty".to_string())?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "failed to create claude app-owned session marker dir {}: {err}",
+                parent.display()
+            )
+        })?;
+    }
+    let payload = serde_json::json!({
+        "sessionId": session_id,
+        "source": "onlineworker-app",
+        "branchedFrom": branched_from,
+    });
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&payload).map_err(|err| err.to_string())?,
+    )
+    .map_err(|err| {
+        format!(
+            "failed to write claude app-owned session marker {}: {err}",
+            path.display()
+        )
+    })
+}
+
+fn run_claude_send_command(
+    claude_command: &[String],
+    session_id: &str,
+    final_text: &str,
+    session_exists: bool,
+    cwd: &Path,
+) -> Result<(), String> {
+    let argv = build_claude_send_argv(claude_command, session_id, final_text, session_exists);
+    let (program, args) = argv
+        .split_first()
+        .ok_or("claude argv is empty".to_string())?;
+    run_claude_command_with_grace(program, args, cwd)
+}
+
+fn run_claude_compact_send_command(
+    claude_command: &[String],
+    session_id: &str,
+    final_text: &str,
+    system_prompt: Option<&str>,
+    cwd: &Path,
+) -> Result<(), String> {
+    let argv =
+        build_claude_compact_send_argv(claude_command, session_id, final_text, system_prompt);
+    let (program, args) = argv
+        .split_first()
+        .ok_or("claude compact argv is empty".to_string())?;
+    run_claude_command_with_grace(program, args, cwd)
 }
 
 #[tauri::command]
@@ -428,7 +783,11 @@ pub fn send_claude_session_message(
             if name.is_empty() && path.is_empty() {
                 return None;
             }
-            let label = if attachment.kind == "image" { "Attached image" } else { "Attached file" };
+            let label = if attachment.kind == "image" {
+                "Attached image"
+            } else {
+                "Attached file"
+            };
             let title = if !name.is_empty() { name } else { path };
             let mut block = format!("[{label}] {title}");
             if !path.is_empty() {
@@ -470,30 +829,50 @@ pub fn send_claude_session_message(
             .ok()
         })
         .unwrap_or_default();
-    let command_env = load_claude_command_env();
+    let claude_command = read_claude_command_prefix_from_config();
+    let session_app_owned = is_app_owned_claude_session(&session_id);
+    let send_plan = build_claude_session_send_plan(
+        &session_id,
+        session_exists,
+        session_app_owned,
+        &session_turns,
+    );
+    let send_result = match &send_plan {
+        ClaudeSessionSendPlan::Direct {
+            send_session_id,
+            session_exists,
+        } => run_claude_send_command(
+            &claude_command,
+            send_session_id,
+            &final_text,
+            *session_exists,
+            &cwd,
+        ),
+    };
 
-    let argv = build_claude_send_argv("claude", &session_id, &final_text, session_exists);
-    let (program, args) = argv
-        .split_first()
-        .ok_or("claude argv is empty".to_string())?;
-    match run_claude_command_with_grace(program, args, &cwd, &command_env) {
-        Ok(()) => Ok(ClaudeSendResult {
-            session_id,
-            created_new_session: false,
-        }),
-        Err(error) if session_exists && is_claude_prompt_too_long_text(&error) => {
+    match send_result {
+        Ok(()) => match send_plan {
+            ClaudeSessionSendPlan::Direct {
+                send_session_id, ..
+            } => {
+                mark_app_owned_claude_session(&send_session_id, None)?;
+                Ok(ClaudeSendResult {
+                    session_id: send_session_id,
+                    created_new_session: false,
+                })
+            }
+        },
+        Err(error) if is_claude_prompt_too_long_text(&error) => {
             let new_session_id = Uuid::new_v4().to_string();
             let continuation_prompt = build_claude_continuation_system_prompt(&session_turns);
-            let fallback_argv = build_claude_compact_send_argv(
-                "claude",
+            run_claude_compact_send_command(
+                &claude_command,
                 &new_session_id,
                 &final_text,
                 continuation_prompt.as_deref(),
-            );
-            let (fallback_program, fallback_args) = fallback_argv
-                .split_first()
-                .ok_or("claude fallback argv is empty".to_string())?;
-            run_claude_command_with_grace(fallback_program, fallback_args, &cwd, &command_env)?;
+                &cwd,
+            )?;
+            mark_app_owned_claude_session(&new_session_id, Some(&session_id))?;
             Ok(ClaudeSendResult {
                 session_id: new_session_id,
                 created_new_session: true,
@@ -1242,6 +1621,17 @@ fn read_claude_history_turns(
     turns.into_iter().collect()
 }
 
+fn validate_claude_workspace_dir(path: PathBuf) -> Result<PathBuf, String> {
+    if path.is_dir() {
+        Ok(path)
+    } else {
+        Err(format!(
+            "workspace directory does not exist: {}",
+            path.display()
+        ))
+    }
+}
+
 fn resolve_claude_send_context(
     session_id: &str,
     projects_dir: Option<&Path>,
@@ -1256,12 +1646,12 @@ fn resolve_claude_send_context(
     let session_exists = session_file.is_some();
 
     if let Some(workspace) = explicit_workspace {
-        return Ok((workspace, session_exists));
+        return validate_claude_workspace_dir(workspace).map(|cwd| (cwd, session_exists));
     }
 
     if let Some(session_file) = session_file {
         if let Some(cwd) = read_claude_project_session_cwd(&session_file) {
-            return Ok((PathBuf::from(cwd), true));
+            return validate_claude_workspace_dir(PathBuf::from(cwd)).map(|cwd| (cwd, true));
         }
     }
 
@@ -1271,9 +1661,12 @@ fn resolve_claude_send_context(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_claude_command_env_from_env_raw, build_claude_continuation_system_prompt,
-        build_claude_send_argv, is_claude_prompt_too_long_text, list_claude_sessions_from_paths,
-        read_claude_session_from_paths, resolve_claude_send_context, ClaudeSession, ClaudeTurn,
+        build_claude_continuation_system_prompt, build_claude_send_argv,
+        build_claude_session_send_plan, collect_claude_runtime_env_from_pairs,
+        is_app_owned_claude_session_in_dir, is_claude_prompt_too_long_text,
+        list_claude_sessions_from_paths, mark_app_owned_claude_session_in_dir,
+        read_claude_command_prefix_from_config_raw, read_claude_session_from_paths,
+        resolve_claude_send_context, ClaudeSession, ClaudeSessionSendPlan, ClaudeTurn,
     };
     use serde_json::json;
     use std::fs;
@@ -1877,35 +2270,6 @@ mod tests {
     }
 
     #[test]
-    fn build_claude_command_env_from_env_raw_injects_dummy_key_for_proxy_mode() {
-        let env_map = build_claude_command_env_from_env_raw(
-            "ANTHROPIC_BASE_URL=http://localhost:3031\nANTHROPIC_MODEL=claude-opus-4-6\n",
-        );
-
-        assert_eq!(
-            env_map.get("ANTHROPIC_BASE_URL").map(String::as_str),
-            Some("http://localhost:3031")
-        );
-        assert_eq!(
-            env_map.get("ANTHROPIC_MODEL").map(String::as_str),
-            Some("claude-opus-4-6")
-        );
-        assert_eq!(
-            env_map.get("ANTHROPIC_API_KEY").map(String::as_str),
-            Some("dummy")
-        );
-    }
-
-    #[test]
-    fn build_claude_command_env_from_env_raw_skips_empty_values() {
-        let env_map = build_claude_command_env_from_env_raw(
-            "ANTHROPIC_API_KEY=\nANTHROPIC_BASE_URL=\nANTHROPIC_MODEL=   \n",
-        );
-
-        assert!(env_map.is_empty());
-    }
-
-    #[test]
     fn build_claude_continuation_system_prompt_keeps_recent_context_with_budget() {
         let turns = vec![
             ClaudeTurn {
@@ -1946,8 +2310,10 @@ mod tests {
 
     #[test]
     fn build_claude_send_argv_switches_between_resume_and_session_id() {
+        let claude_command = vec!["claude".to_string()];
+
         assert_eq!(
-            build_claude_send_argv("claude", "ses-existing", "继续", true),
+            build_claude_send_argv(&claude_command, "ses-existing", "继续", true),
             vec![
                 "claude".to_string(),
                 "-p".to_string(),
@@ -1961,7 +2327,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            build_claude_send_argv("claude", "ses-new", "继续", false),
+            build_claude_send_argv(&claude_command, "ses-new", "继续", false),
             vec![
                 "claude".to_string(),
                 "-p".to_string(),
@@ -1977,10 +2343,189 @@ mod tests {
     }
 
     #[test]
+    fn build_claude_session_send_plan_resumes_existing_sessions_directly() {
+        let turns = vec![ClaudeTurn {
+            role: "user".into(),
+            content: "上一轮问题".into(),
+        }];
+
+        let plan = build_claude_session_send_plan("ses-existing", true, false, &turns);
+
+        assert_eq!(
+            plan,
+            ClaudeSessionSendPlan::Direct {
+                send_session_id: "ses-existing".to_string(),
+                session_exists: true,
+            }
+        );
+    }
+
+    #[test]
+    fn build_claude_session_send_plan_keeps_new_sessions_direct() {
+        let plan = build_claude_session_send_plan("ses-new", false, false, &[]);
+
+        assert_eq!(
+            plan,
+            ClaudeSessionSendPlan::Direct {
+                send_session_id: "ses-new".to_string(),
+                session_exists: false,
+            }
+        );
+    }
+
+    #[test]
+    fn build_claude_session_send_plan_resumes_app_owned_existing_sessions() {
+        let plan = build_claude_session_send_plan("ses-app-owned", true, true, &[]);
+
+        assert_eq!(
+            plan,
+            ClaudeSessionSendPlan::Direct {
+                send_session_id: "ses-app-owned".to_string(),
+                session_exists: true,
+            }
+        );
+    }
+
+    #[test]
+    fn mark_app_owned_claude_session_writes_resume_marker() {
+        let root = temp_dir("onlineworker-claude-owned-marker");
+
+        mark_app_owned_claude_session_in_dir(&root, "ses-app-owned", Some("ses-imported"))
+            .expect("mark app-owned");
+
+        assert!(is_app_owned_claude_session_in_dir(&root, "ses-app-owned"));
+        assert!(!is_app_owned_claude_session_in_dir(&root, "ses-imported"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn collect_claude_runtime_env_from_pairs_preserves_current_baseurl_chain() {
+        let env_map = collect_claude_runtime_env_from_pairs([
+            ("ANTHROPIC_MODEL", "claude-opus-4-6"),
+            (
+                "ANTHROPIC_BASE_URL",
+                "https://langbase.netease.com/langbase",
+            ),
+            ("ANTHROPIC_AUTH_TOKEN", "token-123"),
+            ("IGNORED_KEY", "ignored"),
+        ]);
+
+        assert_eq!(
+            env_map.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://langbase.netease.com/langbase")
+        );
+        assert_eq!(
+            env_map.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("token-123")
+        );
+        assert_eq!(
+            env_map.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("claude-opus-4-6")
+        );
+    }
+
+    #[test]
+    fn collect_claude_runtime_env_from_pairs_rejects_stale_localhost_baseurl() {
+        let env_map = collect_claude_runtime_env_from_pairs([
+            ("ANTHROPIC_BASE_URL", "http://localhost:3031"),
+            ("ANTHROPIC_MODEL", "claude-opus-4-6"),
+        ]);
+
+        assert!(env_map.is_empty());
+    }
+
+    #[test]
+    fn collect_claude_runtime_env_from_pairs_adds_dummy_key_for_baseurl_without_token() {
+        let mut env_map = collect_claude_runtime_env_from_pairs([
+            (
+                "ANTHROPIC_BASE_URL",
+                "https://langbase.netease.com/langbase",
+            ),
+            ("ANTHROPIC_MODEL", "claude-opus-4-6"),
+        ]);
+        if env_map.contains_key("ANTHROPIC_BASE_URL")
+            && !env_map.contains_key("ANTHROPIC_AUTH_TOKEN")
+            && !env_map.contains_key("ANTHROPIC_API_KEY")
+        {
+            env_map.insert("ANTHROPIC_API_KEY".to_string(), "dummy".to_string());
+        }
+
+        assert_eq!(
+            env_map.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://langbase.netease.com/langbase")
+        );
+        assert_eq!(
+            env_map.get("ANTHROPIC_API_KEY").map(String::as_str),
+            Some("dummy")
+        );
+    }
+
+    #[test]
+    fn build_claude_send_argv_preserves_launcher_prefix() {
+        let claude_command = vec!["ow-claude-launcher".to_string(), "claude".to_string()];
+
+        assert_eq!(
+            build_claude_send_argv(&claude_command, "ses-new", "继续", false),
+            vec![
+                "ow-claude-launcher".to_string(),
+                "claude".to_string(),
+                "-p".to_string(),
+                "--verbose".to_string(),
+                "--output-format".to_string(),
+                "stream-json".to_string(),
+                "--include-partial-messages".to_string(),
+                "--session-id".to_string(),
+                "ses-new".to_string(),
+                "继续".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn read_claude_command_prefix_from_config_uses_provider_bin() {
+        let command = read_claude_command_prefix_from_config_raw(
+            r#"
+schema_version: 2
+providers:
+  claude:
+    bin: "ow-claude-launcher claude"
+"#,
+        );
+
+        assert_eq!(
+            command,
+            vec!["ow-claude-launcher".to_string(), "claude".to_string()]
+        );
+    }
+
+    #[test]
+    fn read_claude_command_prefix_from_config_supports_quoted_launcher_path() {
+        let command = read_claude_command_prefix_from_config_raw(
+            r#"
+schema_version: 2
+providers:
+  claude:
+    bin: '"/Applications/Claude Wrapper/bin/launch" claude'
+"#,
+        );
+
+        assert_eq!(
+            command,
+            vec![
+                "/Applications/Claude Wrapper/bin/launch".to_string(),
+                "claude".to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn resolve_claude_send_context_uses_session_cwd_when_workspace_missing() {
         let root = temp_dir("onlineworker-claude-send-context-existing");
         let projects_dir = root.join("projects");
-        let cwd = "/Users/example/Projects/onlineWorker";
+        let cwd_path = root.join("onlineWorker");
+        fs::create_dir_all(&cwd_path).expect("create cwd");
+        let cwd = cwd_path.to_string_lossy().to_string();
 
         write_jsonl(
             &projects_dir.join("-Users-example-Projects-onlineWorker/ses-existing.jsonl"),
@@ -1997,8 +2542,37 @@ mod tests {
             resolve_claude_send_context("ses-existing", Some(&projects_dir), None)
                 .expect("resolve send context");
 
-        assert_eq!(resolved_cwd, std::path::PathBuf::from(cwd));
+        assert_eq!(resolved_cwd, cwd_path);
         assert!(session_exists);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolve_claude_send_context_rejects_missing_explicit_workspace() {
+        let root = temp_dir("onlineworker-claude-send-context-missing-explicit");
+        let projects_dir = root.join("projects");
+        let missing_cwd = root.join("deleted-onlineWorker");
+
+        write_jsonl(
+            &projects_dir.join("-Users-example-Projects-onlineWorker/ses-existing.jsonl"),
+            &[json!({
+                "type": "user",
+                "timestamp": "2026-04-07T09:31:18.002Z",
+                "cwd": missing_cwd.to_string_lossy(),
+                "sessionId": "ses-existing",
+                "message": {"role": "user", "content": "继续"},
+            })],
+        );
+
+        let error = resolve_claude_send_context(
+            "ses-existing",
+            Some(&projects_dir),
+            Some(missing_cwd.to_string_lossy().as_ref()),
+        )
+        .expect_err("missing explicit workspace should not be used");
+
+        assert!(error.contains("workspace directory does not exist"));
 
         let _ = fs::remove_dir_all(root);
     }

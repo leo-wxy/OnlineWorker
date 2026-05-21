@@ -10,6 +10,21 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLUGIN_STAGING_ROOT="$PROJECT_ROOT/mac-app/src-tauri/provider-plugins"
+BUNDLE_ROOT="$PROJECT_ROOT/mac-app/src-tauri/target/release/bundle"
+
+cleanup_previous_bundle_outputs() {
+	local volume="/Volumes/OnlineWorker"
+	if [ -d "$volume" ]; then
+		echo "=== Detaching stale OnlineWorker volume ==="
+		hdiutil detach "$volume" || hdiutil detach "$volume" -force || true
+		echo ""
+	fi
+
+	echo "=== Cleaning previous bundle outputs ==="
+	rm -rf "$BUNDLE_ROOT/dmg" "$BUNDLE_ROOT/macos"
+	mkdir -p "$BUNDLE_ROOT"
+	echo ""
+}
 
 stage_provider_plugins() {
 	mkdir -p "$PLUGIN_STAGING_ROOT"
@@ -77,6 +92,8 @@ echo "Project: $PROJECT_ROOT"
 echo "Target:  $TARGET_TRIPLE"
 echo "Plugin sources: ${ONLINEWORKER_PLUGIN_SOURCE_DIRS:-<none>}"
 echo ""
+
+cleanup_previous_bundle_outputs
 
 # Step 1: Use arm64 Python for PyInstaller
 PYTHON_ARM64="${PYTHON_ARM64:-$HOME/.pyenv/versions/3.13.1/bin/python3}"

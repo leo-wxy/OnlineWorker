@@ -178,12 +178,11 @@ export async function sendClaudeMessage(
   attachments: ComposerAttachment[] = [],
   workspaceDir?: string | null,
 ): Promise<ClaudeSendResult> {
-  return invoke<ClaudeSendResult>("send_claude_session_message", {
+  await sendProviderSessionMessage("claude", sessionId, text, attachments, workspaceDir);
+  return {
     sessionId,
-    text,
-    attachments,
-    workspaceDir: workspaceDir ?? null,
-  });
+    createdNewSession: false,
+  };
 }
 
 export async function stageComposerAttachments(

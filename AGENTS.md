@@ -20,6 +20,21 @@ rules needed to work safely in this codebase.
    app surfaces.
 4. Keep public docs and code free of non-public credentials, endpoints, or
    repository-external implementation details.
+5. Never delete files outside this repository. User history, sessions, logs,
+   databases, app data, credentials, and state under `~/.codex`, `~/.claude`,
+   `~/Library`, `/Applications`, `~/.Trash`, or any other external location are
+   not cleanup targets.
+6. Do not implement cleanup scripts that physically delete session, history,
+   log, database, or state files. Any cleanup must be reversible: first produce
+   an explicit candidate list, then move approved files to a repository-local or
+   user-approved quarantine/archive directory with a manifest, and provide a
+   restore path.
+7. Codex/Claude transcript files are user history. Do not classify a whole
+   transcript as disposable because it contains smoke-test text, markers, tool
+   output, or quoted evidence.
+8. Any operation touching non-repository paths must be read-only unless the user
+   explicitly asks for that exact write. A general request like "clean up smoke"
+   is not permission to delete or move external files.
 
 ## Packaging
 
@@ -45,6 +60,125 @@ rules needed to work safely in this codebase.
 - Frontend tests live under `mac-app/tests`
 - For packaged-app changes, document whether installed-app verification was
   completed or remains unverified
+
+### Complete Packaged-App Verification Chain
+
+When the user says "开始验证", "打包验证", "重新验证", "打包 + 覆盖", or
+similar wording, treat it as the full packaged-app verification chain unless
+the user explicitly says to only build or not launch:
+
+Every step must have an action and an immediate verification before moving to
+the next step. Do not merge "file copied" with "new app is running"; these are
+separate facts with separate evidence.
+
+1. Record the pre-existing runtime state.
+   - Action: list current OnlineWorker-owned processes with a precise filter:
+     `ps -axo pid,ppid,etime,command | rg "OnlineWorker.app|onlineworker-app|onlineworker-bot"`.
+   - Verification: record old PIDs, elapsed time, and commands. If the command
+     is blocked by permissions, request approval immediately and say that this
+     process check is blocked.
+2. Run source-level regression checks when code changed.
+   - Action: run the smallest relevant Python/Rust test set before packaging.
+   - Verification: record exact commands and pass/fail counts. If these fail,
+     stop before building.
+3. Build from the combined repository root entry point:
+   `bash build.sh`.
+   - Verification: the command exits 0 and reports the freshly generated DMG
+     path.
+4. Record the fresh artifact identity.
+   - Action: hash the generated DMG with `shasum -a 256`.
+   - Verification: report the DMG path and hash. This hash identifies the build
+     being installed.
+5. Mount the freshly generated DMG.
+   - Action: detach any stale `/Volumes/OnlineWorker` mount first, then attach
+     the new DMG. Prefer non-interactive attach options when appropriate, but
+     do not skip content verification.
+   - Verification: `/Volumes/OnlineWorker/OnlineWorker.app` exists and its
+     `Info.plist` is readable.
+6. Verify the DMG app contents before copying.
+   - Action: read `/Volumes/OnlineWorker/OnlineWorker.app/Contents/Info.plist`
+     and hash `/Volumes/OnlineWorker/OnlineWorker.app/Contents/MacOS/onlineworker-bot`.
+   - Verification: version is the expected version, and the mounted sidecar
+     hash is recorded.
+7. Stop all old OnlineWorker-owned runtime processes.
+   - Action: kill the old `onlineworker-app` and `onlineworker-bot` PIDs found
+     in step 1. Include OnlineWorker-owned child runtime processes when their
+     parent chain belongs to `onlineworker-bot`.
+   - Verification: the kill command exits 0 or reports already-exited PIDs.
+     Do not kill unrelated standalone Codex, Claude, terminal, editor, or
+     system processes.
+8. Verify old runtime processes are gone.
+   - Action: run the same precise process filter again.
+   - Verification: no OnlineWorker-owned business process remains. It is OK for
+     the verification command's own `ps`/`rg` processes to appear; do not count
+     those as OnlineWorker runtime processes.
+9. Overwrite `/Applications/OnlineWorker.app`.
+   - Action: remove the old installed app and copy the mounted app with
+     `ditto /Volumes/OnlineWorker/OnlineWorker.app /Applications/OnlineWorker.app`.
+   - Verification: both commands exit 0.
+10. Verify installed app contents.
+    - Action: compare hashes for
+      `/Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot` and
+      `/Volumes/OnlineWorker/OnlineWorker.app/Contents/MacOS/onlineworker-bot`,
+      then read `/Applications/OnlineWorker.app/Contents/Info.plist`.
+    - Verification: installed sidecar hash exactly equals mounted sidecar hash,
+      and installed version matches the expected version.
+11. Relaunch `/Applications/OnlineWorker.app`.
+    - Action: run `open /Applications/OnlineWorker.app`.
+    - Verification: this command alone only means launch was requested; it does
+      not prove the new app is running.
+12. Verify the relaunched runtime is new.
+    - Action: run the precise process filter again and inspect each new PID
+      with `ps -p <pid> -o pid=,etime=,comm=`.
+    - Verification: new `onlineworker-app` and `onlineworker-bot` PIDs exist,
+      their elapsed times are short relative to the relaunch, and their
+      executable paths are under `/Applications/OnlineWorker.app`. If elapsed
+      time shows an older process, stop and restart again.
+13. Verify runtime IPC before feature smoke.
+    - Action: check the relevant socket or health endpoint for the provider
+      under test, for example the provider owner bridge socket in
+      `~/Library/Application Support/OnlineWorker`.
+    - Verification: the socket or health check responds from the newly started
+      app.
+14. Run the feature-specific smoke.
+    - Action: run the smallest script or command that proves the target
+      behavior, for example a Claude owner-bridge smoke that sends a unique
+      marker and reads the assistant response back.
+    - Verification: send succeeds, read succeeds, and the returned assistant
+      content exactly matches the marker.
+15. Check logs for errors from this run.
+    - Action: inspect the relevant recent log file or system log after the
+      smoke.
+    - Verification: no traceback, bridge error, provider error, or permission
+      routing error corresponds to the just-run smoke marker or timestamp.
+16. Detach the DMG.
+    - Action: `hdiutil detach /Volumes/OnlineWorker`.
+    - Verification: detach exits 0, or any failure is reported with the exact
+      reason.
+17. Report only verified facts.
+    - Action: summarize commands, hashes, PIDs, elapsed times, version, smoke
+      marker, and log result.
+    - Verification: do not claim packaged-app verification is complete unless
+      all required steps above passed. Mark any skipped or failed step as
+      unverified.
+
+Do not claim packaged-app verification is complete after only building or only
+overwriting. Do not claim relaunch is complete after only running `open`; a
+valid relaunch requires evidence that old OnlineWorker processes were stopped
+and new `onlineworker-app` / `onlineworker-bot` PIDs appeared afterward. If
+relaunch or runtime verification fails, report that failure explicitly with the
+command/output evidence.
+
+Stopping and restarting are one indivisible verification action. Never leave the
+installed app stopped as the end state of verification unless the user explicitly
+asked to stop it. If a stop command succeeds, is interrupted, or partially
+executes, immediately continue with the relaunch and post-start process/log
+checks before reporting status.
+
+Process verification output can be large and easy to misread. Prefer a precise
+process filter over scanning truncated full-process output. If any command is
+waiting for approval or permissions, say that immediately instead of silently
+waiting or retrying with new command shapes.
 
 ## Reference Documents
 

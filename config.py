@@ -5,7 +5,7 @@ import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 from core.providers.overlay import load_overlay_provider_raws, manifest_to_provider_raw
 
@@ -20,6 +20,28 @@ _dotenv_loaded: bool = False  # track whether CWD .env has been loaded
 # 当前 App surface 已正式暴露 claude，运行时链路不再额外隐藏 provider。
 HIDDEN_PROVIDER_IDS = frozenset()
 BUILTIN_PROVIDER_PLUGIN_DIR = Path(__file__).resolve().parent / "plugins" / "providers" / "builtin"
+OWNED_ENV_KEYS = frozenset(
+    {
+        "TELEGRAM_TOKEN",
+        "ALLOWED_USER_ID",
+        "GROUP_CHAT_ID",
+    }
+)
+OWNED_ENV_PREFIXES = ("ONLINEWORKER_",)
+
+
+def _is_owned_env_key(key: str) -> bool:
+    normalized = str(key or "").strip()
+    return normalized in OWNED_ENV_KEYS or normalized.startswith(OWNED_ENV_PREFIXES)
+
+
+def _load_owned_env(env_path: str, *, override: bool) -> None:
+    values = dotenv_values(env_path)
+    for key, value in values.items():
+        if not key or value is None or not _is_owned_env_key(key):
+            continue
+        if override or key not in os.environ:
+            os.environ[key] = str(value)
 
 
 def get_data_dir() -> str | None:
@@ -218,11 +240,7 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
                 "cleanup_matchers": [],
             },
             "health": {},
-            "auth": {
-                "key": "",
-                "base_url": "",
-                "model": "",
-            },
+            "auth": {},
         }
     return {
         "visible": True,
@@ -366,34 +384,6 @@ def _load_provider_overlay() -> dict[str, Any]:
     return merged
 
 
-def _normalize_claude_auth(raw_auth: Any) -> dict[str, str]:
-    raw = raw_auth if isinstance(raw_auth, dict) else {}
-    env_fallback = {
-        "key": (os.environ.get("ANTHROPIC_API_KEY") or "").strip(),
-        "base_url": (os.environ.get("ANTHROPIC_BASE_URL") or "").strip(),
-        "model": (os.environ.get("ANTHROPIC_MODEL") or "").strip(),
-    }
-    auth: dict[str, str] = {}
-    for key in ("key", "base_url", "model"):
-        explicit_value = str(raw.get(key) or "").strip()
-        auth[key] = explicit_value or env_fallback[key]
-    return auth
-
-
-def _apply_claude_auth_env(auth: dict[str, str]) -> None:
-    env_map = {
-        "key": "ANTHROPIC_API_KEY",
-        "base_url": "ANTHROPIC_BASE_URL",
-        "model": "ANTHROPIC_MODEL",
-    }
-    for auth_key, env_key in env_map.items():
-        value = str((auth or {}).get(auth_key) or "").strip()
-        if value:
-            os.environ[env_key] = value
-        else:
-            os.environ.pop(env_key, None)
-
-
 def _resolve_protocol(
     tool_name: str,
     *,
@@ -529,7 +519,13 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
         control_mode=control_mode,
     )
 
-    auth = _normalize_claude_auth(raw.get("auth")) if tool_name == "claude" else {}
+    auth = {}
+    if isinstance(raw.get("auth"), dict):
+        auth = {
+            str(k): str(v or "").strip()
+            for k, v in raw.get("auth", {}).items()
+            if k is not None and str(v or "").strip()
+        }
     return ToolConfig(
         name=tool_name,
         enabled=managed,
@@ -577,11 +573,11 @@ def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None)
     # Load .env explicitly (never at module level) -------------------------
     global _dotenv_loaded
     if data_dir is not None:
-        # data-dir mode: always load the data-dir's .env, override existing vars
-        load_dotenv(dotenv_path=env_path, override=True)
+        # data-dir mode: always load OnlineWorker-owned .env keys, preserving provider-private runtime env.
+        _load_owned_env(env_path, override=True)
     elif not _dotenv_loaded:
-        # CWD mode (backward compat): load once, matching old module-level call
-        load_dotenv(dotenv_path=env_path, override=False)
+        # CWD mode (backward compat): load once, without overriding existing process env.
+        _load_owned_env(env_path, override=False)
         _dotenv_loaded = True
 
     with open(config_path, "r", encoding="utf-8") as f:
@@ -657,10 +653,6 @@ def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None)
             _default_provider_blueprint("claude"),
             legacy=False,
         )
-
-    claude_provider = providers.get("claude")
-    if claude_provider is not None:
-        _apply_claude_auth_env(claude_provider.auth)
 
     ordered_names = []
     for name in ("codex", "claude"):

@@ -41,6 +41,13 @@ test("generic provider sessions render a reusable chat surface with composer wir
   assert.doesNotMatch(sessionBrowser, /chat is not available/);
 });
 
+test("claude session composer sends through the provider owner bridge", () => {
+  const api = readFileSync(join(root, "src", "components", "session-browser", "api.ts"), "utf8");
+
+  assert.match(api, /await sendProviderSessionMessage\(\s*"claude",\s*sessionId,\s*text,\s*attachments,\s*workspaceDir/);
+  assert.doesNotMatch(api, /send_claude_session_message/);
+});
+
 test("session locale strings expose provider, source, and smoke labels", () => {
   for (const locale of ["en", "zh"]) {
     const source = readFileSync(join(root, "src", "i18n", "locales", `${locale}.ts`), "utf8");

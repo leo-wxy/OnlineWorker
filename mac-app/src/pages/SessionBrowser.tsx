@@ -40,6 +40,7 @@ import {
   buildSnapshotSignature,
   countAssistantEntries,
   pollAssistantReply,
+  startActiveSessionRefresh,
 } from "../utils/sessionPolling.js";
 import { shouldClearReplyWatch } from "../utils/replyWatch.js";
 import type {
@@ -486,6 +487,8 @@ function ClaudeChat({ session, refreshSessions }: { session: UnifiedSession; ref
   const msgEndRef = useRef<HTMLDivElement>(null);
   const replyWatchTokenRef = useRef(0);
   const messagesRef = useRef<SessionTurn[]>([]);
+  const sendingRef = useRef(false);
+  const replyWatchStateRef = useRef<ReplyWatchState | null>(null);
 
   const cancelReplyWatch = useCallback(() => {
     replyWatchTokenRef.current += 1;
@@ -521,6 +524,32 @@ function ClaudeChat({ session, refreshSessions }: { session: UnifiedSession; ref
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  useEffect(() => {
+    sendingRef.current = sending;
+  }, [sending]);
+
+  useEffect(() => {
+    replyWatchStateRef.current = replyWatchState;
+  }, [replyWatchState]);
+
+  useEffect(() => startActiveSessionRefresh<SessionTurn>({
+    getCurrentSnapshot: () => messagesRef.current,
+    loadSnapshot: () => fetchClaudeMessages(rawSession.sessionId, rawSession.workspace),
+    onSnapshot: (nextMessages) => {
+      messagesRef.current = nextMessages;
+      setMessages(nextMessages);
+      setReplyWatchState((current) => (current === "expired" ? null : current));
+    },
+    shouldSkip: () => (
+      sendingRef.current ||
+      replyWatchStateRef.current === "foreground" ||
+      replyWatchStateRef.current === "background"
+    ),
+    onError: (error) => {
+      console.warn("Failed to refresh Claude session", error);
+    },
+  }), [rawSession.sessionId, rawSession.workspace]);
 
   useEffect(() => {
     msgEndRef.current?.scrollIntoView({ behavior: "smooth" });

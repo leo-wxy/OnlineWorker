@@ -377,7 +377,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--env-file",
         default=_default_env_file(),
-        help="Environment file used for Claude auth/proxy settings",
+        help="Optional environment file for smoke-test-only overrides",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)

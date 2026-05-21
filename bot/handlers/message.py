@@ -50,13 +50,10 @@ logger = logging.getLogger(__name__)
 
 
 def _attachment_download_dir() -> str:
-    from config import get_data_dir
+    from config import default_data_dir, get_data_dir
 
-    data_dir = get_data_dir()
-    if data_dir:
-        target = os.path.join(data_dir, "attachments")
-    else:
-        target = os.path.join(os.getcwd(), ".codex", "attachments")
+    data_dir = get_data_dir() or default_data_dir()
+    target = os.path.join(data_dir, "attachments")
     os.makedirs(target, exist_ok=True)
     return target
 
@@ -216,6 +213,7 @@ async def _dispatch_thread_message(
     original_streaming_msg_id = getattr(thread_info, "streaming_msg_id", None)
     original_last_tg_user_message_id = getattr(thread_info, "last_tg_user_message_id", None)
 
+    send_text = text if text and text.strip() else caption
     has_files = any(str(item.get("kind") or "").strip().lower() == "file" for item in (attachments or []))
     if has_photo and not (message_hooks and message_hooks.supports_photo):
         raise RuntimeError(f"当前 {ws_info.tool} thread 不支持图片消息。")
@@ -246,7 +244,7 @@ async def _dispatch_thread_message(
             context=context,
             group_chat_id=group_chat_id,
             src_topic_id=src_topic_id,
-            text=text,
+            text=send_text,
             has_photo=has_photo,
             attachments=attachments,
         )
@@ -275,7 +273,7 @@ async def _dispatch_thread_message(
                 context=context,
                 group_chat_id=group_chat_id,
                 src_topic_id=src_topic_id,
-                text=text,
+                text=send_text,
                 has_photo=has_photo,
             )
             if attachments:
@@ -299,7 +297,7 @@ async def _dispatch_thread_message(
                 context=context,
                 group_chat_id=group_chat_id,
                 src_topic_id=src_topic_id,
-                text=text,
+                text=send_text,
                 has_photo=has_photo,
             )
             if attachments:
@@ -316,11 +314,11 @@ async def _dispatch_thread_message(
                 await adapter.send_user_message(
                     workspace_id,
                     thread_info.thread_id,
-                    text,
+                    send_text,
                     attachments=attachments,
                 )
             else:
-                await adapter.send_user_message(workspace_id, thread_info.thread_id, text)
+                await adapter.send_user_message(workspace_id, thread_info.thread_id, send_text)
     except Exception:
         if thread_info.thread_id != original_thread_id:
             ws_info.threads.pop(thread_info.thread_id, None)
@@ -339,7 +337,7 @@ async def _dispatch_thread_message(
     source_changed = str(getattr(thread_info, "source", "") or "unknown") != original_source
     preview_value = _preview_for_message(text, caption, has_photo)
     preview_changed = False
-    if (remapped or not thread_info.preview) and preview_value and preview_value != thread_info.preview:
+    if not thread_info.preview and preview_value and preview_value != thread_info.preview:
         thread_info.preview = preview_value
         preview_changed = True
 
@@ -376,14 +374,6 @@ def _build_provider_approval_reply(approval, action: str) -> tuple[str, dict]:
     if action == "exec_allow_always":
         return "✅ 已总是允许", {"decision": "acceptForSession"}
     return "✅ 已允许", {"decision": "accept"}
-
-
-def _build_codex_hook_approval_reply(action: str) -> tuple[str, dict]:
-    if action == "exec_deny":
-        return "❌ 已拒绝", {"behavior": "deny"}
-    if action == "exec_allow_always":
-        return "✅ 已总是允许", {"behavior": "allow", "scope": "session"}
-    return "✅ 已允许", {"behavior": "allow"}
 
 
 async def _safe_answer_callback(
@@ -730,41 +720,29 @@ def make_callback_handler(state: AppState, group_chat_id: int) -> Callable:
                 await query.edit_message_text("⚠️ 此授权请求已失效或已处理。")  # type: ignore[union-attr]
                 return
 
-            approval_source = str(getattr(approval, "approval_source", "") or "app_server")
-            if approval_source == "hook_bridge":
-                label, reply_body = _build_codex_hook_approval_reply(action)
-                if getattr(approval, "tool_name", ""):
-                    reply_body["tool_name"] = approval.tool_name
-            else:
-                label, reply_body = _build_provider_approval_reply(approval, action)
+            label, reply_body = _build_provider_approval_reply(approval, action)
 
             try:
-                if getattr(approval, "approval_source", "") == "hook_bridge":
-                    bridge = codex_state.get_hook_bridge(state)
-                    if bridge is None or not getattr(bridge, "is_running", False):
-                        raise RuntimeError("Codex hook bridge 未运行，无法回复授权。")
-                    await bridge.reply_server_request(approval.request_id, reply_body)
-                else:
-                    tool_name = approval.tool_type or state.get_tool_for_workspace(approval.workspace_id) or ""
-                    unavailable = _provider_unavailable_message(state, tool_name) if tool_name else None
-                    if unavailable:
-                        await query.edit_message_text(f"❌ 回复授权失败：{unavailable}")  # type: ignore[union-attr]
-                        return
-                    active_adapter = state.get_adapter(tool_name) if tool_name else None
-                    if active_adapter is None:
-                        active_adapter = state.get_adapter_for_workspace(approval.workspace_id)
-                    if not active_adapter or not active_adapter.connected:
-                        logger.warning(
-                            f"[approval] adapter 未连接 action={action} msg_id={msg_id} "
-                            f"tool={tool_name or approval.tool_type or '?'} ws={approval.workspace_id}"
-                        )
-                        await query.edit_message_text("❌ 未连接，无法回复授权。")  # type: ignore[union-attr]
-                        return
-                    await active_adapter.reply_server_request(
-                        approval.workspace_id,
-                        approval.request_id,
-                        reply_body,
+                tool_name = approval.tool_type or state.get_tool_for_workspace(approval.workspace_id) or ""
+                unavailable = _provider_unavailable_message(state, tool_name) if tool_name else None
+                if unavailable:
+                    await query.edit_message_text(f"❌ 回复授权失败：{unavailable}")  # type: ignore[union-attr]
+                    return
+                active_adapter = state.get_adapter(tool_name) if tool_name else None
+                if active_adapter is None:
+                    active_adapter = state.get_adapter_for_workspace(approval.workspace_id)
+                if not active_adapter or not active_adapter.connected:
+                    logger.warning(
+                        f"[approval] adapter 未连接 action={action} msg_id={msg_id} "
+                        f"tool={tool_name or approval.tool_type or '?'} ws={approval.workspace_id}"
                     )
+                    await query.edit_message_text("❌ 未连接，无法回复授权。")  # type: ignore[union-attr]
+                    return
+                await active_adapter.reply_server_request(
+                    approval.workspace_id,
+                    approval.request_id,
+                    reply_body,
+                )
                 if approval.tool_type == "codex" or codex_state.has_interruption(state, approval.request_id):
                     codex_state.resolve_interruption(
                         state,

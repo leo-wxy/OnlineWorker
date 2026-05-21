@@ -380,8 +380,17 @@ fn list_codex_threads_from_paths(
     let mut candidates = Vec::new();
     let mut seen_ids = std::collections::HashSet::new();
     for r in rows {
-        let (id, title, cwd, archived, rollout_path, source, model_provider, created_at, updated_at) =
-            r.map_err(|e| e.to_string())?;
+        let (
+            id,
+            title,
+            cwd,
+            archived,
+            rollout_path,
+            source,
+            model_provider,
+            created_at,
+            updated_at,
+        ) = r.map_err(|e| e.to_string())?;
         if is_codex_subagent_source(&source) {
             continue;
         }
@@ -576,14 +585,22 @@ fn send_codex_thread_message_via_owner_bridge_with_retry(
     let mut last_error = format!("codex owner bridge not ready: {}", socket_path.display());
 
     loop {
-        match send_codex_thread_message_via_owner_bridge(data_dir, thread_id, text, attachments, cwd) {
+        match send_codex_thread_message_via_owner_bridge(
+            data_dir,
+            thread_id,
+            text,
+            attachments,
+            cwd,
+        ) {
             Ok(CodexOwnerBridgeSendAttempt::Accepted(result)) => return Ok(result),
             Ok(CodexOwnerBridgeSendAttempt::NotReady) => {
                 last_error = format!("codex owner bridge not ready: {}", socket_path.display());
             }
             Err(error) => {
                 if error.starts_with("__OWNER_BRIDGE_NOT_READY__:") {
-                    last_error = error.trim_start_matches("__OWNER_BRIDGE_NOT_READY__:").to_string();
+                    last_error = error
+                        .trim_start_matches("__OWNER_BRIDGE_NOT_READY__:")
+                        .to_string();
                     if started_at.elapsed() >= timeout {
                         return Err(last_error);
                     }
@@ -733,9 +750,7 @@ fn extract_codex_image_summary(item: &Value, image_label: Option<&str>) -> Optio
         .and_then(Value::as_str)
         .or_else(|| item.get("imageUrl").and_then(Value::as_str))
         .or_else(|| item.get("path").and_then(Value::as_str))?;
-    let normalized_ref = image_ref
-        .strip_prefix("file://")
-        .unwrap_or(image_ref);
+    let normalized_ref = image_ref.strip_prefix("file://").unwrap_or(image_ref);
     if normalized_ref.starts_with("data:") {
         let fallback_label = image_label
             .map(str::trim)
@@ -1286,8 +1301,8 @@ mod tests {
         list_codex_threads_from_paths, parse_codex_stream_events, read_codex_thread,
         read_codex_thread_state, read_codex_thread_updates,
         send_codex_thread_message_via_owner_bridge,
-        send_codex_thread_message_via_owner_bridge_with_retry, CodexThreadCursor,
-        CodexOwnerBridgeSendAttempt,
+        send_codex_thread_message_via_owner_bridge_with_retry, CodexOwnerBridgeSendAttempt,
+        CodexThreadCursor,
     };
     use rusqlite::{params, Connection};
     use serde_json::json;
@@ -1383,8 +1398,9 @@ mod tests {
                 .expect("write response");
         });
 
-        let error = send_codex_thread_message_via_owner_bridge(&temp_dir, "tid-1", "hello", &[], None)
-            .expect_err("owner bridge should return error");
+        let error =
+            send_codex_thread_message_via_owner_bridge(&temp_dir, "tid-1", "hello", &[], None)
+                .expect_err("owner bridge should return error");
 
         assert!(error.contains("owner adapter unavailable"));
 
@@ -1496,7 +1512,9 @@ mod tests {
             let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
             reader.read_line(&mut line).expect("read request");
             stream
-                .write_all(b"{\"ok\":false,\"error\":\"no rollout found for thread id tid-hard\"}\n")
+                .write_all(
+                    b"{\"ok\":false,\"error\":\"no rollout found for thread id tid-hard\"}\n",
+                )
                 .expect("write response");
             std::thread::sleep(Duration::from_millis(250));
         });
@@ -2178,7 +2196,10 @@ mod tests {
 
         assert_eq!(turns.len(), 2);
         assert_eq!(turns[0].role, "user");
-        assert_eq!(turns[0].content, "请看这张图\n[Attached image] screenshot.png");
+        assert_eq!(
+            turns[0].content,
+            "请看这张图\n[Attached image] screenshot.png"
+        );
         assert_eq!(turns[1].role, "assistant");
         assert_eq!(turns[1].content, "我先看截图。");
 
@@ -2212,7 +2233,10 @@ mod tests {
 
         assert_eq!(turns.len(), 2);
         assert_eq!(turns[0].role, "user");
-        assert_eq!(turns[0].content, "请看这张图\n[Attached image] screenshot.png");
+        assert_eq!(
+            turns[0].content,
+            "请看这张图\n[Attached image] screenshot.png"
+        );
         assert_eq!(turns[1].role, "assistant");
         assert_eq!(turns[1].content, "我先看截图。");
 

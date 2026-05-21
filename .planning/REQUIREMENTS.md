@@ -19,8 +19,8 @@ Requirements for the current brownfield improvement milestone. These focus on UI
 
 ### Attachment Support
 
-- [ ] **ATT-01**: User can attach files and images through the supported app surfaces without needing unsupported workarounds.
-- [ ] **ATT-02**: Attachment handling stays inside the existing Telegram and provider/plugin workflow boundaries instead of bypassing them with ad hoc routing.
+- [x] **ATT-01**: User can attach files and images through the supported app surfaces without needing unsupported workarounds, and can clear accumulated local attachment cache from Settings `Maintenance`.
+- [x] **ATT-02**: Attachment handling stays inside the existing Telegram and provider/plugin workflow boundaries instead of bypassing them with ad hoc routing.
 
 ## v2 Requirements
 
@@ -53,8 +53,8 @@ Deferred to future release work after the current UI refinement milestone.
 | UI-02 | Phase 1 | Completed (2026-05-10) |
 | USG-01 | Phase 2 | Completed (2026-05-12) |
 | USG-02 | Phase 2 | Completed (2026-05-12) |
-| ATT-01 | Phase 3 | Pending |
-| ATT-02 | Phase 3 | Pending |
+| ATT-01 | Phase 3 | Completed (2026-05-21) |
+| ATT-02 | Phase 3 | Completed (2026-05-21) |
 
 **Coverage:**
 - v1 requirements: 6 total
@@ -63,4 +63,4 @@ Deferred to future release work after the current UI refinement milestone.
 
 ---
 *Requirements defined: 2026-05-10*
-*Last updated: 2026-05-13 after replacing placeholder Phases 3/4/5 with attachment support as Phase 3*
+*Last updated: 2026-05-21 after Phase 3 attachment implementation, Settings Maintenance cache cleanup, packaged-app reinstall, startup verification, and user-confirmed live Telegram plus desktop attachment smokes*

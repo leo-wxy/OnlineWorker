@@ -27,10 +27,6 @@ providers:
     control_mode: "app"
     transport:
       type: "stdio"
-    auth:
-      key: ""
-      base_url: ""
-      model: ""
 
 telegram:
   # true = delete archived thread topics.

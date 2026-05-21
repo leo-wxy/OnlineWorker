@@ -105,13 +105,10 @@ Additional provider packages can be mounted by setting `ONLINEWORKER_PROVIDER_OV
 TELEGRAM_TOKEN=your_bot_token_here
 ALLOWED_USER_ID=123456789
 GROUP_CHAT_ID=-1001234567890
-
-# Optional Claude proxy / API configuration.
-# Leave these empty for the standard CLI login flow.
-ANTHROPIC_API_KEY=
-ANTHROPIC_BASE_URL=
-ANTHROPIC_MODEL=
 ```
+
+Claude uses the local Claude CLI's own authentication and runtime configuration.
+OnlineWorker does not read or write `ANTHROPIC_*` proxy, model, or key settings.
 
 ### `config.yaml`
 

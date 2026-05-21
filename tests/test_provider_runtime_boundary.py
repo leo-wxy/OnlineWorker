@@ -15,7 +15,7 @@ def test_lifecycle_manager_does_not_embed_provider_specific_runtime() -> None:
         "is_codex_local_owner_mode",
         "start_codex_tui_sync_loop",
         "start_codex_tui_realtime_mirror_loop",
-        "clear_codex_tui_diagnostics_snapshot",
+        "touch_codex_tui_watch_state",
         "clear_stale_host_artifacts",
         "_start_codex",
         "_shutdown_codex",
@@ -77,3 +77,21 @@ def test_core_runtime_files_remain_provider_generic() -> None:
         source = path.read_text(encoding="utf-8")
         for token in ("codex", "claude", "customprovider", "state.adapter"):
             assert token not in source
+
+
+def test_config_loader_does_not_embed_provider_runtime_env_policy() -> None:
+    source = (PROJECT_ROOT / "config.py").read_text(encoding="utf-8")
+
+    assert "CLAUDE_RUNTIME_ENV_KEYS" not in source
+    assert "_capture_claude_runtime_env" not in source
+    assert "_restore_claude_runtime_env" not in source
+    assert "ANTHROPIC_" not in source
+    assert 'tool_name != "claude"' not in source
+
+
+def test_bot_events_materialization_policy_is_provider_hook_driven() -> None:
+    source = (PROJECT_ROOT / "bot" / "events.py").read_text(encoding="utf-8")
+
+    assert "_is_unbound_claude_thread" not in source
+    assert 'ws_info.tool or "").strip().lower() == "claude"' not in source
+    assert "should_materialize_unbound_thread_topic" in source

@@ -650,6 +650,59 @@ async def test_turn_started_materializes_missing_topic_for_registered_customprov
 
 
 @pytest.mark.asyncio
+async def test_turn_started_does_not_materialize_missing_topic_for_claude_app_session():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="claude",
+        topic_id=3794,
+        daemon_workspace_id="claude:onlineWorker",
+    )
+    ws.threads["ses-claude-123"] = ThreadInfo(
+        thread_id="ses-claude-123",
+        topic_id=None,
+        preview="App-created Claude session",
+        archived=False,
+        is_active=True,
+    )
+    storage = AppStorage(workspaces={"claude:onlineWorker": ws})
+    state = AppState(storage=storage)
+
+    bot = SimpleNamespace()
+    bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=6201))
+    bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=5001))
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID)
+    replay_mock = AsyncMock(return_value="cursor-1")
+
+    with patch("bot.events._replay_thread_history", new=replay_mock), patch(
+        "bot.events.save_storage"
+    ) as save_storage_mock:
+        await handler(
+            "app-server-event",
+            {
+                "workspace_id": "claude:onlineWorker",
+                "message": {
+                    "method": "turn/started",
+                    "params": {
+                        "threadId": "ses-claude-123",
+                        "turn": {"id": "turn-claude-1"},
+                    },
+                },
+            },
+        )
+
+    bot.create_forum_topic.assert_not_awaited()
+    replay_mock.assert_not_awaited()
+    bot.send_message.assert_not_awaited()
+    assert ws.threads["ses-claude-123"].topic_id is None
+    assert "ses-claude-123" not in state.streaming_turns
+    save_storage_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_turn_started_with_new_turn_id_replaces_previous_streaming_turn():
     ws = WorkspaceInfo(
         name="onlineWorker",

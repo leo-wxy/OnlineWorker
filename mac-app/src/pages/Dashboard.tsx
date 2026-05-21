@@ -156,10 +156,8 @@ function resolveAlertTitle(alert: DashboardAlert, texts: AppTexts): string {
   switch (alert.code) {
     case "configuration_incomplete":
       return texts.alerts.configurationIncomplete.title;
-    case "codex_degraded":
-      return texts.alerts.codexDegraded.title;
-    case "claude_degraded":
-      return texts.alerts.claudeDegraded.title;
+    case "provider_degraded":
+      return alert.title;
     case "telegram_unavailable":
       return texts.alerts.telegramUnavailable.title;
     default:
@@ -176,10 +174,8 @@ function resolveAlertDetail(alert: DashboardAlert, texts: AppTexts): string {
         );
       }
       return texts.alerts.configurationIncomplete.missingFiles;
-    case "codex_degraded":
-      return texts.alerts.codexDegraded.detail;
-    case "claude_degraded":
-      return texts.alerts.claudeDegraded.detail;
+    case "provider_degraded":
+      return alert.detail;
     case "telegram_unavailable":
       return texts.alerts.telegramUnavailable.detail;
     default:
@@ -244,43 +240,18 @@ function buildServiceControlStatus(state: DashboardState | null) {
   };
 }
 
-function resolveProviders(state: DashboardState | null, texts: AppTexts): ProviderDashboardStatus[] {
+function resolveProviders(state: DashboardState | null): ProviderDashboardStatus[] {
   if (!state) {
     return [];
   }
-  if (state.providers && state.providers.length > 0) {
-    return state.providers;
-  }
-  return [
-    {
-      id: "codex",
-      label: "Codex",
-      description: texts.dashboard.codexDescription,
-      managed: true,
-      autostart: true,
-      health: state.codex.health,
-      port: state.codex.port ?? null,
-      detail: state.codex.detail ?? null,
-      transport: "stdio",
-      liveTransport: "owner_bridge",
-      controlMode: "app",
-      bin: null,
-    },
-  ];
+  return state.providers ?? [];
 }
 
 function describeProvider(provider: ProviderDashboardStatus, texts: AppTexts): string {
   if (provider.description) {
     return provider.description;
   }
-  switch (provider.id) {
-    case "codex":
-      return texts.dashboard.codexDescription;
-    case "claude":
-      return texts.dashboard.claudeDescription;
-    default:
-      return `${texts.dashboard.ownerTransportLabel}: ${provider.transport ?? "-"}`;
-  }
+  return `${texts.dashboard.ownerTransportLabel}: ${provider.transport ?? "-"}`;
 }
 
 function providerDetail(provider: ProviderDashboardStatus, texts: AppTexts): string {
@@ -290,36 +261,55 @@ function providerDetail(provider: ProviderDashboardStatus, texts: AppTexts): str
   if (!provider.autostart) {
     return texts.dashboard.providerAutostartDisabledDetail;
   }
-  if (provider.id === "codex") {
-    return provider.detail ?? texts.dashboard.codexFallbackDetail;
-  }
-  if (provider.id === "claude") {
-    return provider.detail ?? texts.dashboard.claudeDescription;
-  }
   return provider.detail ?? `${texts.dashboard.ownerTransportLabel}: ${provider.transport ?? "-"}`;
 }
 
-function providerAccent(provider: ProviderDashboardStatus) {
-  if (provider.id === "codex") {
-    return {
-      icon: "border-violet-100 bg-violet-50 text-violet-600",
-      bar: "bg-violet-500/70",
-    };
-  }
-  return {
+const providerAccentOptions = [
+  {
+    icon: "border-violet-100 bg-violet-50 text-violet-600",
+    bar: "bg-violet-500/70",
+  },
+  {
+    icon: "border-sky-100 bg-sky-50 text-sky-600",
+    bar: "bg-sky-500/70",
+  },
+  {
+    icon: "border-emerald-100 bg-emerald-50 text-emerald-600",
+    bar: "bg-emerald-500/70",
+  },
+  {
+    icon: "border-amber-100 bg-amber-50 text-amber-700",
+    bar: "bg-amber-500/70",
+  },
+  {
     icon: "border-slate-200 bg-slate-50 text-slate-700",
     bar: "bg-slate-400/70",
-  };
+  },
+];
+
+function stableProviderIndex(providerId: string): number {
+  let hash = 0;
+  for (let i = 0; i < providerId.length; i += 1) {
+    hash = (hash * 31 + providerId.charCodeAt(i)) >>> 0;
+  }
+  return hash % providerAccentOptions.length;
 }
 
-function ProviderIcon({ provider }: { provider: ProviderDashboardStatus }) {
-  if (provider.id === "codex") {
-    return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>;
-  }
-  if (provider.id === "claude") {
-    return <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm4.5 16.5c-2.485 0-4.5-2.015-4.5-4.5s2.015-4.5 4.5-4.5 4.5 2.015 4.5 4.5-2.015 4.5-4.5 4.5zm-9 0C5.015 16.5 3 14.485 3 12s2.015-4.5 4.5-4.5S12 9.515 12 12s-2.015 4.5-4.5 4.5z" /></svg>;
-  }
-  return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>;
+function providerAccent(provider: ProviderDashboardStatus) {
+  return providerAccentOptions[stableProviderIndex(provider.id)];
+}
+
+function ProviderIcon() {
+  return (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+        d="M13 10V3L4 14h7v7l9-11h-7z"
+      ></path>
+    </svg>
+  );
 }
 
 function SettingSwitch({
@@ -359,7 +349,7 @@ export function Dashboard({ onOpenLogs, onOpenSetup, onOpenSessions }: Props) {
 
   const overall = getOverallStyles(t)[dashboardState?.overall ?? "unknown"];
   const controlStatus = buildServiceControlStatus(dashboardState);
-  const providers = resolveProviders(dashboardState, t);
+  const providers = resolveProviders(dashboardState);
   const serviceBusy = serviceAction !== null;
 
   const handleProviderFlagsChange = async (
@@ -594,7 +584,7 @@ export function Dashboard({ onOpenLogs, onOpenSetup, onOpenSessions }: Props) {
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex min-w-0 items-center gap-4">
                       <div className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl border ${accent.icon}`}>
-                        <ProviderIcon provider={provider} />
+                        <ProviderIcon />
                       </div>
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">

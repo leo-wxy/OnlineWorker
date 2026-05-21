@@ -14,7 +14,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: UI Foundation** - Establish a consistent visual system and hierarchy baseline for the desktop workbench
 - [x] **Phase 2: Provider Usage Explorer** - Add a first-class Usage menu for daily provider consumption while keeping statistics behind provider/plugin boundaries
-- [ ] **Phase 3: File and Image Support** - Add first-class file and image attachment support to the app's Telegram and desktop workflows
+- [x] **Phase 3: File and Image Support** - Add first-class file and image attachment support plus Settings Maintenance cache cleanup; packaged app and live attachment smokes verified
+- [ ] **Phase 4: Claude Session Ownership and Safe Resume** - Allow TG/App to continue existing Claude sessions without stealing externally active terminal Claude work
 
 ## Phase Details
 
@@ -54,11 +55,26 @@ Plans:
   1. Users can attach files and images through the supported app surfaces without needing unsupported workarounds.
   2. Attachments are routed through the existing Telegram and provider/plugin workflow boundaries rather than bypassing them with ad hoc handling.
   3. The packaged app still builds and launches after attachment support is introduced.
+  4. Users can clear accumulated local attachment cache from the Settings `Maintenance` sub tab without using a Telegram command.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 03-01: Upgrade the shared message contract and wire Telegram attachments into provider runtimes
-- [ ] 03-02: Add desktop attachment send support and validate the packaged app flow
+- [x] 03-01: Upgrade the shared message contract and wire Telegram attachments into provider runtimes
+- [x] 03-02: Add desktop attachment send support and validate the packaged app flow
+
+Latest verification:
+- Source/runtime attachment routing tests passed on 2026-05-21: `68 passed in 4.75s`.
+- Related handler/events/Claude attachment regression tests passed on 2026-05-21: `80 passed in 5.37s`.
+- Attachment cache command test passed on 2026-05-21: `2 passed`.
+- Desktop app shell test passed after Settings `Maintenance` cache cleanup wiring: `5 passed`.
+- Installed-app Settings `Maintenance` cache smoke passed on 2026-05-21 14:44 +0800: UI cleared `2.2 MB` / `6` files, both cache directories remained present with `0` files and `0B`, and config/env/state/log files remained present.
+- `cd mac-app && npm run build` completed successfully.
+- Final `bash build.sh` completed successfully and produced `OnlineWorker_1.1.0_aarch64.dmg` with mtime `2026-05-21 14:38:28 +0800` and sha256 `94fbb7abce3f694178f1d91c1ebad9f574df91d172372ef9e405afb7fd24a403`.
+- `/Applications/OnlineWorker.app` was replaced and restarted from the final package at `2026-05-21 14:40:03 +0800`; installed version is `1.1.0`.
+- User-confirmed live smoke passed on 2026-05-21: fresh Telegram attachment send no longer hits `Separator is not found`, and installed Session Browser desktop attachment send reaches the provider path.
+
+Remaining Phase 3 verification:
+- None. Phase 3 is closed.
 
 ## Progress
 
@@ -69,4 +85,19 @@ Phases execute in numeric order: 1 → 2 → 3
 |-------|----------------|--------|-----------|
 | 1. UI Foundation | 2/2 | Completed | 2026-05-10 |
 | 2. Provider Usage Explorer | 2/2 | Completed | 2026-05-12 |
-| 3. File and Image Support | 0/2 | Planned | - |
+| 3. File and Image Support | 2/2 | Completed | 2026-05-21 |
+
+### Phase 4: Claude Session Ownership and Safe Resume
+
+**Goal:** Make Claude session sending explicit and safe: existing Claude sessions remain writable from TG/App, but OnlineWorker must not silently fork them or race an externally active terminal Claude process.
+**Requirements**: [CLAUDE-01, CLAUDE-02]
+**Depends on:** Phase 3
+**Success Criteria** (what must be TRUE):
+  1. TG/App can continue an existing Claude session by resuming the original session id; imported/history sessions are not silently remapped into new app-owned sessions.
+  2. OnlineWorker refuses to inject a message into a Claude session that appears externally busy, and tells the user to wait or explicitly fork rather than stealing the terminal task.
+  3. Concurrent sends to the same Claude session are serialized through the provider runtime so TG/App do not launch competing `claude --resume` processes.
+  4. The desktop Session Browser sends Claude messages through the provider owner path instead of bypassing the bot/provider runtime with an independent Tauri Claude send path.
+**Plans:** 1 plan
+
+Plans:
+- [ ] 04-01: Align Claude existing-session resume ownership across TG, provider owner bridge, and Session Browser

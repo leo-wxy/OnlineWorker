@@ -22,7 +22,9 @@ pub(crate) fn app_support_dir_name() -> &'static str {
 /// Application data directory: ~/Library/Application Support/<app name>/
 pub fn data_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/unknown".to_string());
-    PathBuf::from(home).join("Library/Application Support").join(app_support_dir_name())
+    PathBuf::from(home)
+        .join("Library/Application Support")
+        .join(app_support_dir_name())
 }
 
 /// Ensure the data directory exists, creating it if necessary.
@@ -51,6 +53,12 @@ const SENSITIVE_KEYS: &[&str] = &[
     "SECRET",
     "PASSWORD",
 ];
+const CLAUDE_ENV_KEYS: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_MODEL",
+];
 
 fn default_env_template() -> String {
     format!(
@@ -63,6 +71,52 @@ fn is_sensitive_key(key: &str) -> bool {
     SENSITIVE_KEYS
         .iter()
         .any(|k| key.to_uppercase().contains(k))
+}
+
+fn is_claude_env_key(key: &str) -> bool {
+    let upper = key.trim().to_uppercase();
+    upper.starts_with("ANTHROPIC_") || CLAUDE_ENV_KEYS.iter().any(|candidate| *candidate == upper)
+}
+
+fn sanitize_env_content(raw: &str) -> String {
+    let mut lines = Vec::new();
+    for line in raw.lines() {
+        if let Some((key, _)) = line.split_once('=') {
+            if is_claude_env_key(key) {
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+    if lines.is_empty() {
+        String::new()
+    } else {
+        lines.join("\n") + "\n"
+    }
+}
+
+fn cleanup_legacy_claude_config(dir: &PathBuf) -> Result<(), String> {
+    let env = dir.join(".env");
+    if env.exists() {
+        let raw = std::fs::read_to_string(&env).map_err(|e| format!("Cannot read .env: {}", e))?;
+        let sanitized = sanitize_env_content(&raw);
+        if sanitized != raw {
+            std::fs::write(&env, sanitized).map_err(|e| format!("Cannot write .env: {}", e))?;
+        }
+    }
+
+    let config = dir.join("config.yaml");
+    if config.exists() {
+        let raw = std::fs::read_to_string(&config)
+            .map_err(|e| format!("Cannot read config.yaml: {}", e))?;
+        let env_raw = std::fs::read_to_string(&env).unwrap_or_default();
+        let normalized = serialize_normalized_config_with_env(&raw, Some(&env_raw))?;
+        if normalized != raw {
+            std::fs::write(&config, normalized)
+                .map_err(|e| format!("Cannot write config.yaml: {}", e))?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -95,6 +149,7 @@ pub async fn check_first_run() -> Result<bool, String> {
 #[tauri::command]
 pub async fn create_default_config() -> Result<(), String> {
     let dir = ensure_data_dir()?;
+    cleanup_legacy_claude_config(&dir)?;
     let config = dir.join("config.yaml");
     if !config.exists() {
         let default = include_str!("../../default-config.yaml");
@@ -115,6 +170,7 @@ pub async fn set_provider_flags(
     autostart: bool,
 ) -> Result<(), String> {
     let dir = ensure_data_dir()?;
+    cleanup_legacy_claude_config(&dir)?;
     let path = dir.join("config.yaml");
     let raw = if path.exists() {
         std::fs::read_to_string(&path).map_err(|e| format!("Cannot read config.yaml: {}", e))?
@@ -189,7 +245,9 @@ pub async fn write_config(content: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn read_env() -> Result<EnvContent, String> {
     let path = env_path();
-    let raw = std::fs::read_to_string(&path).map_err(|e| format!("Cannot read .env: {}", e))?;
+    let raw = sanitize_env_content(
+        &std::fs::read_to_string(&path).map_err(|e| format!("Cannot read .env: {}", e))?,
+    );
 
     let lines = raw
         .lines()
@@ -231,7 +289,9 @@ pub async fn read_env() -> Result<EnvContent, String> {
 #[tauri::command]
 pub async fn read_env_raw() -> Result<ConfigContent, String> {
     let path = env_path();
-    let raw = std::fs::read_to_string(&path).map_err(|e| format!("Cannot read .env: {}", e))?;
+    let raw = sanitize_env_content(
+        &std::fs::read_to_string(&path).map_err(|e| format!("Cannot read .env: {}", e))?,
+    );
     Ok(ConfigContent {
         raw,
         path: path.to_string_lossy().to_string(),
@@ -241,12 +301,19 @@ pub async fn read_env_raw() -> Result<ConfigContent, String> {
 #[tauri::command]
 pub async fn write_env(content: String) -> Result<(), String> {
     let path = env_path();
-    std::fs::write(&path, content).map_err(|e| format!("Cannot write .env: {}", e))
+    std::fs::write(&path, sanitize_env_content(&content))
+        .map_err(|e| format!("Cannot write .env: {}", e))
 }
 
 /// Read a single field from .env (returns masked value for sensitive fields)
 #[tauri::command]
 pub async fn read_env_field(key: String) -> Result<String, String> {
+    if is_claude_env_key(&key) {
+        return Err(format!(
+            "Key '{}' is no longer managed by OnlineWorker",
+            key
+        ));
+    }
     let path = env_path();
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("Cannot read .env: {}", e))?;
 
@@ -271,6 +338,12 @@ pub async fn read_env_field(key: String) -> Result<String, String> {
 pub async fn reveal_env_field(key: String) -> Result<String, String> {
     use std::time::SystemTime;
 
+    if is_claude_env_key(&key) {
+        return Err(format!(
+            "Key '{}' is no longer managed by OnlineWorker",
+            key
+        ));
+    }
     let path = env_path();
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("Cannot read .env: {}", e))?;
 
@@ -300,8 +373,16 @@ pub async fn reveal_env_field(key: String) -> Result<String, String> {
 /// Write/update a single field in .env (patch style - preserves other fields and comments)
 #[tauri::command]
 pub async fn write_env_field(key: String, value: String) -> Result<(), String> {
+    if is_claude_env_key(&key) {
+        return Err(format!(
+            "Key '{}' is no longer managed by OnlineWorker",
+            key
+        ));
+    }
     let path = env_path();
-    let raw = std::fs::read_to_string(&path).map_err(|e| format!("Cannot read .env: {}", e))?;
+    let raw = sanitize_env_content(
+        &std::fs::read_to_string(&path).map_err(|e| format!("Cannot read .env: {}", e))?,
+    );
 
     let mut lines: Vec<String> = Vec::new();
     let mut found = false;
@@ -339,7 +420,9 @@ pub async fn write_env_field(key: String, value: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn list_env_keys() -> Result<Vec<String>, String> {
     let path = env_path();
-    let raw = std::fs::read_to_string(&path).map_err(|e| format!("Cannot read .env: {}", e))?;
+    let raw = sanitize_env_content(
+        &std::fs::read_to_string(&path).map_err(|e| format!("Cannot read .env: {}", e))?,
+    );
 
     let keys: Vec<String> = raw
         .lines()
@@ -359,7 +442,7 @@ pub async fn list_env_keys() -> Result<Vec<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_env_template, is_sensitive_key};
+    use super::{default_env_template, is_sensitive_key, sanitize_env_content};
 
     #[test]
     fn default_env_template_only_contains_telegram_fields() {
@@ -369,12 +452,37 @@ mod tests {
         assert!(template.contains("GROUP_CHAT_ID="));
         assert!(!template.contains("ANTHROPIC_API_KEY="));
         assert!(!template.contains("ANTHROPIC_BASE_URL="));
+        assert!(!template.contains("ANTHROPIC_AUTH_TOKEN="));
         assert!(!template.contains("ANTHROPIC_MODEL="));
     }
 
     #[test]
     fn api_key_fields_are_masked() {
         assert!(is_sensitive_key("ANTHROPIC_API_KEY"));
+        assert!(is_sensitive_key("ANTHROPIC_AUTH_TOKEN"));
         assert!(is_sensitive_key("OPENAI_API_KEY"));
+    }
+
+    #[test]
+    fn sanitize_env_content_removes_legacy_claude_env_keys() {
+        let raw = "\
+# OnlineWorker .env
+TELEGRAM_TOKEN=token
+ANTHROPIC_API_KEY=dummy
+ANTHROPIC_AUTH_TOKEN=token-123
+ANTHROPIC_BASE_URL=https://runtime.example.test/langbase
+ANTHROPIC_MODEL=claude-opus-4-6
+GROUP_CHAT_ID=-1001
+";
+
+        let sanitized = sanitize_env_content(raw);
+
+        assert!(sanitized.contains("TELEGRAM_TOKEN=token"));
+        assert!(sanitized.contains("GROUP_CHAT_ID=-1001"));
+        assert!(!sanitized.contains("ANTHROPIC_API_KEY"));
+        assert!(!sanitized.contains("ANTHROPIC_AUTH_TOKEN"));
+        assert!(!sanitized.contains("ANTHROPIC_BASE_URL"));
+        assert!(!sanitized.contains("ANTHROPIC_MODEL"));
+        assert!(!sanitized.contains("runtime.example.test"));
     }
 }

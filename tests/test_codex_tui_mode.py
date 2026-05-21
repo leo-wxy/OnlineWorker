@@ -548,7 +548,7 @@ async def test_message_handler_in_app_ws_mode_continues_when_interrupt_fails():
 
 
 @pytest.mark.asyncio
-async def test_message_handler_interrupts_active_claude_turn_before_send():
+async def test_message_handler_keeps_active_claude_turn_without_preemptive_interrupt():
     from bot.handlers.message import make_message_handler
 
     storage = AppStorage()
@@ -603,6 +603,7 @@ async def test_message_handler_interrupts_active_claude_turn_before_send():
     update.effective_message = MagicMock()
     update.effective_message.text = "你好"
     update.effective_message.message_thread_id = 5457
+    update.effective_message.message_id = 7001
 
     ctx = MagicMock()
     ctx.bot = MagicMock()
@@ -612,17 +613,15 @@ async def test_message_handler_interrupts_active_claude_turn_before_send():
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    assert adapter.mock_calls[:3] == [
-        call.turn_interrupt("claude:ncmplayerengine", "ses-1", "turn-claude-1"),
-        call.resume_thread("claude:ncmplayerengine", "ses-1"),
-        call.send_user_message("claude:ncmplayerengine", "ses-1", "你好"),
-    ]
+    adapter.turn_interrupt.assert_not_awaited()
     adapter.inspect_thread_activity.assert_not_awaited()
+    adapter.resume_thread.assert_awaited_once_with("claude:ncmplayerengine", "ses-1")
+    adapter.send_user_message.assert_awaited_once_with("claude:ncmplayerengine", "ses-1", "你好")
     save_storage_mock.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_message_handler_does_not_block_on_claude_thread_history_activity():
+async def test_message_handler_blocks_external_busy_claude_thread():
     from bot.handlers.message import make_message_handler
 
     storage = AppStorage()
@@ -672,6 +671,7 @@ async def test_message_handler_does_not_block_on_claude_thread_history_activity(
     update.effective_message = MagicMock()
     update.effective_message.text = "你好"
     update.effective_message.message_thread_id = 5457
+    update.effective_message.message_id = 7002
 
     ctx = MagicMock()
     ctx.bot = MagicMock()
@@ -681,15 +681,17 @@ async def test_message_handler_does_not_block_on_claude_thread_history_activity(
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    adapter.inspect_thread_activity.assert_not_awaited()
-    adapter.resume_thread.assert_awaited_once_with("claude:ncmplayerengine", "ses-1")
-    adapter.send_user_message.assert_awaited_once_with("claude:ncmplayerengine", "ses-1", "你好")
-    ctx.bot.send_message.assert_not_awaited()
-    save_storage_mock.assert_called_once()
+    adapter.inspect_thread_activity.assert_awaited_once_with("ses-1")
+    adapter.turn_interrupt.assert_not_awaited()
+    adapter.resume_thread.assert_not_awaited()
+    adapter.send_user_message.assert_not_awaited()
+    ctx.bot.send_message.assert_awaited_once()
+    assert "当前 Claude thread 正忙" in ctx.bot.send_message.await_args.kwargs["text"]
+    save_storage_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_message_handler_detaches_imported_claude_thread_before_send():
+async def test_message_handler_resumes_imported_claude_thread_without_remapping():
     from bot.handlers.message import make_message_handler
 
     storage = AppStorage()
@@ -741,6 +743,7 @@ async def test_message_handler_detaches_imported_claude_thread_before_send():
     update.effective_message = MagicMock()
     update.effective_message.text = "你好"
     update.effective_message.message_thread_id = 5457
+    update.effective_message.message_id = 7003
 
     ctx = MagicMock()
     ctx.bot = MagicMock()
@@ -753,22 +756,18 @@ async def test_message_handler_detaches_imported_claude_thread_before_send():
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    adapter.inspect_thread_activity.assert_not_awaited()
-    adapter.start_thread.assert_awaited_once_with("claude:ncmplayerengine")
-    adapter.resume_thread.assert_awaited_once_with("claude:ncmplayerengine", "ses-app-new")
+    adapter.inspect_thread_activity.assert_awaited_once_with("ses-imported")
+    adapter.start_thread.assert_not_awaited()
+    adapter.resume_thread.assert_awaited_once_with("claude:ncmplayerengine", "ses-imported")
     adapter.send_user_message.assert_awaited_once_with(
         "claude:ncmplayerengine",
-        "ses-app-new",
+        "ses-imported",
         "你好",
     )
-    assert "ses-imported" in ws.threads
-    assert ws.threads["ses-imported"].topic_id is None
+    assert set(ws.threads) == {"ses-imported"}
+    assert ws.threads["ses-imported"].topic_id == 5457
     assert ws.threads["ses-imported"].preview == "历史导入 thread"
     assert ws.threads["ses-imported"].source == "imported"
-    assert ws.threads["ses-app-new"].thread_id == "ses-app-new"
-    assert ws.threads["ses-app-new"].topic_id == 5457
-    assert ws.threads["ses-app-new"].preview == "你好"
-    assert ws.threads["ses-app-new"].source == "app"
     save_storage_mock.assert_called()
 
 
@@ -825,6 +824,7 @@ async def test_message_handler_keeps_unknown_claude_thread_when_logs_mark_app_ow
     update.effective_message = MagicMock()
     update.effective_message.text = "你好"
     update.effective_message.message_thread_id = 5457
+    update.effective_message.message_id = 7004
 
     ctx = MagicMock()
     ctx.bot = MagicMock()
@@ -837,8 +837,8 @@ async def test_message_handler_keeps_unknown_claude_thread_when_logs_mark_app_ow
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    adapter.inspect_thread_activity.assert_not_awaited()
-    adapter.start_thread.assert_not_called()
+    adapter.inspect_thread_activity.assert_awaited_once_with("ses-app")
+    adapter.start_thread.assert_not_awaited()
     adapter.resume_thread.assert_awaited_once_with("claude:ncmplayerengine", "ses-app")
     adapter.send_user_message.assert_awaited_once_with("claude:ncmplayerengine", "ses-app", "你好")
     assert ws.threads["ses-app"].source == "app"
@@ -846,7 +846,7 @@ async def test_message_handler_keeps_unknown_claude_thread_when_logs_mark_app_ow
 
 
 @pytest.mark.asyncio
-async def test_message_handler_rolls_back_imported_claude_remap_when_send_fails():
+async def test_message_handler_keeps_imported_claude_thread_when_send_fails():
     from bot.handlers.message import make_message_handler
 
     storage = AppStorage()
@@ -899,6 +899,7 @@ async def test_message_handler_rolls_back_imported_claude_remap_when_send_fails(
     update.effective_message = MagicMock()
     update.effective_message.text = "你好"
     update.effective_message.message_thread_id = 5457
+    update.effective_message.message_id = 7005
 
     ctx = MagicMock()
     ctx.bot = MagicMock()
@@ -908,15 +909,15 @@ async def test_message_handler_rolls_back_imported_claude_remap_when_send_fails(
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    adapter.start_thread.assert_awaited_once_with("claude:ncmplayerengine")
-    adapter.resume_thread.assert_awaited_once_with("claude:ncmplayerengine", "ses-app-new")
+    adapter.inspect_thread_activity.assert_awaited_once_with("ses-imported")
+    adapter.start_thread.assert_not_awaited()
+    adapter.resume_thread.assert_awaited_once_with("claude:ncmplayerengine", "ses-imported")
     adapter.send_user_message.assert_awaited_once_with(
         "claude:ncmplayerengine",
-        "ses-app-new",
+        "ses-imported",
         "你好",
     )
-    assert "ses-imported" in ws.threads
-    assert "ses-app-new" not in ws.threads
+    assert set(ws.threads) == {"ses-imported"}
     assert ws.threads["ses-imported"].thread_id == "ses-imported"
     assert ws.threads["ses-imported"].topic_id == 5457
     assert ws.threads["ses-imported"].source == "imported"

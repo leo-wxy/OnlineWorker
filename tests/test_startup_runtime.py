@@ -393,7 +393,7 @@ async def test_post_init_syncs_existing_claude_topics_after_startup():
 
 
 @pytest.mark.asyncio
-async def test_start_claude_starts_hook_bridge_when_data_dir_available():
+async def test_start_claude_defers_cli_touching_work_until_send():
     storage = AppStorage()
     state = AppState(storage=storage)
     cfg = Config(
@@ -418,26 +418,26 @@ async def test_start_claude_starts_hook_bridge_when_data_dir_available():
 
     adapter = MagicMock()
     adapter.connect = AsyncMock()
+    adapter.configure_hook_bridge = MagicMock()
     adapter.start_hook_bridge = AsyncMock()
     adapter.refresh_auth_status = AsyncMock(return_value={"loggedIn": True})
 
     with patch(
-        "plugins.providers.builtin.claude.python.runtime.resolve_claude_bin",
-        return_value="/opt/homebrew/bin/claude",
-    ), patch(
         "plugins.providers.builtin.claude.python.runtime.ClaudeAdapter",
         return_value=adapter,
-    ), patch(
+    ) as adapter_cls, patch(
         "plugins.providers.builtin.claude.python.runtime.setup_connection",
         new=AsyncMock(),
     ) as setup_mock:
         await claude_runtime.start_runtime(manager, bot=MagicMock(), tool_cfg=tool_cfg)
 
     adapter.connect.assert_awaited_once()
-    adapter.start_hook_bridge.assert_awaited_once_with("/tmp/onlineworker-claude-test")
-    adapter.refresh_auth_status.assert_awaited_once()
+    adapter.configure_hook_bridge.assert_called_once_with("/tmp/onlineworker-claude-test")
+    adapter.start_hook_bridge.assert_not_awaited()
+    adapter.refresh_auth_status.assert_not_awaited()
     setup_mock.assert_awaited_once()
     assert state.get_adapter("claude") is adapter
+    adapter_cls.assert_called_once_with(claude_bin="claude")
 
 
 @pytest.mark.asyncio

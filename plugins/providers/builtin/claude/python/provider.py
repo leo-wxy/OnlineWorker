@@ -12,6 +12,7 @@ from core.providers.contracts import (
     ProviderMessageHooks,
     ProviderMetadata,
     ProviderRuntimeHooks,
+    ProviderSessionEventHooks,
     ProviderThreadHooks,
     ProviderTransportMetadata,
     ProviderWorkspaceHooks,
@@ -74,8 +75,8 @@ def create_provider_descriptor() -> ProviderDescriptor:
                 send=True,
                 approvals=True,
                 questions=True,
-                photos=False,
-                files=False,
+                photos=True,
+                files=True,
                 commands=True,
                 control_modes=("app",),
             ),
@@ -93,8 +94,8 @@ def create_provider_descriptor() -> ProviderDescriptor:
             ensure_connected=ensure_default_connected,
             prepare_send=runtime.prepare_send,
             send=send_default_message,
-            supports_photo=False,
-            supports_files=False,
+            supports_photo=True,
+            supports_files=True,
         ),
         interactions=ProviderInteractionHooks(
             build_approval_reply=runtime.build_approval_reply,
@@ -117,6 +118,9 @@ def create_provider_descriptor() -> ProviderDescriptor:
         runtime_hooks=ProviderRuntimeHooks(
             start=runtime.start_runtime,
             shutdown=runtime.shutdown_runtime,
+        ),
+        session_event_hooks=ProviderSessionEventHooks(
+            should_materialize_unbound_thread_topic=runtime.should_materialize_unbound_thread_topic,
         ),
         status_builder=runtime.build_status_lines,
     )

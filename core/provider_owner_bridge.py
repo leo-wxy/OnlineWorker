@@ -9,6 +9,7 @@ from typing import Optional
 
 from config import get_data_dir
 from core.providers.registry import get_provider
+from core.storage import ThreadInfo, WorkspaceInfo, save_storage
 
 
 OWNER_BRIDGE_SOCKET_FILENAME = "provider_owner_bridge.sock"
@@ -49,9 +50,33 @@ def _resolve_workspace_and_thread(state, provider_id: str, thread_id: str, works
             if thread is None:
                 thread = storage.workspaces[storage_key].threads.setdefault(
                     normalized_thread_id,
-                    _new_thread_info(normalized_thread_id),
+                    _new_thread_info(
+                        normalized_thread_id,
+                        source=_new_thread_source(provider_id),
+                    ),
                 )
             return ws, thread
+
+        workspace_id = _workspace_key(provider_id, normalized_workspace_dir)
+        ws = WorkspaceInfo(
+            name=os.path.basename(normalized_workspace_dir) or normalized_workspace_dir,
+            path=normalized_workspace_dir,
+            tool=provider_id,
+            topic_id=None,
+            daemon_workspace_id=workspace_id,
+            threads={},
+        )
+        thread = _new_thread_info(
+            normalized_thread_id,
+            source=_new_thread_source(provider_id),
+        )
+        ws.threads[normalized_thread_id] = thread
+        storage.workspaces[workspace_id] = ws
+        try:
+            save_storage(storage)
+        except Exception:
+            logger.debug("[provider-owner-bridge] 保存临时 workspace 失败", exc_info=True)
+        return ws, thread
 
     workspace_id = _workspace_key(provider_id, normalized_workspace_dir)
     ws = SimpleNamespace(
@@ -62,13 +87,20 @@ def _resolve_workspace_and_thread(state, provider_id: str, thread_id: str, works
         daemon_workspace_id=workspace_id,
         threads={},
     )
-    thread = _new_thread_info(normalized_thread_id)
+    thread = _new_thread_info(
+        normalized_thread_id,
+        source=_new_thread_source(provider_id),
+    )
     ws.threads[normalized_thread_id] = thread
     return ws, thread
 
 
-def _new_thread_info(thread_id: str):
-    return SimpleNamespace(
+def _new_thread_source(provider_id: str) -> str:
+    return "imported" if provider_id == "claude" else "app"
+
+
+def _new_thread_info(thread_id: str, *, source: str = "app"):
+    return ThreadInfo(
         thread_id=thread_id,
         topic_id=None,
         preview=None,
@@ -77,7 +109,7 @@ def _new_thread_info(thread_id: str):
         last_tg_user_message_id=None,
         history_sync_cursor=None,
         is_active=True,
-        source="app",
+        source=source,
     )
 
 
@@ -180,10 +212,16 @@ class ProviderOwnerBridge:
                     "error": f"unsupported request type: {request_type}",
                 }
             writer.write((json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8"))
-            await writer.drain()
+            try:
+                await writer.drain()
+            except (BrokenPipeError, ConnectionResetError):
+                logger.debug("[provider-owner-bridge] 客户端已断开，跳过响应写入")
         finally:
             writer.close()
-            await writer.wait_closed()
+            try:
+                await writer.wait_closed()
+            except (BrokenPipeError, ConnectionResetError):
+                logger.debug("[provider-owner-bridge] 客户端已断开，跳过关闭等待")
 
     async def _handle_list_sessions(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
@@ -392,6 +430,29 @@ class ProviderOwnerBridge:
         if message_hooks is None:
             return {"ok": False, "error": f"Provider '{provider_id}' 不支持发送消息"}
 
+        original_thread_id = thread_info.thread_id
+        original_topic_id = getattr(thread_info, "topic_id", None)
+        original_preview = getattr(thread_info, "preview", None)
+        original_source = str(getattr(thread_info, "source", "") or "unknown")
+        original_is_active = bool(getattr(thread_info, "is_active", False))
+        original_history_sync_cursor = getattr(thread_info, "history_sync_cursor", None)
+        original_streaming_msg_id = getattr(thread_info, "streaming_msg_id", None)
+        original_last_tg_user_message_id = getattr(thread_info, "last_tg_user_message_id", None)
+
+        def rollback_thread_remap() -> None:
+            if thread_info.thread_id == original_thread_id:
+                return
+            ws_info.threads.pop(thread_info.thread_id, None)
+            thread_info.thread_id = original_thread_id
+            thread_info.topic_id = original_topic_id
+            thread_info.preview = original_preview
+            thread_info.source = original_source
+            thread_info.is_active = original_is_active
+            thread_info.history_sync_cursor = original_history_sync_cursor
+            thread_info.streaming_msg_id = original_streaming_msg_id
+            thread_info.last_tg_user_message_id = original_last_tg_user_message_id
+            ws_info.threads[original_thread_id] = thread_info
+
         try:
             self.state.mark_provider_send_started(provider_id, thread_id)
             connected_adapter = await message_hooks.ensure_connected(
@@ -429,7 +490,7 @@ class ProviderOwnerBridge:
                     "workspace_id": workspace_id,
                 }
 
-            await message_hooks.send(
+            send_result = await message_hooks.send(
                 self.state,
                 adapter,
                 ws_info,
@@ -442,14 +503,26 @@ class ProviderOwnerBridge:
                 has_photo=False,
                 attachments=attachments,
             )
+            if isinstance(send_result, dict) and str(send_result.get("status") or "") == "error":
+                rollback_thread_remap()
+                return {
+                    "ok": False,
+                    "error": str(send_result.get("error") or f"{provider_id} send failed"),
+                    "provider_id": provider_id,
+                    "thread_id": thread_id,
+                    "workspace_id": workspace_id,
+                }
         except Exception as exc:
+            rollback_thread_remap()
             return {"ok": False, "error": str(exc)}
 
         return {
             "ok": True,
             "accepted": True,
             "provider_id": provider_id,
-            "thread_id": thread_id,
+            "thread_id": thread_info.thread_id,
+            "requested_thread_id": thread_id,
+            "remapped": thread_info.thread_id != thread_id,
             "workspace_id": workspace_id,
         }
 

@@ -132,10 +132,24 @@ export const zhTexts: AppTexts = {
       launching: "正在启动服务...",
       launchSuccess: (message: string) => `服务已启动：${message}`,
       launchError: (error: string) => `服务启动失败：${error}`,
+      maintenanceEyebrow: "Maintenance",
+      maintenanceTitle: "维护",
+      maintenanceDescription:
+        "集中处理运行后的本地数据维护项。这里不会改动首次配置、provider 开关或原始配置文件。",
+      storageTitle: "存储",
+      attachmentCacheTitle: "附件缓存",
+      attachmentCacheDescription:
+        "清理 Telegram 下载图片和桌面会话附件的本地缓存，不会删除 AI 会话历史、配置或日志。",
+      attachmentCacheSize: (size: string, count: number) =>
+        `当前占用 ${size}，共 ${count} 个文件`,
+      attachmentCacheClear: "清理附件缓存",
+      attachmentCacheClearing: "正在清理...",
+      attachmentCacheCleared: (size: string, count: number) =>
+        `已清理 ${size}，删除 ${count} 个文件`,
+      attachmentCacheError: (error: string) => `附件缓存操作失败：${error}`,
+      attachmentCachePartialError: (count: number) =>
+        `附件缓存已部分清理，但有 ${count} 项失败。请检查文件权限后重试。`,
       tokenPlaceholder: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-      claudeApiKeyPlaceholder: "your_api_key_here",
-      claudeBaseUrlPlaceholder: "https://your-gateway.example.com",
-      claudeModelPlaceholder: "claude-opus-4-6",
       userIdPlaceholder: "123456789",
       groupChatIdPlaceholder: "-1001234567890",
       showToken: "显示 Token",
@@ -163,11 +177,6 @@ export const zhTexts: AppTexts = {
         "选择一个显示名称和以 bot 结尾的用户名",
         "复制 BotFather 给你的 Token",
       ],
-      claudeAuthTitle: "Claude 鉴权（可选）",
-      claudeAuthDescription:
-        "如果你希望 OnlineWorker 驱动 Claude Code，可以走官方登录，也可以直接在这里配置 API 和代理参数。",
-      claudeAuthHint:
-        "如果你只使用 codex，可以留空。官方链路通常执行 `claude auth login`；如果你走 Raven、Langbase 或其他代理，可以只填写 `ANTHROPIC_BASE_URL` 与 `ANTHROPIC_MODEL`，`ANTHROPIC_API_KEY` 留空时，OnlineWorker 会自动补一个 dummy 占位值给 Claude CLI。这些 Claude 环境变量一旦修改，需要重启 OnlineWorker 服务后才会生效。",
       step2Title: "获取你的用户 ID",
       step2Description: "只允许指定用户向 Bot 发送指令。",
       step2Instructions: [
@@ -448,9 +457,6 @@ export const zhTexts: AppTexts = {
       telegramLabel: "Telegram",
       pidLabel: "PID",
       codexTitle: "codex",
-      codexDescription: "当前由 App 托管的 codex 运行态",
-      codexFallbackDetail: "暂无额外诊断信息，默认以 App 侧运行态为准。",
-      claudeDescription: "通过 bot 运行时接入的本地 Claude CLI 会话桥接",
       providerUnmanagedDetail:
         "该 provider 仅保留配置卡片，不参与 App 托管启动，也不会进入 Telegram 路由。",
       providerAutostartDisabledDetail:
@@ -489,14 +495,6 @@ export const zhTexts: AppTexts = {
         title: "配置不完整",
         missingFiles: "缺少必要的应用配置文件。",
         missingFields: (fields: string) => `缺少必要配置项：${fields}`,
-      },
-      codexDegraded: {
-        title: "codex 状态降级",
-        detail: "从 App 诊断视角看，codex 运行态可能已陈旧或暂不可用。",
-      },
-      claudeDegraded: {
-        title: "claude 状态降级",
-        detail: "从 App 诊断视角看，Claude CLI 当前不可用或尚未完成鉴权。",
       },
       telegramUnavailable: {
         title: "Telegram 连接不可用",

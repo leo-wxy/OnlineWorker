@@ -31,6 +31,7 @@ from plugins.providers.builtin.codex.python.tui_bridge import (
     remember_codex_tg_synced_final_reply,
 )
 from core.providers.session_events import SessionEvent, normalize_session_event
+from core.providers.registry import get_provider
 from core.telegram_formatting import format_telegram_assistant_final_text
 from core.storage import save_storage, ThreadInfo
 from bot.handlers.common import (
@@ -63,6 +64,23 @@ THROTTLE_INTERVAL = 0.6
 
 # 防止 turn/started 并发重复建同一个 thread topic
 _MATERIALIZING_THREAD_TOPICS: set[str] = set()
+
+
+def _provider_should_materialize_unbound_thread_topic(
+    state: AppState,
+    thread_id: str,
+) -> bool:
+    found = state.find_thread_by_id_global(thread_id)
+    if not found:
+        return True
+
+    ws_info, thread_info = found
+    provider = get_provider(str(getattr(ws_info, "tool", "") or ""), state.config)
+    hooks = getattr(provider, "session_event_hooks", None) if provider is not None else None
+    policy = getattr(hooks, "should_materialize_unbound_thread_topic", None) if hooks is not None else None
+    if not callable(policy):
+        return True
+    return bool(policy(state, ws_info, thread_info))
 
 
 async def _materialize_thread_topic_if_needed(
@@ -313,6 +331,7 @@ def _resolve_topic_id(
     """
     topic_id: Optional[int] = None
     thread_found = False
+    thread_waiting_for_topic = False
 
     # 策略 1：通过 thread_id 全局查找（跨所有 workspace）
     if thread_id:
@@ -324,6 +343,7 @@ def _resolve_topic_id(
             if not t.archived:
                 thread_found = True
                 topic_id = t.topic_id  # 可能为 None（按需创建模式）
+                thread_waiting_for_topic = topic_id is None
                 logger.debug(
                     f"[resolve_topic] 全局找到 thread：ws={ws.name} tool={ws.tool} "
                     f"thread={thread_id[:12]}… topic={topic_id}"
@@ -349,7 +369,12 @@ def _resolve_topic_id(
             )
 
     # 策略 3：如果仍然没有 topic_id，记录错误但不再 fallback
-    if topic_id is None and (thread_id or ws_daemon_id):
+    if topic_id is None and thread_waiting_for_topic:
+        logger.debug(
+            f"[resolve_topic] thread 已注册但 topic_id 为空，等待按需 materialize："
+            f"thread={thread_id or 'N/A'} ws_daemon_id={ws_daemon_id or 'N/A'}"
+        )
+    elif topic_id is None and (thread_id or ws_daemon_id):
         logger.error(
             f"[resolve_topic] 无法解析 topic_id：thread={thread_id or 'N/A'} "
             f"ws_daemon_id={ws_daemon_id or 'N/A'} - 事件可能被丢弃"
@@ -644,7 +669,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int):
             amendment_decision=amendment_decision,
             tool_type=provider_name or "codex",
             always_patterns=always_patterns,
-            approval_source="hook_bridge" if approval_params.get("_codex_hook_bridge") else "app_server",
+            approval_source="app_server",
         )
 
         workspace_id, topic_id, route_error = _resolve_approval_target(
@@ -800,12 +825,21 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int):
 
         topic_id = _resolve_topic_id(state, ctx.ws_daemon_id, thread_id, ctx.event_params)
         if topic_id is None:
-            topic_id = await _materialize_thread_topic_if_needed(
-                state,
-                bot,
-                group_chat_id,
-                thread_id,
-            )
+            if not _provider_should_materialize_unbound_thread_topic(state, thread_id):
+                logger.info(
+                    "[streaming] turn/started provider thread 未绑定 TG topic，按 provider 策略跳过 TG 同步: "
+                    "thread=%s provider=%s",
+                    thread_id[:12],
+                    ctx.event.provider or "?",
+                )
+                return
+            else:
+                topic_id = await _materialize_thread_topic_if_needed(
+                    state,
+                    bot,
+                    group_chat_id,
+                    thread_id,
+                )
         if topic_id is None:
             # thread 已占位注册但 topic 还未创建完成，短暂等待后重试
             # （session.created 的 create_forum_topic 仍在进行中）

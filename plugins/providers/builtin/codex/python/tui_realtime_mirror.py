@@ -2,11 +2,9 @@ import asyncio
 import json
 import logging
 import os
-import tempfile
 import time
 from typing import Optional
 
-from config import get_data_dir
 from core.provider_runtime_state import ProviderWatchState
 from core.state import AppState
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
@@ -15,13 +13,12 @@ from plugins.providers.builtin.codex.python.storage_runtime import find_session_
 
 logger = logging.getLogger(__name__)
 
-DIAGNOSTICS_FILENAME = "codex_tui_mirror_status.json"
 ACTIVE_POLL_INTERVAL_SECONDS = 0.5
 WARM_POLL_INTERVAL_SECONDS = 1.5
 IDLE_POLL_INTERVAL_SECONDS = 5.0
 FINAL_GRACE_TTL_SECONDS = 30.0
 DEFAULT_WATCH_TTL_SECONDS = 900.0
-DIAGNOSTICS_WRITE_INTERVAL_SECONDS = 1.0
+WATCH_STATE_TOUCH_INTERVAL_SECONDS = 1.0
 
 
 def watch_codex_thread(
@@ -164,84 +161,8 @@ def _ensure_bound_codex_thread_watches(
     return changed
 
 
-def diagnostics_snapshot_path() -> Optional[str]:
-    data_dir = get_data_dir()
-    if not data_dir:
-        return None
-    return os.path.join(data_dir, DIAGNOSTICS_FILENAME)
-
-
-def clear_codex_tui_diagnostics_snapshot() -> None:
-    path = diagnostics_snapshot_path()
-    if not path:
-        return
-    try:
-        os.remove(path)
-    except FileNotFoundError:
-        return
-    except OSError as e:
-        logger.debug(f"[tui-mirror] 删除 diagnostics 快照失败：{e}")
-
-
-def write_codex_tui_diagnostics_snapshot(state: AppState) -> None:
-    path = diagnostics_snapshot_path()
-    if not path:
-        return
-
-    now_monotonic = time.monotonic()
-    now_epoch = time.time()
-    payload = {
-        "tool": "codex",
-        "mode": "tui",
-        "generated_at_epoch": now_epoch,
-        "mirror_task_running": bool(
-            codex_state.get_runtime(state).mirror_task is not None
-            and not codex_state.get_runtime(state).mirror_task.done()
-        ),
-        "streaming_turn_count": len(state.streaming_turns),
-        "watched_thread_count": len(codex_state.get_runtime(state).watched_threads),
-        "watched_threads": [],
-    }
-
-    runtime = codex_state.get_runtime(state)
-    for thread_id, watch in sorted(runtime.watched_threads.items()):
-        payload["watched_threads"].append(
-            {
-                "thread_id": thread_id,
-                "workspace_id": watch.workspace_id,
-                "topic_id": watch.topic_id,
-                "session_file": watch.session_file,
-                "last_offset": watch.last_offset,
-                "turn_started_sent": watch.turn_started_sent,
-                "poll_interval_seconds": watch.poll_interval_seconds,
-                "seconds_until_next_poll": max(0.0, watch.next_poll_at - now_monotonic),
-                "seconds_until_expire": max(0.0, watch.active_until - now_monotonic),
-                "seconds_since_activity": (
-                    max(0.0, now_monotonic - watch.last_activity_at)
-                    if watch.last_activity_at > 0
-                    else None
-                ),
-                "idle_polls": watch.idle_polls,
-                "has_commentary": bool(watch.last_commentary_text),
-                "has_final": bool(watch.last_final_text),
-            }
-        )
-
-    directory = os.path.dirname(path)
-    os.makedirs(directory, exist_ok=True)
-
-    fd, tmp_path = tempfile.mkstemp(prefix="codex-tui-mirror-", suffix=".json", dir=directory)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_path, path)
-        runtime.last_diagnostics_write = now_monotonic
-    except Exception:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
-        raise
+def touch_codex_tui_watch_state(state: AppState) -> None:
+    codex_state.get_runtime(state).last_watch_state_touch = time.monotonic()
 
 
 def _set_watch_poll_interval(watch: ProviderWatchState, interval_seconds: float, now: float) -> None:
@@ -337,8 +258,8 @@ async def sync_codex_tui_realtime_once(
             sessions_dir=sessions_dir,
         )
 
-    if touched or (now - runtime.last_diagnostics_write >= DIAGNOSTICS_WRITE_INTERVAL_SECONDS):
-        write_codex_tui_diagnostics_snapshot(state)
+    if touched or (now - runtime.last_watch_state_touch >= WATCH_STATE_TOUCH_INTERVAL_SECONDS):
+        touch_codex_tui_watch_state(state)
 
 
 async def sync_watched_thread_once(

@@ -70,7 +70,10 @@ fn summary_with_reason(provider_id: &str, reason: impl Into<String>) -> Provider
     }
 }
 
-fn build_summary(provider_id: &str, buckets: BTreeMap<String, UsageAccumulator>) -> ProviderUsageSummary {
+fn build_summary(
+    provider_id: &str,
+    buckets: BTreeMap<String, UsageAccumulator>,
+) -> ProviderUsageSummary {
     let mut days = buckets
         .into_iter()
         .map(|(date, bucket)| ProviderUsageDay {
@@ -128,24 +131,6 @@ fn collect_jsonl_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn collect_direct_jsonl_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-
-    let mut paths = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .collect::<Vec<_>>();
-    paths.sort();
-
-    for path in paths {
-        if path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
-            out.push(path);
-        }
-    }
-}
-
 fn default_codex_sessions_dir() -> Option<PathBuf> {
     let home = std::env::var("HOME").ok()?;
     let path = PathBuf::from(home).join(".codex/sessions");
@@ -162,10 +147,14 @@ fn date_from_timestamp(value: &str) -> Option<String> {
         return None;
     }
     let candidate = &trimmed[..10];
-    if candidate.chars().enumerate().all(|(index, ch)| match index {
-        4 | 7 => ch == '-',
-        _ => ch.is_ascii_digit(),
-    }) {
+    if candidate
+        .chars()
+        .enumerate()
+        .all(|(index, ch)| match index {
+            4 | 7 => ch == '-',
+            _ => ch.is_ascii_digit(),
+        })
+    {
         Some(candidate.to_string())
     } else {
         None
@@ -174,71 +163,6 @@ fn date_from_timestamp(value: &str) -> Option<String> {
 
 fn is_date_in_range(date: &str, start_date: &str, end_date: &str) -> bool {
     date >= start_date && date <= end_date
-}
-
-fn parse_date_key(date: &str) -> Option<(i32, u32, u32)> {
-    let mut parts = date.split('-');
-    let year = parts.next()?.parse::<i32>().ok()?;
-    let month = parts.next()?.parse::<u32>().ok()?;
-    let day = parts.next()?.parse::<u32>().ok()?;
-    Some((year, month, day))
-}
-
-fn days_in_month(year: i32, month: u32) -> u32 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 => {
-            if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 {
-                29
-            } else {
-                28
-            }
-        }
-        _ => 30,
-    }
-}
-
-fn next_date(date: &str) -> Option<String> {
-    let (mut year, mut month, mut day) = parse_date_key(date)?;
-    day += 1;
-    if day > days_in_month(year, month) {
-        day = 1;
-        month += 1;
-        if month > 12 {
-            month = 1;
-            year += 1;
-        }
-    }
-    Some(format!("{year:04}-{month:02}-{day:02}"))
-}
-
-fn collect_codex_jsonl_files_for_range(root: &Path, start_date: &str, end_date: &str) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    let mut current = start_date.to_string();
-
-    loop {
-        let Some((year, month, day)) = parse_date_key(&current) else {
-            break;
-        };
-        let dir = root
-            .join(format!("{year:04}"))
-            .join(format!("{month:02}"))
-            .join(format!("{day:02}"));
-        if dir.exists() {
-            collect_direct_jsonl_files(&dir, &mut files);
-        }
-        if current == end_date {
-            break;
-        }
-        let Some(next) = next_date(&current) else {
-            break;
-        };
-        current = next;
-    }
-
-    files.sort();
-    files
 }
 
 fn ensure_u64(value: Option<&Value>) -> u64 {
@@ -303,15 +227,19 @@ fn summarize_codex_usage_from_paths(
 ) -> Result<Vec<ProviderUsageDay>, String> {
     let mut files = Vec::new();
     for path in paths {
-        files.extend(collect_codex_jsonl_files_for_range(path, start_date, end_date));
+        collect_jsonl_files(path, &mut files);
     }
     files.sort();
 
     let mut buckets = BTreeMap::<String, UsageAccumulator>::new();
 
     for file_path in files {
-        let file = fs::File::open(&file_path)
-            .map_err(|error| format!("Cannot read codex usage file {}: {error}", file_path.display()))?;
+        let file = fs::File::open(&file_path).map_err(|error| {
+            format!(
+                "Cannot read codex usage file {}: {error}",
+                file_path.display()
+            )
+        })?;
         let reader = BufReader::new(file);
         let mut previous_totals: Option<RawUsage> = None;
         let mut previous_seen_total_usage: Option<RawUsage> = None;
@@ -348,8 +276,10 @@ fn summarize_codex_usage_from_paths(
                 continue;
             }
             let info = payload.get("info");
-            let last_usage = normalize_codex_raw_usage(info.and_then(|value| value.get("last_token_usage")));
-            let total_usage = normalize_codex_raw_usage(info.and_then(|value| value.get("total_token_usage")));
+            let last_usage =
+                normalize_codex_raw_usage(info.and_then(|value| value.get("last_token_usage")));
+            let total_usage =
+                normalize_codex_raw_usage(info.and_then(|value| value.get("total_token_usage")));
 
             if let Some(total) = total_usage {
                 if previous_seen_total_usage == Some(total) {
@@ -410,8 +340,12 @@ fn summarize_claude_usage_from_paths(
     let mut processed_hashes = HashSet::<String>::new();
 
     for file_path in files {
-        let file = fs::File::open(&file_path)
-            .map_err(|error| format!("Cannot read claude usage file {}: {error}", file_path.display()))?;
+        let file = fs::File::open(&file_path).map_err(|error| {
+            format!(
+                "Cannot read claude usage file {}: {error}",
+                file_path.display()
+            )
+        })?;
         let reader = BufReader::new(file);
 
         for line in reader.lines() {
@@ -436,7 +370,11 @@ fn summarize_claude_usage_from_paths(
             if !is_date_in_range(&date, start_date, end_date) {
                 continue;
             }
-            let Some(usage) = parsed.get("message").and_then(|value| value.get("usage")).and_then(Value::as_object) else {
+            let Some(usage) = parsed
+                .get("message")
+                .and_then(|value| value.get("usage"))
+                .and_then(Value::as_object)
+            else {
                 continue;
             };
 
@@ -555,9 +493,8 @@ mod tests {
         )
         .expect("write file");
 
-        let days =
-            summarize_codex_usage_from_paths(&[root.clone()], "2026-05-11", "2026-05-11")
-                .expect("summary");
+        let days = summarize_codex_usage_from_paths(&[root.clone()], "2026-05-11", "2026-05-11")
+            .expect("summary");
         assert_eq!(days.len(), 1);
         assert_eq!(days[0].date, "2026-05-11");
         assert_eq!(days[0].input_tokens, 160);
@@ -566,6 +503,34 @@ mod tests {
         assert_eq!(days[0].total_tokens, 230);
         assert_eq!(days[0].cache_creation_tokens, 0);
         assert_eq!(days[0].total_cost_usd, None);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn codex_usage_summary_reads_long_running_session_from_creation_day_directory() {
+        let root = unique_temp_dir("codex-long-running");
+        let creation_day_dir = root.join("2026").join("05").join("12");
+        fs::create_dir_all(&creation_day_dir).expect("create creation day dir");
+        let file = creation_day_dir.join("rollout.jsonl");
+        fs::write(
+            &file,
+            concat!(
+                "{\"timestamp\":\"2026-05-12T07:14:08.000Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"t1\"}}\n",
+                "{\"timestamp\":\"2026-05-20T11:44:52.682Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"input_tokens\":189292,\"cached_input_tokens\":167808,\"output_tokens\":37,\"total_tokens\":189329},\"total_token_usage\":{\"input_tokens\":114981193,\"cached_input_tokens\":106463488,\"output_tokens\":484228,\"total_tokens\":115465421}}}}\n"
+            ),
+        )
+        .expect("write file");
+
+        let days = summarize_codex_usage_from_paths(&[root.clone()], "2026-05-14", "2026-05-20")
+            .expect("summary");
+
+        assert_eq!(days.len(), 1);
+        assert_eq!(days[0].date, "2026-05-20");
+        assert_eq!(days[0].input_tokens, 189292);
+        assert_eq!(days[0].cache_read_tokens, 167808);
+        assert_eq!(days[0].output_tokens, 37);
+        assert_eq!(days[0].total_tokens, 189329);
 
         let _ = fs::remove_dir_all(root);
     }
@@ -586,9 +551,8 @@ mod tests {
         )
         .expect("write file");
 
-        let days =
-            summarize_claude_usage_from_paths(&[root.clone()], "2026-05-11", "2026-05-11")
-                .expect("summary");
+        let days = summarize_claude_usage_from_paths(&[root.clone()], "2026-05-11", "2026-05-11")
+            .expect("summary");
         assert_eq!(days.len(), 1);
         assert_eq!(days[0].date, "2026-05-11");
         assert_eq!(days[0].input_tokens, 140);
@@ -616,9 +580,8 @@ mod tests {
         )
         .expect("write file");
 
-        let days =
-            summarize_codex_usage_from_paths(&[root.clone()], "2026-05-11", "2026-05-11")
-                .expect("summary");
+        let days = summarize_codex_usage_from_paths(&[root.clone()], "2026-05-11", "2026-05-11")
+            .expect("summary");
         assert_eq!(days.len(), 1);
         assert_eq!(days[0].date, "2026-05-11");
         assert_eq!(days[0].total_tokens, 25);
@@ -643,9 +606,8 @@ mod tests {
         )
         .expect("write file");
 
-        let days =
-            summarize_codex_usage_from_paths(&[root.clone()], "2026-05-11", "2026-05-11")
-                .expect("summary");
+        let days = summarize_codex_usage_from_paths(&[root.clone()], "2026-05-11", "2026-05-11")
+            .expect("summary");
         assert_eq!(days.len(), 1);
         assert_eq!(days[0].input_tokens, 160);
         assert_eq!(days[0].cache_read_tokens, 20);

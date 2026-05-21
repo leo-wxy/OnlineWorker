@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -46,61 +46,18 @@ pub struct ServiceStatus {
     pub pid: Option<u32>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct CodexMirrorWatchSnapshot {
-    #[serde(alias = "thread_id")]
-    pub thread_id: String,
-    #[serde(alias = "workspace_id")]
-    pub workspace_id: String,
-    #[serde(alias = "topic_id")]
-    pub topic_id: i64,
-    #[serde(alias = "session_file")]
-    pub session_file: Option<String>,
-    #[serde(alias = "last_offset")]
-    pub last_offset: u64,
-    #[serde(alias = "turn_started_sent")]
-    pub turn_started_sent: bool,
-    #[serde(alias = "poll_interval_seconds")]
-    pub poll_interval_seconds: f64,
-    #[serde(alias = "seconds_until_next_poll")]
-    pub seconds_until_next_poll: f64,
-    #[serde(alias = "seconds_until_expire")]
-    pub seconds_until_expire: f64,
-    #[serde(alias = "seconds_since_activity")]
-    pub seconds_since_activity: Option<f64>,
-    #[serde(alias = "idle_polls")]
-    pub idle_polls: u64,
-    #[serde(alias = "has_commentary")]
-    pub has_commentary: bool,
-    #[serde(alias = "has_final")]
-    pub has_final: bool,
+const OWNER_BRIDGE_SOCKET_FILENAMES: [&str; 2] =
+    ["provider_owner_bridge.sock", "codex_owner_bridge.sock"];
+
+fn cleanup_owner_bridge_socket_files_in_dir(data_dir: &Path) {
+    for filename in OWNER_BRIDGE_SOCKET_FILENAMES {
+        let _ = std::fs::remove_file(data_dir.join(filename));
+    }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct CodexMirrorStatus {
-    pub tool: String,
-    pub mode: String,
-    #[serde(alias = "generated_at_epoch")]
-    pub generated_at_epoch: f64,
-    #[serde(alias = "mirror_task_running")]
-    pub mirror_task_running: bool,
-    #[serde(alias = "streaming_turn_count")]
-    pub streaming_turn_count: u64,
-    #[serde(alias = "watched_thread_count")]
-    pub watched_thread_count: u64,
-    #[serde(alias = "watched_threads")]
-    pub watched_threads: Vec<CodexMirrorWatchSnapshot>,
-}
-
-fn codex_mirror_status_path() -> Result<std::path::PathBuf, String> {
-    Ok(ensure_data_dir()?.join("codex_tui_mirror_status.json"))
-}
-
-fn cleanup_codex_mirror_status_file() {
-    if let Ok(path) = codex_mirror_status_path() {
-        let _ = std::fs::remove_file(path);
+fn cleanup_owner_bridge_socket_files() {
+    if let Ok(data_dir) = ensure_data_dir() {
+        cleanup_owner_bridge_socket_files_in_dir(&data_dir);
     }
 }
 
@@ -150,11 +107,19 @@ fn cleanup_process_matchers(policy: ManagedProcessCleanupPolicy) -> Vec<String> 
         "python.*main.py".to_string(),
     ];
     for matcher in policy.provider_matchers {
-        if !matcher.trim().is_empty() && !matchers.iter().any(|existing| existing == &matcher) {
-            matchers.push(matcher);
+        let matcher = matcher.trim();
+        if matcher.is_empty() || is_unsafe_global_cleanup_matcher(matcher) {
+            continue;
+        }
+        if !matchers.iter().any(|existing| existing == matcher) {
+            matchers.push(matcher.to_string());
         }
     }
     matchers
+}
+
+fn is_unsafe_global_cleanup_matcher(matcher: &str) -> bool {
+    matches!(matcher, "codex.*app-server" | "codex-aar")
 }
 
 fn cleanup_policy_from_config() -> ManagedProcessCleanupPolicy {
@@ -195,6 +160,7 @@ fn cleanup_managed_processes(policy: ManagedProcessCleanupPolicy) {
 
     // 3. 清理锁文件
     let _ = std::fs::remove_file("/tmp/onlineworker_bot.lock");
+    cleanup_owner_bridge_socket_files();
 }
 
 fn pids_from_output(output: &[u8]) -> Vec<u32> {
@@ -271,6 +237,55 @@ fn select_primary_pid(pids: &[u32], parents: &HashMap<u32, u32>) -> Option<u32> 
             *pid,
         )
     })
+}
+
+fn process_tree_pids(root_pid: u32, parents: &HashMap<u32, u32>) -> Vec<u32> {
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    for (pid, ppid) in parents {
+        children.entry(*ppid).or_default().push(*pid);
+    }
+
+    fn visit(pid: u32, children: &HashMap<u32, Vec<u32>>, ordered: &mut Vec<u32>) {
+        if let Some(child_pids) = children.get(&pid) {
+            let mut sorted = child_pids.clone();
+            sorted.sort_unstable();
+            for child in sorted {
+                visit(child, children, ordered);
+            }
+        }
+        ordered.push(pid);
+    }
+
+    let mut ordered = Vec::new();
+    visit(root_pid, &children, &mut ordered);
+    ordered
+}
+
+fn running_process_tree_pids(root_pid: u32) -> Vec<u32> {
+    let ps_output = match std::process::Command::new("ps")
+        .args(["-axo", "pid=,ppid="])
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        _ => return vec![root_pid],
+    };
+    let parents = pid_parent_pairs_from_output(&ps_output.stdout);
+    process_tree_pids(root_pid, &parents)
+}
+
+fn kill_pid(pid: u32) {
+    let _ = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .output();
+}
+
+fn cleanup_tracked_process_tree(root_pid: Option<u32>) {
+    let Some(root_pid) = root_pid else {
+        return;
+    };
+    for pid in running_process_tree_pids(root_pid) {
+        kill_pid(pid);
+    }
 }
 
 fn find_external_bot_pid(data_dir: &std::path::Path) -> Option<u32> {
@@ -385,6 +400,7 @@ pub async fn shutdown_managed_processes_for_app_exit(state: &Arc<Mutex<BotState>
     let cleanup_policy = cleanup_policy_from_config();
     let mut bot = state.lock().await;
     apply_manual_stop_policy(&mut bot);
+    let tracked_pid = bot.pid;
     if let Some(child) = bot.child.take() {
         let _ = child.kill();
     }
@@ -394,8 +410,8 @@ pub async fn shutdown_managed_processes_for_app_exit(state: &Arc<Mutex<BotState>
     bot.last_started_at = None;
     drop(bot);
 
+    cleanup_tracked_process_tree(tracked_pid);
     cleanup_managed_processes(cleanup_policy);
-    cleanup_codex_mirror_status_file();
 }
 
 /// Internal: do the actual sidecar spawn. Stores child in state, starts monitor task.
@@ -403,7 +419,6 @@ async fn do_spawn(app: &AppHandle, state: &Arc<Mutex<BotState>>) -> Result<u32, 
     let dir = ensure_data_dir()?;
     let dir_str = dir.to_string_lossy().to_string();
     eprintln!("[service] do_spawn: data_dir={}", dir_str);
-    cleanup_codex_mirror_status_file();
 
     let home = std::env::var("HOME").unwrap_or_default();
     let path = format!(
@@ -430,12 +445,10 @@ async fn do_spawn(app: &AppHandle, state: &Arc<Mutex<BotState>>) -> Result<u32, 
     if let Some(overlay_env) = overlay_env {
         sidecar = sidecar.env(PROVIDER_OVERLAY_ENV, overlay_env);
     }
-    let (rx, child) = sidecar
-        .spawn()
-        .map_err(|e| {
-            eprintln!("[service] Failed to spawn: {}", e);
-            format!("Failed to spawn: {}", e)
-        })?;
+    let (rx, child) = sidecar.spawn().map_err(|e| {
+        eprintln!("[service] Failed to spawn: {}", e);
+        format!("Failed to spawn: {}", e)
+    })?;
 
     let pid = child.pid();
     eprintln!("[service] do_spawn: sidecar spawned, pid={}", pid);
@@ -641,6 +654,7 @@ pub(crate) async fn start_service_internal(
         if bot.starting {
             return Ok("Start already in progress".to_string());
         }
+        let tracked_pid = bot.pid;
         if let Some(child) = bot.child.take() {
             let _ = child.kill();
         }
@@ -649,6 +663,8 @@ pub(crate) async fn start_service_internal(
         bot.pid = None;
         bot.last_started_at = None;
         apply_service_start_policy(&mut bot);
+        drop(bot);
+        cleanup_tracked_process_tree(tracked_pid);
     }
 
     eprintln!("[service_start] 先停止 bot 并清理本地接口...");
@@ -675,20 +691,6 @@ pub(crate) async fn stop_service_internal(state: &Arc<Mutex<BotState>>) -> Resul
     shutdown_managed_processes_for_app_exit(state).await;
     eprintln!("[service_stop] 清理完成");
     Ok("Stopped".to_string())
-}
-
-#[tauri::command]
-pub async fn read_codex_mirror_status() -> Result<Option<CodexMirrorStatus>, String> {
-    let path = codex_mirror_status_path()?;
-    if !path.exists() {
-        return Ok(None);
-    }
-
-    let raw = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Cannot read codex mirror status: {}", e))?;
-    let parsed: CodexMirrorStatus = serde_json::from_str(&raw)
-        .map_err(|e| format!("Cannot parse codex mirror status: {}", e))?;
-    Ok(Some(parsed))
 }
 
 /// Check if a PID is still alive
@@ -768,11 +770,11 @@ fn probe_http_health(url: &str) -> Result<bool, String> {
 mod tests {
     use super::should_ignore_sidecar_output_event;
     use super::{
-        apply_manual_stop_policy, apply_service_start_policy, cleanup_process_matchers,
-        compute_service_status, overlay_env_spec, overlay_env_spec_from_app_env,
-        pid_parent_pairs_from_output, pids_from_output, probe_http_health, read_env_key, select_primary_pid,
-        should_attempt_background_service_recovery, BotState, CodexMirrorStatus,
-        ManagedProcessCleanupPolicy,
+        apply_manual_stop_policy, apply_service_start_policy,
+        cleanup_owner_bridge_socket_files_in_dir, cleanup_process_matchers, compute_service_status,
+        overlay_env_spec, overlay_env_spec_from_app_env, pid_parent_pairs_from_output,
+        pids_from_output, probe_http_health, process_tree_pids, read_env_key, select_primary_pid,
+        should_attempt_background_service_recovery, BotState, ManagedProcessCleanupPolicy,
     };
     use std::collections::HashMap;
     use std::fs;
@@ -934,9 +936,40 @@ mod tests {
                 "custom-provider.*serve".to_string(),
             ],
         });
-        assert!(matchers.contains(&"codex.*app-server".to_string()));
-        assert!(matchers.contains(&"codex-aar".to_string()));
+        assert!(!matchers.contains(&"codex.*app-server".to_string()));
+        assert!(!matchers.contains(&"codex-aar".to_string()));
         assert!(matchers.contains(&"custom-provider.*serve".to_string()));
+    }
+
+    #[test]
+    fn cleanup_process_matchers_skip_legacy_codex_global_matchers() {
+        let matchers = cleanup_process_matchers(ManagedProcessCleanupPolicy {
+            provider_matchers: vec!["codex.*app-server".to_string(), "codex-aar".to_string()],
+        });
+
+        assert!(!matchers.contains(&"codex.*app-server".to_string()));
+        assert!(!matchers.contains(&"codex-aar".to_string()));
+    }
+
+    #[test]
+    fn cleanup_owner_bridge_socket_files_removes_stale_bridge_paths_only() {
+        let dir =
+            std::env::temp_dir().join(format!("ow-service-socket-cleanup-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let provider_socket = dir.join("provider_owner_bridge.sock");
+        let codex_socket = dir.join("codex_owner_bridge.sock");
+        let unrelated = dir.join("onlineworker_state.json");
+        fs::write(&provider_socket, "").expect("write provider socket placeholder");
+        fs::write(&codex_socket, "").expect("write codex socket placeholder");
+        fs::write(&unrelated, "{}").expect("write unrelated file");
+
+        cleanup_owner_bridge_socket_files_in_dir(&dir);
+
+        assert!(!provider_socket.exists());
+        assert!(!codex_socket.exists());
+        assert!(unrelated.exists());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1011,44 +1044,9 @@ mod tests {
     }
 
     #[test]
-    fn codex_mirror_status_accepts_snake_case_snapshot_and_serializes_camel_case() {
-        let raw = r#"{
-          "tool": "codex",
-          "mode": "tui",
-          "generated_at_epoch": 1775477775.18,
-          "mirror_task_running": true,
-          "streaming_turn_count": 0,
-          "watched_thread_count": 1,
-          "watched_threads": [
-            {
-              "thread_id": "tid-1",
-              "workspace_id": "codex:onlineWorker",
-              "topic_id": 100,
-              "session_file": "/tmp/demo.jsonl",
-              "last_offset": 123,
-              "turn_started_sent": false,
-              "poll_interval_seconds": 0.5,
-              "seconds_until_next_poll": 0.2,
-              "seconds_until_expire": 10.0,
-              "seconds_since_activity": 0.4,
-              "idle_polls": 0,
-              "has_commentary": false,
-              "has_final": false
-            }
-          ]
-        }"#;
+    fn process_tree_pids_returns_only_descendants_before_root() {
+        let parents = HashMap::from([(100, 1), (110, 100), (120, 110), (200, 1), (210, 200)]);
 
-        let parsed: CodexMirrorStatus = serde_json::from_str(raw).expect("parse snake_case");
-        let serialized = serde_json::to_value(parsed).expect("serialize camelCase");
-
-        assert_eq!(serialized["generatedAtEpoch"], 1775477775.18);
-        assert_eq!(serialized["mirrorTaskRunning"], true);
-        assert_eq!(serialized["watchedThreadCount"], 1);
-        assert_eq!(serialized["watchedThreads"][0]["threadId"], "tid-1");
-        assert_eq!(
-            serialized["watchedThreads"][0]["workspaceId"],
-            "codex:onlineWorker"
-        );
-        assert_eq!(serialized["watchedThreads"][0]["pollIntervalSeconds"], 0.5);
+        assert_eq!(process_tree_pids(100, &parents), vec![120, 110, 100]);
     }
 }

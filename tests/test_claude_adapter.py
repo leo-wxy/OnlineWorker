@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import time
 from unittest.mock import AsyncMock
 
 import pytest
@@ -60,33 +61,75 @@ class FakeStreamingProcess:
         return self.returncode
 
 
+class SlowStreamingProcess:
+    def __init__(self, stdout_lines: list[str], release_event: asyncio.Event, returncode: int = 0):
+        self.returncode = returncode
+        self.stdout = FakeStreamReader(stdout_lines)
+        self.stderr = FakeStreamReader([])
+        self._release_event = release_event
+
+    async def wait(self):
+        await self._release_event.wait()
+        return self.returncode
+
+
 @pytest.fixture(autouse=True)
 def clear_claude_auth_env(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
 
 
-def test_resolve_claude_bin_prefers_homebrew_binary_over_stale_local(monkeypatch):
+def register_existing_workspace(adapter, workspace_id: str, tmp_path, name: str = "onlineWorker"):
+    workspace = tmp_path / name
+    workspace.mkdir(parents=True, exist_ok=True)
+    adapter.register_workspace_cwd(workspace_id, str(workspace))
+    return workspace
+
+
+def test_resolve_claude_bin_preserves_bare_command_for_path_resolution():
+    from plugins.providers.builtin.claude.python.adapter import (
+        resolve_claude_bin,
+        resolve_claude_command_prefix,
+    )
+
+    assert resolve_claude_bin("claude") == "claude"
+    assert resolve_claude_command_prefix("claude") == ["claude"]
+
+
+def test_resolve_claude_bin_preserves_explicit_path():
     from plugins.providers.builtin.claude.python.adapter import resolve_claude_bin
-
-    monkeypatch.setattr("plugins.providers.builtin.claude.python.adapter.PREFERRED_CLAUDE_BINARIES", ("/opt/homebrew/bin/claude",))
-    monkeypatch.setattr("plugins.providers.builtin.claude.python.adapter.os.path.isfile", lambda path: path in {
-        "/opt/homebrew/bin/claude",
-        "/Users/example/.local/bin/claude",
-    })
-    monkeypatch.setattr("plugins.providers.builtin.claude.python.adapter.os.access", lambda path, mode: True)
-    monkeypatch.setattr("plugins.providers.builtin.claude.python.adapter.shutil.which", lambda name: "/Users/example/.local/bin/claude")
-
-    assert resolve_claude_bin("claude") == "/opt/homebrew/bin/claude"
-
-
-def test_resolve_claude_bin_preserves_explicit_path(monkeypatch):
-    from plugins.providers.builtin.claude.python.adapter import resolve_claude_bin
-
-    monkeypatch.setattr("plugins.providers.builtin.claude.python.adapter.shutil.which", lambda name: "/opt/homebrew/bin/claude")
 
     assert resolve_claude_bin("/custom/bin/claude") == "/custom/bin/claude"
+
+
+def test_claude_adapter_build_send_argv_preserves_launcher_prefix():
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    adapter = ClaudeAdapter(claude_bin="ow-claude-launcher claude")
+
+    assert adapter._build_send_argv("ses-1", "继续") == [
+        "ow-claude-launcher",
+        "claude",
+        "-p",
+        "--verbose",
+        "--output-format",
+        "stream-json",
+        "--include-partial-messages",
+        "--session-id",
+        "ses-1",
+        "继续",
+    ]
+
+
+def test_resolve_claude_command_prefix_supports_quoted_launcher_path():
+    from plugins.providers.builtin.claude.python.adapter import resolve_claude_command_prefix
+
+    assert resolve_claude_command_prefix('"/Applications/Claude Wrapper/bin/launch" claude') == [
+        "/Applications/Claude Wrapper/bin/launch",
+        "claude",
+    ]
 
 
 def test_resolve_preferred_node_bin_dir_prefers_latest_supported_nvm(monkeypatch):
@@ -322,12 +365,12 @@ async def test_claude_adapter_lists_threads_from_local_facts(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_claude_adapter_send_user_message_emits_minimal_turn_events(monkeypatch):
+async def test_claude_adapter_send_user_message_emits_minimal_turn_events(monkeypatch, tmp_path):
     from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
 
     adapter = ClaudeAdapter(claude_bin="claude")
     await adapter.connect()
-    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/example/Projects/onlineWorker")
+    register_existing_workspace(adapter, "claude:onlineWorker", tmp_path)
 
     events = []
 
@@ -338,7 +381,6 @@ async def test_claude_adapter_send_user_message_emits_minimal_turn_events(monkey
 
     create_process = AsyncMock(
         side_effect=[
-            FakeAuthProcess('{"loggedIn": true, "authMethod": "subscription", "apiProvider": "firstParty"}'),
             FakeStreamingProcess(
                 stdout_lines=[
                     '{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_1","content":[]}}}\n',
@@ -358,7 +400,7 @@ async def test_claude_adapter_send_user_message_emits_minimal_turn_events(monkey
 
     result = await adapter.send_user_message("claude:onlineWorker", "ses-1", "继续")
 
-    assert create_process.await_count == 2
+    assert create_process.await_count == 1
     assert result["threadId"] == "ses-1"
     assert result["status"] == "completed"
     assert [event[0] for event in events] == [
@@ -380,16 +422,153 @@ async def test_claude_adapter_send_user_message_emits_minimal_turn_events(monkey
 
 
 @pytest.mark.asyncio
-async def test_claude_adapter_resumes_existing_session_with_resume_flag(monkeypatch):
+async def test_claude_adapter_send_user_message_renders_attachment_paths(monkeypatch, tmp_path):
     from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
 
     adapter = ClaudeAdapter(claude_bin="claude")
     await adapter.connect()
-    adapter.register_workspace_cwd("claude:ncmplayerengine", "/Users/example/Projects/sample-project")
+    register_existing_workspace(adapter, "claude:onlineWorker", tmp_path)
+
+    create_process = AsyncMock(
+        return_value=FakeStreamingProcess(
+            stdout_lines=[
+                '{"type":"result","subtype":"success","is_error":false,"result":"ok"}\n',
+            ],
+        )
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.asyncio.create_subprocess_exec",
+        create_process,
+    )
+
+    result = await adapter.send_user_message(
+        "claude:onlineWorker",
+        "ses-1",
+        "请根据附件回答",
+        attachments=[
+            {
+                "kind": "image",
+                "path": "/tmp/ow-attachments/photo.jpg",
+                "name": "photo.jpg",
+                "mime_type": "image/jpeg",
+            },
+            {
+                "kind": "file",
+                "path": "/tmp/ow-attachments/report.pdf",
+                "name": "report.pdf",
+                "mime_type": "application/pdf",
+            },
+        ],
+    )
+
+    assert result["status"] == "completed"
+    prompt = create_process.await_args.args[-1]
+    assert "用户附带了以下本地附件" in prompt
+    assert "1. 图片" in prompt
+    assert "path: /tmp/ow-attachments/photo.jpg" in prompt
+    assert "name: photo.jpg" in prompt
+    assert "mime_type: image/jpeg" in prompt
+    assert "2. 文件" in prompt
+    assert "path: /tmp/ow-attachments/report.pdf" in prompt
+    assert "name: report.pdf" in prompt
+    assert "mime_type: application/pdf" in prompt
+    assert "用户消息：" in prompt
+    assert "请根据附件回答" in prompt
+
+
+@pytest.mark.asyncio
+async def test_claude_adapter_uses_larger_subprocess_stream_limit_for_send(monkeypatch, tmp_path):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    adapter = ClaudeAdapter(claude_bin="claude")
+    await adapter.connect()
+    register_existing_workspace(adapter, "claude:onlineWorker", tmp_path)
+
+    create_process = AsyncMock(
+        return_value=FakeStreamingProcess(
+            stdout_lines=[
+                '{"type":"result","subtype":"success","is_error":false,"result":"ok"}\n',
+            ],
+        )
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.asyncio.create_subprocess_exec",
+        create_process,
+    )
+
+    result = await adapter.send_user_message("claude:onlineWorker", "ses-1", "继续")
+
+    assert result["status"] == "completed"
+    assert create_process.await_args.kwargs["limit"] >= 1024 * 1024
+
+
+@pytest.mark.asyncio
+async def test_claude_adapter_serializes_sends_for_same_session(monkeypatch, tmp_path):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    adapter = ClaudeAdapter(claude_bin="claude")
+    await adapter.connect()
+    register_existing_workspace(adapter, "claude:onlineWorker", tmp_path)
+
+    release_first = asyncio.Event()
+    first_spawned = asyncio.Event()
+    launches: list[tuple[str, float]] = []
+
+    async def fake_create_process(*args, **kwargs):
+        prompt = str(args[-1])
+        launches.append((prompt, time.monotonic()))
+        if prompt == "first":
+            first_spawned.set()
+            return SlowStreamingProcess(
+                ['{"type":"result","subtype":"success","is_error":false,"result":"first ok"}\n'],
+                release_first,
+            )
+        return FakeStreamingProcess(
+            stdout_lines=[
+                '{"type":"result","subtype":"success","is_error":false,"result":"second ok"}\n',
+            ],
+        )
+
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.asyncio.create_subprocess_exec",
+        fake_create_process,
+    )
+
+    first_task = asyncio.create_task(
+        adapter.send_user_message("claude:onlineWorker", "ses-1", "first")
+    )
+    await asyncio.wait_for(first_spawned.wait(), timeout=1)
+
+    second_task = asyncio.create_task(
+        adapter.send_user_message("claude:onlineWorker", "ses-1", "second")
+    )
+    await asyncio.sleep(0.02)
+
+    assert [prompt for prompt, _ in launches] == ["first"]
+
+    release_first.set()
+    first_result, second_result = await asyncio.gather(first_task, second_task)
+
+    assert first_result["status"] == "completed"
+    assert second_result["status"] == "completed"
+    assert [prompt for prompt, _ in launches] == ["first", "second"]
+    assert launches[1][1] >= launches[0][1]
+
+
+@pytest.mark.asyncio
+async def test_claude_adapter_resumes_existing_session_with_resume_flag(monkeypatch, tmp_path):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.resolve_claude_bin",
+        lambda claude_bin: claude_bin,
+    )
+    adapter = ClaudeAdapter(claude_bin="claude")
+    await adapter.connect()
+    register_existing_workspace(adapter, "claude:ncmplayerengine", tmp_path, "sample-project")
 
     create_process = AsyncMock(
         side_effect=[
-            FakeAuthProcess('{"loggedIn": true, "authMethod": "proxyEnv"}'),
             FakeMainProcess("最终回复"),
         ]
     )
@@ -409,8 +588,8 @@ async def test_claude_adapter_resumes_existing_session_with_resume_flag(monkeypa
     )
 
     assert result["status"] == "completed"
-    second_call_args = create_process.await_args_list[1].args
-    assert second_call_args[:8] == (
+    send_call_args = create_process.await_args.args
+    assert send_call_args[:8] == (
         "claude",
         "-p",
         "--verbose",
@@ -423,16 +602,19 @@ async def test_claude_adapter_resumes_existing_session_with_resume_flag(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_claude_adapter_uses_session_id_flag_for_new_session(monkeypatch):
+async def test_claude_adapter_uses_session_id_flag_for_new_session(monkeypatch, tmp_path):
     from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
 
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.resolve_claude_bin",
+        lambda claude_bin: claude_bin,
+    )
     adapter = ClaudeAdapter(claude_bin="claude")
     await adapter.connect()
-    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/example/Projects/onlineWorker")
+    register_existing_workspace(adapter, "claude:onlineWorker", tmp_path)
 
     create_process = AsyncMock(
         side_effect=[
-            FakeAuthProcess('{"loggedIn": true, "authMethod": "proxyEnv"}'),
             FakeMainProcess("最终回复"),
         ]
     )
@@ -452,8 +634,8 @@ async def test_claude_adapter_uses_session_id_flag_for_new_session(monkeypatch):
     )
 
     assert result["status"] == "completed"
-    second_call_args = create_process.await_args_list[1].args
-    assert second_call_args[:8] == (
+    send_call_args = create_process.await_args.args
+    assert send_call_args[:8] == (
         "claude",
         "-p",
         "--verbose",
@@ -466,56 +648,166 @@ async def test_claude_adapter_uses_session_id_flag_for_new_session(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_claude_adapter_marks_env_auth_as_ready(monkeypatch):
+async def test_claude_adapter_rejects_missing_workspace_cwd_before_send(monkeypatch, tmp_path):
     from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "dummy")
-    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://localhost:3031")
-    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-opus-4-6")
-
+    missing_workspace = tmp_path / "deleted-onlineWorker"
     adapter = ClaudeAdapter(claude_bin="claude")
+    await adapter.connect()
+    adapter.register_workspace_cwd("claude:onlineWorker", str(missing_workspace))
+
+    async def fail_if_spawned(*args, **kwargs):
+        raise AssertionError("send should fail before spawning claude")
+
+    create_process = AsyncMock(side_effect=fail_if_spawned)
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.asyncio.create_subprocess_exec",
+        create_process,
+    )
+
+    with pytest.raises(RuntimeError, match="Claude workspace cwd 不存在"):
+        await adapter.send_user_message("claude:onlineWorker", "ses-1", "继续")
+
+    create_process.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_claude_adapter_uses_cli_auth_status_instead_of_provider_auth(monkeypatch):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.resolve_claude_bin",
+        lambda claude_bin: claude_bin,
+    )
+    adapter = ClaudeAdapter(
+        claude_bin="claude",
+        auth={
+            "key": "dummy",
+            "base_url": "https://config.example.test/langbase",
+            "model": "claude-opus-4-6",
+        },
+    )
+    create_process = AsyncMock(
+        return_value=FakeAuthProcess(
+            '{"loggedIn": true, "authMethod": "subscription", "apiProvider": "firstParty"}'
+        )
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.asyncio.create_subprocess_exec",
+        create_process,
+    )
 
     status = await adapter.refresh_auth_status()
 
     assert status["loggedIn"] is True
-    assert status["authMethod"] == "apiKeyEnv"
+    assert status["authMethod"] == "subscription"
     assert adapter.auth_ready is True
-    assert adapter.auth_method == "apiKeyEnv"
+    assert adapter.auth_method == "subscription"
+    create_process.assert_awaited_once()
+    assert create_process.await_args.args[:3] == ("claude", "auth", "status")
+    assert create_process.await_args.kwargs["stdin"] == asyncio.subprocess.DEVNULL
 
 
 @pytest.mark.asyncio
-async def test_claude_adapter_marks_proxy_env_without_api_key_as_ready(monkeypatch):
+async def test_claude_adapter_does_not_treat_provider_proxy_config_as_auth_ready(monkeypatch):
     from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
 
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://localhost:3031")
-    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-opus-4-6")
+    adapter = ClaudeAdapter(
+        claude_bin="claude",
+        auth={
+            "base_url": "https://config.example.test/langbase",
+            "model": "claude-opus-4-6",
+        },
+    )
+    create_process = AsyncMock(
+        return_value=FakeAuthProcess(
+            '{"loggedIn": false, "authMethod": "none", "apiProvider": "firstParty"}'
+        )
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.asyncio.create_subprocess_exec",
+        create_process,
+    )
 
-    adapter = ClaudeAdapter(claude_bin="claude")
+    status = await adapter.refresh_auth_status()
+
+    assert status["loggedIn"] is False
+    assert status["authMethod"] == "none"
+    assert adapter.auth_ready is False
+    assert adapter.auth_method == "none"
+    create_process.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_claude_adapter_auth_status_uses_runtime_env_without_cli_login(monkeypatch):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    monkeypatch.setenv("CODEX_CI", "1")
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "sdk-cli")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://process.example.test/langbase")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "process-token")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "process-model")
+    adapter = ClaudeAdapter(claude_bin="claude", auth={"base_url": "https://config.example.test/langbase"})
+
+    create_process = AsyncMock(
+        return_value=FakeAuthProcess(
+            '{"loggedIn": false, "authMethod": "none", "apiProvider": "firstParty"}'
+        )
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.asyncio.create_subprocess_exec",
+        create_process,
+    )
+
+    status = await adapter.refresh_auth_status()
+
+    assert status == {"loggedIn": True, "authMethod": "proxyEnv"}
+    create_process.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_claude_adapter_auth_status_uses_launcher_prefix(monkeypatch):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    adapter = ClaudeAdapter(claude_bin="ow-claude-launcher claude")
+
+    create_process = AsyncMock(
+        return_value=FakeAuthProcess(
+            '{"loggedIn": true, "authMethod": "oauth_token", "apiProvider": "firstParty"}'
+        )
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.asyncio.create_subprocess_exec",
+        create_process,
+    )
 
     status = await adapter.refresh_auth_status()
 
     assert status["loggedIn"] is True
-    assert status["authMethod"] == "proxyEnv"
-    assert adapter.auth_ready is True
-    assert adapter.auth_method == "proxyEnv"
+    assert create_process.await_args.args[:4] == ("ow-claude-launcher", "claude", "auth", "status")
 
 
 @pytest.mark.asyncio
-async def test_claude_adapter_injects_dummy_api_key_for_proxy_env(monkeypatch):
+async def test_claude_adapter_preserves_valid_runtime_env_when_sending(monkeypatch, tmp_path):
     from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
 
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://localhost:3031")
-    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-opus-4-6")
     monkeypatch.setenv("PATH", "/Users/example/.nvm/versions/node/v18.20.4/bin:/opt/homebrew/bin:/usr/bin:/bin")
     monkeypatch.setenv("NVM_BIN", "/Users/example/.nvm/versions/node/v18.20.4/bin")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://process.example.test/langbase")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "process-token")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "process-model")
     monkeypatch.setenv("CODEX_CI", "1")
     monkeypatch.setenv("CODEX_THREAD_ID", "thread-from-app")
 
-    adapter = ClaudeAdapter(claude_bin="claude")
+    adapter = ClaudeAdapter(
+        claude_bin="claude",
+        auth={
+            "base_url": "https://config.example.test/langbase",
+            "model": "claude-opus-4-6",
+        },
+    )
     await adapter.connect()
-    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/example/Projects/onlineWorker")
+    register_existing_workspace(adapter, "claude:onlineWorker", tmp_path)
 
     captured_env = {}
     captured_kwargs = {}
@@ -544,9 +836,10 @@ async def test_claude_adapter_injects_dummy_api_key_for_proxy_env(monkeypatch):
     result = await adapter.send_user_message("claude:onlineWorker", "ses-1", "继续")
 
     assert result["status"] == "completed"
-    assert captured_env["ANTHROPIC_API_KEY"] == "dummy"
-    assert captured_env["ANTHROPIC_BASE_URL"] == "http://localhost:3031"
-    assert captured_env["ANTHROPIC_MODEL"] == "claude-opus-4-6"
+    assert "ANTHROPIC_API_KEY" not in captured_env
+    assert captured_env["ANTHROPIC_BASE_URL"] == "https://process.example.test/langbase"
+    assert captured_env["ANTHROPIC_AUTH_TOKEN"] == "process-token"
+    assert captured_env["ANTHROPIC_MODEL"] == "process-model"
     assert captured_env["NVM_BIN"] == "/Users/example/.nvm/versions/node/v20.20.1/bin"
     assert captured_env["PATH"].startswith("/Users/example/.nvm/versions/node/v20.20.1/bin:")
     assert "CODEX_CI" not in captured_env
@@ -554,14 +847,81 @@ async def test_claude_adapter_injects_dummy_api_key_for_proxy_env(monkeypatch):
     assert captured_kwargs["stdin"] == asyncio.subprocess.DEVNULL
 
 
-@pytest.mark.asyncio
-async def test_claude_adapter_send_user_message_rejects_when_not_authenticated(monkeypatch):
+def test_claude_adapter_build_env_ignores_onlineworker_config_auth(tmp_path, monkeypatch):
     from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
 
-    adapter = ClaudeAdapter(claude_bin="claude")
-    await adapter.connect()
-    adapter.register_workspace_cwd("claude:onlineWorker", "/Users/example/Projects/onlineWorker")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://process.example.test/langbase")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "process-model")
+    (tmp_path / "config.yaml").write_text(
+        """
+schema_version: 2
+providers:
+  claude:
+    auth:
+      base_url: https://langbase.example.test/langbase
+      auth_token: token-123
+      model: claude-opus-4-6
+""",
+        encoding="utf-8",
+    )
 
+    adapter = ClaudeAdapter(claude_bin="claude")
+    adapter._hook_data_dir = str(tmp_path)
+
+    env = adapter._build_claude_env()
+
+    assert env["ANTHROPIC_BASE_URL"] == "https://process.example.test/langbase"
+    assert env["ANTHROPIC_MODEL"] == "process-model"
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
+    assert env["ANTHROPIC_API_KEY"] == "dummy"
+
+
+def test_claude_adapter_build_env_uses_process_claude_env(tmp_path, monkeypatch):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://process.example.test/langbase")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "process-token")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "process-model")
+    (tmp_path / "config.yaml").write_text(
+        """
+schema_version: 2
+providers:
+  claude:
+    auth:
+      base_url: ""
+      auth_token: ""
+      model: ""
+""",
+        encoding="utf-8",
+    )
+
+    adapter = ClaudeAdapter(claude_bin="claude")
+    adapter._hook_data_dir = str(tmp_path)
+
+    env = adapter._build_claude_env()
+
+    assert env["ANTHROPIC_BASE_URL"] == "https://process.example.test/langbase"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "process-token"
+    assert env["ANTHROPIC_MODEL"] == "process-model"
+
+
+@pytest.mark.asyncio
+async def test_claude_adapter_does_not_treat_current_config_auth_token_as_ready(tmp_path, monkeypatch):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    (tmp_path / "config.yaml").write_text(
+        """
+schema_version: 2
+providers:
+  claude:
+    auth:
+      auth_token: token-123
+""",
+        encoding="utf-8",
+    )
+
+    adapter = ClaudeAdapter(claude_bin="claude")
+    adapter._hook_data_dir = str(tmp_path)
     create_process = AsyncMock(
         return_value=FakeAuthProcess(
             '{"loggedIn": false, "authMethod": "none", "apiProvider": "firstParty"}'
@@ -572,10 +932,144 @@ async def test_claude_adapter_send_user_message_rejects_when_not_authenticated(m
         create_process,
     )
 
-    with pytest.raises(RuntimeError, match="未鉴权"):
-        await adapter.send_user_message("claude:onlineWorker", "ses-1", "继续")
+    status = await adapter.refresh_auth_status()
 
+    assert status["loggedIn"] is False
+    assert status["authMethod"] == "none"
+    assert adapter.auth_ready is False
+    assert adapter.auth_method == "none"
     create_process.assert_awaited_once()
+
+
+def test_claude_adapter_ignores_data_dir_env_file_for_claude_runtime(tmp_path, monkeypatch):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+    (tmp_path / ".env").write_text(
+        "ANTHROPIC_BASE_URL=https://env.example.test/langbase\n"
+        "ANTHROPIC_AUTH_TOKEN=env-token\n"
+        "ANTHROPIC_MODEL=env-model\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "config.yaml").write_text(
+        """
+schema_version: 2
+providers:
+  claude:
+    auth:
+      base_url: https://config.example.test/langbase
+      auth_token: config-token
+      model: config-model
+""",
+        encoding="utf-8",
+    )
+
+    adapter = ClaudeAdapter(claude_bin="claude")
+    adapter._hook_data_dir = str(tmp_path)
+
+    env = adapter._build_claude_env()
+
+    assert "ANTHROPIC_BASE_URL" not in env
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
+    assert "ANTHROPIC_MODEL" not in env
+
+
+def test_claude_adapter_build_env_ignores_active_claude_process_env(monkeypatch):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+
+    env = ClaudeAdapter(claude_bin="claude")._build_claude_env()
+
+    assert "ANTHROPIC_BASE_URL" not in env
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
+    assert "ANTHROPIC_MODEL" not in env
+
+
+def test_claude_adapter_does_not_scan_active_claude_process_env(monkeypatch):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+
+    env = ClaudeAdapter(claude_bin="claude")._build_claude_env()
+
+    assert "ANTHROPIC_BASE_URL" not in env
+    assert "ANTHROPIC_MODEL" not in env
+    assert "ANTHROPIC_API_KEY" not in env
+
+
+def test_claude_adapter_rejects_stale_localhost_runtime_env(monkeypatch):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://localhost:3031")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-opus-4-6")
+
+    env = ClaudeAdapter(claude_bin="claude")._build_claude_env()
+
+    assert "ANTHROPIC_BASE_URL" not in env
+    assert "ANTHROPIC_MODEL" not in env
+    assert "ANTHROPIC_API_KEY" not in env
+
+
+@pytest.mark.asyncio
+async def test_claude_adapter_reports_cli_auth_failure_from_send_error(monkeypatch, tmp_path):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    adapter = ClaudeAdapter(claude_bin="claude")
+    await adapter.connect()
+    register_existing_workspace(adapter, "claude:onlineWorker", tmp_path)
+
+    create_process = AsyncMock(
+        return_value=FakeStreamingProcess(
+            stdout_lines=[],
+            stderr_lines=["not logged in"],
+            returncode=1,
+        )
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.asyncio.create_subprocess_exec",
+        create_process,
+    )
+
+    result = await adapter.send_user_message("claude:onlineWorker", "ses-1", "继续")
+
+    assert result["status"] == "error"
+    assert result["error"] == "not logged in"
+    create_process.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_claude_adapter_does_not_discover_launcher_from_claude_settings(monkeypatch, tmp_path):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    adapter = ClaudeAdapter(claude_bin="claude")
+    await adapter.connect()
+    register_existing_workspace(adapter, "claude:onlineWorker", tmp_path)
+
+    create_process = AsyncMock(
+        return_value=FakeStreamingProcess(
+            stdout_lines=[],
+            stderr_lines=["not logged in"],
+            returncode=1,
+        )
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.asyncio.create_subprocess_exec",
+        create_process,
+    )
+
+    result = await adapter.send_user_message("claude:onlineWorker", "ses-1", "继续")
+
+    assert result["status"] == "error"
+    assert result["error"] == "not logged in"
+    create_process.assert_awaited_once()
+    assert create_process.await_args.args[:2] == ("claude", "-p")
 
 
 @pytest.mark.asyncio
@@ -799,5 +1293,39 @@ async def test_claude_adapter_start_hook_bridge_writes_settings_and_send_argv(tm
     assert argv[sources_index + 1] == "project,local"
     settings_index = argv.index("--settings")
     assert argv[settings_index + 1] == settings_path
+
+    await adapter.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_claude_adapter_starts_hook_bridge_lazily_on_send(monkeypatch, tmp_path):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    adapter = ClaudeAdapter(claude_bin="claude")
+    await adapter.connect()
+    register_existing_workspace(adapter, "claude:onlineWorker", tmp_path)
+    adapter.configure_hook_bridge(str(tmp_path / "data"))
+
+    create_process = AsyncMock(
+        return_value=FakeStreamingProcess(
+            stdout_lines=[
+                '{"type":"result","subtype":"success","is_error":false,"result":"ok"}\n',
+            ],
+        )
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.asyncio.create_subprocess_exec",
+        create_process,
+    )
+
+    assert adapter.hook_settings_path is None
+    result = await adapter.send_user_message("claude:onlineWorker", "ses-1", "继续")
+
+    assert result["status"] == "completed"
+    settings_path = adapter.hook_settings_path
+    assert settings_path is not None
+    send_call_args = create_process.await_args.args
+    assert "--settings" in send_call_args
+    assert send_call_args[send_call_args.index("--settings") + 1] == settings_path
 
     await adapter.disconnect()

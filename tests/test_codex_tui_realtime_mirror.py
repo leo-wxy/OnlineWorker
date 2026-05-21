@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -368,41 +368,13 @@ async def test_sync_watched_thread_once_ignores_reasoning_items_with_null_conten
     assert watch.last_commentary_text == "继续处理中"
 
 
-def test_write_codex_tui_diagnostics_snapshot(tmp_path):
-    from plugins.providers.builtin.codex.python.tui_realtime_mirror import write_codex_tui_diagnostics_snapshot
-    from core.state import StreamingTurn
+def test_touch_codex_tui_watch_state_updates_runtime_marker(tmp_path):
+    from plugins.providers.builtin.codex.python.tui_realtime_mirror import touch_codex_tui_watch_state
 
-    state, ws, session_file, _sessions_dir = _make_state(tmp_path)
-    from plugins.providers.builtin.codex.python.tui_realtime_mirror import watch_codex_thread
+    state, _ws, _session_file, _sessions_dir = _make_state(tmp_path)
+    runtime = codex_state.get_runtime(state)
+    assert runtime.last_watch_state_touch == 0.0
 
-    watch_codex_thread(state, ws, "tid-1", ttl_seconds=120)
-    watch = codex_state.get_runtime(state).watched_threads["tid-1"]
-    watch.session_file = str(session_file)
-    watch.last_offset = 123
-    watch.turn_started_sent = True
-    watch.idle_polls = 2
-    watch.last_commentary_text = "处理中"
-    watch.next_poll_at = watch.last_poll_at + 1.5
+    touch_codex_tui_watch_state(state)
 
-    state.streaming_turns["tid-1"] = StreamingTurn(message_id=5001, topic_id=100)
-    codex_state.get_runtime(state).mirror_task = MagicMock()
-    codex_state.get_runtime(state).mirror_task.done.return_value = False
-
-    with patch("plugins.providers.builtin.codex.python.tui_realtime_mirror.get_data_dir", return_value=str(tmp_path)):
-        write_codex_tui_diagnostics_snapshot(state)
-        snapshot_path = tmp_path / "codex_tui_mirror_status.json"
-        payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
-
-    assert payload["tool"] == "codex"
-    assert payload["mode"] == "tui"
-    assert payload["mirror_task_running"] is True
-    assert payload["streaming_turn_count"] == 1
-    assert payload["watched_thread_count"] == 1
-    watched = payload["watched_threads"][0]
-    assert watched["thread_id"] == "tid-1"
-    assert watched["workspace_id"] == "codex:onlineWorker"
-    assert watched["topic_id"] == 100
-    assert watched["last_offset"] == 123
-    assert watched["idle_polls"] == 2
-    assert watched["has_commentary"] is True
-    assert watched["has_final"] is False
+    assert runtime.last_watch_state_touch > 0.0

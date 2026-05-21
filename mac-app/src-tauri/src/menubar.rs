@@ -8,13 +8,13 @@ use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri::{AppHandle, Emitter, Manager, Wry};
 use tokio::sync::Mutex;
 
-use crate::commands::dashboard::{compute_dashboard_state, DashboardState, SystemHealth};
 use crate::commands::config::app_name;
+use crate::commands::dashboard::{compute_dashboard_state, DashboardState, SystemHealth};
 use crate::commands::service::{
     ensure_service_running_if_needed, snapshot_service_status, start_service_internal,
     stop_service_internal, BotState,
 };
-use crate::AppExitState;
+use crate::{cleanup_managed_processes_for_exit_once, AppExitState};
 
 const APP_TRAY_ID: &str = "main-tray";
 const APP_TRAY_TITLE_ID: &str = "tray_app_title";
@@ -242,6 +242,7 @@ fn handle_tray_menu_event(
         APP_TRAY_QUIT_ID => {
             let exit_state = app.state::<AppExitState>();
             exit_state.mark_exiting();
+            cleanup_managed_processes_for_exit_once(app);
             app.exit(0);
         }
         _ => {}
@@ -325,7 +326,10 @@ async fn update_menubar_state(
 }
 
 fn build_tray_tooltip(status: TrayStatus, dashboard: Option<&DashboardState>) -> String {
-    let mut lines = vec![app_name().to_string(), format!("Status: {}", status.label())];
+    let mut lines = vec![
+        app_name().to_string(),
+        format!("Status: {}", status.label()),
+    ];
 
     if let Some(workspace_name) = dashboard
         .and_then(|state| state.recent_activity.as_ref())

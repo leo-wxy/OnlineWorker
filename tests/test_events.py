@@ -197,6 +197,16 @@ class TestResolveTopicId:
         result = _resolve_topic_id(state, "daemon-001", "tid-001", {})
         assert result is None
 
+    def test_thread_without_topic_does_not_log_error_before_materialize(self, caplog):
+        thread = ThreadInfo(thread_id="tid-001", topic_id=None, archived=False)
+        state, ws = make_state_with_workspace(threads={"tid-001": thread})
+        caplog.set_level("ERROR", logger="bot.events")
+
+        result = _resolve_topic_id(state, "daemon-001", "tid-001", {})
+
+        assert result is None
+        assert "无法解析 topic_id" not in caplog.text
+
 
 def make_state_with_owner(
     threads: dict | None = None,

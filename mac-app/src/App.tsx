@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ConfigEditor,
   LogWindow,
+  MaintenanceSettingsPanel,
   ProviderSettingsPanel,
 } from "./components";
 import {
@@ -28,7 +29,7 @@ export default function App() {
   const { locale, setLocale, t } = useI18n();
   const [activeTab, setActiveTab] = useState<AppTab>("dashboard");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<"onlineworker" | "agents" | "extensions" | "advanced">("onlineworker");
+  const [settingsSection, setSettingsSection] = useState<"onlineworker" | "agents" | "extensions" | "maintenance" | "advanced">("onlineworker");
   const [showLogs, setShowLogs] = useState(false);
   const [isFirstRun, setIsFirstRun] = useState(false);
 
@@ -262,11 +263,12 @@ export default function App() {
           {activeTab === "setup" && (
             <div className="h-full p-5 sm:p-6">
               <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">
-                <div className="ow-segment grid w-full grid-cols-4 rounded-2xl p-1">
+                <div className="ow-segment grid w-full grid-cols-5 rounded-2xl p-1">
                   {([
                     ["onlineworker", "OnlineWorker"],
                     ["agents", "Agents"],
                     ["extensions", "Extensions"],
+                    ["maintenance", "Maintenance"],
                     ["advanced", "Advanced"],
                   ] as const).map(([key, label]) => (
                     <button
@@ -296,6 +298,7 @@ export default function App() {
                 )}
                 {settingsSection === "agents" && <ProviderSettingsPanel mode="agents" />}
                 {settingsSection === "extensions" && <ProviderSettingsPanel mode="extensions" />}
+                {settingsSection === "maintenance" && <MaintenanceSettingsPanel />}
                 {settingsSection === "advanced" && <ConfigEditor />}
               </div>
             </div>
