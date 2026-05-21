@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: UI Foundation** - Establish a consistent visual system and hierarchy baseline for the desktop workbench
 - [x] **Phase 2: Provider Usage Explorer** - Add a first-class Usage menu for daily provider consumption while keeping statistics behind provider/plugin boundaries
 - [x] **Phase 3: File and Image Support** - Add first-class file and image attachment support plus Settings Maintenance cache cleanup; packaged app and live attachment smokes verified
-- [ ] **Phase 4: Claude Session Ownership and Safe Resume** - Allow TG/App to continue existing Claude sessions without stealing externally active terminal Claude work
+- [x] **Phase 4: Claude Session Ownership and Safe Resume** - Allow TG/App to continue existing Claude sessions without stealing externally active terminal Claude work
 
 ## Phase Details
 
@@ -79,13 +79,14 @@ Remaining Phase 3 verification:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3
+Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. UI Foundation | 2/2 | Completed | 2026-05-10 |
 | 2. Provider Usage Explorer | 2/2 | Completed | 2026-05-12 |
 | 3. File and Image Support | 2/2 | Completed | 2026-05-21 |
+| 4. Claude Session Ownership and Safe Resume | 1/1 | Completed | 2026-05-21 |
 
 ### Phase 4: Claude Session Ownership and Safe Resume
 
@@ -100,4 +101,14 @@ Phases execute in numeric order: 1 → 2 → 3
 **Plans:** 1 plan
 
 Plans:
-- [ ] 04-01: Align Claude existing-session resume ownership across TG, provider owner bridge, and Session Browser
+- [x] 04-01: Align Claude existing-session resume ownership across TG, provider owner bridge, and Session Browser
+
+Latest verification:
+- Phase 4 implementation summary captured in `.planning/phases/04-claude-session-ownership-and-safe-resume/04-01-SUMMARY.md`.
+- Claude existing-session resume now keeps imported/history sessions on the original session id instead of silently remapping normal sends.
+- Externally busy Claude sessions are rejected before OnlineWorker injects a message.
+- Claude adapter sends are serialized per session id.
+- Desktop Claude Session Browser sends use the provider owner bridge path.
+
+Remaining Phase 4 verification:
+- None for the planned ownership boundary. Explicit fork UX remains future work.

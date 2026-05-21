@@ -63,7 +63,7 @@ Recent decisions affecting current work:
 - Attachment support uses existing provider/plugin routing; source/build/install verification and live user-facing smokes are complete.
 - Settings `Maintenance` cache cleanup passed installed-app smoke on 2026-05-21: cache directories were emptied and preserved, while config/env/state/log files remained present.
 - Adjacent Claude adapter auth/env tests still have known failures unrelated to the TG attachment stream-limit fix; do not treat those as Phase 3 attachment regressions without new evidence.
-- The current worktree still contains Phase 3 closeout changes plus an earlier incorrect Claude auto-fork attempt; Phase 4 should revise only the Claude ownership boundary without undoing unrelated Phase 3 files.
+- Explicit Claude fork UX remains future work; Phase 4 only removes implicit fork/remap from normal sends and adds the safe resume guard.
 
 ### Roadmap Evolution
 
