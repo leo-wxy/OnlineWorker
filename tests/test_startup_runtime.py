@@ -2082,6 +2082,93 @@ async def test_ensure_thread_topics_replays_history_via_provider_defaults_for_co
     assert ws.threads["tid-new"].history_sync_cursor == "cursor-1"
 
 
+@pytest.mark.parametrize(
+    "provider_name,descriptor_factory",
+    [
+        ("codemaker", "codemaker.python.provider:create_provider_descriptor"),
+        (
+            "claude",
+            "plugins.providers.builtin.claude.python.provider:create_provider_descriptor",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_ensure_thread_topics_respects_unbound_topic_policy(
+    monkeypatch,
+    provider_name,
+    descriptor_factory,
+):
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="root",
+        path="/Users/example/Projects/onlineworker-combined",
+        tool=provider_name,
+        daemon_workspace_id=f"{provider_name}:root",
+    )
+    thread_id = f"ses-{provider_name}-1"
+    ws.threads[thread_id] = ThreadInfo(
+        thread_id=thread_id,
+        topic_id=None,
+        preview=None,
+        archived=False,
+        is_active=False,
+    )
+    storage.workspaces[f"{provider_name}:root"] = ws
+
+    state = AppState(storage=storage)
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=2,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name=provider_name,
+                enabled=True,
+                codex_bin=provider_name,
+                protocol="http",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
+
+    module_name, _, factory_name = descriptor_factory.partition(":")
+    module = __import__(module_name, fromlist=[factory_name])
+    create_provider_descriptor = getattr(module, factory_name)
+
+    bot = MagicMock()
+    bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=6204))
+    replay_mock = AsyncMock()
+
+    monkeypatch.setattr(
+        "core.providers.topic_policy.get_provider",
+        lambda name, config=None: (
+            create_provider_descriptor() if name == provider_name else None
+        ),
+    )
+    monkeypatch.setattr(
+        "core.lifecycle.query_provider_active_thread_ids",
+        lambda tool_name, workspace_path: {thread_id},
+    )
+
+    with patch(
+        "core.lifecycle.list_provider_threads",
+        return_value=[{"id": thread_id, "preview": "Provider active thread"}],
+    ), patch(
+        "core.lifecycle._replay_thread_history",
+        new=replay_mock,
+    ), patch("core.lifecycle.save_storage"):
+        await manager._ensure_thread_topics(bot, ws)
+
+    bot.create_forum_topic.assert_not_awaited()
+    replay_mock.assert_not_awaited()
+    thread_info = ws.threads[thread_id]
+    assert thread_info.is_active is True
+    assert thread_info.topic_id is None
+    assert thread_info.preview == "Provider active thread"
+
+
 @pytest.mark.asyncio
 async def test_sync_existing_claude_topics_syncs_active_threads_with_topic(monkeypatch):
     storage = AppStorage()

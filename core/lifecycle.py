@@ -17,6 +17,7 @@ from core.provider_owner_bridge import (
 )
 from core.providers.registry import get_provider
 from core.providers.facts import list_provider_threads, query_provider_active_thread_ids
+from core.providers.topic_policy import provider_allows_unbound_thread_topic_materialization
 from core.state import AppState
 from core.storage import (
     AppStorage, ThreadInfo, save_storage,
@@ -27,6 +28,7 @@ from bot.handlers.common import (
 )
 from bot.utils import TopicNotFoundError
 from bot.handlers.workspace import (
+    _make_thread_topic_name,
     _replay_thread_history,
 )
 
@@ -344,14 +346,25 @@ class LifecycleManager:
                 continue
             if not thread_info.is_active:
                 continue  # on-demand only
-            try:
-                prefix = f"[{tool_name}/{ws_info.name}] "
-                body = (
-                    thread_info.preview
-                    if thread_info.preview
-                    else f"thread-{thread_id[-8:]}"
+            if not provider_allows_unbound_thread_topic_materialization(
+                self.state,
+                ws_info,
+                thread_info,
+            ):
+                logger.info(
+                    "[lifecycle] provider 策略跳过未绑定 thread topic 自动创建: "
+                    "provider=%s thread=%s",
+                    tool_name,
+                    thread_id[:12],
                 )
-                topic_name = (prefix + body)[:128]
+                continue
+            try:
+                topic_name = _make_thread_topic_name(
+                    tool_name,
+                    ws_info.name,
+                    thread_info.preview,
+                    thread_id,
+                )
                 topic = await bot.create_forum_topic(chat_id=self.gid, name=topic_name)
                 thread_info.topic_id = topic.message_thread_id
                 logger.info(

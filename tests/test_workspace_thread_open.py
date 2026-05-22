@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from bot.handlers.workspace import (
+    _make_thread_topic_name,
     make_thread_open_callback_handler,
     make_thread_open_callback_data,
 )
@@ -11,6 +12,42 @@ from core.storage import AppStorage, WorkspaceInfo, ThreadInfo
 
 
 GROUP_CHAT_ID = -100123456789
+
+
+def test_make_thread_topic_name_normalizes_root_workspace_name():
+    assert (
+        _make_thread_topic_name(
+            "codemaker",
+            "/",
+            "图里什么内容？",
+            "ses_29dc367eeffeoDSvql4qBCz2A2",
+        )
+        == "[codemaker/root] 图里什么内容？"
+    )
+
+
+def test_make_thread_topic_name_uses_path_basename_for_workspace_label():
+    assert (
+        _make_thread_topic_name(
+            "codemaker",
+            "/Users/wxy/Projects/claude-code-plugin",
+            None,
+            "ses_29dc367eeffeoDSvql4qBCz2A2",
+        )
+        == "[codemaker/claude-code-plugin] New session"
+    )
+
+
+def test_make_thread_topic_name_collapses_preview_whitespace():
+    assert (
+        _make_thread_topic_name(
+            "codemaker",
+            "onlineWorker",
+            "第一行\n第二行\t第三行",
+            "ses_12345678",
+        )
+        == "[codemaker/onlineWorker] 第一行 第二行 第三行"
+    )
 
 
 @pytest.mark.asyncio
@@ -916,6 +953,74 @@ async def test_thread_open_backfills_codex_jsonl_only_thread(monkeypatch):
     call_kwargs = bot.create_forum_topic.await_args.kwargs
     assert call_kwargs["name"] == "[codex/onlineWorker] 继续处理phase15"
     assert ws.threads["tid-phase15"].preview == "继续处理phase15"
+
+
+@pytest.mark.asyncio
+async def test_thread_open_refreshes_codemaker_preview_from_provider_title(monkeypatch):
+    target_tid = "ses_1eb30fc75ffeNzwtKsGkX8dW1u"
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="/",
+        path="/",
+        tool="codemaker",
+        topic_id=None,
+        daemon_workspace_id="codemaker:/",
+    )
+    ws.threads[target_tid] = ThreadInfo(
+        thread_id=target_tid,
+        topic_id=None,
+        preview=None,
+        archived=False,
+        is_active=True,
+        source="app",
+    )
+    storage.workspaces["codemaker:/"] = ws
+    state = AppState(storage=storage)
+
+    handler = make_thread_open_callback_handler(state, GROUP_CHAT_ID)
+
+    bot = MagicMock()
+    bot.create_forum_topic = AsyncMock(return_value=MagicMock(message_thread_id=4567))
+
+    query = MagicMock()
+    query.data = make_thread_open_callback_data("codemaker:/", target_tid)
+    query.answer = AsyncMock()
+    query.get_bot.return_value = bot
+
+    update = MagicMock(callback_query=query)
+    context = MagicMock()
+
+    monkeypatch.setattr(
+        "bot.handlers.workspace.list_provider_threads",
+        lambda tool_name, path, limit=50: [
+            {
+                "id": target_tid,
+                "title": "分析工程结构",
+                "createdAt": 3000,
+                "updatedAt": 3000,
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        "bot.handlers.workspace._replay_thread_history",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "bot.handlers.workspace._send_to_group",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "bot.handlers.workspace.save_storage",
+        lambda storage: None,
+    )
+
+    await handler.callback(update, context)
+
+    bot.create_forum_topic.assert_awaited_once()
+    call_kwargs = bot.create_forum_topic.await_args.kwargs
+    assert call_kwargs["name"] == "[codemaker/root] 分析工程结构"
+    assert ws.threads[target_tid].preview == "分析工程结构"
 
 
 @pytest.mark.asyncio

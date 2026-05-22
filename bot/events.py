@@ -31,7 +31,7 @@ from plugins.providers.builtin.codex.python.tui_bridge import (
     remember_codex_tg_synced_final_reply,
 )
 from core.providers.session_events import SessionEvent, normalize_session_event
-from core.providers.registry import get_provider
+from core.providers.topic_policy import provider_allows_unbound_thread_topic_materialization
 from core.telegram_formatting import format_telegram_assistant_final_text
 from core.storage import save_storage, ThreadInfo
 from bot.handlers.common import (
@@ -75,12 +75,7 @@ def _provider_should_materialize_unbound_thread_topic(
         return True
 
     ws_info, thread_info = found
-    provider = get_provider(str(getattr(ws_info, "tool", "") or ""), state.config)
-    hooks = getattr(provider, "session_event_hooks", None) if provider is not None else None
-    policy = getattr(hooks, "should_materialize_unbound_thread_topic", None) if hooks is not None else None
-    if not callable(policy):
-        return True
-    return bool(policy(state, ws_info, thread_info))
+    return provider_allows_unbound_thread_topic_materialization(state, ws_info, thread_info)
 
 
 async def _materialize_thread_topic_if_needed(
@@ -1228,11 +1223,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int):
             logger.debug(f"[session.created] 未找到 workspace ws={ctx.ws_daemon_id[:16] if ctx.ws_daemon_id else '?'}，跳过")
             return
 
-        tool_name = ws_info.tool or "provider"
-        prefix = f"[{tool_name}/{ws_info.name}] "
-        body = title.strip().replace("\n", " ") if title else f"thread-{thread_id[-8:]}"
-        topic_name = (prefix + body)[:128]
-
         # 只注册 thread，不自动创建 TG topic
         # topic 由用户通过 /list 点按钮时按需创建
         thread_info = ThreadInfo(
@@ -1265,9 +1255,12 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int):
         if not thread_info.topic_id:
             return
 
-        tool_name = ws_info.tool or "provider"
-        prefix = f"[{tool_name}/{ws_info.name}] "
-        new_topic_name = (prefix + title.strip().replace("\n", " "))[:128]
+        new_topic_name = _make_thread_topic_name(
+            ws_info.tool or "provider",
+            ws_info.name,
+            title,
+            thread_id,
+        )
 
         try:
             await bot.edit_forum_topic(

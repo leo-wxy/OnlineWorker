@@ -129,6 +129,50 @@ def test_read_provider_session_rows_normalizes_content_shape(monkeypatch):
     ]
 
 
+def test_read_provider_session_rows_preserves_visible_error_metadata(monkeypatch):
+    class Facts:
+        @staticmethod
+        def read_thread_history(session_id, limit=50, sessions_dir=None):
+            return [
+                {
+                    "role": "assistant",
+                    "text": "provider quota exhausted",
+                    "displayMode": "plain",
+                    "kind": "error",
+                },
+                {
+                    "role": "assistant",
+                    "text": "",
+                    "kind": "error",
+                    "error": "provider auth failed",
+                },
+                {
+                    "role": "assistant",
+                    "text": "",
+                    "kind": "empty-placeholder",
+                },
+            ]
+
+    monkeypatch.setattr(bridge, "_provider_facts", lambda provider_id: Facts)
+
+    result = bridge.read_provider_session_rows("overlay-tool", "session-1", limit=50)
+
+    assert result == [
+        {
+            "role": "assistant",
+            "content": "provider quota exhausted",
+            "displayMode": "plain",
+            "kind": "error",
+        },
+        {
+            "role": "assistant",
+            "content": "provider auth failed",
+            "displayMode": "plain",
+            "kind": "error",
+        },
+    ]
+
+
 def test_read_provider_session_rows_defaults_to_latest_twenty_turns(monkeypatch):
     observed = {}
 

@@ -35,7 +35,10 @@ from core.storage import (
     save_storage,
 )
 from bot.handlers.common import _send_to_group, reconcile_workspace_threads_with_source
-from bot.handlers.workspace import make_thread_open_callback_data
+from bot.handlers.workspace import (
+    _make_thread_topic_name,
+    make_thread_open_callback_data,
+)
 from bot.thread_controls import send_thread_control_panel, thread_interrupt_supported
 from bot.utils import TopicNotFoundError
 
@@ -70,16 +73,6 @@ def _resolve_workspace(state: AppState, src_topic_id: Optional[int]) -> Optional
         if found is not None:
             return found[0]
     return state.get_active_workspace()
-
-
-def _make_thread_topic_name(tool: str, ws_name: str, preview: Optional[str], thread_id: str) -> str:
-    """生成 thread Topic 名称：[tool/ws_name] preview（最长 128 字符）。"""
-    prefix = f"[{tool}/{ws_name}] "
-    if preview:
-        body = preview.strip().replace("\n", " ")
-    else:
-        body = f"thread-{thread_id[-8:]}"
-    return (prefix + body)[:128]
 
 
 def _extract_started_thread_id(result: object) -> str:

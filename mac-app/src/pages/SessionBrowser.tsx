@@ -763,7 +763,13 @@ function ClaudeChat({ session, refreshSessions }: { session: UnifiedSession; ref
   );
 }
 
-function GenericProviderChat({ session }: { session: UnifiedSession }) {
+function GenericProviderChat({
+  session,
+  providerSupportsAttachments,
+}: {
+  session: UnifiedSession;
+  providerSupportsAttachments: boolean;
+}) {
   const { t } = useI18n();
   const providerLabel = getProviderUi(session.type).label;
   const [messages, setMessages] = useState<SessionTurn[]>([]);
@@ -815,8 +821,6 @@ function GenericProviderChat({ session }: { session: UnifiedSession }) {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  const providerSupportsAttachments = false;
 
   const handleSend = async (trimmedText: string, nextAttachments: ComposerAttachment[]) => {
     if (!trimmedText.trim() && nextAttachments.length === 0) {
@@ -1034,6 +1038,9 @@ export function SessionBrowser() {
   const providerLabels = useMemo(() => Object.fromEntries(
     visibleProviders.map((provider) => [provider.id, provider.label || provider.id]),
   ) as Record<string, string>, [visibleProviders]);
+  const providerCapabilities = useMemo(() => Object.fromEntries(
+    visibleProviders.map((provider) => [provider.id, provider.capabilities]),
+  ) as Record<string, ProviderMetadata["capabilities"]>, [visibleProviders]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1344,7 +1351,14 @@ export function SessionBrowser() {
           {selectedSession ? (
             selectedSession.type === "codex" ? <CodexChat session={selectedSession} key={selectedSession.id} /> :
             selectedSession.type === "claude" ? <ClaudeChat session={selectedSession} key={selectedSession.id} refreshSessions={refreshCurrentProvider} /> :
-            <GenericProviderChat session={selectedSession} key={selectedSession.id} />
+            <GenericProviderChat
+              session={selectedSession}
+              key={selectedSession.id}
+              providerSupportsAttachments={Boolean(
+                providerCapabilities[selectedSession.type]?.files ||
+                providerCapabilities[selectedSession.type]?.photos
+              )}
+            />
           ) : (
             <div className="ow-page-frame-soft flex h-full items-center justify-center rounded-[28px]">
               <StatePanel message={t.sessions.selectSession} />

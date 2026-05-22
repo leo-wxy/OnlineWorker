@@ -35,6 +35,34 @@ def _int_value(value: Any) -> int:
         return 0
 
 
+def _normalize_provider_turn_content(turn: dict[str, Any]) -> str:
+    content = str(turn.get("content") or turn.get("text") or "").strip()
+    if content:
+        return content
+    if str(turn.get("kind") or "").strip() == "error":
+        return str(turn.get("error") or "").strip()
+    return ""
+
+
+def _normalize_provider_turn(turn: dict[str, Any]) -> dict[str, str]:
+    role = str(turn.get("role") or "").strip()
+    normalized = {
+        "role": role,
+        "content": _normalize_provider_turn_content(turn),
+    }
+
+    kind = str(turn.get("kind") or "").strip()
+    display_mode = str(turn.get("displayMode") or turn.get("display_mode") or "").strip()
+    if display_mode in {"plain", "markdown"}:
+        normalized["displayMode"] = display_mode
+    elif kind == "error":
+        normalized["displayMode"] = "plain"
+    if kind:
+        normalized["kind"] = kind
+
+    return normalized
+
+
 def _builtin_manifest_paths() -> list[Path]:
     plugin_root = Path(__file__).resolve().parents[2] / "plugins" / "providers" / "builtin"
     if not plugin_root.exists():
@@ -273,10 +301,10 @@ def read_provider_session_rows(
         role = str(turn.get("role") or "").strip()
         if role not in {"user", "assistant"}:
             continue
-        content = str(turn.get("content") or turn.get("text") or "").strip()
-        if not content:
+        normalized_turn = _normalize_provider_turn(turn)
+        if not normalized_turn["content"]:
             continue
-        normalized.append({"role": role, "content": content})
+        normalized.append(normalized_turn)
     return normalized
 
 

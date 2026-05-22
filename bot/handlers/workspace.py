@@ -16,6 +16,7 @@
 """
 import logging
 import hashlib
+import os
 from datetime import datetime
 from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -99,12 +100,25 @@ def _list_provider_local_threads(tool_name: str, workspace_path: str, *, limit: 
 
 def _make_thread_topic_name(tool_name: str, ws_name: str, preview: Optional[str], thread_id: str) -> str:
     """生成 thread Topic 名称：[tool/ws_name] preview（最长 128 字符）。"""
-    prefix = f"[{tool_name}/{ws_name}] "
+    workspace_label = _normalize_workspace_topic_label(ws_name)
+    prefix = f"[{tool_name}/{workspace_label}] "
     if preview:
-        body = preview.strip().replace("\n", " ")
+        body = " ".join(str(preview).strip().split())
     else:
-        body = f"thread-{thread_id[-8:]}"
+        body = "New session"
     return (prefix + body)[:128]
+
+
+def _normalize_workspace_topic_label(ws_name: str) -> str:
+    normalized = str(ws_name or "").strip()
+    if not normalized:
+        return "workspace"
+    if normalized == "/":
+        return "root"
+    if "/" in normalized or "\\" in normalized:
+        basename = os.path.basename(normalized.rstrip("/\\"))
+        return basename or "workspace"
+    return normalized
 
 
 def _make_thread_open_token(value: str) -> str:

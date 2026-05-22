@@ -16,6 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Provider Usage Explorer** - Add a first-class Usage menu for daily provider consumption while keeping statistics behind provider/plugin boundaries
 - [x] **Phase 3: File and Image Support** - Add first-class file and image attachment support plus Settings Maintenance cache cleanup; packaged app and live attachment smokes verified
 - [x] **Phase 4: Claude Session Ownership and Safe Resume** - Allow TG/App to continue existing Claude sessions without stealing externally active terminal Claude work
+- [x] **Phase 5: Provider Session Error Visibility** - Make asynchronous provider failures visible in Session Browser instead of leaving users waiting on silent background errors
 
 ## Phase Details
 
@@ -79,7 +80,7 @@ Remaining Phase 3 verification:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -87,6 +88,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 2. Provider Usage Explorer | 2/2 | Completed | 2026-05-12 |
 | 3. File and Image Support | 2/2 | Completed | 2026-05-21 |
 | 4. Claude Session Ownership and Safe Resume | 1/1 | Completed | 2026-05-21 |
+| 5. Provider Session Error Visibility | 1/1 | Completed | 2026-05-22 |
 
 ### Phase 4: Claude Session Ownership and Safe Resume
 
@@ -112,3 +114,38 @@ Latest verification:
 
 Remaining Phase 4 verification:
 - None for the planned ownership boundary. Explicit fork UX remains future work.
+
+### Phase 5: Provider Session Error Visibility
+
+**Goal:** Surface asynchronous provider failures, especially quota/auth/network/runtime errors that occur after a send request is accepted, as visible Session Browser error turns or error panels instead of leaving the user in a reply-watch state.
+**Requirements**: [ERR-01, ERR-02]
+**Depends on:** Phase 4
+**Success Criteria** (what must be TRUE):
+  1. Generic provider sessions can surface asynchronous generation failures without requiring provider-specific React branches.
+  2. codemaker `session.error` events become visible in Session Browser and stop the reply watch instead of timing out as a silent wait.
+  3. Provider session history/read normalization preserves error records that users need to see while still filtering empty non-error assistant placeholders.
+  4. Regression coverage proves a generic overlay provider async failure is visible through the same Session Browser data path used by codemaker.
+**Plans:** 1 plan
+
+Plans:
+- [x] 05-01: Add provider session async error normalization and Session Browser visibility
+
+Latest verification:
+- codemaker storage runtime now surfaces assistant `data.error` records as visible assistant error turns.
+- Provider owner bridge and fallback provider session bridge preserve `displayMode/kind` and turn empty `kind=error` records with an `error` field into visible content.
+- Empty non-error assistant placeholders remain filtered.
+- Targeted red/green coverage passed: `3 passed in 0.09s`.
+- codemaker plugin-side regression passed: `8 passed in 0.08s`.
+- provider bridge/owner bridge regression passed: `18 passed in 0.09s`.
+- Tauri owner bridge payload test passed: `1 passed; 166 filtered out`.
+- Follow-up provider-session isolation completed on 2026-05-22:
+  - `core/providers/topic_policy.py` centralizes provider policy for unbound thread topic materialization.
+  - `bot/events.py` streaming materialization and `LifecycleManager._ensure_thread_topics()` now honor the same provider hook.
+  - codemaker and Claude app sessions with `topic_id=None` skip automatic TG topic creation; codex and providers without this hook keep default materialization.
+- Follow-up verification passed on 2026-05-22:
+  - `PYTHONPATH=/Users/wxy/Projects/onlineworker-combined/OnlineWorker:/Users/wxy/Projects/onlineworker-combined pytest OnlineWorker/tests/test_startup_runtime.py::test_ensure_thread_topics_respects_unbound_topic_policy OnlineWorker/tests/test_startup_runtime.py::test_ensure_thread_topics_replays_history_via_provider_defaults_for_codex OnlineWorker/tests/test_startup_runtime.py::test_ensure_thread_topics_revives_stale_archived_active_thread -q` -> `4 passed in 0.90s`.
+  - `PYTHONPATH=/Users/wxy/Projects/onlineworker-combined/OnlineWorker:/Users/wxy/Projects/onlineworker-combined pytest OnlineWorker/tests/test_startup_runtime.py OnlineWorker/tests/test_events_streaming.py OnlineWorker/tests/test_workspace_thread_open.py OnlineWorker/tests/test_provider_facts.py -q` -> `114 passed in 6.04s`.
+  - `PYTHONPATH=/Users/wxy/Projects/onlineworker-combined/OnlineWorker:/Users/wxy/Projects/onlineworker-combined pytest tests/test_codemaker_attachments.py tests/test_codemaker_plugin_manifest.py tests/test_codemaker_storage_runtime.py -q` -> `10 passed in 0.05s`.
+
+Remaining Phase 5 verification:
+- None for the read-normalization and topic-materialization policy boundaries. Full live upstream quota/auth behavior still depends on the actual provider account state.

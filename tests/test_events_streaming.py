@@ -624,7 +624,6 @@ async def test_turn_started_materializes_missing_topic_for_registered_customprov
 
     handler = make_event_handler(state, bot, GROUP_CHAT_ID)
     replay_mock = AsyncMock(return_value="cursor-1")
-
     with patch("bot.events._replay_thread_history", new=replay_mock), patch(
         "bot.events.save_storage"
     ) as save_storage_mock:
@@ -699,6 +698,63 @@ async def test_turn_started_does_not_materialize_missing_topic_for_claude_app_se
     bot.send_message.assert_not_awaited()
     assert ws.threads["ses-claude-123"].topic_id is None
     assert "ses-claude-123" not in state.streaming_turns
+    save_storage_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_turn_started_does_not_materialize_missing_topic_for_codemaker_app_session():
+    ws = WorkspaceInfo(
+        name="/",
+        path="/",
+        tool="codemaker",
+        topic_id=None,
+        daemon_workspace_id="codemaker:/",
+    )
+    ws.threads["ses-codemaker-123"] = ThreadInfo(
+        thread_id="ses-codemaker-123",
+        topic_id=None,
+        preview="图里什么内容？",
+        archived=False,
+        is_active=True,
+    )
+    storage = AppStorage(workspaces={"codemaker:/": ws})
+    state = AppState(storage=storage)
+
+    bot = SimpleNamespace()
+    bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=6201))
+    bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=5001))
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID)
+    replay_mock = AsyncMock(return_value="cursor-1")
+    from codemaker.python.provider import create_provider_descriptor
+
+    def provider_for_test(name, *args, **kwargs):
+        return create_provider_descriptor() if name == "codemaker" else None
+
+    with patch("core.providers.topic_policy.get_provider", side_effect=provider_for_test), patch(
+        "bot.events._replay_thread_history", new=replay_mock
+    ), patch("bot.events.save_storage") as save_storage_mock:
+        await handler(
+            "app-server-event",
+            {
+                "workspace_id": "codemaker:/",
+                "message": {
+                    "method": "turn/started",
+                    "params": {
+                        "threadId": "ses-codemaker-123",
+                        "turn": {"id": "turn-codemaker-1"},
+                    },
+                },
+            },
+        )
+
+    bot.create_forum_topic.assert_not_awaited()
+    replay_mock.assert_not_awaited()
+    bot.send_message.assert_not_awaited()
+    assert ws.threads["ses-codemaker-123"].topic_id is None
+    assert "ses-codemaker-123" not in state.streaming_turns
     save_storage_mock.assert_not_called()
 
 

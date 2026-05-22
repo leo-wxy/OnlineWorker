@@ -369,6 +369,68 @@ async def test_provider_owner_bridge_reads_latest_session_turns_via_provider_fac
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_preserves_visible_error_metadata(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(storage=AppStorage())
+
+    class Facts:
+        @staticmethod
+        def read_thread_history(session_id, limit=20, sessions_dir=None):
+            return [
+                {
+                    "role": "assistant",
+                    "text": "provider quota exhausted",
+                    "displayMode": "plain",
+                    "kind": "error",
+                },
+                {
+                    "role": "assistant",
+                    "text": "",
+                    "kind": "error",
+                    "error": "provider auth failed",
+                },
+                {
+                    "role": "assistant",
+                    "text": "",
+                    "kind": "empty-placeholder",
+                },
+            ]
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(facts=Facts) if name == "overlay-tool" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_read_session(
+        {
+            "provider_id": "overlay-tool",
+            "session_id": "tid-error",
+            "limit": 20,
+        }
+    )
+
+    assert response == {
+        "ok": True,
+        "session": [
+            {
+                "role": "assistant",
+                "content": "provider quota exhausted",
+                "displayMode": "plain",
+                "kind": "error",
+            },
+            {
+                "role": "assistant",
+                "content": "provider auth failed",
+                "displayMode": "plain",
+                "kind": "error",
+            },
+        ],
+    }
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_does_not_treat_workspace_dir_as_sessions_dir(
     monkeypatch, tmp_path
 ):

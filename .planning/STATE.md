@@ -5,21 +5,21 @@
 See: `.planning/PROJECT.md` (updated 2026-05-10)
 
 **Core value:** Developers can reliably control local AI coding CLI workflows from an installed Mac app while still receiving remote final results through Telegram.
-**Current focus:** Phase 4 — Claude Session Ownership and Safe Resume
+**Current focus:** Phase 5 — Provider Session Error Visibility
 
 ## Current Position
 
-Phase: 4 of 4 (Claude Session Ownership and Safe Resume)
+Phase: 5 of 5 (Provider Session Error Visibility)
 Plan: 1 of 1 in current phase
 Status: Completed
-Last activity: 2026-05-21 — Completed Phase 4 by removing silent Claude auto-fork/remap, adding external-busy rejection and per-session serialization, and routing desktop Claude sends through the provider owner bridge
+Last activity: 2026-05-22 — Completed Phase 5 follow-up by routing legacy thread topic materialization through provider policy
 
 Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6
+- Total plans completed: 7
 - Average duration: Tracked per phase
 - Total execution time: Tracked per phase
 
@@ -31,9 +31,10 @@ Progress: [██████████] 100%
 | 2. Provider Usage Explorer | 2 | Completed | - |
 | 3. File and Image Support | 2 | Completed | - |
 | 4. Claude Session Ownership and Safe Resume | 1 | Completed | - |
+| 5. Provider Session Error Visibility | 1 | Completed | - |
 
 **Recent Trend:**
-- Last 5 plans: 02-01, 02-02, 03-01, 03-02, 04-01
+- Last 5 completed plans: 02-02, 03-01, 03-02, 04-01, 05-01
 - Trend: Stable
 
 ## Accumulated Context
@@ -51,10 +52,11 @@ Recent decisions affecting current work:
 - [Phase 2] Expose usage as a first-class `Usage` page instead of a sidebar summary
 - [Phase 4] Existing Claude sessions are writable from TG/App; fork is explicit, not a normal-send fallback
 - [Phase 4] OnlineWorker must not steal an externally active terminal Claude session; busy sessions should be rejected or queued only when OnlineWorker owns the live turn
+- [Phase 5] Generic provider asynchronous failures must become visible Session Browser state rather than relying on provider-specific React branches
 
 ### Pending Todos
 
-- None for active phase.
+- None for the current roadmap.
 
 ### Blockers/Concerns
 
@@ -77,6 +79,19 @@ Recent decisions affecting current work:
   - Added external-busy rejection before resuming non-OnlineWorker-owned live sessions.
   - Serialized Claude adapter sends per session id.
   - Routed desktop Claude sends through the provider owner bridge.
+- Phase 5 added: Provider Session Error Visibility
+- Phase 5 scope captured on 2026-05-22:
+  - codemaker `session.error` should surface in Session Browser.
+  - Generic provider history/read normalization should preserve user-visible error records.
+  - Shared Session Browser behavior should not require codemaker-specific React branches.
+- Phase 5 implementation completed on 2026-05-22:
+  - codemaker assistant `data.error` records are converted into visible assistant error turns.
+  - Provider owner bridge and fallback provider session bridge preserve visible provider error metadata.
+  - Session Browser can stop waiting once the async error appears in read results.
+- Phase 5 provider-session isolation follow-up completed on 2026-05-22:
+  - Shared unbound thread topic materialization policy was moved into `core/providers/topic_policy.py`.
+  - Both streaming `turn/started` and `LifecycleManager._ensure_thread_topics()` use the same provider policy.
+  - codemaker and Claude app sessions with no TG topic stay isolated from automatic topic creation; codex keeps the default behavior.
 
 ## Deferred Items
 
