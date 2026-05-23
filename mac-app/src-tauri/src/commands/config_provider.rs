@@ -11,11 +11,16 @@ const BUILTIN_CODEX_PLUGIN_MANIFEST: &str =
     include_str!("../../../../plugins/providers/builtin/codex/plugin.yaml");
 const BUILTIN_CLAUDE_PLUGIN_MANIFEST: &str =
     include_str!("../../../../plugins/providers/builtin/claude/plugin.yaml");
+const BUILTIN_TELEGRAM_NOTIFICATION_PLUGIN_MANIFEST: &str =
+    include_str!("../../../../plugins/notifications/builtin/telegram/plugin.yaml");
 const BUILTIN_CODEX_PLUGIN_ICON: &str =
     include_str!("../../../../plugins/providers/builtin/codex/icon.svg");
 const BUILTIN_CLAUDE_PLUGIN_ICON: &str =
     include_str!("../../../../plugins/providers/builtin/claude/icon.svg");
+const BUILTIN_TELEGRAM_NOTIFICATION_PLUGIN_ICON: &str =
+    include_str!("../../../../plugins/notifications/builtin/telegram/icon.svg");
 const PROVIDER_OVERLAY_ENV: &str = "ONLINEWORKER_PROVIDER_OVERLAY";
+const NOTIFICATION_OVERLAY_ENV: &str = "ONLINEWORKER_NOTIFICATION_OVERLAY";
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 pub(crate) struct ProviderConfigDocument {
@@ -29,6 +34,72 @@ pub(crate) struct ProviderConfigDocument {
     logging: Option<serde_yaml::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     telegram: Option<serde_yaml::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) notifications: Option<NotificationConfigDocument>,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub(crate) struct NotificationConfigDocument {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) channels: Option<BTreeMap<String, NotificationChannelConfigEntry>>,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub(crate) struct NotificationChannelConfigEntry {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) config: Option<BTreeMap<String, serde_yaml::Value>>,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NotificationSettingsOption {
+    #[serde(default)]
+    pub(crate) value: String,
+    #[serde(default)]
+    pub(crate) label: String,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NotificationSettingsField {
+    #[serde(default)]
+    pub(crate) key: String,
+    #[serde(default)]
+    pub(crate) label: String,
+    #[serde(rename = "type", default)]
+    pub(crate) kind: String,
+    #[serde(default)]
+    pub(crate) required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) default: Option<serde_yaml::Value>,
+    #[serde(default)]
+    pub(crate) description: String,
+    #[serde(default)]
+    pub(crate) options: Vec<NotificationSettingsOption>,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+struct NotificationSettingsManifest {
+    fields: Option<Vec<NotificationSettingsField>>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NotificationChannelMetadata {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    pub(crate) description: String,
+    pub(crate) enabled: bool,
+    pub(crate) builtin: bool,
+    pub(crate) config: BTreeMap<String, serde_yaml::Value>,
+    pub(crate) settings_fields: Vec<NotificationSettingsField>,
+    pub(crate) icon: Option<ProviderIconEntry>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
@@ -277,6 +348,32 @@ struct ProviderPluginManifestSource {
     path: PathBuf,
 }
 
+#[derive(Clone, Debug)]
+struct NotificationPluginDefault {
+    id: String,
+    label: String,
+    description: String,
+    default_enabled: bool,
+    builtin: bool,
+    order: u32,
+    settings_fields: Vec<NotificationSettingsField>,
+    icon: Option<ProviderIconEntry>,
+}
+
+#[derive(Deserialize, Default, Clone, Debug)]
+struct NotificationPluginManifest {
+    id: String,
+    kind: Option<String>,
+    order: Option<u32>,
+    label: Option<String>,
+    description: Option<String>,
+    default_enabled: Option<bool>,
+    icon: Option<ProviderIconEntry>,
+    #[serde(skip)]
+    manifest_path: Option<PathBuf>,
+    settings: Option<NotificationSettingsManifest>,
+}
+
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -332,8 +429,17 @@ fn read_manifest_files_from_overlay_path(overlay_path: &Path) -> Vec<ProviderPlu
     manifests
 }
 
-fn read_manifest_files_from_overlay_env() -> Vec<ProviderPluginManifestSource> {
-    let Some(raw) = read_overlay_env_spec() else {
+fn read_manifest_files_from_overlay_env(env_key: &str) -> Vec<ProviderPluginManifestSource> {
+    let Some(raw) = read_overlay_env_spec(env_key) else {
+        return Vec::new();
+    };
+    env::split_paths(&raw)
+        .flat_map(|path| read_manifest_files_from_overlay_path(&path))
+        .collect()
+}
+
+fn read_manifest_files_from_process_env(env_key: &str) -> Vec<ProviderPluginManifestSource> {
+    let Some(raw) = env::var(env_key).ok().and_then(trimmed_env_value) else {
         return Vec::new();
     };
     env::split_paths(&raw)
@@ -359,26 +465,31 @@ fn trimmed_env_value(value: String) -> Option<String> {
 }
 
 fn overlay_env_spec_from_env_raw(raw: &str) -> Option<String> {
-    read_env_key(raw, PROVIDER_OVERLAY_ENV).and_then(trimmed_env_value)
+    overlay_env_spec_from_env_raw_for_key(raw, PROVIDER_OVERLAY_ENV)
 }
 
-fn read_overlay_env_spec_from_app_env() -> Option<String> {
+fn overlay_env_spec_from_env_raw_for_key(raw: &str, env_key: &str) -> Option<String> {
+    read_env_key(raw, env_key).and_then(trimmed_env_value)
+}
+
+fn read_overlay_env_spec_from_app_env(env_key: &str) -> Option<String> {
     let raw = fs::read_to_string(app_support_env_path()).ok()?;
-    overlay_env_spec_from_env_raw(&raw)
+    overlay_env_spec_from_env_raw_for_key(&raw, env_key)
 }
 
-fn read_overlay_env_spec() -> Option<String> {
-    env::var(PROVIDER_OVERLAY_ENV)
-        .ok()
-        .and_then(trimmed_env_value)
-        .or_else(read_overlay_env_spec_from_app_env)
+fn read_overlay_env_spec(env_key: &str) -> Option<String> {
+    let from_process = env::var(env_key).ok().and_then(trimmed_env_value);
+    if env_key == NOTIFICATION_OVERLAY_ENV {
+        return from_process;
+    }
+    from_process.or_else(|| read_overlay_env_spec_from_app_env(env_key))
 }
 
 fn provider_plugin_manifest_sources_with_paths() -> Vec<ProviderPluginManifestSource> {
     let plugin_root = workspace_root().join("plugins").join("providers");
     let mut sources = Vec::new();
     sources.extend(read_manifest_files_from_group(&plugin_root.join("builtin")));
-    sources.extend(read_manifest_files_from_overlay_env());
+    sources.extend(read_manifest_files_from_overlay_env(PROVIDER_OVERLAY_ENV));
     if !sources.is_empty() {
         return sources;
     }
@@ -405,6 +516,108 @@ pub(crate) fn provider_plugin_manifest_sources() -> Vec<String> {
         .into_iter()
         .map(|manifest| manifest.source)
         .collect()
+}
+
+fn notification_plugin_manifest_sources_with_paths() -> Vec<ProviderPluginManifestSource> {
+    let plugin_root = workspace_root().join("plugins").join("notifications");
+    let mut sources = Vec::new();
+    sources.extend(read_manifest_files_from_group(&plugin_root.join("builtin")));
+    sources.extend(read_manifest_files_from_process_env(NOTIFICATION_OVERLAY_ENV));
+    if !sources.is_empty() {
+        return sources;
+    }
+    vec![ProviderPluginManifestSource {
+        source: BUILTIN_TELEGRAM_NOTIFICATION_PLUGIN_MANIFEST.to_string(),
+        path: plugin_root
+            .join("builtin")
+            .join("telegram")
+            .join("plugin.yaml"),
+    }]
+}
+
+fn notification_plugin_default_list() -> Vec<NotificationPluginDefault> {
+    let mut defaults = Vec::new();
+    for manifest_source in notification_plugin_manifest_sources_with_paths() {
+        let Ok(mut manifest) =
+            serde_yaml::from_str::<NotificationPluginManifest>(&manifest_source.source)
+        else {
+            continue;
+        };
+        manifest.manifest_path = Some(manifest_source.path.clone());
+        if manifest.kind.as_deref() != Some("notification") {
+            continue;
+        }
+        let notification_id = manifest.id.trim().to_string();
+        if notification_id.is_empty() {
+            continue;
+        }
+        let builtin = manifest_source
+            .path
+            .components()
+            .any(|component| component.as_os_str() == "builtin");
+        defaults.push(NotificationPluginDefault {
+            id: notification_id.clone(),
+            label: manifest.label.unwrap_or_else(|| notification_id.clone()),
+            description: manifest.description.unwrap_or_default(),
+            default_enabled: manifest.default_enabled.unwrap_or(true),
+            builtin,
+            order: manifest.order.unwrap_or(u32::MAX),
+            settings_fields: normalize_notification_settings_fields(
+                manifest
+                    .settings
+                    .and_then(|settings| settings.fields)
+                    .unwrap_or_default(),
+            ),
+            icon: resolve_notification_icon(
+                manifest.icon,
+                manifest.manifest_path.as_deref(),
+                &notification_id,
+            ),
+        });
+    }
+    defaults.sort_by(|left, right| {
+        left.order
+            .cmp(&right.order)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    defaults
+}
+
+fn normalize_notification_settings_fields(
+    fields: Vec<NotificationSettingsField>,
+) -> Vec<NotificationSettingsField> {
+    fields
+        .into_iter()
+        .filter_map(|mut field| {
+            field.key = field.key.trim().to_string();
+            if field.key.is_empty() {
+                return None;
+            }
+            field.label = if field.label.trim().is_empty() {
+                field.key.clone()
+            } else {
+                field.label.trim().to_string()
+            };
+            field.kind = normalize_notification_field_type(&field.kind);
+            field.description = field.description.trim().to_string();
+            for option in field.options.iter_mut() {
+                option.value = option.value.trim().to_string();
+                if option.label.trim().is_empty() {
+                    option.label = option.value.clone();
+                } else {
+                    option.label = option.label.trim().to_string();
+                }
+            }
+            Some(field)
+        })
+        .collect()
+}
+
+fn normalize_notification_field_type(kind: &str) -> String {
+    match kind.trim() {
+        "string" | "number" | "boolean" | "select" | "secret" => kind.trim().to_string(),
+        _ => "string".to_string(),
+    }
 }
 
 fn resolve_provider_icon(
@@ -439,6 +652,29 @@ fn builtin_provider_icon_svg(provider_id: &str) -> Option<&'static str> {
     match provider_id {
         "codex" => Some(BUILTIN_CODEX_PLUGIN_ICON),
         "claude" => Some(BUILTIN_CLAUDE_PLUGIN_ICON),
+        _ => None,
+    }
+}
+
+fn resolve_notification_icon(
+    icon: Option<ProviderIconEntry>,
+    manifest_path: Option<&Path>,
+    notification_id: &str,
+) -> Option<ProviderIconEntry> {
+    let mut icon = resolve_provider_icon(icon, manifest_path, notification_id)?;
+    if icon.url.trim().is_empty() && icon.path.trim() == "icon.svg" {
+        if let Some(svg) = builtin_notification_icon_svg(notification_id) {
+            let encoded = base64::engine::general_purpose::STANDARD.encode(svg);
+            icon.url = format!("data:image/svg+xml;base64,{encoded}");
+            icon.generated_url = true;
+        }
+    }
+    Some(icon)
+}
+
+fn builtin_notification_icon_svg(notification_id: &str) -> Option<&'static str> {
+    match notification_id {
+        "telegram" => Some(BUILTIN_TELEGRAM_NOTIFICATION_PLUGIN_ICON),
         _ => None,
     }
 }
@@ -818,7 +1054,40 @@ pub(super) fn normalize_provider_document_with_env(
 
     doc.schema_version = Some(2);
     doc.tools = None;
+    normalize_notification_document(&mut doc);
     Ok(doc)
+}
+
+fn normalize_notification_document(doc: &mut ProviderConfigDocument) {
+    let notifications = doc
+        .notifications
+        .get_or_insert_with(NotificationConfigDocument::default);
+    let channels = notifications.channels.get_or_insert_with(BTreeMap::new);
+
+    for default in notification_plugin_default_list() {
+        let channel = channels
+            .entry(default.id.clone())
+            .or_insert_with(NotificationChannelConfigEntry::default);
+        channel.enabled = Some(channel.enabled.unwrap_or(default.default_enabled));
+        channel
+            .label
+            .get_or_insert_with(|| default.label.clone());
+        channel
+            .description
+            .get_or_insert_with(|| default.description.clone());
+        channel.config.get_or_insert_with(BTreeMap::new);
+    }
+
+    for (channel_id, channel) in channels.iter_mut() {
+        channel.enabled = Some(channel.enabled.unwrap_or(false));
+        channel
+            .label
+            .get_or_insert_with(|| channel_id.to_string());
+        channel
+            .description
+            .get_or_insert_with(String::new);
+        channel.config.get_or_insert_with(BTreeMap::new);
+    }
 }
 
 fn provider_metadata_from_entry(
@@ -900,6 +1169,83 @@ pub(crate) fn visible_provider_ids_from_raw(
         .filter(|provider| provider.visible)
         .map(|provider| provider.id)
         .collect())
+}
+
+pub(crate) fn notification_channel_metadata_from_raw(
+    raw: &str,
+    env_raw: Option<&str>,
+) -> Result<Vec<NotificationChannelMetadata>, String> {
+    let doc = normalize_provider_document_with_env(raw, env_raw)?;
+    let channels = doc
+        .notifications
+        .and_then(|notifications| notifications.channels)
+        .unwrap_or_default();
+
+    let mut ordered = Vec::new();
+    let plugin_defaults = notification_plugin_default_list();
+    for default in &plugin_defaults {
+        if let Some(channel) = channels.get(&default.id) {
+            ordered.push(notification_channel_metadata_from_entry(
+                &default.id,
+                channel,
+                &default.label,
+                &default.description,
+                default.builtin,
+                default.settings_fields.clone(),
+                default.icon.clone(),
+            ));
+        }
+    }
+
+    for (channel_id, channel) in channels {
+        if plugin_defaults
+            .iter()
+            .any(|default| default.id == channel_id)
+        {
+            continue;
+        }
+        let label = channel.label.as_deref().unwrap_or(&channel_id);
+        let description = channel.description.as_deref().unwrap_or("");
+        ordered.push(notification_channel_metadata_from_entry(
+            &channel_id,
+            &channel,
+            label,
+            description,
+            false,
+            Vec::new(),
+            None,
+        ));
+    }
+
+    Ok(ordered)
+}
+
+fn notification_channel_metadata_from_entry(
+    channel_id: &str,
+    channel: &NotificationChannelConfigEntry,
+    default_label: &str,
+    default_description: &str,
+    builtin: bool,
+    settings_fields: Vec<NotificationSettingsField>,
+    icon: Option<ProviderIconEntry>,
+) -> NotificationChannelMetadata {
+    NotificationChannelMetadata {
+        id: channel_id.to_string(),
+        label: channel
+            .label
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| default_label.to_string()),
+        description: channel
+            .description
+            .clone()
+            .unwrap_or_else(|| default_description.to_string()),
+        enabled: channel.enabled.unwrap_or(false),
+        builtin,
+        config: channel.config.clone().unwrap_or_default(),
+        settings_fields,
+        icon,
+    }
 }
 
 fn explicit_provider_ids_from_raw(raw: &str) -> BTreeSet<String> {
@@ -996,6 +1342,54 @@ pub(super) fn set_provider_flags_in_document(
     doc.tools = None;
 }
 
+pub(super) fn set_notification_channel_enabled_in_document(
+    doc: &mut ProviderConfigDocument,
+    channel_id: &str,
+    enabled: bool,
+) {
+    let normalized_id = channel_id.trim();
+    if normalized_id.is_empty() {
+        return;
+    }
+
+    normalize_notification_document(doc);
+    let notifications = doc
+        .notifications
+        .get_or_insert_with(NotificationConfigDocument::default);
+    let channels = notifications.channels.get_or_insert_with(BTreeMap::new);
+    let channel = channels
+        .entry(normalized_id.to_string())
+        .or_insert_with(NotificationChannelConfigEntry::default);
+    channel.enabled = Some(enabled);
+    normalize_notification_document(doc);
+    doc.schema_version = Some(2);
+    doc.tools = None;
+}
+
+pub(super) fn set_notification_channel_config_in_document(
+    doc: &mut ProviderConfigDocument,
+    channel_id: &str,
+    config: BTreeMap<String, serde_yaml::Value>,
+) {
+    let normalized_id = channel_id.trim();
+    if normalized_id.is_empty() {
+        return;
+    }
+
+    normalize_notification_document(doc);
+    let notifications = doc
+        .notifications
+        .get_or_insert_with(NotificationConfigDocument::default);
+    let channels = notifications.channels.get_or_insert_with(BTreeMap::new);
+    let channel = channels
+        .entry(normalized_id.to_string())
+        .or_insert_with(NotificationChannelConfigEntry::default);
+    channel.config = Some(config);
+    normalize_notification_document(doc);
+    doc.schema_version = Some(2);
+    doc.tools = None;
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -1003,9 +1397,11 @@ mod tests {
 
     use super::{
         normalize_config_for_display, normalize_provider_document,
-        normalize_provider_document_with_env, overlay_env_spec_from_env_raw,
-        provider_metadata_from_raw, read_manifest_files_from_overlay_path,
-        serialize_normalized_config_with_env, set_provider_flags_in_document,
+        normalize_provider_document_with_env, notification_channel_metadata_from_raw,
+        overlay_env_spec_from_env_raw, provider_metadata_from_raw,
+        read_manifest_files_from_overlay_path, serialize_normalized_config_with_env,
+        set_notification_channel_config_in_document, set_notification_channel_enabled_in_document,
+        set_provider_flags_in_document, NOTIFICATION_OVERLAY_ENV,
     };
 
     #[test]
@@ -1039,6 +1435,137 @@ app_server_port: 4722
     }
 
     #[test]
+    fn normalize_provider_document_backfills_default_notification_channel() {
+        let doc = normalize_provider_document("").expect("normalized config");
+
+        let channels = doc
+            .notifications
+            .expect("notifications")
+            .channels
+            .expect("channels");
+        let telegram = channels.get("telegram").expect("telegram channel");
+        assert_eq!(telegram.enabled, Some(true));
+        assert_eq!(telegram.label.as_deref(), Some("Telegram"));
+        assert!(telegram.config.as_ref().expect("config").is_empty());
+    }
+
+    #[test]
+    fn set_notification_channel_enabled_updates_existing_channel() {
+        let raw = r#"
+schema_version: 2
+notifications:
+  channels:
+    telegram:
+      enabled: true
+"#;
+
+        let mut doc = normalize_provider_document(raw).expect("normalized config");
+        set_notification_channel_enabled_in_document(&mut doc, "telegram", false);
+
+        let channels = doc
+            .notifications
+            .expect("notifications")
+            .channels
+            .expect("channels");
+        let telegram = channels.get("telegram").expect("telegram channel");
+        assert_eq!(telegram.enabled, Some(false));
+    }
+
+    #[test]
+    fn set_notification_channel_config_updates_plugin_config() {
+        let mut doc = normalize_provider_document("").expect("normalized config");
+        let mut config = BTreeMap::new();
+        config.insert(
+            "recipient_user_id".to_string(),
+            serde_yaml::Value::String("123456789".to_string()),
+        );
+
+        set_notification_channel_config_in_document(&mut doc, "telegram", config);
+
+        let channels = doc
+            .notifications
+            .expect("notifications")
+            .channels
+            .expect("channels");
+        let telegram = channels.get("telegram").expect("telegram channel");
+        assert_eq!(
+            telegram
+                .config
+                .as_ref()
+                .and_then(|config| config.get("recipient_user_id"))
+                .and_then(|value| value.as_str()),
+            Some("123456789")
+        );
+    }
+
+    #[test]
+    fn notification_channel_metadata_lists_builtin_then_custom_channels() {
+        let raw = r#"
+schema_version: 2
+notifications:
+  channels:
+    wechat:
+      enabled: true
+      label: WeChat
+      description: Custom WeChat notifier
+"#;
+
+        let metadata =
+            notification_channel_metadata_from_raw(raw, None).expect("notification metadata");
+
+        assert_eq!(metadata[0].id, "telegram");
+        assert!(metadata[0].builtin);
+        assert_eq!(metadata[0].settings_fields[0].key, "bot_token");
+        assert_eq!(metadata[0].settings_fields[0].kind, "secret");
+        assert_eq!(metadata[0].settings_fields[1].key, "recipient_user_id");
+        assert!(metadata[0].icon.as_ref().expect("telegram icon").url.starts_with("data:image/svg+xml;base64,"));
+        assert_eq!(metadata[1].id, "wechat");
+        assert_eq!(metadata[1].label, "WeChat");
+        assert_eq!(metadata[1].description, "Custom WeChat notifier");
+        assert!(metadata[1].enabled);
+        assert!(!metadata[1].builtin);
+    }
+
+    #[test]
+    fn notification_channel_metadata_reads_overlay_notification_plugin() {
+        let dir = std::env::temp_dir().join(format!(
+            "onlineworker-notification-plugins-{}",
+            std::process::id()
+        ));
+        let plugin_dir = dir.join("wechat");
+        fs::create_dir_all(&plugin_dir).expect("create plugin dir");
+        fs::write(
+            plugin_dir.join("plugin.yaml"),
+            r#"
+schema_version: 1
+id: wechat
+kind: notification
+label: WeChat
+description: Custom WeChat notifier
+default_enabled: false
+entrypoints:
+  python_descriptor: wechat.python.channel:create_notification_descriptor
+"#,
+        )
+        .expect("write plugin manifest");
+        std::env::set_var(NOTIFICATION_OVERLAY_ENV, &dir);
+
+        let metadata = notification_channel_metadata_from_raw("", None).expect("metadata");
+
+        std::env::remove_var(NOTIFICATION_OVERLAY_ENV);
+        let _ = fs::remove_dir_all(&dir);
+
+        let wechat = metadata
+            .iter()
+            .find(|channel| channel.id == "wechat")
+            .expect("wechat channel");
+        assert_eq!(wechat.label, "WeChat");
+        assert_eq!(wechat.description, "Custom WeChat notifier");
+        assert!(!wechat.enabled);
+        assert!(!wechat.builtin);
+    }
+
+    #[test]
     fn overlay_env_spec_from_env_raw_reads_trimmed_app_env_value() {
         let raw = r#"
 TELEGRAM_TOKEN=token
@@ -1049,6 +1576,18 @@ ONLINEWORKER_PROVIDER_OVERLAY=  /tmp/private-overlay:/tmp/other-overlay
             overlay_env_spec_from_env_raw(raw).as_deref(),
             Some("/tmp/private-overlay:/tmp/other-overlay")
         );
+    }
+
+    #[test]
+    fn notification_overlay_env_spec_reads_process_env() {
+        std::env::set_var(NOTIFICATION_OVERLAY_ENV, "/tmp/notification-overlay");
+
+        assert_eq!(
+            super::read_overlay_env_spec(NOTIFICATION_OVERLAY_ENV).as_deref(),
+            Some("/tmp/notification-overlay")
+        );
+
+        std::env::remove_var(NOTIFICATION_OVERLAY_ENV);
     }
 
     #[test]

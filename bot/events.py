@@ -33,6 +33,7 @@ from plugins.providers.builtin.codex.python.tui_bridge import (
 from core.providers.session_events import SessionEvent, normalize_session_event
 from core.providers.topic_policy import provider_allows_unbound_thread_topic_materialization
 from core.telegram_formatting import format_telegram_assistant_final_text
+from core.notifications import NotificationEvent, build_notification_router
 from core.storage import save_storage, ThreadInfo
 from bot.handlers.common import (
     _send_to_group,
@@ -401,7 +402,7 @@ def _resolve_workspace_info(
     return None
 
 
-def make_event_handler(state: AppState, bot: Bot, group_chat_id: int):
+def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notification_router=None):
     """
     返回 daemon 事件回调。
 
@@ -412,6 +413,118 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int):
     4. 找对应 thread → 拿 topic_id
     5. 推送到对应 Telegram Topic
     """
+
+    if notification_router is None and state.config is not None:
+        try:
+            notification_router = build_notification_router(state.config)
+        except Exception as e:
+            logger.warning("[notification] 初始化通知路由失败：%s", e)
+            notification_router = None
+
+    def _display_agent_name(agent_id: str) -> str:
+        name = str(agent_id or "").strip()
+        if not name:
+            return "Agent"
+        known = {
+            "codex": "Codex",
+            "claude": "Claude",
+        }
+        return known.get(name.lower(), name[:1].upper() + name[1:])
+
+    def _notification_context(ctx: "EventContext", thread_id: Optional[str]):
+        ws_info = _resolve_workspace_info(state, ctx.ws_daemon_id, thread_id)
+        thread_info = None
+        if thread_id:
+            found = state.find_thread_by_id_global(thread_id)
+            if found:
+                ws_info, thread_info = found
+
+        agent_id = str(
+            (ws_info.tool if ws_info is not None else "")
+            or ctx.event.provider
+            or state.get_tool_for_workspace(ctx.ws_daemon_id)
+            or "agent"
+        ).strip()
+        task_name = str(
+            (thread_info.preview if thread_info is not None else "")
+            or (ws_info.name if ws_info is not None else "")
+            or (thread_id[:8] if thread_id else "")
+            or "Task"
+        ).strip()
+        return agent_id, _display_agent_name(agent_id), task_name
+
+    def _notification_task_id(ctx: "EventContext", thread_id: Optional[str], fallback_id: str = "") -> str:
+        agent_id, _agent_name, _task_name = _notification_context(ctx, thread_id)
+        run = None
+        if thread_id and agent_id:
+            run = state.get_provider_current_run(agent_id, thread_id)
+        if run is not None and run.run_id:
+            return str(run.run_id)
+        turn_id = _extract_turn_id(ctx.event_params)
+        return str(turn_id or fallback_id or thread_id or ctx.ws_daemon_id or "task")
+
+    async def _emit_notification(
+        ctx: "EventContext",
+        *,
+        thread_id: Optional[str],
+        status: str,
+        message: str,
+        task_id: str = "",
+    ) -> None:
+        if notification_router is None:
+            return
+
+        agent_id, agent_name, task_name = _notification_context(ctx, thread_id)
+        try:
+            event = NotificationEvent(
+                status=status,
+                agent_name=agent_name,
+                task_name=task_name,
+                message=message,
+                task_id=task_id or _notification_task_id(ctx, thread_id),
+                agent_id=agent_id,
+            )
+            result = await notification_router.notify(event)
+        except Exception as e:
+            logger.warning(
+                "[notification] 发送任务通知异常 thread=%s status=%s error=%s",
+                thread_id or "N/A",
+                status,
+                e,
+            )
+            return
+
+        if result.sent:
+            logger.info(
+                "[notification] 已发送任务通知 channels=%s thread=%s status=%s",
+                ",".join(result.channels),
+                thread_id or "N/A",
+                status,
+            )
+        elif result.reason not in {"deduped", "no_channels"}:
+            detail = f" errors={'; '.join(result.errors)}" if result.errors else ""
+            logger.warning(
+                "[notification] 任务通知未发送 reason=%s thread=%s status=%s%s",
+                result.reason,
+                thread_id or "N/A",
+                status,
+                detail,
+            )
+
+    def _notification_for_turn_status(run_status: str, turn: Any, ctx: "EventContext") -> tuple[str, str]:
+        normalized = str(run_status or "completed").strip().lower()
+        if normalized in {"error", "failed", "cancelled", "canceled", "aborted"}:
+            if normalized == "aborted":
+                return "failed", "任务已中断"
+            if normalized in {"cancelled", "canceled"}:
+                return "failed", "任务已取消"
+            error_text = ""
+            if isinstance(turn, dict):
+                error_text = str(turn.get("error") or "").strip()
+            if not error_text:
+                error_text = str(ctx.event_params.get("error") or "").strip()
+            return "failed", f"任务失败：{error_text}" if error_text else "任务失败"
+        return "completed", "任务已完成"
 
     async def _do_edit(thread_id: str, st: StreamingTurn, text: str) -> bool:
         """实际执行 telegram 消息编辑，更新 last_edit_time。网络错误时最多重试 2 次。"""
@@ -702,6 +815,13 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int):
                 interruption_id=str(request_id),
             )
         await send_approval_to_telegram(state, bot, group_chat_id, topic_id, workspace_id, info)
+        await _emit_notification(
+            ctx,
+            thread_id=thread_id,
+            status="needs_action",
+            message="需要处理授权请求",
+            task_id=str(request_id or thread_id or workspace_id),
+        )
 
     async def _handle_question(ctx: EventContext) -> None:
         """question/asked"""
@@ -802,6 +922,13 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int):
             logger.info(
                 f"[question] 已推送 question={question_id} sub={sub_index + 1}/{sub_total} "
                 f"msg_id={msg_id} options={len(options)} multiple={multiple} custom={custom}"
+            )
+            await _emit_notification(
+                ctx,
+                thread_id=thread_id,
+                status="needs_action",
+                message="需要回答问题",
+                task_id=question_id or thread_id or ctx.ws_daemon_id,
             )
         except Exception as e:
             logger.error(f"推送 question 到 Telegram 失败：{e}")
@@ -1112,6 +1239,13 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int):
                         thread_id=thread_id,
                         status=run_status,
                     )
+                notification_status, notification_message = _notification_for_turn_status(run_status, turn, ctx)
+                await _emit_notification(
+                    ctx,
+                    thread_id=thread_id,
+                    status=notification_status,
+                    message=notification_message,
+                )
                 return
             if _is_stale_turn_event(st, event_turn_id):
                 logger.info(
@@ -1203,6 +1337,13 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int):
                 thread_id=thread_id,
                 status=run_status,
             )
+        notification_status, notification_message = _notification_for_turn_status(run_status, turn, ctx)
+        await _emit_notification(
+            ctx,
+            thread_id=thread_id,
+            status=notification_status,
+            message=notification_message,
+        )
 
     async def _handle_session_created(ctx: EventContext) -> None:
         """session.created"""

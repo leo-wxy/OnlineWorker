@@ -17,6 +17,15 @@ GROUP_CHAT_ID = -100123456789
 SEMANTIC_FIXTURE_PATH = Path(__file__).parent / "fixtures" / "codex_semantic_sequences.json"
 
 
+class RecordingNotificationRouter:
+    def __init__(self):
+        self.events = []
+
+    async def notify(self, event):
+        self.events.append(event)
+        return SimpleNamespace(sent=True, channels=("recording",), reason="")
+
+
 def _load_semantic_sequences() -> dict:
     return json.loads(SEMANTIC_FIXTURE_PATH.read_text(encoding="utf-8"))
 
@@ -171,6 +180,184 @@ async def test_turn_completed_failed_edits_failure_instead_of_completed():
     text = bot.edit_message_text.await_args.kwargs["text"]
     assert text != "✅ 已完成"
     assert "失败" in text or "错误" in text
+
+
+@pytest.mark.asyncio
+async def test_turn_completed_sends_task_notification():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-123"] = ThreadInfo(
+        thread_id="tid-123",
+        topic_id=3794,
+        preview="Phase 6 通知机制",
+        archived=False,
+        streaming_msg_id=5001,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    state.streaming_turns["tid-123"] = StreamingTurn(
+        message_id=5001,
+        topic_id=3794,
+        turn_id="turn-123",
+        buffer="完成内容",
+    )
+    codex_state.start_run(
+        state,
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-123",
+        turn_id="turn-123",
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "tid-123",
+                    "turnId": "turn-123",
+                    "turn": {"id": "turn-123", "status": "completed"},
+                },
+            },
+        },
+    )
+
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.status == "completed"
+    assert event.agent_name == "Codex"
+    assert event.agent_id == "codex"
+    assert event.task_name == "Phase 6 通知机制"
+    assert event.task_id == "turn-123"
+    assert event.message == "任务已完成"
+
+
+@pytest.mark.asyncio
+async def test_turn_failed_sends_failed_task_notification():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-123"] = ThreadInfo(
+        thread_id="tid-123",
+        topic_id=3794,
+        preview="Phase 6 通知机制",
+        archived=False,
+        streaming_msg_id=5001,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    state.streaming_turns["tid-123"] = StreamingTurn(
+        message_id=5001,
+        topic_id=3794,
+        turn_id="turn-123",
+        buffer="",
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "tid-123",
+                    "turnId": "turn-123",
+                    "turn": {
+                        "id": "turn-123",
+                        "status": "failed",
+                        "error": "boom",
+                    },
+                },
+            },
+        },
+    )
+
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.status == "failed"
+    assert event.message == "任务失败：boom"
+    assert event.dedupe_key == "turn-123:codex:failed"
+
+
+@pytest.mark.asyncio
+async def test_event_handler_builds_notification_router_from_state_config():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-123"] = ThreadInfo(
+        thread_id="tid-123",
+        topic_id=3794,
+        preview="Phase 6 通知机制",
+        archived=False,
+        streaming_msg_id=5001,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    state.config = SimpleNamespace(enabled_notification_channels=[])
+    state.streaming_turns["tid-123"] = StreamingTurn(
+        message_id=5001,
+        topic_id=3794,
+        turn_id="turn-123",
+        buffer="完成内容",
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    with patch("bot.events.build_notification_router", return_value=notifications) as build_router:
+        handler = make_event_handler(state, bot, GROUP_CHAT_ID)
+
+    build_router.assert_called_once_with(state.config)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "tid-123",
+                    "turnId": "turn-123",
+                    "turn": {"id": "turn-123", "status": "completed"},
+                },
+            },
+        },
+    )
+
+    assert len(notifications.events) == 1
 
 
 @pytest.mark.asyncio

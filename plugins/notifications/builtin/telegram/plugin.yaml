@@ -1,0 +1,28 @@
+schema_version: 1
+id: telegram
+kind: notification
+visibility: public
+order: 10
+label: Telegram
+description: Send concise task notifications through a dedicated Telegram bot.
+default_enabled: true
+icon:
+  path: icon.svg
+  source: https://telegram.org
+
+settings:
+  fields:
+    - key: bot_token
+      label: Bot Token
+      type: secret
+      required: true
+      description: Telegram bot token used only for notification delivery.
+    - key: recipient_user_id
+      label: Recipient User ID
+      type: string
+      required: true
+      default: ""
+      description: Telegram user id that receives notification messages.
+
+entrypoints:
+  python_descriptor: plugins.notifications.builtin.telegram.python.channel:create_notification_descriptor

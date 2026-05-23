@@ -6,6 +6,7 @@ import {
   ConfigEditor,
   LogWindow,
   MaintenanceSettingsPanel,
+  NotificationSettingsPanel,
   ProviderSettingsPanel,
 } from "./components";
 import {
@@ -23,7 +24,6 @@ import {
 } from "./utils/appTabs.js";
 
 const APP_NAVIGATE_TAB_EVENT = "app:navigate-tab";
-const appWindow = getCurrentWindow();
 
 export default function App() {
   const { locale, setLocale, t } = useI18n();
@@ -79,6 +79,7 @@ export default function App() {
       case "sessions": return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"></path></svg>;
       case "usage": return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 12h3m4-6h3m-3 12h7m-7-6h7M7 6h.01M7 12h.01M7 18h.01"></path></svg>;
       case "commands": return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>;
+      case "notifications": return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0a3 3 0 11-6 0m6 0H9"></path></svg>;
       case "setup": return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>;
       case "config": return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>;
       default: return null;
@@ -89,9 +90,13 @@ export default function App() {
     if (event.button !== 0) {
       return;
     }
-    void appWindow.startDragging().catch((error) => {
-      console.error("Failed to start window dragging", error);
-    });
+    try {
+      void getCurrentWindow().startDragging().catch((error) => {
+        console.error("Failed to start window dragging", error);
+      });
+    } catch {
+      // Non-Tauri environments do not expose native window APIs.
+    }
   }, []);
 
   return (
@@ -241,7 +246,7 @@ export default function App() {
         {/* Content */}
         <main
           className={`flex-1 flex flex-col min-h-0 ${
-            activeTab === "sessions" || activeTab === "commands" || activeTab === "usage"
+            activeTab === "sessions" || activeTab === "commands" || activeTab === "usage" || activeTab === "notifications"
               ? "overflow-hidden overscroll-none"
               : "overflow-y-auto"
           }`}
@@ -258,6 +263,11 @@ export default function App() {
           {activeTab === "config" && (
             <div className="h-full p-5 sm:p-6">
               <ConfigEditor />
+            </div>
+          )}
+          {activeTab === "notifications" && (
+            <div className="flex min-h-0 flex-1 flex-col p-5 sm:p-6">
+              <NotificationSettingsPanel />
             </div>
           )}
           {activeTab === "setup" && (

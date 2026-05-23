@@ -30,12 +30,14 @@ See also:
 - Built around an installed app, not a browser-hosted service.
 - App for setup and ongoing control, Telegram for remote input and final delivery.
 - Builtin providers in this repository: `codex` and `claude`.
+- Builtin notification channel in this repository: `telegram`, with external notification channels mountable through plugins.
 - A first-class `Usage` page for recent provider consumption, with `Codex / Claude` switching inside the app.
 
 ## Features
 
 - Mac app control for setup, dashboard, sessions, commands, and logs.
 - Telegram entry point for remote task submission and final updates.
+- Plugin-based notification channels, configurable from the first-class `Notifications` page.
 - Provider-driven configuration for supported CLI backends.
 - Session browsing and message sending from the app.
 - Session Browser supports text plus image/file attachment sends from the desktop app, with one user message shown per send.
@@ -53,6 +55,14 @@ This repository ships builtin support for:
 
 The app also supports external provider packages through the public plugin
 contracts, but this repository only bundles the builtin providers listed above.
+
+## Notification Channels
+
+This repository ships builtin notification support for:
+
+- `telegram`
+
+Additional notification packages can be mounted through the public notification plugin contract. The shared notification router sends concise task status events to enabled channels; each plugin owns the actual app-specific send logic.
 
 ## Requirements
 
@@ -100,6 +110,8 @@ When running from source, the repo root may also use local `config.yaml`, `.env`
 
 Additional provider packages can be mounted by setting `ONLINEWORKER_PROVIDER_OVERLAY` to a file or directory path. When the path points to a directory, OnlineWorker scans any `plugin.yaml` files under that tree and loads the provider descriptors it finds there. The installed app also reads the same key from `~/Library/Application Support/OnlineWorker/.env`, with process env taking priority when both are present.
 
+Additional notification packages can be mounted by setting `ONLINEWORKER_NOTIFICATION_OVERLAY` in the process environment to a file or directory path. Directory paths are scanned for `plugin.yaml` files with `kind: notification`. This key is not read from the app `.env`.
+
 ### `.env`
 
 ```bash
@@ -113,7 +125,9 @@ OnlineWorker does not read or write `ANTHROPIC_*` proxy, model, or key settings.
 
 ### `config.yaml`
 
-`config.yaml` is the app configuration file for provider and Telegram settings. Use the in-app settings UI to edit it in normal workflows.
+`config.yaml` is the app configuration file for provider, Telegram, and notification plugin settings. Use the in-app settings UI to edit it in normal workflows.
+
+Notification channels are exposed as a first-class `Notifications` tab. Channel switches are stored under `notifications.channels.<channel>.enabled`; plugin field values are stored under `notifications.channels.<channel>.config`.
 
 ## Development
 
@@ -160,7 +174,7 @@ cd /path/to/onlineWorker
 bash scripts/build.sh
 ```
 
-This build path packages the base app from this repository. Additional provider packages can be mounted at runtime through `ONLINEWORKER_PROVIDER_OVERLAY`, or staged at build time through `ONLINEWORKER_PLUGIN_SOURCE_DIRS` before calling the same `scripts/build.sh`.
+This build path packages the base app from this repository. Additional provider packages can be mounted at runtime through `ONLINEWORKER_PROVIDER_OVERLAY`, notification packages can be mounted through `ONLINEWORKER_NOTIFICATION_OVERLAY`, and provider packages can be staged at build time through `ONLINEWORKER_PLUGIN_SOURCE_DIRS` before calling the same `scripts/build.sh`.
 
 Pushing a version tag such as `1.2.1` also builds this same Apple Silicon DMG automatically through `.github/workflows/release-dmg.yml`. The workflow uploads the DMG as a workflow artifact, creates the matching GitHub Release if needed, and then attaches the DMG to that Release asset list.
 
@@ -183,7 +197,7 @@ onlineWorker/
 ├── bot/                     # Telegram bot handlers and utilities
 ├── core/                    # Shared runtime, state, storage, and provider contracts
 ├── mac-app/                 # Tauri + React Mac app
-├── plugins/                 # Provider descriptors and runtime implementations
+├── plugins/                 # Provider and notification plugin descriptors/runtime implementations
 ├── scripts/                 # Build and maintenance scripts
 ├── tests/                   # Python tests
 ├── deploy/                  # Packaging and deployment notes

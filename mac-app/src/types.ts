@@ -74,6 +74,34 @@ export interface ProviderMetadata {
   icon?: ProviderIconMetadata | null;
 }
 
+export interface NotificationChannelMetadata {
+  id: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  builtin: boolean;
+  config: Record<string, unknown>;
+  settingsFields: NotificationSettingsField[];
+  icon?: ProviderIconMetadata | null;
+}
+
+export type NotificationSettingsFieldType = "string" | "number" | "boolean" | "select" | "secret";
+
+export interface NotificationSettingsOption {
+  value: string;
+  label: string;
+}
+
+export interface NotificationSettingsField {
+  key: string;
+  label: string;
+  type: NotificationSettingsFieldType;
+  required: boolean;
+  default?: unknown;
+  description: string;
+  options: NotificationSettingsOption[];
+}
+
 export interface DashboardAlert {
   level: AlertLevel;
   code?: string;

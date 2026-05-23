@@ -60,6 +60,7 @@ export const zhTexts: AppTexts = {
         sessions: "会话",
         usage: "用量",
         commands: "命令",
+        notifications: "通知",
         config: "配置",
         setup: "设置",
       },
@@ -431,6 +432,46 @@ export const zhTexts: AppTexts = {
       scopeGlobal: "全局",
       scopeWorkspace: "工作区",
       scopeThread: "Thread",
+    },
+    notifications: {
+      title: "通知",
+      description:
+        "配置任务状态通知的出口。渠道由插件声明，开关和字段值会保存到 config.yaml。",
+      channelsTitle: "通知渠道",
+      channelsDescription: "选择一个渠道查看和编辑插件配置。",
+      channelCount: (count: number) => `${count} 个渠道`,
+      configTitle: "渠道配置",
+      loading: "正在加载通知渠道...",
+      noChannelsTitle: "暂无通知渠道",
+      noChannelsDescription: "当前插件目录没有可用的通知渠道。",
+      noFieldsTitle: "无需配置",
+      noFieldsDescription: "这个通知渠道没有声明可配置字段。",
+      builtin: "内置",
+      custom: "自定义",
+      enabled: "已启用",
+      disabled: "未启用",
+      configured: "已配置",
+      needsConfig: "待配置",
+      saveConfiguration: "保存配置",
+      enableChannel: "启用渠道",
+      loadError: (error: string) => `通知渠道加载失败：${error}`,
+      channelDescriptionFallback: "这个通知渠道没有提供描述。",
+      pluginIdLabel: "插件 ID",
+      fieldLabels: {
+        telegram: {
+          bot_token: "Bot Token",
+          recipient_user_id: "接收用户 ID",
+        },
+      },
+      fieldDescriptions: {
+        telegram: {
+          bot_token: "用于发送通知的 Telegram Bot Token。",
+          recipient_user_id: "接收通知消息的 Telegram 用户 ID。",
+        },
+      },
+      channelDescriptions: {
+        telegram: "通过独立 Telegram Bot 发送简短任务通知。",
+      },
     },
     dashboard: {
       overallTitle: {

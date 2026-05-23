@@ -28,10 +28,17 @@ OWNED_ENV_KEYS = frozenset(
     }
 )
 OWNED_ENV_PREFIXES = ("ONLINEWORKER_",)
+EXCLUDED_OWNED_ENV_KEYS = frozenset(
+    {
+        "ONLINEWORKER_NOTIFICATION_OVERLAY",
+    }
+)
 
 
 def _is_owned_env_key(key: str) -> bool:
     normalized = str(key or "").strip()
+    if normalized in EXCLUDED_OWNED_ENV_KEYS:
+        return False
     return normalized in OWNED_ENV_KEYS or normalized.startswith(OWNED_ENV_PREFIXES)
 
 
@@ -127,6 +134,26 @@ class ToolConfig:
 
 
 @dataclass
+class NotificationChannelConfig:
+    name: str
+    enabled: bool = True
+    label: str = ""
+    description: str = ""
+    config: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.name = str(self.name or "").strip()
+        self.enabled = bool(self.enabled)
+        self.label = str(self.label or self.name).strip()
+        self.description = str(self.description or "").strip()
+        self.config = {
+            str(key): value
+            for key, value in (self.config or {}).items()
+            if key is not None
+        }
+
+
+@dataclass
 class Config:
     telegram_token: str
     allowed_user_id: int
@@ -137,6 +164,7 @@ class Config:
     data_dir: str | None = None  # --data-dir path, or None for CWD defaults
     delete_archived_topics: bool = True  # 归档 thread 时是否删除 topic（vs 仅关闭）
     schema_version: int = 1  # 1=legacy tools[]; 2=provider-centric
+    notification_channels: dict[str, NotificationChannelConfig] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.providers and not self.tools:
@@ -175,6 +203,49 @@ class Config:
     def enabled_tools(self) -> list:
         """返回所有已启用的工具列表。"""
         return [t for t in self.tools if t.enabled and t.visible and is_provider_exposed(t.name)]
+
+    @property
+    def enabled_notification_channels(self) -> list[NotificationChannelConfig]:
+        """返回所有已启用的通知渠道。"""
+        return [channel for channel in self.notification_channels.values() if channel.enabled]
+
+
+def _build_notification_channel_config(
+    channel_name: str,
+    raw: dict[str, Any] | None,
+) -> NotificationChannelConfig:
+    raw = raw if isinstance(raw, dict) else {}
+    config = raw.get("config") if isinstance(raw.get("config"), dict) else {}
+    return NotificationChannelConfig(
+        name=channel_name,
+        enabled=bool(raw.get("enabled", True)),
+        label=str(raw.get("label") or channel_name),
+        description=str(raw.get("description") or ""),
+        config=dict(config),
+    )
+
+
+def _load_notification_channels(data: dict[str, Any]) -> dict[str, NotificationChannelConfig]:
+    notifications_raw = data.get("notifications")
+    channels_raw = {}
+    if isinstance(notifications_raw, dict) and isinstance(notifications_raw.get("channels"), dict):
+        channels_raw = notifications_raw.get("channels") or {}
+
+    channels: dict[str, NotificationChannelConfig] = {}
+    channels["telegram"] = _build_notification_channel_config(
+        "telegram",
+        channels_raw.get("telegram") if isinstance(channels_raw, dict) else None,
+    )
+    if isinstance(channels_raw, dict):
+        for channel_name, channel_raw in channels_raw.items():
+            normalized_name = str(channel_name or "").strip()
+            if not normalized_name or normalized_name in channels:
+                continue
+            channels[normalized_name] = _build_notification_channel_config(
+                normalized_name,
+                channel_raw if isinstance(channel_raw, dict) else {},
+            )
+    return channels
 
 
 def _default_provider_blueprint(name: str) -> dict[str, Any]:
@@ -673,4 +744,5 @@ def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None)
         data_dir=data_dir,
         delete_archived_topics=telegram_config.get("delete_archived_topics", True),
         schema_version=schema_version,
+        notification_channels=_load_notification_channels(data),
     )

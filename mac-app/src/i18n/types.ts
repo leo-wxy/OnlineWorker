@@ -48,6 +48,7 @@ export interface AppTexts {
       sessions: string;
       usage: string;
       commands: string;
+      notifications: string;
       config: string;
       setup: string;
     };
@@ -336,6 +337,33 @@ export interface AppTexts {
     scopeGlobal: string;
     scopeWorkspace: string;
     scopeThread: string;
+  };
+  notifications: {
+    title: string;
+    description: string;
+    channelsTitle: string;
+    channelsDescription: string;
+    channelCount: (count: number) => string;
+    configTitle: string;
+    loading: string;
+    noChannelsTitle: string;
+    noChannelsDescription: string;
+    noFieldsTitle: string;
+    noFieldsDescription: string;
+    builtin: string;
+    custom: string;
+    enabled: string;
+    disabled: string;
+    configured: string;
+    needsConfig: string;
+    saveConfiguration: string;
+    enableChannel: string;
+    loadError: (error: string) => string;
+    channelDescriptionFallback: string;
+    pluginIdLabel: string;
+    fieldLabels: Record<string, Record<string, string>>;
+    fieldDescriptions: Record<string, Record<string, string>>;
+    channelDescriptions: Record<string, string>;
   };
   dashboard: {
     overallTitle: Record<"healthy" | "degraded" | "misconfigured" | "stopped" | "unknown", string>;

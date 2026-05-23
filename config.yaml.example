@@ -1,5 +1,5 @@
 # OnlineWorker configuration template.
-# Sensitive values such as Telegram token and user IDs belong in .env.
+# Main Telegram bot credentials remain in .env; notification plugin settings live below.
 
 schema_version: 2
 
@@ -36,3 +36,11 @@ telegram:
 logging:
   # DEBUG / INFO / WARNING / ERROR
   level: "INFO"
+
+notifications:
+  channels:
+    telegram:
+      enabled: true
+      config:
+        bot_token: ""
+        recipient_user_id: ""

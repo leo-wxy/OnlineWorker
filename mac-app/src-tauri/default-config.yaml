@@ -1,5 +1,5 @@
 # OnlineWorker Configuration
-# Sensitive values (tokens, user IDs) are in .env, not here.
+# Main Telegram bot credentials are in .env. Notification plugin settings live below.
 
 schema_version: 2
 
@@ -25,3 +25,11 @@ providers:
 
 logging:
   level: "INFO"
+
+notifications:
+  channels:
+    telegram:
+      enabled: true
+      config:
+        bot_token: ""
+        recipient_user_id: ""

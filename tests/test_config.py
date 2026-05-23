@@ -101,6 +101,100 @@ logging:
     assert cfg.providers["claude"].label == "Claude"
 
 
+def test_load_config_backfills_default_notification_channel(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text("logging:\n  level: \"INFO\"\n", encoding="utf-8")
+    monkeypatch.setenv("TELEGRAM_TOKEN", "123:abc")
+    monkeypatch.setenv("ALLOWED_USER_ID", "456789")
+    monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
+
+    from config import load_config
+
+    cfg = load_config(str(p))
+
+    assert cfg.notification_channels["telegram"].enabled is True
+    assert cfg.enabled_notification_channels[0].name == "telegram"
+
+
+def test_load_config_reads_custom_notification_channel(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        """
+notifications:
+  channels:
+    telegram:
+      enabled: false
+    wechat:
+      enabled: true
+      label: WeChat
+      description: Custom notifier
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TELEGRAM_TOKEN", "123:abc")
+    monkeypatch.setenv("ALLOWED_USER_ID", "456789")
+    monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
+
+    from config import load_config
+
+    cfg = load_config(str(p))
+
+    assert cfg.notification_channels["telegram"].enabled is False
+    assert cfg.notification_channels["wechat"].label == "WeChat"
+    assert [channel.name for channel in cfg.enabled_notification_channels] == ["wechat"]
+
+
+def test_load_config_reads_notification_channel_plugin_config(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        """
+notifications:
+  channels:
+    telegram:
+      enabled: true
+      config:
+        recipient_user_id: "123456789"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TELEGRAM_TOKEN", "123:abc")
+    monkeypatch.setenv("ALLOWED_USER_ID", "456789")
+    monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
+
+    from config import load_config
+
+    cfg = load_config(str(p))
+
+    assert cfg.notification_channels["telegram"].config == {
+        "recipient_user_id": "123456789",
+    }
+
+
+def test_load_config_data_dir_env_does_not_inject_notification_overlay(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text("logging:\n  level: \"INFO\"\n", encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        """
+TELEGRAM_TOKEN=123:abc
+ALLOWED_USER_ID=456789
+GROUP_CHAT_ID=-100987654321
+ONLINEWORKER_NOTIFICATION_OVERLAY=/tmp/notification-overlay
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
+    monkeypatch.delenv("ALLOWED_USER_ID", raising=False)
+    monkeypatch.delenv("GROUP_CHAT_ID", raising=False)
+    monkeypatch.delenv("ONLINEWORKER_NOTIFICATION_OVERLAY", raising=False)
+
+    from config import load_config
+
+    load_config(data_dir=str(tmp_path))
+
+    assert "ONLINEWORKER_NOTIFICATION_OVERLAY" not in os.environ
+
+
 def test_builtin_provider_plugin_manifests_define_public_defaults():
     plugin_root = Path(__file__).resolve().parents[1] / "plugins" / "providers" / "builtin"
     manifests = sorted(plugin_root.glob("*/plugin.yaml"))

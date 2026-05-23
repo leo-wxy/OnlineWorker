@@ -2,20 +2,20 @@
 
 ## What This Is
 
-OnlineWorker is a macOS AI coding workspace built around local CLI agents. The installed Mac app is the primary control surface for setup, sessions, commands, logs, and service lifecycle, while Telegram acts as the remote entry point for starting work, handling approvals, checking status, and receiving final replies.
+OnlineWorker is a macOS AI coding workspace built around local CLI agents. The installed Mac app is the primary control surface for setup, sessions, commands, logs, and service lifecycle, while Telegram acts as the current remote entry point for starting work, handling approvals, checking status, and receiving final replies.
 
 This repository is a brownfield product codebase. The archived v1.2.1 milestone improved the visible workbench, provider usage exploration, attachment handling, Claude safe resume behavior, and provider-session error visibility without changing the installed-app-first product model.
 
 ## Core Value
 
-Developers can reliably control local AI coding CLI workflows from an installed Mac app while still receiving remote final results through Telegram.
+Developers can reliably control local AI coding CLI workflows from an installed Mac app while receiving timely remote notifications and final results through supported notification channels.
 
 ## Current State
 
 - Latest archived milestone: `v1.2.1`
 - Release tag: `1.2.1`
-- Active milestone: not started
-- Active roadmap phases: none
+- Active milestone: Notification Extensibility
+- Active roadmap phase: Phase 6, Notification Channel Abstraction
 
 ## Requirements
 
@@ -34,14 +34,15 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 
 ### Active
 
-No active milestone requirements are currently defined.
+- [ ] Add a plugin-based notification mechanism so notification delivery is not limited to Telegram.
+- [ ] Keep Telegram as the default builtin notification plugin while leaving a clean extension boundary for custom plugins such as WeChat.
 
 ### Out of Scope
 
 - Browser-hosted or SaaS control plane — product is explicitly installed-app-first
 - New builtin providers beyond `codex` and `claude` — external providers should use the public plugin/overlay boundary
 - Windows or Linux desktop ports — current runtime and packaging target is macOS
-- Replacing Telegram with a different remote interaction channel — existing workflow already depends on Telegram delivery/approvals
+- Replacing Telegram as an input channel in this phase — current work is notification delivery abstraction, not full remote interaction replacement
 
 ## Context
 
@@ -49,6 +50,7 @@ No active milestone requirements are currently defined.
 - Installed-app behavior matters more than source-only behavior; release confidence is tied to packaged-app validation.
 - The repo includes provider abstraction boundaries, session/event tests, packaging scripts, plugin manifests, and tag-driven DMG release automation.
 - v1.2.1 milestone artifacts are archived under `.planning/milestones/`.
+- The current milestone starts from the practical limitation that notifications are Telegram-only today.
 
 ## Constraints
 
@@ -56,6 +58,7 @@ No active milestone requirements are currently defined.
 - **Platform**: macOS installed-app behavior is the source of truth.
 - **Workflow compatibility**: Existing `App / Sessions + Telegram final reply` behavior must remain intact.
 - **Provider boundary**: Shared app surfaces should not reintroduce provider-specific coupling.
+- **Notification boundary**: New notification delivery should avoid spreading app-specific conditionals through shared runtime code.
 - **Release path**: Tag-driven DMG packaging and startup/build sanity must stay working.
 
 ## Key Decisions
@@ -66,8 +69,10 @@ No active milestone requirements are currently defined.
 | Use README + codebase map as project definition baseline | Current repo docs already state the product shape clearly enough for initialization | Validated |
 | Keep installed-app-first framing | Public docs and architecture both center the packaged Mac app rather than browser hosting | Validated |
 | Keep provider-specific behavior behind plugin/runtime boundaries | External provider support should not leak private provider concepts into shared app surfaces | Validated |
+| Treat notification delivery as a plugin boundary | Telegram is currently the only notification plugin, but future apps such as WeChat should not require rewriting shared send/status logic | Active |
 
 ## Evolution
 
 - 2026-05-10: Planning initialized for a brownfield OnlineWorker milestone.
 - 2026-05-23: v1.2.1 milestone archived after completing phases 1-5 and publishing tag `1.2.1`.
+- 2026-05-23: Phase 6 added for notification channel abstraction.

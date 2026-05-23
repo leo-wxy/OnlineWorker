@@ -21,9 +21,11 @@ use commands::command_registry::{
     set_command_telegram_enabled,
 };
 use commands::config::{
-    check_first_run, create_default_config, get_provider_metadata, list_env_keys, read_config,
-    read_env, read_env_field, read_env_raw, read_provider_runtime_policies_from_disk,
-    reveal_env_field, set_provider_flags, write_config, write_env, write_env_field,
+    check_first_run, create_default_config, get_notification_channels, get_provider_metadata,
+    list_env_keys, read_config, read_env, read_env_field, read_env_raw,
+    read_provider_runtime_policies_from_disk, reveal_env_field,
+    set_notification_channel_config, set_notification_channel_enabled, set_provider_flags,
+    write_config, write_env, write_env_field,
 };
 use commands::dashboard::get_dashboard_state;
 use commands::logs::{get_log_file_path, start_log_tail, stop_log_tail};
@@ -258,6 +260,9 @@ pub fn run() {
             read_env_field,
             write_env_field,
             set_provider_flags,
+            get_notification_channels,
+            set_notification_channel_config,
+            set_notification_channel_enabled,
             get_provider_metadata,
             list_env_keys,
             reveal_env_field,

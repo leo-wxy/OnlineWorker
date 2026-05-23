@@ -40,16 +40,18 @@ test("sidebar collapse labels exist in both locales", () => {
   }
 });
 
-test("app shell exposes a first-class usage tab in navigation and routing", () => {
+test("app shell exposes first-class usage and notification tabs in navigation and routing", () => {
   const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
   const tabs = readFileSync(join(root, "src", "utils", "appTabs.js"), "utf8");
   const types = readFileSync(join(root, "src", "utils", "appTabs.d.ts"), "utf8");
   const pages = readFileSync(join(root, "src", "pages", "index.ts"), "utf8");
 
-  assert.match(tabs, /PRIMARY_APP_TABS = \["dashboard", "sessions", "usage", "commands", "setup"\]/);
-  assert.match(types, /"dashboard" \| "sessions" \| "usage" \| "commands" \| "config" \| "setup"/);
+  assert.match(tabs, /PRIMARY_APP_TABS = \["dashboard", "sessions", "usage", "commands", "notifications", "setup"\]/);
+  assert.match(types, /"dashboard" \| "sessions" \| "usage" \| "commands" \| "notifications" \| "config" \| "setup"/);
   assert.match(app, /activeTab === "usage"/);
+  assert.match(app, /activeTab === "notifications"/);
   assert.match(app, /<UsageBrowser \/>/);
+  assert.match(app, /<NotificationSettingsPanel \/>/);
   assert.match(pages, /export \{ UsageBrowser \} from "\.\/UsageBrowser";/);
 });
 
@@ -72,6 +74,41 @@ test("settings exposes attachment cache controls under a maintenance section", (
   assert.match(types, /attachmentCacheTitle:\s*string/);
   assert.match(zh, /附件缓存/);
   assert.match(en, /Attachment Cache/);
+});
+
+test("notification tab exposes split app list and plugin-defined configuration", () => {
+  const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
+  const panel = readFileSync(join(root, "src", "components", "NotificationSettingsPanel.tsx"), "utf8");
+  const components = readFileSync(join(root, "src", "components", "index.ts"), "utf8");
+  const types = readFileSync(join(root, "src", "types.ts"), "utf8");
+  const i18nTypes = readFileSync(join(root, "src", "i18n", "types.ts"), "utf8");
+  const zh = readFileSync(join(root, "src", "i18n", "locales", "zh.ts"), "utf8");
+  const en = readFileSync(join(root, "src", "i18n", "locales", "en.ts"), "utf8");
+
+  assert.match(app, /"notifications"/);
+  assert.match(app, /<NotificationSettingsPanel \/>/);
+  assert.match(app, /grid-cols-5/);
+  assert.equal(app.includes('["notifications", "Notifications"]'), false);
+  assert.match(components, /export \{ NotificationSettingsPanel \}/);
+  assert.match(types, /export interface NotificationChannelMetadata/);
+  assert.match(types, /icon\?: ProviderIconMetadata \| null;/);
+  assert.match(panel, /get_notification_channels/);
+  assert.match(panel, /set_notification_channel_enabled/);
+  assert.match(panel, /set_notification_channel_config/);
+  assert.equal(panel.includes("write_env_field"), false);
+  assert.equal(panel.includes("read_env_field"), false);
+  assert.match(panel, /useI18n/);
+  assert.match(panel, /notifications\.channelsTitle/);
+  assert.equal(panel.includes("Supported Apps"), false);
+  assert.equal(panel.includes("Save configuration"), false);
+  assert.equal((panel.match(/set_notification_channel_enabled/g) ?? []).length, 1);
+  assert.equal((panel.match(/notifications\.enableChannel/g) ?? []).length, 1);
+  assert.match(i18nTypes, /notifications:\s*\{/);
+  assert.match(zh, /通知渠道/);
+  assert.match(en, /Notification channels/);
+  assert.match(panel, /ChannelIcon/);
+  assert.match(panel, /settingsFields/);
+  assert.match(panel, /service_restart/);
 });
 
 test("dashboard renders provider icons from provider metadata", () => {

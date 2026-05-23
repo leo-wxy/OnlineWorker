@@ -60,6 +60,7 @@ export const enTexts: AppTexts = {
         sessions: "Sessions",
         usage: "Usage",
         commands: "Commands",
+        notifications: "Notifications",
         config: "Config",
         setup: "Setup",
       },
@@ -436,6 +437,46 @@ export const enTexts: AppTexts = {
       scopeGlobal: "Global",
       scopeWorkspace: "Workspace",
       scopeThread: "Thread",
+    },
+    notifications: {
+      title: "Notifications",
+      description:
+        "Configure where task status notifications are sent. Channels come from plugins; switches and field values are saved to config.yaml.",
+      channelsTitle: "Notification channels",
+      channelsDescription: "Select a channel to review and edit its plugin settings.",
+      channelCount: (count: number) => `${count} channels`,
+      configTitle: "Channel configuration",
+      loading: "Loading notification channels...",
+      noChannelsTitle: "No notification channels",
+      noChannelsDescription: "No notification plugins are available from the current plugin catalog.",
+      noFieldsTitle: "No configuration required",
+      noFieldsDescription: "This notification channel does not declare configurable fields.",
+      builtin: "Built in",
+      custom: "Custom",
+      enabled: "Enabled",
+      disabled: "Disabled",
+      configured: "Configured",
+      needsConfig: "Needs config",
+      saveConfiguration: "Save configuration",
+      enableChannel: "Enable channel",
+      loadError: (error: string) => `Failed to load notification channels: ${error}`,
+      channelDescriptionFallback: "This notification channel does not provide a description.",
+      pluginIdLabel: "Plugin ID",
+      fieldLabels: {
+        telegram: {
+          bot_token: "Bot Token",
+          recipient_user_id: "Recipient User ID",
+        },
+      },
+      fieldDescriptions: {
+        telegram: {
+          bot_token: "Telegram bot token used for notification delivery.",
+          recipient_user_id: "Telegram user ID that receives notification messages.",
+        },
+      },
+      channelDescriptions: {
+        telegram: "Send concise task notifications through a dedicated Telegram bot.",
+      },
     },
     dashboard: {
       overallTitle: {
