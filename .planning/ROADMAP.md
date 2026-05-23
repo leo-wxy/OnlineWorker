@@ -122,30 +122,29 @@ Remaining Phase 4 verification:
 **Depends on:** Phase 4
 **Success Criteria** (what must be TRUE):
   1. Generic provider sessions can surface asynchronous generation failures without requiring provider-specific React branches.
-  2. codemaker `session.error` events become visible in Session Browser and stop the reply watch instead of timing out as a silent wait.
+  2. External overlay provider async error events become visible in Session Browser and stop the reply watch instead of timing out as a silent wait.
   3. Provider session history/read normalization preserves error records that users need to see while still filtering empty non-error assistant placeholders.
-  4. Regression coverage proves a generic overlay provider async failure is visible through the same Session Browser data path used by codemaker.
+  4. Regression coverage proves a generic overlay provider async failure is visible through the same Session Browser data path.
 **Plans:** 1 plan
 
 Plans:
 - [x] 05-01: Add provider session async error normalization and Session Browser visibility
 
 Latest verification:
-- codemaker storage runtime now surfaces assistant `data.error` records as visible assistant error turns.
+- External overlay provider storage/runtime behavior now surfaces assistant `data.error` records as visible assistant error turns.
 - Provider owner bridge and fallback provider session bridge preserve `displayMode/kind` and turn empty `kind=error` records with an `error` field into visible content.
 - Empty non-error assistant placeholders remain filtered.
 - Targeted red/green coverage passed: `3 passed in 0.09s`.
-- codemaker plugin-side regression passed: `8 passed in 0.08s`.
+- External overlay provider-side regression passed in the source workspace.
 - provider bridge/owner bridge regression passed: `18 passed in 0.09s`.
 - Tauri owner bridge payload test passed: `1 passed; 166 filtered out`.
 - Follow-up provider-session isolation completed on 2026-05-22:
   - `core/providers/topic_policy.py` centralizes provider policy for unbound thread topic materialization.
   - `bot/events.py` streaming materialization and `LifecycleManager._ensure_thread_topics()` now honor the same provider hook.
-  - codemaker and Claude app sessions with `topic_id=None` skip automatic TG topic creation; codex and providers without this hook keep default materialization.
+  - External overlay provider and Claude app sessions with `topic_id=None` skip automatic TG topic creation; codex and providers without this hook keep default materialization.
 - Follow-up verification passed on 2026-05-22:
-  - `PYTHONPATH=/Users/wxy/Projects/onlineworker-combined/OnlineWorker:/Users/wxy/Projects/onlineworker-combined pytest OnlineWorker/tests/test_startup_runtime.py::test_ensure_thread_topics_respects_unbound_topic_policy OnlineWorker/tests/test_startup_runtime.py::test_ensure_thread_topics_replays_history_via_provider_defaults_for_codex OnlineWorker/tests/test_startup_runtime.py::test_ensure_thread_topics_revives_stale_archived_active_thread -q` -> `4 passed in 0.90s`.
-  - `PYTHONPATH=/Users/wxy/Projects/onlineworker-combined/OnlineWorker:/Users/wxy/Projects/onlineworker-combined pytest OnlineWorker/tests/test_startup_runtime.py OnlineWorker/tests/test_events_streaming.py OnlineWorker/tests/test_workspace_thread_open.py OnlineWorker/tests/test_provider_facts.py -q` -> `114 passed in 6.04s`.
-  - `PYTHONPATH=/Users/wxy/Projects/onlineworker-combined/OnlineWorker:/Users/wxy/Projects/onlineworker-combined pytest tests/test_codemaker_attachments.py tests/test_codemaker_plugin_manifest.py tests/test_codemaker_storage_runtime.py -q` -> `10 passed in 0.05s`.
+  - `pytest tests/test_startup_runtime.py::test_ensure_thread_topics_respects_unbound_topic_policy tests/test_startup_runtime.py::test_ensure_thread_topics_replays_history_via_provider_defaults_for_codex tests/test_startup_runtime.py::test_ensure_thread_topics_revives_stale_archived_active_thread -q` -> passed in source workspace.
+  - `pytest tests/test_startup_runtime.py tests/test_events_streaming.py tests/test_workspace_thread_open.py tests/test_provider_facts.py -q` -> passed in source workspace.
 
 Remaining Phase 5 verification:
 - None for the read-normalization and topic-materialization policy boundaries. Full live upstream quota/auth behavior still depends on the actual provider account state.

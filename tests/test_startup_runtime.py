@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from config import Config, ToolConfig
 from core.lifecycle import LifecycleManager
+from core.providers.contracts import ProviderDescriptor, ProviderFactsHooks, ProviderSessionEventHooks
 from plugins.providers.builtin.codex.python.process import AppServerProcess
 from plugins.providers.builtin.codex.python import runtime as codex_runtime
 from plugins.providers.builtin.claude.python import runtime as claude_runtime
@@ -2082,26 +2083,31 @@ async def test_ensure_thread_topics_replays_history_via_provider_defaults_for_co
     assert ws.threads["tid-new"].history_sync_cursor == "cursor-1"
 
 
-@pytest.mark.parametrize(
-    "provider_name,descriptor_factory",
-    [
-        ("codemaker", "codemaker.python.provider:create_provider_descriptor"),
-        (
-            "claude",
-            "plugins.providers.builtin.claude.python.provider:create_provider_descriptor",
+def _external_provider_descriptor() -> ProviderDescriptor:
+    return ProviderDescriptor(
+        name="external",
+        facts=ProviderFactsHooks(
+            scan_workspaces=lambda **kwargs: [],
+            list_threads=lambda workspace_path, limit=20: [],
+            read_thread_history=lambda thread_id, **kwargs: [],
+            query_active_thread_ids=lambda workspace_path: set(),
         ),
-    ],
-)
+        session_event_hooks=ProviderSessionEventHooks(
+            should_materialize_unbound_thread_topic=lambda state, ws_info, thread_info: False
+        ),
+    )
+
+
+@pytest.mark.parametrize("provider_name", ["external", "claude"])
 @pytest.mark.asyncio
 async def test_ensure_thread_topics_respects_unbound_topic_policy(
     monkeypatch,
     provider_name,
-    descriptor_factory,
 ):
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="root",
-        path="/Users/example/Projects/onlineworker-combined",
+        path="/Users/example/Projects/sample-project",
         tool=provider_name,
         daemon_workspace_id=f"{provider_name}:root",
     )
@@ -2133,9 +2139,14 @@ async def test_ensure_thread_topics_respects_unbound_topic_policy(
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    module_name, _, factory_name = descriptor_factory.partition(":")
-    module = __import__(module_name, fromlist=[factory_name])
-    create_provider_descriptor = getattr(module, factory_name)
+    def create_provider_descriptor():
+        if provider_name == "claude":
+            from plugins.providers.builtin.claude.python.provider import (
+                create_provider_descriptor as create_claude_provider_descriptor,
+            )
+
+            return create_claude_provider_descriptor()
+        return _external_provider_descriptor()
 
     bot = MagicMock()
     bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=6204))

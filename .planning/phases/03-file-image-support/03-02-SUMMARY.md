@@ -36,7 +36,7 @@ Plan 03-02 added desktop attachment send support through the existing Session Br
 
 ## Packaged App Verification From 2026-05-21
 
-Real build and install flow completed from `/Users/wxy/Projects/onlineworker-combined`:
+Real build and install flow completed from the source workspace:
 
 ```text
 bash build.sh
@@ -45,7 +45,7 @@ bash build.sh
 Generated DMG:
 
 ```text
-/Users/wxy/Projects/onlineworker-combined/OnlineWorker/mac-app/src-tauri/target/release/bundle/dmg/OnlineWorker_1.1.0_aarch64.dmg
+mac-app/src-tauri/target/release/bundle/dmg/OnlineWorker_1.1.0_aarch64.dmg
 mtime: 2026-05-21 14:38:28 +0800
 sha256: 94fbb7abce3f694178f1d91c1ebad9f574df91d172372ef9e405afb7fd24a403
 ```
@@ -61,12 +61,12 @@ version: 1.1.0
 Runtime verification:
 
 - OnlineWorker app and bot processes restarted from `/Applications/OnlineWorker.app/Contents/MacOS/...`.
-- `provider-plugins/codemaker` exists inside the installed app resources.
+- Provider plugin resources exist inside the installed app resources.
 - Startup log shows:
   - `2026-05-21 14:40:03` OnlineWorker startup.
   - Claude hook bridge started.
   - Claude workspace cwd registrations completed.
-  - codemaker health check passed.
+  - External overlay provider health check passed.
   - Provider owner bridge and Codex owner bridge sockets were recreated from the installed app runtime.
 
 ## Verification

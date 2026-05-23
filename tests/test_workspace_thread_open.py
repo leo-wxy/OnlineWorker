@@ -17,36 +17,36 @@ GROUP_CHAT_ID = -100123456789
 def test_make_thread_topic_name_normalizes_root_workspace_name():
     assert (
         _make_thread_topic_name(
-            "codemaker",
+            "external",
             "/",
             "图里什么内容？",
             "ses_29dc367eeffeoDSvql4qBCz2A2",
         )
-        == "[codemaker/root] 图里什么内容？"
+        == "[external/root] 图里什么内容？"
     )
 
 
 def test_make_thread_topic_name_uses_path_basename_for_workspace_label():
     assert (
         _make_thread_topic_name(
-            "codemaker",
+            "external",
             "/Users/wxy/Projects/claude-code-plugin",
             None,
             "ses_29dc367eeffeoDSvql4qBCz2A2",
         )
-        == "[codemaker/claude-code-plugin] New session"
+        == "[external/claude-code-plugin] New session"
     )
 
 
 def test_make_thread_topic_name_collapses_preview_whitespace():
     assert (
         _make_thread_topic_name(
-            "codemaker",
+            "external",
             "onlineWorker",
             "第一行\n第二行\t第三行",
             "ses_12345678",
         )
-        == "[codemaker/onlineWorker] 第一行 第二行 第三行"
+        == "[external/onlineWorker] 第一行 第二行 第三行"
     )
 
 
@@ -956,16 +956,16 @@ async def test_thread_open_backfills_codex_jsonl_only_thread(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_thread_open_refreshes_codemaker_preview_from_provider_title(monkeypatch):
+async def test_thread_open_refreshes_external_preview_from_provider_title(monkeypatch):
     target_tid = "ses_1eb30fc75ffeNzwtKsGkX8dW1u"
 
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="/",
         path="/",
-        tool="codemaker",
+        tool="external",
         topic_id=None,
-        daemon_workspace_id="codemaker:/",
+        daemon_workspace_id="external:/",
     )
     ws.threads[target_tid] = ThreadInfo(
         thread_id=target_tid,
@@ -975,7 +975,7 @@ async def test_thread_open_refreshes_codemaker_preview_from_provider_title(monke
         is_active=True,
         source="app",
     )
-    storage.workspaces["codemaker:/"] = ws
+    storage.workspaces["external:/"] = ws
     state = AppState(storage=storage)
 
     handler = make_thread_open_callback_handler(state, GROUP_CHAT_ID)
@@ -984,7 +984,7 @@ async def test_thread_open_refreshes_codemaker_preview_from_provider_title(monke
     bot.create_forum_topic = AsyncMock(return_value=MagicMock(message_thread_id=4567))
 
     query = MagicMock()
-    query.data = make_thread_open_callback_data("codemaker:/", target_tid)
+    query.data = make_thread_open_callback_data("external:/", target_tid)
     query.answer = AsyncMock()
     query.get_bot.return_value = bot
 
@@ -1019,7 +1019,7 @@ async def test_thread_open_refreshes_codemaker_preview_from_provider_title(monke
 
     bot.create_forum_topic.assert_awaited_once()
     call_kwargs = bot.create_forum_topic.await_args.kwargs
-    assert call_kwargs["name"] == "[codemaker/root] 分析工程结构"
+    assert call_kwargs["name"] == "[external/root] 分析工程结构"
     assert ws.threads[target_tid].preview == "分析工程结构"
 
 

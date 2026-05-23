@@ -81,17 +81,17 @@ Recent decisions affecting current work:
   - Routed desktop Claude sends through the provider owner bridge.
 - Phase 5 added: Provider Session Error Visibility
 - Phase 5 scope captured on 2026-05-22:
-  - codemaker `session.error` should surface in Session Browser.
+  - External overlay provider async errors should surface in Session Browser.
   - Generic provider history/read normalization should preserve user-visible error records.
-  - Shared Session Browser behavior should not require codemaker-specific React branches.
+  - Shared Session Browser behavior should not require provider-specific React branches.
 - Phase 5 implementation completed on 2026-05-22:
-  - codemaker assistant `data.error` records are converted into visible assistant error turns.
+  - External overlay provider assistant `data.error` records are converted into visible assistant error turns.
   - Provider owner bridge and fallback provider session bridge preserve visible provider error metadata.
   - Session Browser can stop waiting once the async error appears in read results.
 - Phase 5 provider-session isolation follow-up completed on 2026-05-22:
   - Shared unbound thread topic materialization policy was moved into `core/providers/topic_policy.py`.
   - Both streaming `turn/started` and `LifecycleManager._ensure_thread_topics()` use the same provider policy.
-  - codemaker and Claude app sessions with no TG topic stay isolated from automatic topic creation; codex keeps the default behavior.
+  - External overlay provider and Claude app sessions with no TG topic stay isolated from automatic topic creation; codex keeps the default behavior.
 
 ## Deferred Items
 

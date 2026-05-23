@@ -702,22 +702,22 @@ async def test_turn_started_does_not_materialize_missing_topic_for_claude_app_se
 
 
 @pytest.mark.asyncio
-async def test_turn_started_does_not_materialize_missing_topic_for_codemaker_app_session():
+async def test_turn_started_does_not_materialize_missing_topic_for_external_app_session():
     ws = WorkspaceInfo(
         name="/",
         path="/",
-        tool="codemaker",
+        tool="external",
         topic_id=None,
-        daemon_workspace_id="codemaker:/",
+        daemon_workspace_id="external:/",
     )
-    ws.threads["ses-codemaker-123"] = ThreadInfo(
-        thread_id="ses-codemaker-123",
+    ws.threads["ses-external-123"] = ThreadInfo(
+        thread_id="ses-external-123",
         topic_id=None,
         preview="图里什么内容？",
         archived=False,
         is_active=True,
     )
-    storage = AppStorage(workspaces={"codemaker:/": ws})
+    storage = AppStorage(workspaces={"external:/": ws})
     state = AppState(storage=storage)
 
     bot = SimpleNamespace()
@@ -728,10 +728,15 @@ async def test_turn_started_does_not_materialize_missing_topic_for_codemaker_app
 
     handler = make_event_handler(state, bot, GROUP_CHAT_ID)
     replay_mock = AsyncMock(return_value="cursor-1")
-    from codemaker.python.provider import create_provider_descriptor
 
     def provider_for_test(name, *args, **kwargs):
-        return create_provider_descriptor() if name == "codemaker" else None
+        if name != "external":
+            return None
+        return SimpleNamespace(
+            session_event_hooks=SimpleNamespace(
+                should_materialize_unbound_thread_topic=lambda state, ws_info, thread_info: False
+            )
+        )
 
     with patch("core.providers.topic_policy.get_provider", side_effect=provider_for_test), patch(
         "bot.events._replay_thread_history", new=replay_mock
@@ -739,12 +744,12 @@ async def test_turn_started_does_not_materialize_missing_topic_for_codemaker_app
         await handler(
             "app-server-event",
             {
-                "workspace_id": "codemaker:/",
+                "workspace_id": "external:/",
                 "message": {
                     "method": "turn/started",
                     "params": {
-                        "threadId": "ses-codemaker-123",
-                        "turn": {"id": "turn-codemaker-1"},
+                        "threadId": "ses-external-123",
+                        "turn": {"id": "turn-external-1"},
                     },
                 },
             },
@@ -753,8 +758,8 @@ async def test_turn_started_does_not_materialize_missing_topic_for_codemaker_app
     bot.create_forum_topic.assert_not_awaited()
     replay_mock.assert_not_awaited()
     bot.send_message.assert_not_awaited()
-    assert ws.threads["ses-codemaker-123"].topic_id is None
-    assert "ses-codemaker-123" not in state.streaming_turns
+    assert ws.threads["ses-external-123"].topic_id is None
+    assert "ses-external-123" not in state.streaming_turns
     save_storage_mock.assert_not_called()
 
 

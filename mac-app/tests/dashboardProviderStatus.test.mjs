@@ -15,8 +15,8 @@ test("providerShowsPort only returns true for positive ports", () => {
 
 test("providerStatusValue falls back to detail when dynamic port is zero", () => {
   assert.equal(
-    providerStatusValue({ port: 0 }, "• codemaker serve：✅ 已连接"),
-    "• codemaker serve：✅ 已连接",
+    providerStatusValue({ port: 0 }, "• external serve：✅ 已连接"),
+    "• external serve：✅ 已连接",
   );
   assert.equal(providerStatusValue({ port: 4722 }, "healthy"), 4722);
 });
