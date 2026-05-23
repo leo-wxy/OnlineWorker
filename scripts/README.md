@@ -8,6 +8,11 @@
 - `build.sh` 额外支持 `ONLINEWORKER_PLUGIN_SOURCE_DIRS`，可在打包前把额外 provider 包 staged 到 bundle resource 目录。
 - 如果你维护额外 provider 包，可在本地包装脚本里设置 `ONLINEWORKER_PLUGIN_SOURCE_DIRS=...` 后复用同一套 `build.sh`。
 - `scripts/` 目录只保留当前仓库可复用的基础构建与诊断脚本，不维护仓库外部的包装逻辑。
+- `install-current-dmg.sh [path/to/OnlineWorker.dmg]`：不重新打包，直接安装最新或指定 DMG 到 `/Applications/OnlineWorker.app` 并重启。适合“DMG 已经打好，只要覆盖验证”的快路径；不替代发布前完整安装包验证链。
+
+## Verification shortcuts
+
+- `verify-fast.sh`：并发运行常用回归检查，包括通知/配置相关 Python tests、App shell/tab 前端 tests、Rust `config_provider` tests 和前端 production build。它不打包、不覆盖安装，用于开发迭代阶段快速判断改动是否可继续。
 
 ## Runtime helpers
 

@@ -139,7 +139,7 @@ def test_notification_runtime_skips_channels_with_incomplete_config(monkeypatch)
 @pytest.mark.asyncio
 async def test_notification_router_dedupes_same_task_agent_status():
     channel = RecordingChannel()
-    router = NotificationRouter(channels=[channel], ttl_seconds=24 * 60 * 60, clock=lambda: 100.0)
+    router = NotificationRouter(channels=[channel], clock=lambda: 100.0)
 
     first = await router.notify(_event())
     second = await router.notify(_event())
@@ -149,6 +149,21 @@ async def test_notification_router_dedupes_same_task_agent_status():
     assert second.skipped is True
     assert second.reason == "deduped"
     assert len(channel.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_notification_router_default_dedupe_window_expires_after_five_minutes():
+    now = 100.0
+    channel = RecordingChannel()
+    router = NotificationRouter(channels=[channel], clock=lambda: now)
+
+    first = await router.notify(_event())
+    now += 301.0
+    second = await router.notify(_event())
+
+    assert first.sent is True
+    assert second.sent is True
+    assert len(channel.events) == 2
 
 
 @pytest.mark.asyncio

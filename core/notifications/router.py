@@ -37,7 +37,7 @@ class NotificationRouter:
         self,
         channels: Iterable[NotificationChannel] | None = None,
         *,
-        ttl_seconds: float = 24 * 60 * 60,
+        ttl_seconds: float = 5 * 60,
         clock=None,
     ) -> None:
         self.ttl_seconds = float(ttl_seconds)
