@@ -4,11 +4,18 @@
 
 OnlineWorker is a macOS AI coding workspace built around local CLI agents. The installed Mac app is the primary control surface for setup, sessions, commands, logs, and service lifecycle, while Telegram acts as the remote entry point for starting work, handling approvals, checking status, and receiving final replies.
 
-This repository is a brownfield product codebase, not a greenfield prototype. The current planning baseline assumes the existing app and provider runtime already work, and upcoming work should refine product quality without breaking the installed-app workflow.
+This repository is a brownfield product codebase. The archived v1.2.1 milestone improved the visible workbench, provider usage exploration, attachment handling, Claude safe resume behavior, and provider-session error visibility without changing the installed-app-first product model.
 
 ## Core Value
 
 Developers can reliably control local AI coding CLI workflows from an installed Mac app while still receiving remote final results through Telegram.
+
+## Current State
+
+- Latest archived milestone: `v1.2.1`
+- Release tag: `1.2.1`
+- Active milestone: not started
+- Active roadmap phases: none
 
 ## Requirements
 
@@ -19,63 +26,48 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 - ✓ Builtin `codex` and `claude` providers are supported behind a shared provider registry/runtime boundary — existing
 - ✓ App-side session browsing and message sending are available from the desktop UI — existing
 - ✓ Tauri + PyInstaller packaging produces installable macOS artifacts — existing
-- ✓ Primary desktop workbench screens now share a stable shell baseline with collapsible navigation — Phase 1
-- ✓ A first-class `Usage` page now exposes daily `Codex / Claude` consumption through provider-specific adapters — Phase 2
+- ✓ Primary desktop workbench screens share a stable shell baseline with collapsible navigation — v1.2.1 Phase 1
+- ✓ A first-class `Usage` page exposes daily `Codex / Claude` consumption through provider-specific adapters — v1.2.1 Phase 2
+- ✓ File and image attachments work across Telegram and desktop workflows while staying inside provider/plugin routing boundaries — v1.2.1 Phase 3
+- ✓ Claude existing-session sends are explicit and safe, without silent normal-send fork/remap or externally busy session stealing — v1.2.1 Phase 4
+- ✓ Provider asynchronous failures can surface as visible Session Browser error turns through provider-neutral read normalization — v1.2.1 Phase 5
 
 ### Active
 
-- [ ] Add first-class file and image attachment support across Telegram and desktop workflows
-- [ ] Keep attachment routing inside the existing provider/plugin boundaries
-- [ ] Preserve packaged-app build and launch confidence while attachment support lands
+No active milestone requirements are currently defined.
 
 ### Out of Scope
 
 - Browser-hosted or SaaS control plane — product is explicitly installed-app-first
-- New builtin providers beyond `codex` and `claude` — not the focus of the current milestone
+- New builtin providers beyond `codex` and `claude` — external providers should use the public plugin/overlay boundary
 - Windows or Linux desktop ports — current runtime and packaging target is macOS
-- Replacing Telegram with a different remote interaction channel — existing workflow already depends on it
+- Replacing Telegram with a different remote interaction channel — existing workflow already depends on Telegram delivery/approvals
 
 ## Context
 
 - The codebase is split across Python runtime orchestration, Rust/Tauri host commands, and a React frontend.
 - Installed-app behavior matters more than source-only behavior; release confidence is tied to packaged-app validation.
-- The repo already includes provider abstraction boundaries, session/event tests, packaging scripts, and tag-driven DMG release automation.
-- Current user intent after public-repo preparation is to extend the shipped workflow with first-class file and image support rather than redesigning the core product model.
-- The current completed work now includes a dedicated `Usage` page wired through provider/plugin boundaries, and the next active phase is attachment support across Telegram and desktop surfaces.
+- The repo includes provider abstraction boundaries, session/event tests, packaging scripts, plugin manifests, and tag-driven DMG release automation.
+- v1.2.1 milestone artifacts are archived under `.planning/milestones/`.
 
 ## Constraints
 
-- **Tech stack**: Preserve the current Python + Rust/Tauri + React split — it already matches the shipped product architecture.
-- **Platform**: macOS installed-app behavior is the source of truth — UI work cannot be validated only in source mode.
-- **Workflow compatibility**: Existing `App / Sessions + Telegram final reply` behavior must remain intact — this is the product's operating model.
-- **Provider boundary**: UI improvements should not reintroduce provider-specific coupling into shared app surfaces.
-- **Release path**: Tag-driven DMG packaging and startup/build sanity must stay working while UI changes are made.
+- **Tech stack**: Preserve the current Python + Rust/Tauri + React split.
+- **Platform**: macOS installed-app behavior is the source of truth.
+- **Workflow compatibility**: Existing `App / Sessions + Telegram final reply` behavior must remain intact.
+- **Provider boundary**: Shared app surfaces should not reintroduce provider-specific coupling.
+- **Release path**: Tag-driven DMG packaging and startup/build sanity must stay working.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Initialize planning as a brownfield project | The repository already ships working product code, packaging, and provider runtimes | ✓ Good |
-| Use README + codebase map as project definition baseline | Current repo docs already state the product shape clearly enough for initialization | ✓ Good |
-| Focus current active scope on UI refinement | The next requested work is “调整 UI 效果”, not core runtime replacement | — Pending |
-| Keep installed-app-first framing | Public docs and architecture both center the packaged Mac app rather than browser hosting | ✓ Good |
+| Initialize planning as a brownfield project | The repository already ships working product code, packaging, and provider runtimes | Validated |
+| Use README + codebase map as project definition baseline | Current repo docs already state the product shape clearly enough for initialization | Validated |
+| Keep installed-app-first framing | Public docs and architecture both center the packaged Mac app rather than browser hosting | Validated |
+| Keep provider-specific behavior behind plugin/runtime boundaries | External provider support should not leak private provider concepts into shared app surfaces | Validated |
 
 ## Evolution
 
-This document evolves at phase transitions and milestone boundaries.
-
-**After each phase transition** (via `$gsd-transition`):
-1. Requirements invalidated? → Move to Out of Scope with reason
-2. Requirements validated? → Move to Validated with phase reference
-3. New requirements emerged? → Add to Active
-4. Decisions to log? → Add to Key Decisions
-5. "What This Is" still accurate? → Update if drifted
-
-**After each milestone** (via `$gsd-complete-milestone`):
-1. Full review of all sections
-2. Core Value check — still the right priority?
-3. Audit Out of Scope — reasons still valid?
-4. Update Context with current state
-
----
-*Last updated: 2026-05-10 after initialization*
+- 2026-05-10: Planning initialized for a brownfield OnlineWorker milestone.
+- 2026-05-23: v1.2.1 milestone archived after completing phases 1-5 and publishing tag `1.2.1`.
