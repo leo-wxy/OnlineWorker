@@ -92,9 +92,14 @@ test("notification tab exposes split app list and plugin-defined configuration",
   assert.match(components, /export \{ NotificationSettingsPanel \}/);
   assert.match(types, /export interface NotificationChannelMetadata/);
   assert.match(types, /icon\?: ProviderIconMetadata \| null;/);
+  assert.match(types, /export interface NotificationSetupGuide/);
+  assert.match(types, /setupGuide\?: NotificationSetupGuide \| null;/);
   assert.match(panel, /get_notification_channels/);
   assert.match(panel, /set_notification_channel_enabled/);
   assert.match(panel, /set_notification_channel_config/);
+  assert.match(panel, /srcDoc=\{guideHtml\}/);
+  assert.match(panel, /sandbox=""/);
+  assert.match(panel, /notifications\.guideTab/);
   assert.equal(panel.includes("write_env_field"), false);
   assert.equal(panel.includes("read_env_field"), false);
   assert.match(panel, /useI18n/);
@@ -108,6 +113,7 @@ test("notification tab exposes split app list and plugin-defined configuration",
   assert.match(en, /Notification channels/);
   assert.match(panel, /ChannelIcon/);
   assert.match(panel, /settingsFields/);
+  assert.match(panel, /setupGuide/);
   assert.match(panel, /service_restart/);
 });
 

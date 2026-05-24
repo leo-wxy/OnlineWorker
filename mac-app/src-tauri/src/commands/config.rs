@@ -3,12 +3,12 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use super::config_provider::{
-    notification_channel_metadata_from_raw,
     normalize_config_for_display, normalize_provider_document_with_env,
-    serialize_config_document_for_persistence, serialize_normalized_config_with_env,
-    set_notification_channel_config_in_document, set_notification_channel_enabled_in_document,
-    set_provider_flags_in_document, visible_provider_ids_from_raw, NotificationChannelMetadata,
-    ProviderMetadata, ProviderRuntimePolicy,
+    notification_channel_metadata_from_raw, serialize_config_document_for_persistence,
+    serialize_normalized_config_with_env, set_notification_channel_config_in_document,
+    set_notification_channel_enabled_in_document, set_provider_flags_in_document,
+    visible_provider_ids_from_raw, NotificationChannelMetadata, ProviderMetadata,
+    ProviderRuntimePolicy,
 };
 
 pub(crate) const DEFAULT_APP_NAME: &str = "OnlineWorker";

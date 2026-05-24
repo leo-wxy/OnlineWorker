@@ -24,5 +24,11 @@ settings:
       default: ""
       description: Telegram user id that receives notification messages.
 
+setup_guide:
+  type: html
+  assets:
+    zh: guides/setup.zh-CN.html
+    en: guides/setup.en-US.html
+
 entrypoints:
   python_descriptor: plugins.notifications.builtin.telegram.python.channel:create_notification_descriptor

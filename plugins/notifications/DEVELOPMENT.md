@@ -21,6 +21,9 @@ provider 插件开发规则见 [../providers/DEVELOPMENT.md](../providers/DEVELO
 my-notifier/
 ├── __init__.py
 ├── plugin.yaml
+├── guides/
+│   ├── setup.zh-CN.html
+│   └── setup.en-US.html
 └── python/
     ├── __init__.py
     └── channel.py
@@ -57,6 +60,12 @@ settings:
       default: ""
       description: WeChat robot webhook used by this notification channel.
 
+setup_guide:
+  type: html
+  assets:
+    zh: guides/setup.zh-CN.html
+    en: guides/setup.en-US.html
+
 entrypoints:
   python_descriptor: wechat.python.channel:create_notification_descriptor
 ```
@@ -75,6 +84,7 @@ entrypoints:
 | `default_enabled` | 否 | 首次归一化配置时是否默认开启。 |
 | `icon.path` | 否 | 相对 `plugin.yaml` 的图标路径。当前 UI 会把 SVG 转成 data URL 展示。 |
 | `settings.fields` | 否 | App 通知页渲染的插件配置字段。 |
+| `setup_guide` | 否 | App 通知页展示的插件内置配置引导。当前支持静态 HTML。 |
 | `entrypoints.python_descriptor` | 是 | Python descriptor 工厂，必须是 `module:function` 格式。 |
 
 不要在 `plugin.yaml` 中写入真实 token、webhook endpoint、本地用户路径或账号数据。需要用户填写的字段通过 `settings.fields` 声明，值由 App 保存到 `config.yaml` 的 `notifications.channels.<id>.config`。
@@ -135,6 +145,28 @@ notifications:
 - 插件字段值保存在 `notifications.channels.<id>.config`。
 - App 不从 `.env` 读取 notification plugin 配置字段。
 - 插件必须把所有配置都视为不可信输入，在 `channel_factory` 或发送前自行校验。
+
+## 配置引导
+
+插件可以声明一个内置配置引导，帮助用户理解当前通知 App 的配置流程。引导只用于展示，不参与保存、验证或发送逻辑。
+
+示例：
+
+```yaml
+setup_guide:
+  type: html
+  assets:
+    zh: guides/setup.zh-CN.html
+    en: guides/setup.en-US.html
+```
+
+约定：
+
+- `type` 当前只支持 `html`。
+- `assets` 的 key 使用语言标识。内置 UI 当前会优先读取当前语言对应的内容，再回退到另一个语言或第一个可用资源。
+- asset 路径必须是相对 `plugin.yaml` 的路径，不能使用绝对路径、`..`、`file://` 或远程 URL。
+- HTML 应是静态说明文档。不要写入 `<script>`、`iframe`、表单、内联事件或远程 JS/CSS。
+- App 会用 sandbox iframe 展示 HTML，插件 HTML 不能调用 Tauri API，也不能读取或修改主应用状态。
 
 ## Python Descriptor 规范
 

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      color: #111827;
+      background: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+      line-height: 1.6;
+    }
+    body {
+      margin: 0;
+      padding: 20px;
+      font-size: 14px;
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 20px;
+      line-height: 1.3;
+    }
+    h2 {
+      margin: 22px 0 8px;
+      font-size: 15px;
+    }
+    p {
+      margin: 8px 0;
+      color: #475569;
+    }
+    ol,
+    ul {
+      margin: 8px 0 0;
+      padding-left: 22px;
+      color: #334155;
+    }
+    li {
+      margin: 6px 0;
+    }
+    code {
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      background: #f8fafc;
+      padding: 1px 5px;
+      color: #0f172a;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <h1>配置 Telegram 通知</h1>
+  <p>Telegram 通知需要一个 Bot Token 和一个接收用户 ID。保存后可以启用渠道，任务完成或需要处理时会发送简短通知。</p>
+
+  <h2>获取 Bot Token</h2>
+  <ol>
+    <li>在 Telegram 搜索 <code>BotFather</code>。</li>
+    <li>发送 <code>/newbot</code> 创建机器人。</li>
+    <li>复制 BotFather 返回的 token，填入 <strong>Bot Token</strong>。</li>
+  </ol>
+
+  <h2>获取接收用户 ID</h2>
+  <ol>
+    <li>先给你创建的机器人发送任意一条消息。</li>
+    <li>使用你自己的 Telegram 用户 ID 作为 <strong>接收用户 ID</strong>。</li>
+    <li>保存配置并启用 Telegram 渠道。</li>
+  </ol>
+
+  <h2>注意</h2>
+  <ul>
+    <li>机器人不能主动给从未私聊过它的用户发消息。</li>
+    <li>这里配置的是通知专用渠道，不影响主 Telegram Bot 的群组交互配置。</li>
+  </ul>
+</body>
+</html>

@@ -358,6 +358,10 @@ export interface AppTexts {
     needsConfig: string;
     saveConfiguration: string;
     enableChannel: string;
+    configTab: string;
+    guideTab: string;
+    noGuideTitle: string;
+    noGuideDescription: string;
     loadError: (error: string) => string;
     channelDescriptionFallback: string;
     pluginIdLabel: string;

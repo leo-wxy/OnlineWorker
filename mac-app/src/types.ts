@@ -83,6 +83,12 @@ export interface NotificationChannelMetadata {
   config: Record<string, unknown>;
   settingsFields: NotificationSettingsField[];
   icon?: ProviderIconMetadata | null;
+  setupGuide?: NotificationSetupGuide | null;
+}
+
+export interface NotificationSetupGuide {
+  type: "html" | string;
+  assets: Record<string, string>;
 }
 
 export type NotificationSettingsFieldType = "string" | "number" | "boolean" | "select" | "secret";

@@ -19,6 +19,10 @@ const BUILTIN_CLAUDE_PLUGIN_ICON: &str =
     include_str!("../../../../plugins/providers/builtin/claude/icon.svg");
 const BUILTIN_TELEGRAM_NOTIFICATION_PLUGIN_ICON: &str =
     include_str!("../../../../plugins/notifications/builtin/telegram/icon.svg");
+const BUILTIN_TELEGRAM_NOTIFICATION_GUIDE_ZH: &str =
+    include_str!("../../../../plugins/notifications/builtin/telegram/guides/setup.zh-CN.html");
+const BUILTIN_TELEGRAM_NOTIFICATION_GUIDE_EN: &str =
+    include_str!("../../../../plugins/notifications/builtin/telegram/guides/setup.en-US.html");
 const PROVIDER_OVERLAY_ENV: &str = "ONLINEWORKER_PROVIDER_OVERLAY";
 const NOTIFICATION_OVERLAY_ENV: &str = "ONLINEWORKER_NOTIFICATION_OVERLAY";
 
@@ -89,6 +93,23 @@ struct NotificationSettingsManifest {
     fields: Option<Vec<NotificationSettingsField>>,
 }
 
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NotificationSetupGuide {
+    #[serde(rename = "type", default)]
+    pub(crate) kind: String,
+    #[serde(default)]
+    pub(crate) assets: BTreeMap<String, String>,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+struct NotificationSetupGuideManifest {
+    #[serde(rename = "type", default)]
+    kind: String,
+    #[serde(default)]
+    assets: BTreeMap<String, String>,
+}
+
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NotificationChannelMetadata {
@@ -100,6 +121,7 @@ pub(crate) struct NotificationChannelMetadata {
     pub(crate) config: BTreeMap<String, serde_yaml::Value>,
     pub(crate) settings_fields: Vec<NotificationSettingsField>,
     pub(crate) icon: Option<ProviderIconEntry>,
+    pub(crate) setup_guide: Option<NotificationSetupGuide>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
@@ -358,6 +380,7 @@ struct NotificationPluginDefault {
     order: u32,
     settings_fields: Vec<NotificationSettingsField>,
     icon: Option<ProviderIconEntry>,
+    setup_guide: Option<NotificationSetupGuide>,
 }
 
 #[derive(Deserialize, Default, Clone, Debug)]
@@ -372,6 +395,7 @@ struct NotificationPluginManifest {
     #[serde(skip)]
     manifest_path: Option<PathBuf>,
     settings: Option<NotificationSettingsManifest>,
+    setup_guide: Option<NotificationSetupGuideManifest>,
 }
 
 fn workspace_root() -> PathBuf {
@@ -439,7 +463,7 @@ fn read_manifest_files_from_overlay_env(env_key: &str) -> Vec<ProviderPluginMani
 }
 
 fn read_manifest_files_from_process_env(env_key: &str) -> Vec<ProviderPluginManifestSource> {
-    let Some(raw) = env::var(env_key).ok().and_then(trimmed_env_value) else {
+    let Some(raw) = read_process_env_value(env_key) else {
         return Vec::new();
     };
     env::split_paths(&raw)
@@ -464,6 +488,30 @@ fn trimmed_env_value(value: String) -> Option<String> {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_PROCESS_ENV_OVERRIDES: std::cell::RefCell<BTreeMap<String, Option<String>>> =
+        std::cell::RefCell::new(BTreeMap::new());
+}
+
+#[cfg(test)]
+fn set_test_process_env_override(env_key: &str, value: Option<String>) {
+    TEST_PROCESS_ENV_OVERRIDES.with(|overrides| {
+        overrides.borrow_mut().insert(env_key.to_string(), value);
+    });
+}
+
+fn read_process_env_value(env_key: &str) -> Option<String> {
+    #[cfg(test)]
+    if let Some(value) =
+        TEST_PROCESS_ENV_OVERRIDES.with(|overrides| overrides.borrow().get(env_key).cloned())
+    {
+        return value.and_then(trimmed_env_value);
+    }
+
+    env::var(env_key).ok().and_then(trimmed_env_value)
+}
+
 fn overlay_env_spec_from_env_raw(raw: &str) -> Option<String> {
     overlay_env_spec_from_env_raw_for_key(raw, PROVIDER_OVERLAY_ENV)
 }
@@ -478,7 +526,7 @@ fn read_overlay_env_spec_from_app_env(env_key: &str) -> Option<String> {
 }
 
 fn read_overlay_env_spec(env_key: &str) -> Option<String> {
-    let from_process = env::var(env_key).ok().and_then(trimmed_env_value);
+    let from_process = read_process_env_value(env_key);
     if env_key == NOTIFICATION_OVERLAY_ENV {
         return from_process;
     }
@@ -522,7 +570,9 @@ fn notification_plugin_manifest_sources_with_paths() -> Vec<ProviderPluginManife
     let plugin_root = workspace_root().join("plugins").join("notifications");
     let mut sources = Vec::new();
     sources.extend(read_manifest_files_from_group(&plugin_root.join("builtin")));
-    sources.extend(read_manifest_files_from_process_env(NOTIFICATION_OVERLAY_ENV));
+    sources.extend(read_manifest_files_from_process_env(
+        NOTIFICATION_OVERLAY_ENV,
+    ));
     if !sources.is_empty() {
         return sources;
     }
@@ -570,6 +620,11 @@ fn notification_plugin_default_list() -> Vec<NotificationPluginDefault> {
             ),
             icon: resolve_notification_icon(
                 manifest.icon,
+                manifest.manifest_path.as_deref(),
+                &notification_id,
+            ),
+            setup_guide: resolve_notification_setup_guide(
+                manifest.setup_guide,
                 manifest.manifest_path.as_deref(),
                 &notification_id,
             ),
@@ -675,6 +730,81 @@ fn resolve_notification_icon(
 fn builtin_notification_icon_svg(notification_id: &str) -> Option<&'static str> {
     match notification_id {
         "telegram" => Some(BUILTIN_TELEGRAM_NOTIFICATION_PLUGIN_ICON),
+        _ => None,
+    }
+}
+
+fn resolve_notification_setup_guide(
+    guide: Option<NotificationSetupGuideManifest>,
+    manifest_path: Option<&Path>,
+    notification_id: &str,
+) -> Option<NotificationSetupGuide> {
+    let guide = guide?;
+    if guide.kind.trim() != "html" {
+        return None;
+    }
+    let mut assets = BTreeMap::new();
+    for (locale, asset_path) in guide.assets {
+        let locale = locale.trim().to_string();
+        if locale.is_empty() {
+            continue;
+        }
+        if let Some(html) =
+            read_notification_guide_asset(notification_id, manifest_path, asset_path.trim())
+        {
+            assets.insert(locale, html);
+        }
+    }
+    if assets.is_empty() {
+        None
+    } else {
+        Some(NotificationSetupGuide {
+            kind: "html".to_string(),
+            assets,
+        })
+    }
+}
+
+fn read_notification_guide_asset(
+    notification_id: &str,
+    manifest_path: Option<&Path>,
+    asset_path: &str,
+) -> Option<String> {
+    if !is_safe_relative_asset_path(asset_path) {
+        return None;
+    }
+    let file_asset = manifest_path.and_then(Path::parent).and_then(|dir| {
+        let base = dir.canonicalize().ok()?;
+        let target = dir.join(asset_path).canonicalize().ok()?;
+        if !target.starts_with(&base) || !target.is_file() {
+            return None;
+        }
+        fs::read_to_string(target).ok()
+    });
+    file_asset.or_else(|| {
+        builtin_notification_guide_html(notification_id, asset_path).map(str::to_string)
+    })
+}
+
+fn is_safe_relative_asset_path(asset_path: &str) -> bool {
+    let path = Path::new(asset_path);
+    !asset_path.trim().is_empty()
+        && path.is_relative()
+        && path.components().all(|component| {
+            matches!(
+                component,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
+}
+
+fn builtin_notification_guide_html(
+    notification_id: &str,
+    asset_path: &str,
+) -> Option<&'static str> {
+    match (notification_id, asset_path) {
+        ("telegram", "guides/setup.zh-CN.html") => Some(BUILTIN_TELEGRAM_NOTIFICATION_GUIDE_ZH),
+        ("telegram", "guides/setup.en-US.html") => Some(BUILTIN_TELEGRAM_NOTIFICATION_GUIDE_EN),
         _ => None,
     }
 }
@@ -1069,9 +1199,7 @@ fn normalize_notification_document(doc: &mut ProviderConfigDocument) {
             .entry(default.id.clone())
             .or_insert_with(NotificationChannelConfigEntry::default);
         channel.enabled = Some(channel.enabled.unwrap_or(default.default_enabled));
-        channel
-            .label
-            .get_or_insert_with(|| default.label.clone());
+        channel.label.get_or_insert_with(|| default.label.clone());
         channel
             .description
             .get_or_insert_with(|| default.description.clone());
@@ -1080,12 +1208,8 @@ fn normalize_notification_document(doc: &mut ProviderConfigDocument) {
 
     for (channel_id, channel) in channels.iter_mut() {
         channel.enabled = Some(channel.enabled.unwrap_or(false));
-        channel
-            .label
-            .get_or_insert_with(|| channel_id.to_string());
-        channel
-            .description
-            .get_or_insert_with(String::new);
+        channel.label.get_or_insert_with(|| channel_id.to_string());
+        channel.description.get_or_insert_with(String::new);
         channel.config.get_or_insert_with(BTreeMap::new);
     }
 }
@@ -1193,6 +1317,7 @@ pub(crate) fn notification_channel_metadata_from_raw(
                 default.builtin,
                 default.settings_fields.clone(),
                 default.icon.clone(),
+                default.setup_guide.clone(),
             ));
         }
     }
@@ -1214,6 +1339,7 @@ pub(crate) fn notification_channel_metadata_from_raw(
             false,
             Vec::new(),
             None,
+            None,
         ));
     }
 
@@ -1228,6 +1354,7 @@ fn notification_channel_metadata_from_entry(
     builtin: bool,
     settings_fields: Vec<NotificationSettingsField>,
     icon: Option<ProviderIconEntry>,
+    setup_guide: Option<NotificationSetupGuide>,
 ) -> NotificationChannelMetadata {
     NotificationChannelMetadata {
         id: channel_id.to_string(),
@@ -1245,6 +1372,7 @@ fn notification_channel_metadata_from_entry(
         config: channel.config.clone().unwrap_or_default(),
         settings_fields,
         icon,
+        setup_guide,
     }
 }
 
@@ -1401,7 +1529,7 @@ mod tests {
         overlay_env_spec_from_env_raw, provider_metadata_from_raw,
         read_manifest_files_from_overlay_path, serialize_normalized_config_with_env,
         set_notification_channel_config_in_document, set_notification_channel_enabled_in_document,
-        set_provider_flags_in_document, NOTIFICATION_OVERLAY_ENV,
+        set_provider_flags_in_document, set_test_process_env_override, NOTIFICATION_OVERLAY_ENV,
     };
 
     #[test]
@@ -1518,7 +1646,36 @@ notifications:
         assert_eq!(metadata[0].settings_fields[0].key, "bot_token");
         assert_eq!(metadata[0].settings_fields[0].kind, "secret");
         assert_eq!(metadata[0].settings_fields[1].key, "recipient_user_id");
-        assert!(metadata[0].icon.as_ref().expect("telegram icon").url.starts_with("data:image/svg+xml;base64,"));
+        assert_eq!(
+            metadata[0]
+                .setup_guide
+                .as_ref()
+                .expect("telegram guide")
+                .kind,
+            "html"
+        );
+        assert!(metadata[0]
+            .setup_guide
+            .as_ref()
+            .expect("telegram guide")
+            .assets
+            .get("zh")
+            .expect("zh guide")
+            .contains("BotFather"));
+        assert!(metadata[0]
+            .setup_guide
+            .as_ref()
+            .expect("telegram guide")
+            .assets
+            .get("en")
+            .expect("en guide")
+            .contains("BotFather"));
+        assert!(metadata[0]
+            .icon
+            .as_ref()
+            .expect("telegram icon")
+            .url
+            .starts_with("data:image/svg+xml;base64,"));
         assert_eq!(metadata[1].id, "wechat");
         assert_eq!(metadata[1].label, "WeChat");
         assert_eq!(metadata[1].description, "Custom WeChat notifier");
@@ -1548,11 +1705,14 @@ entrypoints:
 "#,
         )
         .expect("write plugin manifest");
-        std::env::set_var(NOTIFICATION_OVERLAY_ENV, &dir);
+        set_test_process_env_override(
+            NOTIFICATION_OVERLAY_ENV,
+            Some(dir.to_string_lossy().to_string()),
+        );
 
         let metadata = notification_channel_metadata_from_raw("", None).expect("metadata");
 
-        std::env::remove_var(NOTIFICATION_OVERLAY_ENV);
+        set_test_process_env_override(NOTIFICATION_OVERLAY_ENV, None);
         let _ = fs::remove_dir_all(&dir);
 
         let wechat = metadata
@@ -1580,14 +1740,17 @@ ONLINEWORKER_PROVIDER_OVERLAY=  /tmp/private-overlay:/tmp/other-overlay
 
     #[test]
     fn notification_overlay_env_spec_reads_process_env() {
-        std::env::set_var(NOTIFICATION_OVERLAY_ENV, "/tmp/notification-overlay");
+        set_test_process_env_override(
+            NOTIFICATION_OVERLAY_ENV,
+            Some("/tmp/notification-overlay".to_string()),
+        );
 
         assert_eq!(
             super::read_overlay_env_spec(NOTIFICATION_OVERLAY_ENV).as_deref(),
             Some("/tmp/notification-overlay")
         );
 
-        std::env::remove_var(NOTIFICATION_OVERLAY_ENV);
+        set_test_process_env_override(NOTIFICATION_OVERLAY_ENV, None);
     }
 
     #[test]

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en-US">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      color: #111827;
+      background: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+      line-height: 1.6;
+    }
+    body {
+      margin: 0;
+      padding: 20px;
+      font-size: 14px;
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 20px;
+      line-height: 1.3;
+    }
+    h2 {
+      margin: 22px 0 8px;
+      font-size: 15px;
+    }
+    p {
+      margin: 8px 0;
+      color: #475569;
+    }
+    ol,
+    ul {
+      margin: 8px 0 0;
+      padding-left: 22px;
+      color: #334155;
+    }
+    li {
+      margin: 6px 0;
+    }
+    code {
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      background: #f8fafc;
+      padding: 1px 5px;
+      color: #0f172a;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Configure Telegram notifications</h1>
+  <p>Telegram notifications need a Bot Token and a recipient user ID. After saving and enabling the channel, OnlineWorker sends concise updates when a task completes or needs attention.</p>
+
+  <h2>Get a Bot Token</h2>
+  <ol>
+    <li>Search for <code>BotFather</code> in Telegram.</li>
+    <li>Send <code>/newbot</code> to create a bot.</li>
+    <li>Copy the token returned by BotFather into <strong>Bot Token</strong>.</li>
+  </ol>
+
+  <h2>Get the recipient user ID</h2>
+  <ol>
+    <li>Send any message to the bot you created.</li>
+    <li>Use your Telegram user ID as <strong>Recipient User ID</strong>.</li>
+    <li>Save the configuration and enable the Telegram channel.</li>
+  </ol>
+
+  <h2>Notes</h2>
+  <ul>
+    <li>A bot cannot start a private chat with a user who has never messaged it.</li>
+    <li>This is the dedicated notification channel and does not change the main Telegram bot group setup.</li>
+  </ul>
+</body>
+</html>

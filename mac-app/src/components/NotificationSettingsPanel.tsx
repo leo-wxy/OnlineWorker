@@ -9,6 +9,7 @@ import { useI18n, type AppTexts } from "../i18n";
 
 type ChannelDrafts = Record<string, Record<string, unknown>>;
 type NotificationTexts = AppTexts["notifications"];
+type DetailTab = "config" | "guide";
 
 function hasSecretFields(channel: NotificationChannelMetadata) {
   return channel.settingsFields.some((field) => field.type === "secret");
@@ -95,6 +96,22 @@ function configDraftFor(channel: NotificationChannelMetadata) {
   return draft;
 }
 
+function guideHtmlFor(channel: NotificationChannelMetadata, locale: string) {
+  const guide = channel.setupGuide;
+  if (!guide || guide.type !== "html") {
+    return "";
+  }
+  const assets = guide.assets ?? {};
+  return (
+    assets[locale] ||
+    assets[locale === "zh" ? "zh-CN" : "en-US"] ||
+    assets[locale === "zh" ? "zh_CN" : "en_US"] ||
+    assets[locale === "zh" ? "en" : "zh"] ||
+    Object.values(assets)[0] ||
+    ""
+  );
+}
+
 function FieldInput({
   channelId,
   field,
@@ -162,7 +179,7 @@ function FieldInput({
 }
 
 export function NotificationSettingsPanel() {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const common = t.common;
   const notifications = t.notifications;
   const [channels, setChannels] = useState<NotificationChannelMetadata[]>([]);
@@ -172,6 +189,7 @@ export function NotificationSettingsPanel() {
   const [savingChannelId, setSavingChannelId] = useState<string | null>(null);
   const [savedChannelId, setSavedChannelId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [detailTab, setDetailTab] = useState<DetailTab>("config");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -202,6 +220,7 @@ export function NotificationSettingsPanel() {
     [channels]
   );
   const selectedChannel = selectedChannelId ? byId.get(selectedChannelId) : channels[0];
+  const guideHtml = selectedChannel ? guideHtmlFor(selectedChannel, locale) : "";
 
   const labelForField = (channel: NotificationChannelMetadata, field: NotificationSettingsField) =>
     notifications.fieldLabels[channel.id]?.[field.key] || field.label;
@@ -400,67 +419,109 @@ export function NotificationSettingsPanel() {
                     </div>
                   </div>
 
-                  <div className="min-h-0 flex-1 overflow-y-auto p-6">
-                    {channel.settingsFields.length === 0 ? (
-                      <div className="ow-page-frame-soft rounded-[24px] p-5 shadow-none">
-                        <h4 className="text-sm font-bold text-gray-950">{notifications.noFieldsTitle}</h4>
-                        <p className="mt-1 text-sm font-medium text-slate-500">{notifications.noFieldsDescription}</p>
+                  <div className="flex min-h-0 flex-1 flex-col">
+                    <div className="border-b border-[var(--ow-line-soft)] px-6 py-3">
+                      <div className="ow-segment inline-flex rounded-2xl p-1">
+                        {([
+                          ["config", notifications.configTab],
+                          ["guide", notifications.guideTab],
+                        ] as const).map(([tab, label]) => (
+                          <button
+                            key={tab}
+                            type="button"
+                            onClick={() => setDetailTab(tab)}
+                            className={`rounded-xl px-4 py-1.5 text-sm font-semibold transition-colors ${
+                              detailTab === tab
+                                ? "ow-segment-button-active"
+                                : "ow-segment-button hover:text-gray-700"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {detailTab === "config" ? (
+                      <div className="min-h-0 flex-1 overflow-y-auto p-6">
+                        {channel.settingsFields.length === 0 ? (
+                          <div className="ow-page-frame-soft rounded-[24px] p-5 shadow-none">
+                            <h4 className="text-sm font-bold text-gray-950">{notifications.noFieldsTitle}</h4>
+                            <p className="mt-1 text-sm font-medium text-slate-500">{notifications.noFieldsDescription}</p>
+                          </div>
+                        ) : (
+                          <div className="ow-page-frame-soft divide-y divide-[var(--ow-line-soft)] overflow-hidden rounded-[24px] shadow-none">
+                            {channel.settingsFields.map((field) => {
+                              const fieldDescription = descriptionForField(channel, field);
+                              return (
+                                <div
+                                  key={field.key}
+                                  className="grid gap-4 px-5 py-5 md:grid-cols-[220px_minmax(0,1fr)]"
+                                >
+                                  <div>
+                                    <label
+                                      htmlFor={`notification-${channel.id}-${field.key}`}
+                                      className="text-sm font-bold text-gray-950"
+                                    >
+                                      {labelForField(channel, field)}
+                                      {field.required && <span className="ml-1 text-rose-600">*</span>}
+                                    </label>
+                                    {fieldDescription && (
+                                      <p className="mt-1 text-xs font-medium leading-5 text-slate-500">{fieldDescription}</p>
+                                    )}
+                                  </div>
+                                  <FieldInput
+                                    channelId={channel.id}
+                                    field={field}
+                                    value={channelDraft[field.key]}
+                                    disabled={busy}
+                                    labels={notifications}
+                                    onChange={(value) => {
+                                      setDrafts((current) => ({
+                                        ...current,
+                                        [channel.id]: {
+                                          ...(current[channel.id] ?? {}),
+                                          [field.key]: value,
+                                        },
+                                      }));
+                                    }}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        <div className="mt-5 flex justify-end">
+                          {channel.settingsFields.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => void saveChannelConfig(channel.id)}
+                              disabled={busy}
+                              className="ow-btn-primary rounded-xl px-5 py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {busy ? common.saving : notifications.saveConfiguration}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ) : (
-                      <div className="ow-page-frame-soft divide-y divide-[var(--ow-line-soft)] overflow-hidden rounded-[24px] shadow-none">
-                        {channel.settingsFields.map((field) => {
-                          const fieldDescription = descriptionForField(channel, field);
-                          return (
-                            <div
-                              key={field.key}
-                              className="grid gap-4 px-5 py-5 md:grid-cols-[220px_minmax(0,1fr)]"
-                            >
-                              <div>
-                                <label
-                                  htmlFor={`notification-${channel.id}-${field.key}`}
-                                  className="text-sm font-bold text-gray-950"
-                                >
-                                  {labelForField(channel, field)}
-                                  {field.required && <span className="ml-1 text-rose-600">*</span>}
-                                </label>
-                                {fieldDescription && (
-                                  <p className="mt-1 text-xs font-medium leading-5 text-slate-500">{fieldDescription}</p>
-                                )}
-                              </div>
-                              <FieldInput
-                                channelId={channel.id}
-                                field={field}
-                                value={channelDraft[field.key]}
-                                disabled={busy}
-                                labels={notifications}
-                                onChange={(value) => {
-                                  setDrafts((current) => ({
-                                    ...current,
-                                    [channel.id]: {
-                                      ...(current[channel.id] ?? {}),
-                                      [field.key]: value,
-                                    },
-                                  }));
-                                }}
-                              />
-                            </div>
-                          );
-                        })}
+                      <div className="min-h-0 flex-1 p-6">
+                        {guideHtml ? (
+                          <iframe
+                            title={`${channel.label} ${notifications.guideTab}`}
+                            srcDoc={guideHtml}
+                            sandbox=""
+                            className="h-full min-h-[420px] w-full rounded-2xl border border-[var(--ow-line-soft)] bg-white"
+                          />
+                        ) : (
+                          <div className="ow-page-frame-soft rounded-[24px] p-5 shadow-none">
+                            <h4 className="text-sm font-bold text-gray-950">{notifications.noGuideTitle}</h4>
+                            <p className="mt-1 text-sm font-medium text-slate-500">{notifications.noGuideDescription}</p>
+                          </div>
+                        )}
                       </div>
                     )}
-
-                    <div className="mt-5 flex justify-end">
-                      {channel.settingsFields.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => void saveChannelConfig(channel.id)}
-                          disabled={busy}
-                          className="ow-btn-primary rounded-xl px-5 py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {busy ? common.saving : notifications.saveConfiguration}
-                        </button>
-                      )}
-                    </div>
                   </div>
                 </>
               );
