@@ -61,6 +61,29 @@ rules needed to work safely in this codebase.
 - For packaged-app changes, document whether installed-app verification was
   completed or remains unverified
 
+## Git Commit
+
+- Commit message format: `<type>(scope): <summary>`.
+- `scope` is optional; use it when it clarifies the touched area, for example
+  `notification`, `verify`, `docs`, `config`, or `ui`.
+- `summary` must be Chinese, start with a verb, be 50 characters or less, and
+  must not end with punctuation.
+- Common `type` values: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`.
+- Keep commits focused. Do not mix unrelated product changes, verification
+  scripts, generated artifacts, and planning/documentation updates unless they
+  are part of the same requested delivery.
+- Before committing, run the smallest relevant verification for the touched
+  files and include the exact commands/results in the handoff.
+- Do not commit secrets, local app data, logs, installed app bundles, DMGs,
+  or files from outside this repository.
+
+Examples:
+
+- `feat(notification): 接入插件化通知渠道`
+- `fix(session): 清理图片发送后的输入状态`
+- `docs(notification): 完善通知插件开发规范`
+- `chore(verify): 增加快速验证安装脚本`
+
 ### Complete Packaged-App Verification Chain
 
 When the user says "开始验证", "打包验证", "重新验证", "打包 + 覆盖", or
