@@ -136,6 +136,7 @@ class StreamingTurn:
     throttle_task: Optional[asyncio.Task] = None  # asyncio.Task（延迟 edit 任务）
     completed: bool = False    # 是否已收到 turn/completed
     placeholder_deleted: bool = False  # 占位消息是否已删除并切换为新消息
+    notification_emitted: bool = False  # 本 turn 是否已发送任务状态通知
     # 按 item_id 收集已完成的 shell 命令摘要（用于 turn 结束时的总结）
     shell_summaries: list = field(default_factory=list)
 

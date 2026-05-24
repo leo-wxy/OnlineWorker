@@ -1173,6 +1173,91 @@ async def test_final_answer_item_completed_marks_reply_as_synced_for_background_
 
 
 @pytest.mark.asyncio
+async def test_final_answer_item_completed_sends_task_notification_and_dedupes_later_turn_completed():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-123"] = ThreadInfo(
+        thread_id="tid-123",
+        topic_id=3794,
+        preview="POPO 通知验收",
+        archived=False,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    codex_state.start_run(
+        state,
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-123",
+        turn_id="turn-new",
+    )
+    state.streaming_turns["tid-123"] = StreamingTurn(
+        message_id=5002,
+        topic_id=3794,
+        turn_id="turn-new",
+        buffer="💭 分析中",
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "item/completed",
+                "params": {
+                    "threadId": "tid-123",
+                    "turnId": "turn-new",
+                    "item": {
+                        "type": "agentMessage",
+                        "threadId": "tid-123",
+                        "phase": "final_answer",
+                        "text": "最终回复已经发到 TG",
+                    },
+                },
+            },
+        },
+    )
+
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.status == "completed"
+    assert event.agent_name == "Codex"
+    assert event.agent_id == "codex"
+    assert event.task_name == "POPO 通知验收"
+    assert event.task_id == "turn-new"
+    assert event.message == "任务已完成"
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "tid-123",
+                    "turnId": "turn-new",
+                    "turn": {"id": "turn-new", "status": "completed"},
+                },
+            },
+        },
+    )
+
+    assert len(notifications.events) == 1
+
+
+@pytest.mark.asyncio
 async def test_item_completed_can_render_codex_semantic_final_reply_without_raw_item_text():
     ws = WorkspaceInfo(
         name="onlineWorker",

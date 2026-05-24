@@ -1112,6 +1112,8 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         if item_type == "agentMessage":
             text = str(item.get("text", "")).strip()
             phase = str(item.get("phase", "") or "")
+            notification_status = ""
+            notification_message = ""
             if semantic_payload:
                 text = str(semantic_payload.get("text") or text).strip()
                 phase = str(semantic_payload.get("phase") or phase or "")
@@ -1119,12 +1121,29 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                     phase = "commentary"
                 elif semantic_kind == "turn_completed" and not phase:
                     phase = "final_answer"
+                    notification_status, notification_message = _notification_for_turn_status(
+                        "completed",
+                        {"status": "completed"},
+                        ctx,
+                    )
+                elif semantic_kind == "turn_aborted":
+                    notification_status, notification_message = _notification_for_turn_status(
+                        "aborted",
+                        {"status": "aborted", "reason": semantic_payload.get("reason", "")},
+                        ctx,
+                    )
             if not phase and ctx.event.provider and ctx.event.provider != "codex":
                 # Some provider event streams omit phase; their completed agentMessage
                 # is treated as the user-visible final assistant reply.
                 phase = "final_answer"
             if not text or not thread_id:
                 return
+            if phase == "final_answer" and not notification_status:
+                notification_status, notification_message = _notification_for_turn_status(
+                    "completed",
+                    {"status": "completed"},
+                    ctx,
+                )
 
             st = state.streaming_turns.get(thread_id)
             ws = _resolve_workspace_info(state, ctx.ws_daemon_id, thread_id)
@@ -1185,6 +1204,15 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                     thread_id=thread_id,
                     final_reply_synced_to_tg=True,
                 )
+            if phase == "final_answer" and notification_status and not (st is not None and st.notification_emitted):
+                await _emit_notification(
+                    ctx,
+                    thread_id=thread_id,
+                    status=notification_status,
+                    message=notification_message,
+                )
+                if st is not None:
+                    st.notification_emitted = True
             return
 
         if item_type == "shellCommand":
@@ -1239,13 +1267,15 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                         thread_id=thread_id,
                         status=run_status,
                     )
-                notification_status, notification_message = _notification_for_turn_status(run_status, turn, ctx)
-                await _emit_notification(
-                    ctx,
-                    thread_id=thread_id,
-                    status=notification_status,
-                    message=notification_message,
-                )
+                if not st.notification_emitted:
+                    notification_status, notification_message = _notification_for_turn_status(run_status, turn, ctx)
+                    await _emit_notification(
+                        ctx,
+                        thread_id=thread_id,
+                        status=notification_status,
+                        message=notification_message,
+                    )
+                    st.notification_emitted = True
                 return
             if _is_stale_turn_event(st, event_turn_id):
                 logger.info(
@@ -1337,13 +1367,16 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 thread_id=thread_id,
                 status=run_status,
             )
-        notification_status, notification_message = _notification_for_turn_status(run_status, turn, ctx)
-        await _emit_notification(
-            ctx,
-            thread_id=thread_id,
-            status=notification_status,
-            message=notification_message,
-        )
+        if st is None or not st.notification_emitted:
+            notification_status, notification_message = _notification_for_turn_status(run_status, turn, ctx)
+            await _emit_notification(
+                ctx,
+                thread_id=thread_id,
+                status=notification_status,
+                message=notification_message,
+            )
+            if st is not None:
+                st.notification_emitted = True
 
     async def _handle_session_created(ctx: EventContext) -> None:
         """session.created"""
