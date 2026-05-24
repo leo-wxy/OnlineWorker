@@ -48,3 +48,11 @@ test("usage browser provides codex/claude switching and provider usage loader", 
   assert.match(page, /t\.usage\.title/);
   assert.match(page, /t\.usage\.providerTabs\[activeProvider\]/);
 });
+
+test("usage token detail table keeps its own bounded scroll area", () => {
+  const page = readFileSync(join(root, "src", "pages", "UsageBrowser.tsx"), "utf8");
+
+  assert.match(page, /<div className="flex min-h-0 flex-1 flex-col">/);
+  assert.match(page, /<div className="min-h-0 flex-1 overflow-auto rounded-2xl border border-\[var\(--ow-line-soft\)\] bg-white">/);
+  assert.match(page, /<thead className="sticky top-0 z-\[1\] bg-slate-50\/95">/);
+});

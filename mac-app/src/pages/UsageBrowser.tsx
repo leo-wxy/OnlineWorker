@@ -249,7 +249,7 @@ export function UsageBrowser() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col">
         {loading && <StatePanel message={t.usage.applying} />}
         {!loading && error && <StatePanel message={error} tone="error" />}
         {!loading && !error && summary?.unsupportedReason && (
@@ -259,9 +259,9 @@ export function UsageBrowser() {
           <StatePanel message={t.usage.empty} />
         )}
         {!loading && !error && summary && !summary.unsupportedReason && summary.days.length > 0 && (
-          <div className="overflow-auto rounded-2xl border border-[var(--ow-line-soft)] bg-white">
+          <div className="min-h-0 flex-1 overflow-auto rounded-2xl border border-[var(--ow-line-soft)] bg-white">
             <table className="min-w-full border-collapse text-sm">
-              <thead className="bg-slate-50/90">
+              <thead className="sticky top-0 z-[1] bg-slate-50/95">
                 <tr className="text-left text-slate-500">
                   <th className="px-4 py-3 font-semibold">{t.usage.today}</th>
                   <th className="px-4 py-3 font-semibold">{t.usage.inputTokens}</th>
