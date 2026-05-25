@@ -15,7 +15,7 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 - Latest archived milestone: `v1.2.1`
 - Release tag: `1.2.1`
 - Active milestone: Notification Extensibility
-- Active roadmap phase: Phase 6, Notification Channel Abstraction
+- Active roadmap phase: none; Phase 6 is complete and ready for milestone archive/release decision
 
 ## Requirements
 
@@ -34,8 +34,8 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 
 ### Active
 
-- [ ] Add a plugin-based notification mechanism so notification delivery is not limited to Telegram.
-- [ ] Keep Telegram as the default builtin notification plugin while leaving a clean extension boundary for custom plugins such as WeChat.
+- [x] Add a plugin-based notification mechanism so notification delivery is not limited to Telegram.
+- [x] Keep Telegram as the default builtin notification plugin while leaving a clean extension boundary for custom plugins such as WeChat.
 
 ### Out of Scope
 
@@ -50,7 +50,7 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 - Installed-app behavior matters more than source-only behavior; release confidence is tied to packaged-app validation.
 - The repo includes provider abstraction boundaries, session/event tests, packaging scripts, plugin manifests, and tag-driven DMG release automation.
 - v1.2.1 milestone artifacts are archived under `.planning/milestones/`.
-- The current milestone starts from the practical limitation that notifications are Telegram-only today.
+- The current milestone resolved the practical limitation that notifications were Telegram-only by adding a notification plugin boundary with Telegram as the first builtin channel.
 
 ## Constraints
 
@@ -69,10 +69,11 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 | Use README + codebase map as project definition baseline | Current repo docs already state the product shape clearly enough for initialization | Validated |
 | Keep installed-app-first framing | Public docs and architecture both center the packaged Mac app rather than browser hosting | Validated |
 | Keep provider-specific behavior behind plugin/runtime boundaries | External provider support should not leak private provider concepts into shared app surfaces | Validated |
-| Treat notification delivery as a plugin boundary | Telegram is currently the only notification plugin, but future apps such as WeChat should not require rewriting shared send/status logic | Active |
+| Treat notification delivery as a plugin boundary | Telegram is currently the only builtin notification plugin, but future apps such as WeChat should not require rewriting shared send/status logic | Validated |
 
 ## Evolution
 
 - 2026-05-10: Planning initialized for a brownfield OnlineWorker milestone.
 - 2026-05-23: v1.2.1 milestone archived after completing phases 1-5 and publishing tag `1.2.1`.
 - 2026-05-23: Phase 6 added for notification channel abstraction.
+- 2026-05-25: Phase 6 completed with notification plugin routing, Telegram builtin channel, configuration UI, local setup guide assets, plugin development docs, and installed-app validation.

@@ -12,7 +12,7 @@ This milestone decouples user notifications from Telegram-only delivery so Onlin
 
 ## Phases
 
-- [ ] **Phase 6: Notification Channel Abstraction** - Introduce a provider-neutral notification mechanism so OnlineWorker can emit concise notifications through enabled notification plugins. Core plugin/router/config UI is implemented; existing Telegram task/approval/final-reply paths remain unchanged.
+- [x] **Phase 6: Notification Channel Abstraction** - Introduce a provider-neutral notification mechanism so OnlineWorker can emit concise notifications through enabled notification plugins. Core plugin/router/config UI is implemented; existing Telegram task/approval/final-reply paths remain unchanged.
 
 ## Phase Details
 
@@ -29,8 +29,24 @@ This milestone decouples user notifications from Telegram-only delivery so Onlin
 **Plans:** 1 plan
 
 Plans:
-- [ ] 06-01: Add minimal notification channel abstraction
+- [x] 06-01: Add minimal notification channel abstraction
   - [x] Core notification event/router/registry
   - [x] Builtin Telegram notification plugin
   - [x] External notification plugin discovery and `Setup → Notifications` UI
   - [x] Existing Telegram business send paths left unchanged
+
+Latest verification:
+- Notification unit/config regression passed: `rtk pytest -q tests/test_notifications.py tests/test_config.py` -> `49 passed`.
+- App shell notification UI regression passed: `node --test mac-app/tests/appShell.test.mjs` -> `8 passed`.
+- Rust config provider regression passed: `cargo test --manifest-path mac-app/src-tauri/Cargo.toml config_provider --quiet` -> `22 passed`.
+- Codex TG ordinary message routing regression passed after the provider interaction approval pull:
+  - `rtk pytest -q tests/test_codex_tui_mode.py::test_message_handler_in_app_stdio_owner_bridge_mode_uses_app_adapter_for_tg_messages ...` -> `4 passed`.
+  - `rtk pytest -q tests/test_codex_tui_mode.py tests/test_slash_router.py tests/test_thread_controls.py tests/test_provider_owner_bridge.py tests/test_codex_owner_bridge.py` -> `109 passed`.
+- Installed app was rebuilt with `bash scripts/build.sh`, overwritten to `/Applications/OnlineWorker.app`, relaunched, and runtime-checked:
+  - installed version `1.2.1`
+  - `provider_owner_bridge.sock` and `codex_owner_bridge.sock` connectable
+  - provider owner bridge runtime status reported Codex app-server healthy
+  - startup log error scan returned zero matches for the verification window
+
+Remaining Phase 6 verification:
+- None for the notification plugin boundary and Telegram builtin channel. Non-Telegram notification channels remain future plugin work.
