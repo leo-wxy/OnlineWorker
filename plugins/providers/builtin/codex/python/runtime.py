@@ -689,7 +689,7 @@ async def try_route_owner_bridge_send(state, ws_info, thread_info, *, text: str)
         ensure_codex_tui_host_bound,
     )
 
-    await ensure_codex_tui_host_bound(state, ws_info, thread_id)
+    await ensure_codex_tui_host_bound(state, ws_info, thread_id, allow_owner_bridge=True)
     if not can_route_cli_approval_to_tui_host(state, thread_id):
         return False
     from plugins.providers.builtin.codex.python.tui_host_client import (

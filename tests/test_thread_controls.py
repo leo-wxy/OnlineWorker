@@ -15,7 +15,13 @@ from core.storage import AppStorage, ThreadInfo, WorkspaceInfo
 GROUP_CHAT_ID = -100123456789
 
 
-def _build_state(*, tool: str, control_mode: str = "app") -> AppState:
+def _build_state(
+    *,
+    tool: str,
+    control_mode: str = "app",
+    protocol: str | None = None,
+    live_transport: str | None = None,
+) -> AppState:
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
@@ -37,7 +43,8 @@ def _build_state(*, tool: str, control_mode: str = "app") -> AppState:
                 name=tool,
                 enabled=True,
                 codex_bin=tool,
-                protocol="ws" if tool == "codex" else "http",
+                protocol=protocol or ("stdio" if tool == "codex" else "http"),
+                live_transport=live_transport or ("stdio" if tool == "codex" else "http"),
                 app_server_port=4722 if tool == "codex" else None,
                 control_mode=control_mode if tool == "codex" else "app",
             )

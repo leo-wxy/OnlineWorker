@@ -228,7 +228,7 @@ def should_route_codex_messages_to_tui_host(state: AppState, ws: Optional[Worksp
     live_transport = str(getattr(tool_cfg, "live_transport", "") or "").strip().lower()
     return bool(
         tool_cfg.control_mode == "app"
-        and (tool_cfg.protocol == "ws" or live_transport == "owner_bridge")
+        and (tool_cfg.protocol == "ws" or live_transport == "shared_ws")
     )
 
 
@@ -286,8 +286,13 @@ async def ensure_codex_tui_host_bound(
     state: AppState,
     ws: WorkspaceInfo,
     thread_id: str,
+    *,
+    allow_owner_bridge: bool = False,
 ) -> None:
-    if not should_route_codex_messages_to_tui_host(state, ws):
+    if not (
+        should_route_codex_messages_to_tui_host(state, ws)
+        or (allow_owner_bridge and should_auto_manage_codex_host(state, ws))
+    ):
         return
 
     live_status = _read_live_host_status(state)

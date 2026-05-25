@@ -771,10 +771,9 @@ mod tests {
     use super::should_ignore_sidecar_output_event;
     use super::{
         apply_manual_stop_policy, apply_service_start_policy,
-        cleanup_owner_bridge_socket_files_in_dir, cleanup_process_matchers,
-        compute_service_status, overlay_env_spec, overlay_env_spec_from_app_env,
-        pid_parent_pairs_from_output, pids_from_output, probe_http_health,
-        process_tree_pids, read_env_key, select_primary_pid,
+        cleanup_owner_bridge_socket_files_in_dir, cleanup_process_matchers, compute_service_status,
+        overlay_env_spec, overlay_env_spec_from_app_env, pid_parent_pairs_from_output,
+        pids_from_output, probe_http_health, process_tree_pids, read_env_key, select_primary_pid,
         should_attempt_background_service_recovery, BotState, ManagedProcessCleanupPolicy,
     };
     use std::collections::HashMap;

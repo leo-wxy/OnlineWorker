@@ -40,7 +40,10 @@ fn write_executable_script(path: &Path, content: &str) -> Result<(), String> {
     let mut file = fs::File::create(path).map_err(|error| error.to_string())?;
     file.write_all(content.as_bytes())
         .map_err(|error| error.to_string())?;
-    let mut permissions = file.metadata().map_err(|error| error.to_string())?.permissions();
+    let mut permissions = file
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .permissions();
     permissions.set_mode(0o700);
     fs::set_permissions(path, permissions).map_err(|error| error.to_string())
 }
