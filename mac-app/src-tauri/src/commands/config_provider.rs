@@ -1529,7 +1529,8 @@ mod tests {
         overlay_env_spec_from_env_raw, provider_metadata_from_raw,
         read_manifest_files_from_overlay_path, serialize_normalized_config_with_env,
         set_notification_channel_config_in_document, set_notification_channel_enabled_in_document,
-        set_provider_flags_in_document, set_test_process_env_override, NOTIFICATION_OVERLAY_ENV,
+        set_provider_flags_in_document, set_test_process_env_override, ProviderCapabilitiesEntry,
+        NOTIFICATION_OVERLAY_ENV,
     };
 
     #[test]
@@ -2012,6 +2013,48 @@ providers:
         assert_eq!(claude_icon.path, "icon.svg");
         assert!(claude_icon.url.starts_with("data:image/svg+xml;base64,"));
         assert!(claude_icon.source.contains("simpleicons"));
+    }
+
+    #[test]
+    fn provider_metadata_exposes_manifest_capabilities() {
+        let providers = provider_metadata_from_raw("", None).expect("metadata");
+        let codex = providers
+            .iter()
+            .find(|provider| provider.id == "codex")
+            .expect("codex");
+        let claude = providers
+            .iter()
+            .find(|provider| provider.id == "claude")
+            .expect("claude");
+
+        assert_eq!(
+            codex.capabilities,
+            ProviderCapabilitiesEntry {
+                sessions: true,
+                send: true,
+                commands: true,
+                approvals: true,
+                questions: false,
+                photos: true,
+                files: true,
+                command_wrappers: vec!["model".to_string(), "review".to_string()],
+                control_modes: vec!["app".to_string(), "tui".to_string(), "hybrid".to_string()],
+            }
+        );
+        assert_eq!(
+            claude.capabilities,
+            ProviderCapabilitiesEntry {
+                sessions: true,
+                send: true,
+                commands: true,
+                approvals: true,
+                questions: true,
+                photos: true,
+                files: true,
+                command_wrappers: Vec::new(),
+                control_modes: vec!["app".to_string()],
+            }
+        );
     }
 
     #[test]

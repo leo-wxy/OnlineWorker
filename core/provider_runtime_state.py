@@ -66,6 +66,8 @@ class ProviderRuntimeState:
     host: Any = None
     host_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     mirror_task: Optional[asyncio.Task] = None
+    approval_mirror_task: Optional[asyncio.Task] = None
+    approval_mirror_seen_at: dict[str, tuple[float, bool]] = field(default_factory=dict)
     last_watch_state_touch: float = 0.0
     last_synced_assistant: dict[str, str] = field(default_factory=dict)
     runs: dict[str, ProviderRunState] = field(default_factory=dict)

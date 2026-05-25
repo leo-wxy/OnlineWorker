@@ -100,6 +100,7 @@ struct WorkspaceSnapshot {
 struct WorkspaceActivityCandidate {
     workspace_id: String,
     workspace_name: Option<String>,
+    workspace_path: String,
     tool: String,
     session_id: String,
     preview: Option<String>,
@@ -883,6 +884,7 @@ fn read_codex_workspace_activity(
     Some(WorkspaceActivityCandidate {
         workspace_id: workspace.id.clone(),
         workspace_name: workspace.name.clone(),
+        workspace_path: workspace.path.clone(),
         tool: workspace.tool.clone(),
         session_id: latest_session_id?,
         preview: latest_preview,
@@ -956,6 +958,7 @@ fn read_claude_workspace_activity(
         let candidate = WorkspaceActivityCandidate {
             workspace_id: workspace.id.clone(),
             workspace_name: workspace.name.clone(),
+            workspace_path: workspace.path.clone(),
             tool: workspace.tool.clone(),
             session_id: session_id.clone(),
             preview,
@@ -1003,6 +1006,7 @@ fn build_recent_activity_summary_from_candidate(
     RecentActivitySummary {
         active_workspace_id: Some(candidate.workspace_id),
         active_workspace_name: candidate.workspace_name,
+        active_workspace_path: Some(candidate.workspace_path),
         active_tool: Some(candidate.tool.clone()),
         active_session_id: Some(candidate.session_id),
         active_session_tool: Some(candidate.tool),
@@ -1044,6 +1048,10 @@ fn read_recent_activity_summary_from_state(
     Some(RecentActivitySummary {
         active_workspace_id,
         active_workspace_name,
+        active_workspace_path: selected_workspace
+            .get("path")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
         active_tool: active_tool.clone(),
         active_session_id,
         active_session_tool: active_tool,
@@ -1587,6 +1595,7 @@ mod tests {
             recent_activity: Some(RecentActivitySummary {
                 active_workspace_id: Some("codex:onlineWorker".into()),
                 active_workspace_name: Some("onlineWorker".into()),
+                active_workspace_path: Some("/Users/example/Projects/onlineWorker".into()),
                 active_tool: Some("codex".into()),
                 active_session_id: Some("ses_demo".into()),
                 active_session_tool: Some("codex".into()),

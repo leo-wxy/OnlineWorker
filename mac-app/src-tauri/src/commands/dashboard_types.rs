@@ -79,6 +79,7 @@ pub struct ProviderDashboardStatus {
 pub struct RecentActivitySummary {
     pub active_workspace_id: Option<String>,
     pub active_workspace_name: Option<String>,
+    pub active_workspace_path: Option<String>,
     pub active_tool: Option<String>,
     pub active_session_id: Option<String>,
     pub active_session_tool: Option<String>,

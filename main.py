@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import fcntl
 import json
 import logging
@@ -193,6 +194,16 @@ def main() -> None:
         help="Run once as Codex hook bridge relay and exit",
     )
     parser.add_argument(
+        "--codex-tui-host",
+        action="store_true",
+        help="Run a visible single-owner Codex TUI host and exit when Codex exits",
+    )
+    parser.add_argument("--codex-tui-target", default=None)
+    parser.add_argument("--codex-tui-cd", default=None)
+    parser.add_argument("--codex-tui-remote", default=None)
+    parser.add_argument("--codex-tui-bin", default="codex")
+    parser.add_argument("--codex-tui-extra-arg", action="append", default=[])
+    parser.add_argument(
         "--provider-session-bridge",
         action="store_true",
         help="Run once as provider session bridge and exit",
@@ -215,6 +226,23 @@ def main() -> None:
         from plugins.providers.builtin.codex.python.hook_bridge import run_codex_hook_bridge_once
 
         raise SystemExit(run_codex_hook_bridge_once(data_dir))
+    if args.codex_tui_host:
+        from plugins.providers.builtin.codex.python.tui_host_runtime import run_codex_tui_host_once
+
+        if not args.codex_tui_cd:
+            raise SystemExit("--codex-tui-cd is required")
+        raise SystemExit(
+            asyncio.run(
+                run_codex_tui_host_once(
+                    data_dir=data_dir,
+                    cwd=args.codex_tui_cd,
+                    target=args.codex_tui_target,
+                    remote_url=args.codex_tui_remote,
+                    codex_bin=args.codex_tui_bin,
+                    extra_args=args.codex_tui_extra_arg,
+                )
+            )
+        )
     if args.provider_session_bridge:
         raise SystemExit(
             _run_provider_session_bridge(

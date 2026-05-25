@@ -63,6 +63,8 @@ class LifecycleManager:
 
     async def post_init(self, application: Application) -> None:
         bot = application.bot
+        self.state.telegram_bot = bot
+        self.state.group_chat_id = self.gid
 
         # 1. Create global Topics for each enabled tool
         for tool in self.cfg.enabled_tools:

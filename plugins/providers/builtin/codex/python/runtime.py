@@ -8,12 +8,12 @@ import urllib.error
 import urllib.request
 from typing import TYPE_CHECKING, Optional
 
+from config import get_data_dir
 from core.telegram_formatting import format_telegram_assistant_final_text
 from core.providers.lifecycle_runtime import _save_storage_via_lifecycle
 from core.providers.message_runtime import _interrupt_active_turn
 from core.providers.thread_runtime import interrupt_default_thread
 from plugins.providers.builtin.codex.python.adapter import CodexAdapter
-from plugins.providers.builtin.codex.python.hook_cleanup import cleanup_onlineworker_codex_permission_hooks
 from plugins.providers.builtin.codex.python.process import AppServerProcess
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
 from plugins.providers.builtin.codex.python import storage_runtime
@@ -102,6 +102,34 @@ async def edit_final_reply_with_fallback(
 
 
 def build_approval_reply(approval, action: str) -> tuple[str, dict]:
+    source = str(getattr(approval, "approval_source", "") or "")
+    if source == "codex_tui_host":
+        if action == "exec_deny":
+            return "❌ 已拒绝", {"host_action": "exec_deny"}
+        if action == "exec_allow_always":
+            return "✅ 已总是允许", {"host_action": "exec_allow_always"}
+        return "✅ 已允许", {"host_action": "exec_allow"}
+
+    if source in {"execCommandApproval", "applyPatchApproval"}:
+        if action == "exec_deny":
+            return "❌ 已拒绝", {"decision": "denied"}
+        if action == "exec_allow_always" and approval.amendment_decision:
+            return "✅ 已总是允许", approval.amendment_decision
+        if action == "exec_allow_always":
+            return "✅ 已总是允许", {"decision": "approved_for_session"}
+        return "✅ 已允许", {"decision": "approved"}
+
+    if source == "item/permissions/requestApproval":
+        if action == "exec_deny":
+            return "❌ 已拒绝", {"permissions": {}, "scope": "turn"}
+        permissions = getattr(approval, "amendment_decision", {}) or {}
+        permissions = permissions.get("permissions") if isinstance(permissions, dict) else None
+        scope = "session" if action == "exec_allow_always" else "turn"
+        return "✅ 已总是允许" if scope == "session" else "✅ 已允许", {
+            "permissions": permissions or {},
+            "scope": scope,
+        }
+
     if action == "exec_deny":
         return "❌ 已拒绝", {"decision": "decline"}
 
@@ -574,7 +602,11 @@ async def handle_local_owner(
     from bot.handlers.common import _send_to_group, tg_processing_ack_text, tg_send_failed_text
     from bot.handlers import message as message_handler
 
-    if not message_handler.is_codex_local_owner_mode(state, ws_info):
+    should_route_to_tui = (
+        message_handler.should_route_codex_messages_to_tui_host(state, ws_info)
+        or can_route_cli_approval_to_tui_host(state, thread_info.thread_id)
+    )
+    if not should_route_to_tui:
         return False
 
     try:
@@ -609,6 +641,69 @@ async def handle_local_owner(
             topic_id=src_topic_id,
         )
     return True
+
+
+def can_route_cli_approval_to_tui_host(state, thread_id: str) -> bool:
+    if not thread_id:
+        return False
+    from plugins.providers.builtin.codex.python.tui_host_protocol import read_host_status
+
+    host = codex_state.get_tui_host(state)
+    if (
+        host is not None
+        and getattr(host, "thread_id", "") == thread_id
+        and bool(getattr(host, "is_running", False))
+    ):
+        return True
+
+    data_dir = getattr(getattr(state, "config", None), "data_dir", None) or get_data_dir()
+    try:
+        status = read_host_status(data_dir)
+    except Exception:
+        return False
+    if not isinstance(status, dict) or not status.get("online"):
+        return False
+    return str(status.get("active_thread_id") or "").strip() == thread_id
+
+
+async def mirror_approval_policy(state, request: dict, ws_info, thread_info) -> dict:
+    thread_id = str(request.get("thread_id") or "").strip()
+    if can_route_cli_approval_to_tui_host(state, thread_id):
+        return {
+            "interactive": True,
+            "request_id": f"codex-tui-host:{thread_id}",
+            "approval_source": "codex_tui_host",
+            "notice_suffix": "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。",
+        }
+    return {
+        "interactive": False,
+        "approval_source": str(request.get("source") or "provider_hook_mirror"),
+    }
+
+
+async def try_route_owner_bridge_send(state, ws_info, thread_info, *, text: str):
+    if not text:
+        return False
+    thread_id = str(getattr(thread_info, "thread_id", "") or "").strip()
+    from plugins.providers.builtin.codex.python.tui_bridge import (
+        ensure_codex_tui_host_bound,
+    )
+
+    await ensure_codex_tui_host_bound(state, ws_info, thread_id)
+    if not can_route_cli_approval_to_tui_host(state, thread_id):
+        return False
+    from plugins.providers.builtin.codex.python.tui_host_client import (
+        send_message_to_codex_tui_host,
+    )
+
+    await send_message_to_codex_tui_host(
+        state,
+        ws_info,
+        thread_id,
+        text,
+        topic_id=getattr(thread_info, "topic_id", None),
+    )
+    return "codex_tui_host"
 
 
 async def prepare_send(
@@ -1327,6 +1422,10 @@ async def monitor_process_health(
 
 
 async def start_runtime(manager, bot, tool_cfg) -> None:
+    from plugins.providers.builtin.codex.python.current_session_approval_mirror import (
+        start_current_session_approval_mirror_loop,
+    )
+    from plugins.providers.builtin.codex.python.hook_bridge import install_codex_permission_mirror_hook
     from plugins.providers.builtin.codex.python.tui_bridge import (
         is_codex_local_owner_mode,
         start_codex_tui_sync_loop,
@@ -1337,8 +1436,19 @@ async def start_runtime(manager, bot, tool_cfg) -> None:
         touch_codex_tui_watch_state,
     )
 
-    if cleanup_onlineworker_codex_permission_hooks():
-        logger.info("[codex] 已清理 ~/.codex/hooks.json 中的 OnlineWorker PermissionRequest hook")
+    data_dir = manager.state.config.data_dir if manager.state.config is not None else None
+    if data_dir:
+        try:
+            if install_codex_permission_mirror_hook(data_dir):
+                logger.info("[codex] 已安装 PermissionRequest 镜像 hook，CLI 审批保持原生显示并同步通知 TG")
+        except Exception as e:
+            logger.warning("[codex] 安装 PermissionRequest 镜像 hook 失败：%s", e)
+
+    runtime = codex_state.get_runtime(manager.state)
+    if data_dir:
+        approval_mirror_task = getattr(runtime, "approval_mirror_task", None)
+        if approval_mirror_task is None or approval_mirror_task.done():
+            runtime.approval_mirror_task = start_current_session_approval_mirror_loop(manager.state)
 
     control_mode = getattr(tool_cfg, "control_mode", "app")
     if is_codex_local_owner_mode(manager.state):
@@ -1362,7 +1472,6 @@ async def start_runtime(manager, bot, tool_cfg) -> None:
             touch_codex_tui_watch_state(manager.state)
         return
 
-    data_dir = manager.state.config.data_dir if manager.state.config is not None else None
     if clear_stale_host_artifacts(data_dir):
         logger.info("已清理 stale codex TUI host artifacts")
 
@@ -1402,6 +1511,10 @@ async def start_runtime(manager, bot, tool_cfg) -> None:
 
 async def shutdown_runtime(manager) -> None:
     from plugins.providers.builtin.codex.python.owner_bridge import stop_codex_owner_bridge
+    approval_mirror_task = codex_state.get_runtime(manager.state).approval_mirror_task
+    if approval_mirror_task and not approval_mirror_task.done():
+        approval_mirror_task.cancel()
+    codex_state.get_runtime(manager.state).approval_mirror_task = None
     sync_task = manager.get_tui_sync_task("codex")
     if sync_task and not sync_task.done():
         sync_task.cancel()

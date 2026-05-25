@@ -19,6 +19,7 @@ import websockets
 import websockets.exceptions
 
 logger = logging.getLogger(__name__)
+DEFAULT_APPROVALS_REVIEWER = "user"
 
 # 回调类型，必须与 daemon.py 完全一致
 EventCallback = Callable[[str, Any], Awaitable[None]]
@@ -257,7 +258,7 @@ class CodexAdapter:
 
     async def start_thread(self, workspace_id: str) -> dict:
         cwd = self._workspace_cwd_map.get(workspace_id)
-        params: dict[str, Any] = {}
+        params: dict[str, Any] = {"approvalsReviewer": DEFAULT_APPROVALS_REVIEWER}
         if cwd:
             params["cwd"] = cwd
         result = await self._call("thread/start", params)
@@ -273,7 +274,10 @@ class CodexAdapter:
         if thread_id and workspace_id:
             self._thread_workspace_map[thread_id] = workspace_id
             logger.debug(f"[thread_map] 记录映射：thread={thread_id[:12]}… → workspace={workspace_id}")
-        params: dict[str, Any] = {"threadId": thread_id}
+        params: dict[str, Any] = {
+            "threadId": thread_id,
+            "approvalsReviewer": DEFAULT_APPROVALS_REVIEWER,
+        }
         cwd = self._workspace_cwd_map.get(workspace_id)
         if cwd:
             params["cwd"] = cwd
@@ -309,6 +313,7 @@ class CodexAdapter:
         params: dict[str, Any] = {
             "threadId": thread_id,
             "input": input_items,
+            "approvalsReviewer": DEFAULT_APPROVALS_REVIEWER,
         }
         cwd = self._workspace_cwd_map.get(workspace_id)
         if cwd:

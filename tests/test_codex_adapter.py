@@ -238,7 +238,10 @@ async def test_start_thread_passes_registered_workspace_cwd():
 
     adapter._call.assert_awaited_once_with(
         "thread/start",
-        {"cwd": "/Users/example/Projects/onlineWorker"},
+        {
+            "cwd": "/Users/example/Projects/onlineWorker",
+            "approvalsReviewer": "user",
+        },
     )
     assert result == {"id": "tid-new"}
     assert adapter._thread_workspace_map["tid-new"] == "codex:onlineWorker"
@@ -254,7 +257,10 @@ async def test_start_thread_records_mapping_when_app_server_returns_nested_threa
 
     adapter._call.assert_awaited_once_with(
         "thread/start",
-        {"cwd": "/Users/example/Projects/onlineWorker"},
+        {
+            "cwd": "/Users/example/Projects/onlineWorker",
+            "approvalsReviewer": "user",
+        },
     )
     assert result == {"thread": {"id": "tid-nested"}}
     assert adapter._thread_workspace_map["tid-nested"] == "codex:onlineWorker"
@@ -269,6 +275,7 @@ async def test_send_user_message_records_thread_mapping_before_turn_start():
         assert params == {
             "threadId": "tid-live",
             "input": [{"type": "text", "text": "hello"}],
+            "approvalsReviewer": "user",
         }
         assert adapter._thread_workspace_map["tid-live"] == "codex:onlineWorker"
         return {"ok": True}
@@ -294,6 +301,7 @@ async def test_resume_thread_passes_registered_workspace_cwd():
         {
             "threadId": "tid-live",
             "cwd": "/Users/example/Projects/onlineWorker",
+            "approvalsReviewer": "user",
         },
     )
     assert result == {"id": "tid-live"}
@@ -314,6 +322,7 @@ async def test_send_user_message_passes_registered_workspace_cwd():
             "threadId": "tid-live",
             "cwd": "/Users/example/Projects/onlineWorker",
             "input": [{"type": "text", "text": "hello"}],
+            "approvalsReviewer": "user",
         },
     )
     assert result == {"ok": True}
@@ -337,6 +346,7 @@ async def test_send_user_message_can_override_approval_policy():
         {
             "threadId": "tid-live",
             "input": [{"type": "text", "text": "hello"}],
+            "approvalsReviewer": "user",
             "approvalPolicy": "untrusted",
         },
     )
@@ -359,6 +369,7 @@ async def test_send_user_message_can_override_sandbox_policy():
         {
             "threadId": "tid-live",
             "input": [{"type": "text", "text": "hello"}],
+            "approvalsReviewer": "user",
             "sandboxPolicy": {"type": "readOnly"},
         },
     )
@@ -373,7 +384,7 @@ async def test_send_user_message_can_override_approvals_reviewer():
         "codex:onlineWorker",
         "tid-live",
         "hello",
-        approvals_reviewer="user",
+        approvals_reviewer="auto_review",
     )
 
     adapter._call.assert_awaited_once_with(
@@ -381,7 +392,7 @@ async def test_send_user_message_can_override_approvals_reviewer():
         {
             "threadId": "tid-live",
             "input": [{"type": "text", "text": "hello"}],
-            "approvalsReviewer": "user",
+            "approvalsReviewer": "auto_review",
         },
     )
 

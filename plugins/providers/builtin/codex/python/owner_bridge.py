@@ -7,6 +7,7 @@ import os
 from typing import Optional
 
 from config import get_data_dir
+from plugins.providers.builtin.codex.python.adapter import DEFAULT_APPROVALS_REVIEWER
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
 
 
@@ -308,6 +309,7 @@ class CodexOwnerBridge:
                     {
                         "threadId": thread_id,
                         "input": input_items,
+                        "approvalsReviewer": DEFAULT_APPROVALS_REVIEWER,
                     },
                 )
         except Exception as exc:

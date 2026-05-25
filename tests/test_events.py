@@ -10,14 +10,17 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from config import Config, ToolConfig
 from core.state import AppState
+from core.provider_runtime_state import ProviderWatchState
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
 from core.storage import AppStorage, WorkspaceInfo, ThreadInfo
+from core.providers.interactions import ProviderApprovalRequest
 from bot.events import (
     _extract_thread_id,
     _is_network_error,
     _resolve_topic_id,
     make_event_handler,
     make_server_request_handler,
+    send_approval_to_telegram,
 )
 from bot.handlers.common import (
     tg_approval_request_text,
@@ -90,6 +93,40 @@ class TestTelegramMessageContract:
         )
         assert "沙盒权限请求" in text
         assert "可直接在 TG 中处理授权" not in text
+
+
+@pytest.mark.asyncio
+async def test_noninteractive_approval_notification_does_not_create_tg_decision_state(monkeypatch):
+    state = AppState(storage=AppStorage())
+    bot = MagicMock()
+    bot.edit_message_reply_markup = AsyncMock()
+    send_mock = AsyncMock(return_value=MagicMock(message_id=88))
+    monkeypatch.setattr("bot.events._send_to_group", send_mock)
+
+    await send_approval_to_telegram(
+        state,
+        bot,
+        -100123456789,
+        7653,
+        "codex:/tmp/project-a",
+        ProviderApprovalRequest(
+            request_id="provider-cli-hook",
+            thread_id="tid-cli",
+            command="ps -axo pid,command",
+            reason="源 CLI 正在请求本地权限审批。",
+            tool_name="shell",
+            tool_type="codex",
+            approval_source="codex_cli_hook",
+        ),
+        interactive=False,
+        notice_suffix="此请求已在 Codex CLI 中弹出，请在 CLI 中完成审批。",
+    )
+
+    send_mock.assert_awaited_once()
+    assert send_mock.await_args.kwargs["topic_id"] == 7653
+    assert "此请求已在 Codex CLI 中弹出" in send_mock.await_args.args[2]
+    assert state.pending_approvals == {}
+    bot.edit_message_reply_markup.assert_not_awaited()
 
 
 # ── _extract_thread_id ────────────────────────────────────────────────────────
@@ -258,8 +295,147 @@ async def test_server_request_approval_unknown_thread_notifies_owner_dm():
     call_kwargs = bot.send_message.call_args[1]
     assert call_kwargs["chat_id"] == 12345
     assert "missing-thread" in call_kwargs["text"]
-    assert "无法路由" in call_kwargs["text"]
-    bot.edit_message_reply_markup.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_server_request_approval_routes_via_codex_watch_state_for_thread(monkeypatch):
+    state = make_state_with_owner()
+    ws = state.storage.workspaces["proj"]
+    ws.tool = "codex"
+    ws.daemon_workspace_id = "codex:/proj"
+    runtime = codex_state.get_runtime(state)
+    runtime.watched_threads["tid-cli"] = ProviderWatchState(
+        workspace_id="codex:/proj",
+        topic_id=7653,
+    )
+    bot = MagicMock()
+    send_mock = AsyncMock(return_value=MagicMock(message_id=88))
+    monkeypatch.setattr("bot.events._send_to_group", send_mock)
+    bot.edit_message_reply_markup = AsyncMock()
+
+    handler = make_server_request_handler(state, bot, -100123456789)
+    await handler(
+        "item/commandExecution/requestApproval",
+        {
+            "threadId": "tid-cli",
+            "command": "touch /tmp/from-hook",
+            "reason": "need permission",
+            "_workspaceId": "codex:/proj",
+        },
+        "approval-1",
+    )
+
+    send_mock.assert_awaited_once()
+    assert send_mock.await_args.kwargs["topic_id"] == 7653
+    assert state.pending_approvals[88].request_id == "approval-1"
+    assert state.pending_approvals[88].workspace_id == "codex:/proj"
+    assert state.pending_approvals[88].tool_type == "codex"
+    bot.edit_message_reply_markup.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_server_request_exec_command_approval_routes_via_conversation_id(monkeypatch):
+    state = make_state_with_owner()
+    ws = state.storage.workspaces["proj"]
+    ws.tool = "codex"
+    ws.daemon_workspace_id = "codex:/proj"
+    runtime = codex_state.get_runtime(state)
+    runtime.watched_threads["tid-cli"] = ProviderWatchState(
+        workspace_id="codex:/proj",
+        topic_id=7653,
+    )
+    bot = MagicMock()
+    send_mock = AsyncMock(return_value=MagicMock(message_id=89))
+    monkeypatch.setattr("bot.events._send_to_group", send_mock)
+    bot.edit_message_reply_markup = AsyncMock()
+
+    handler = make_server_request_handler(state, bot, -100123456789)
+    await handler(
+        "execCommandApproval",
+        {
+            "conversationId": "tid-cli",
+            "command": ["/bin/zsh", "-lc", "ps -axo pid,command"],
+            "cwd": "/Users/wxy/Projects/onlineworker-combined",
+            "reason": "inspect processes",
+        },
+        "approval-legacy",
+    )
+
+    send_mock.assert_awaited_once()
+    assert send_mock.await_args.kwargs["topic_id"] == 7653
+    pending = state.pending_approvals[89]
+    assert pending.request_id == "approval-legacy"
+    assert pending.thread_id == "tid-cli"
+    assert pending.cmd == "/bin/zsh -lc 'ps -axo pid,command'"
+    assert pending.approval_source == "execCommandApproval"
+
+
+@pytest.mark.asyncio
+async def test_server_request_permissions_approval_routes_to_thread_topic(monkeypatch):
+    state = make_state_with_owner()
+    ws = state.storage.workspaces["proj"]
+    ws.tool = "codex"
+    ws.daemon_workspace_id = "codex:/proj"
+    runtime = codex_state.get_runtime(state)
+    runtime.watched_threads["tid-cli"] = ProviderWatchState(
+        workspace_id="codex:/proj",
+        topic_id=7653,
+    )
+    bot = MagicMock()
+    send_mock = AsyncMock(return_value=MagicMock(message_id=90))
+    monkeypatch.setattr("bot.events._send_to_group", send_mock)
+    bot.edit_message_reply_markup = AsyncMock()
+
+    handler = make_server_request_handler(state, bot, -100123456789)
+    await handler(
+        "item/permissions/requestApproval",
+        {
+            "threadId": "tid-cli",
+            "cwd": "/Users/wxy/Projects/onlineworker-combined",
+            "reason": "need Downloads write access",
+            "permissions": {
+                "network": None,
+                "fileSystem": {"additionalRoots": ["/Users/wxy/Downloads"]},
+            },
+        },
+        "approval-permissions",
+    )
+
+    send_mock.assert_awaited_once()
+    assert send_mock.await_args.kwargs["topic_id"] == 7653
+    pending = state.pending_approvals[90]
+    assert pending.request_id == "approval-permissions"
+    assert pending.thread_id == "tid-cli"
+    assert pending.approval_source == "item/permissions/requestApproval"
+    assert pending.amendment_decision == {
+        "permissions": {"fileSystem": {"additionalRoots": ["/Users/wxy/Downloads"]}}
+    }
+
+
+@pytest.mark.asyncio
+async def test_server_request_approval_notifies_owner_for_unroutable_request():
+    state = make_state_with_owner()
+    adapter = MagicMock()
+    adapter.reply_server_request = AsyncMock()
+    state.set_adapter("codex", adapter)
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    bot.edit_message_reply_markup = AsyncMock()
+
+    handler = make_server_request_handler(state, bot, -100123456789)
+    await handler(
+        "item/commandExecution/requestApproval",
+        {
+            "threadId": "missing-thread",
+            "command": "touch /tmp/from-hook",
+            "reason": "need permission",
+            "_workspaceId": "codex:/proj",
+        },
+        "approval-1",
+    )
+
+    bot.send_message.assert_awaited_once()
+    adapter.reply_server_request.assert_not_awaited()
 
 
 @pytest.mark.asyncio

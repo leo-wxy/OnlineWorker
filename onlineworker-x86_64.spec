@@ -8,7 +8,10 @@ a = Analysis(
     ['main.py'],
     pathex=['.'],
     binaries=[],
-    datas=[],
+    datas=[
+        ('plugins/providers/builtin/claude/plugin.yaml', 'plugins/providers/builtin/claude'),
+        ('plugins/providers/builtin/codex/plugin.yaml', 'plugins/providers/builtin/codex'),
+    ],
     hiddenimports=[
         'yaml',
         'dotenv',

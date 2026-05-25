@@ -20,6 +20,10 @@ from typing import Callable, Optional
 from plugins.providers.builtin.codex.python.tui_bridge import (
     enqueue_codex_tui_message,
     is_codex_local_owner_mode,
+    should_route_codex_messages_to_tui_host,
+)
+from plugins.providers.builtin.codex.python.tui_host_client import (
+    send_approval_action_to_codex_tui_host,
 )
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
 from core.providers.registry import classify_provider, get_provider, provider_not_enabled_message
@@ -723,6 +727,30 @@ def make_callback_handler(state: AppState, group_chat_id: int) -> Callable:
             label, reply_body = _build_provider_approval_reply(approval, action)
 
             try:
+                if approval.tool_type == "codex" and approval.approval_source == "codex_tui_host":
+                    await send_approval_action_to_codex_tui_host(
+                        state,
+                        approval.thread_id,
+                        action,
+                    )
+                    if codex_state.has_interruption(state, approval.request_id):
+                        codex_state.resolve_interruption(
+                            state,
+                            approval.request_id,
+                            status="resolved",
+                            tg_message_id=msg_id,
+                        )
+                    state.pending_approvals.pop(msg_id, None)
+                    await query.edit_message_text(  # type: ignore[union-attr]
+                        f"{label}\n\n命令：`{approval.cmd[:200]}`",
+                        parse_mode="Markdown",
+                    )
+                    logger.info(
+                        f"[approval] codex_tui_host thread={approval.thread_id[:12]} "
+                        f"action={action} msg_id={msg_id}"
+                    )
+                    return
+
                 tool_name = approval.tool_type or state.get_tool_for_workspace(approval.workspace_id) or ""
                 unavailable = _provider_unavailable_message(state, tool_name) if tool_name else None
                 if unavailable:

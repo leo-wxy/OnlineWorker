@@ -28,6 +28,7 @@ class ProviderMessageHooks:
     prepare_send: Callable
     send: Callable
     handle_local_owner: Optional[Callable] = None
+    try_route_owner_bridge_send: Optional[Callable] = None
     supports_photo: bool = False
     supports_files: bool = False
 
@@ -36,6 +37,10 @@ class ProviderMessageHooks:
 class ProviderInteractionHooks:
     build_approval_reply: Optional[Callable] = None
     reply_question: Optional[Callable] = None
+    mirror_approval_policy: Optional[Callable] = None
+    parse_approval_request: Optional[Callable] = None
+    parse_question_request: Optional[Callable] = None
+    server_request_methods: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -114,6 +119,7 @@ class ProviderWorkspaceHooks:
 @dataclass(frozen=True)
 class ProviderThreadHooks:
     resolve_adapter: Optional[Callable] = None
+    new_imported_thread_source: Optional[Callable] = None
     validate_new_thread: Optional[Callable] = None
     activate_new_thread: Optional[Callable] = None
     archive_thread: Optional[Callable] = None

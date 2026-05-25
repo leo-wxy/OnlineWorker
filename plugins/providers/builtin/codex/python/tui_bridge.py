@@ -215,13 +215,33 @@ def is_codex_local_owner_mode(state: AppState, ws: Optional[WorkspaceInfo] = Non
     return tool_cfg.control_mode == "tui"
 
 
+def should_route_codex_messages_to_tui_host(state: AppState, ws: Optional[WorkspaceInfo] = None) -> bool:
+    cfg = state.config
+    if cfg is None:
+        return False
+    tool_name = ws.tool if ws is not None else "codex"
+    tool_cfg = cfg.get_tool(tool_name)
+    if not tool_cfg or tool_cfg.name != "codex":
+        return False
+    if tool_cfg.control_mode == "tui":
+        return True
+    live_transport = str(getattr(tool_cfg, "live_transport", "") or "").strip().lower()
+    return bool(
+        tool_cfg.control_mode == "app"
+        and (tool_cfg.protocol == "ws" or live_transport == "owner_bridge")
+    )
+
+
 def should_auto_manage_codex_host(state: AppState, ws: Optional[WorkspaceInfo] = None) -> bool:
     cfg = state.config
     if cfg is None:
         return False
     tool_name = ws.tool if ws is not None else "codex"
     tool_cfg = cfg.get_tool(tool_name)
-    return bool(tool_cfg and tool_cfg.name == "codex" and tool_cfg.control_mode == "app" and tool_cfg.protocol == "ws")
+    if not tool_cfg or tool_cfg.name != "codex" or tool_cfg.control_mode != "app":
+        return False
+    live_transport = str(getattr(tool_cfg, "live_transport", "") or "").strip().lower()
+    return bool(tool_cfg.protocol == "ws" or live_transport == "owner_bridge")
 
 
 def uses_codex_shared_live_transport(state: AppState, ws: Optional[WorkspaceInfo] = None) -> bool:
@@ -267,7 +287,7 @@ async def ensure_codex_tui_host_bound(
     ws: WorkspaceInfo,
     thread_id: str,
 ) -> None:
-    if not is_codex_local_owner_mode(state, ws):
+    if not should_route_codex_messages_to_tui_host(state, ws):
         return
 
     live_status = _read_live_host_status(state)

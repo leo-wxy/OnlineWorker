@@ -145,6 +145,7 @@ export interface ProviderDashboardStatus {
 export interface RecentActivitySummary {
   activeWorkspaceId?: string | null;
   activeWorkspaceName?: string | null;
+  activeWorkspacePath?: string | null;
   activeTool?: string | null;
   activeSessionId?: string | null;
   activeSessionTool?: string | null;

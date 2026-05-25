@@ -404,6 +404,29 @@ export function Dashboard({ onOpenLogs, onOpenSetup, onOpenSessions }: Props) {
     }
   };
 
+  const handleOpenCodexTuiHost = async () => {
+    const activity = dashboardState?.recentActivity;
+    const workspacePath = activity?.activeWorkspacePath?.trim();
+    const threadId = activity?.activeSessionId?.trim();
+    if (!workspacePath || !threadId) {
+      return;
+    }
+    try {
+      await invoke("open_codex_tui_host_terminal", {
+        workspacePath,
+        threadId,
+      });
+    } catch (err) {
+      console.error("Open codex TUI host terminal error:", err);
+      alert(String(err));
+    }
+  };
+
+  const canOpenCodexTuiHost =
+    dashboardState?.recentActivity?.activeSessionTool === "codex" &&
+    Boolean(dashboardState.recentActivity.activeWorkspacePath?.trim()) &&
+    Boolean(dashboardState.recentActivity.activeSessionId?.trim());
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <div className={`ow-page-frame rounded-[28px] px-5 py-5 md:px-6 md:py-6 ${overall.panel}`}>
@@ -513,6 +536,18 @@ export function Dashboard({ onOpenLogs, onOpenSetup, onOpenSessions }: Props) {
             </div>
 
             <div className="space-y-3">
+              {canOpenCodexTuiHost && (
+                <button onClick={() => void handleOpenCodexTuiHost()} className="group flex w-full items-center gap-4 rounded-2xl border border-slate-200/70 bg-slate-50/80 p-4 text-left transition-all hover:border-emerald-200 hover:bg-emerald-50/70">
+                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-emerald-100 text-emerald-600">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 9l3 3-3 3m5-6h3m-3 6h3M5 5h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z"></path></svg>
+                  </div>
+                  <div className="min-w-0">
+                    <h4 className="font-semibold text-gray-900 group-hover:text-emerald-800">{t.dashboard.openCodexTuiHostTitle}</h4>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">{t.dashboard.openCodexTuiHostDescription}</p>
+                  </div>
+                </button>
+              )}
+
               <button onClick={onOpenSessions} className="group flex w-full items-center gap-4 rounded-2xl border border-slate-200/70 bg-slate-50/80 p-4 text-left transition-all hover:border-blue-200 hover:bg-blue-50/70">
                 <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-blue-100 text-blue-600">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"></path></svg>

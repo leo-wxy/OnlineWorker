@@ -310,6 +310,40 @@ async def test_codex_approval_callback_resolves_run_interruption(state, mock_cod
 
 
 @pytest.mark.asyncio
+async def test_codex_tui_host_approval_callback_routes_to_host_instead_of_adapter(state, mock_codex_adapter, monkeypatch):
+    """OnlineWorker 托管的 Codex TUI 审批回调应写回 TUI host，而不是 app-server adapter。"""
+    from bot.handlers import make_callback_handler
+
+    state.set_adapter("codex", mock_codex_adapter)
+    host_mock = AsyncMock(return_value={"ok": True, "accepted": True})
+    monkeypatch.setattr(
+        "bot.handlers.message.send_approval_action_to_codex_tui_host",
+        host_mock,
+    )
+    state.pending_approvals[53] = PendingApproval(
+        request_id="codex-tui-host:tid-1",
+        workspace_id="codex:test",
+        thread_id="tid-1",
+        cmd="ps -axo pid,command",
+        justification="源 CLI 正在请求本地权限审批。",
+        tool_name="shell",
+        tool_type="codex",
+        approval_source="codex_tui_host",
+    )
+
+    ts = int(time.time())
+    update, query = _make_update_with_query(f"exec_allow:53:{ts}")
+    ctx = MagicMock()
+    handler = make_callback_handler(state, GROUP_CHAT_ID)
+    await handler(update, ctx)
+
+    host_mock.assert_awaited_once_with(state, "tid-1", "exec_allow")
+    mock_codex_adapter.reply_server_request.assert_not_awaited()
+    assert 53 not in state.pending_approvals
+    query.edit_message_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_q_ans_single_select(state, mock_cm_adapter):
     """单选回调：点击立即提交"""
     from bot.handlers import make_callback_handler
@@ -719,6 +753,70 @@ async def test_codex_deny_uses_decline_instead_of_cancel(state, mock_codex_adapt
     query.edit_message_text.assert_awaited_once()
     text = query.edit_message_text.await_args.args[0]
     assert "已拒绝" in text
+
+
+@pytest.mark.asyncio
+async def test_codex_legacy_exec_command_approval_uses_review_decision(state, mock_codex_adapter):
+    from bot.handlers import make_callback_handler
+
+    state.set_adapter("codex", mock_codex_adapter)
+    state.pending_approvals[51] = PendingApproval(
+        request_id="req_legacy_exec",
+        workspace_id="codex:test",
+        thread_id="tid_legacy",
+        cmd="/bin/zsh -lc 'ps -axo pid,command'",
+        justification="inspect processes",
+        tool_type="codex",
+        approval_source="execCommandApproval",
+    )
+
+    ts = int(time.time())
+    update, query = _make_update_with_query(f"exec_allow:51:{ts}")
+    ctx = MagicMock()
+    handler = make_callback_handler(state, GROUP_CHAT_ID)
+    await handler(update, ctx)
+
+    mock_codex_adapter.reply_server_request.assert_awaited_once_with(
+        "codex:test",
+        "req_legacy_exec",
+        {"decision": "approved"},
+    )
+    query.edit_message_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_codex_permissions_approval_uses_permission_response(state, mock_codex_adapter):
+    from bot.handlers import make_callback_handler
+
+    state.set_adapter("codex", mock_codex_adapter)
+    state.pending_approvals[52] = PendingApproval(
+        request_id="req_permissions",
+        workspace_id="codex:test",
+        thread_id="tid_permissions",
+        cmd='request permissions: {"fileSystem": {"additionalRoots": ["/Users/wxy/Downloads"]}}',
+        justification="need Downloads write access",
+        amendment_decision={
+            "permissions": {"fileSystem": {"additionalRoots": ["/Users/wxy/Downloads"]}}
+        },
+        tool_type="codex",
+        approval_source="item/permissions/requestApproval",
+    )
+
+    ts = int(time.time())
+    update, query = _make_update_with_query(f"exec_allow:52:{ts}")
+    ctx = MagicMock()
+    handler = make_callback_handler(state, GROUP_CHAT_ID)
+    await handler(update, ctx)
+
+    mock_codex_adapter.reply_server_request.assert_awaited_once_with(
+        "codex:test",
+        "req_permissions",
+        {
+            "permissions": {"fileSystem": {"additionalRoots": ["/Users/wxy/Downloads"]}},
+            "scope": "turn",
+        },
+    )
+    query.edit_message_text.assert_awaited_once()
 
 
 @pytest.mark.asyncio

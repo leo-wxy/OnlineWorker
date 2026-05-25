@@ -3,19 +3,19 @@ from __future__ import annotations
 from typing import Optional
 
 from core.providers.contracts import (
-    ProviderCapabilities,
     ProviderDescriptor,
     ProviderFactsHooks,
     ProviderInteractionHooks,
     ProviderLifecycleHooks,
-    ProviderManifestCapabilities,
     ProviderMessageHooks,
-    ProviderMetadata,
     ProviderRuntimeHooks,
     ProviderSessionEventHooks,
     ProviderThreadHooks,
-    ProviderTransportMetadata,
     ProviderWorkspaceHooks,
+)
+from core.providers.manifest import (
+    metadata_from_builtin_provider_manifest,
+    runtime_capabilities_from_manifest,
 )
 from core.providers.message_runtime import (
     ensure_default_connected,
@@ -54,58 +54,38 @@ def _read_thread_history(thread_id: str, *, limit: int = 10, sessions_dir: Optio
 
 
 def create_provider_descriptor() -> ProviderDescriptor:
+    metadata = metadata_from_builtin_provider_manifest(__file__)
+    capabilities = metadata.capabilities
     return ProviderDescriptor(
         name="claude",
-        metadata=ProviderMetadata(
-            id="claude",
-            runtime_id="claude",
-            label="Claude",
-            description="Anthropic Claude Code CLI sessions",
-            visible=True,
-            managed=False,
-            autostart=False,
-            bin="claude",
-            transport=ProviderTransportMetadata(
-                owner="stdio",
-                live="stdio",
-                type="stdio",
-            ),
-            capabilities=ProviderManifestCapabilities(
-                sessions=True,
-                send=True,
-                approvals=True,
-                questions=True,
-                photos=True,
-                files=True,
-                commands=True,
-                control_modes=("app",),
-            ),
-        ),
+        metadata=metadata,
         facts=ProviderFactsHooks(
             scan_workspaces=_scan_workspaces,
             list_threads=_list_threads,
             read_thread_history=_read_thread_history,
             query_active_thread_ids=_query_active_thread_ids,
         ),
-        capabilities=ProviderCapabilities(
-            control_modes=("app",),
-        ),
+        capabilities=runtime_capabilities_from_manifest(capabilities),
         message_hooks=ProviderMessageHooks(
             ensure_connected=ensure_default_connected,
             prepare_send=runtime.prepare_send,
             send=send_default_message,
-            supports_photo=True,
-            supports_files=True,
+            supports_photo=capabilities.photos,
+            supports_files=capabilities.files,
         ),
         interactions=ProviderInteractionHooks(
             build_approval_reply=runtime.build_approval_reply,
             reply_question=runtime.reply_question_via_adapter,
+            parse_approval_request=runtime.parse_approval_request,
+            parse_question_request=runtime.parse_question_request,
+            server_request_methods=("item/commandExecution/requestApproval",),
         ),
         workspace_hooks=ProviderWorkspaceHooks(
             normalize_server_threads=default_normalize_server_threads,
         ),
         thread_hooks=ProviderThreadHooks(
             resolve_adapter=resolve_default_thread_adapter,
+            new_imported_thread_source=runtime.new_imported_thread_source,
             activate_new_thread=activate_default_new_thread,
             archive_thread=archive_default_thread,
             interrupt_thread=interrupt_default_thread,

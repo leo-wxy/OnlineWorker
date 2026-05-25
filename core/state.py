@@ -32,10 +32,8 @@ class PendingApproval:
     cmd: str                   # 要执行的命令（展示给用户）
     justification: str         # provider 给出的理由
     tool_name: str = ""        # 请求权限的工具名
-    proposed_amendment: list = field(default_factory=list)   # execpolicy_amendment 前缀列表（展示用）
-    # availableDecisions 里完整的 acceptWithExecpolicyAmendment dict
-    # 形如：{"acceptWithExecpolicyAmendment": {"execpolicy_amendment": [...]}}
-    # Allow Always 按钮需要把这整个 dict 作为 decision 发回 daemon
+    proposed_amendment: list = field(default_factory=list)   # provider 建议的持久授权规则（展示用）
+    # provider 原始的“总是允许”决策 payload，Allow Always 按钮原样回传给对应 provider
     amendment_decision: dict = field(default_factory=dict)
     # provider 名称，用于选择正确的 reply 格式
     tool_type: str = ""

@@ -89,7 +89,10 @@ class AppServerProcess:
             return self.ws_url if self.protocol == "ws" else "stdio://"
 
         listen_url = "stdio://" if self.protocol == "stdio" else f"ws://127.0.0.1:{self.port}"
-        cmd = [self.codex_bin, "app-server", "--listen", listen_url]
+        # OnlineWorker owns this app-server instance and forwards approvals from
+        # app-server events. User-level Codex hooks can consume PermissionRequest
+        # before those events exist, so disable hooks only for this managed child.
+        cmd = [self.codex_bin, "app-server", "--disable", "hooks", "--listen", listen_url]
 
         logger.info(f"启动 app-server：{' '.join(cmd)}")
         stderr_target = asyncio.subprocess.PIPE if self.protocol == "stdio" else asyncio.subprocess.STDOUT

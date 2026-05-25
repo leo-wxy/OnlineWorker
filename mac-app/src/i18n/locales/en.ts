@@ -541,6 +541,8 @@ export const enTexts: AppTexts = {
       openSetupDescription: "Adjust Telegram and provider configuration",
       openSessionsTitle: "Open Sessions",
       openSessionsDescription: "Browse codex and Claude sessions",
+      openCodexTuiHostTitle: "Open Codex CLI",
+      openCodexTuiHostDescription: "Open a visible CLI approval path for the active codex session",
       openLogsTitle: "Open Logs",
       openLogsDescription: "Inspect runtime logs and diagnostics output",
     },

@@ -4,9 +4,11 @@ import asyncio
 import json
 import logging
 import os
+import time
 from types import SimpleNamespace
 from typing import Optional
 
+from core.providers.interactions import ProviderApprovalRequest
 from config import get_data_dir
 from core.providers.registry import get_provider
 from core.storage import ThreadInfo, WorkspaceInfo, save_storage
@@ -14,6 +16,7 @@ from core.storage import ThreadInfo, WorkspaceInfo, save_storage
 
 OWNER_BRIDGE_SOCKET_FILENAME = "provider_owner_bridge.sock"
 logger = logging.getLogger(__name__)
+APPROVAL_MIRROR_DEDUPE_SECONDS = 10.0
 
 
 def provider_owner_bridge_socket_path(data_dir: Optional[str] = None) -> Optional[str]:
@@ -95,8 +98,61 @@ def _resolve_workspace_and_thread(state, provider_id: str, thread_id: str, works
     return ws, thread
 
 
+def _resolve_workspace_and_thread_for_mirror(state, provider_id: str, thread_id: str, workspace_dir: str):
+    normalized_thread_id = str(thread_id or "").strip()
+    normalized_workspace_dir = str(workspace_dir or "").strip()
+
+    if normalized_thread_id:
+        found = state.find_thread_by_id_global(normalized_thread_id)
+        if found is not None:
+            return found
+
+    if getattr(state, "storage", None) is not None and normalized_workspace_dir:
+        for ws in state.storage.workspaces.values():
+            if getattr(ws, "tool", "") != provider_id:
+                continue
+            if getattr(ws, "path", "") != normalized_workspace_dir:
+                continue
+            thread = ws.threads.get(normalized_thread_id)
+            if thread is None:
+                thread = _new_thread_info(
+                    normalized_thread_id,
+                    source=_new_thread_source(provider_id),
+                )
+            return ws, thread
+
+    if not normalized_workspace_dir:
+        return None, None
+
+    workspace_id = _workspace_key(provider_id, normalized_workspace_dir)
+    ws = SimpleNamespace(
+        name=os.path.basename(normalized_workspace_dir) or normalized_workspace_dir,
+        path=normalized_workspace_dir,
+        tool=provider_id,
+        topic_id=None,
+        daemon_workspace_id=workspace_id,
+        threads={},
+    )
+    thread = _new_thread_info(
+        normalized_thread_id,
+        source=_new_thread_source(provider_id),
+    )
+    return ws, thread
+
+
 def _new_thread_source(provider_id: str) -> str:
-    return "imported" if provider_id == "claude" else "app"
+    provider = get_provider(provider_id)
+    thread_hooks = getattr(provider, "thread_hooks", None) if provider is not None else None
+    resolver = (
+        getattr(thread_hooks, "new_imported_thread_source", None)
+        if thread_hooks is not None
+        else None
+    )
+    if callable(resolver):
+        source = str(resolver() or "").strip()
+        if source:
+            return source
+    return "app"
 
 
 def _new_thread_info(thread_id: str, *, source: str = "app"):
@@ -161,6 +217,33 @@ def _normalize_provider_turn(turn: dict) -> dict:
         normalized["kind"] = kind
 
     return normalized
+
+
+def _approval_mirror_dedupe_key(
+    provider_id: str,
+    thread_id: str,
+    workspace_dir: str,
+    payload: dict,
+) -> str:
+    command = _approval_mirror_command(payload)
+    return "\x1f".join(
+        [
+            str(provider_id or ""),
+            str(thread_id or ""),
+            str(workspace_dir or ""),
+            str(command or ""),
+        ]
+    )
+
+
+def _approval_mirror_command(payload: dict) -> str:
+    tool_input = payload.get("tool_input")
+    command = payload.get("command")
+    if not command and isinstance(tool_input, dict):
+        command = tool_input.get("command") or tool_input.get("cmd")
+    if command is None:
+        command = payload.get("tool_name") or ""
+    return str(command or "")
 
 
 def _status_lines_for_provider(state, provider_id: str, provider) -> list[str]:
@@ -234,6 +317,8 @@ class ProviderOwnerBridge:
                 response = await self._handle_read_session(request)
             elif request_type == "runtime_status":
                 response = await self._handle_runtime_status(request)
+            elif request_type == "mirror_approval":
+                response = await self._handle_mirror_approval(request)
             else:
                 response = {
                     "ok": False,
@@ -415,6 +500,123 @@ class ProviderOwnerBridge:
             "lines": lines,
         }
 
+    async def _handle_mirror_approval(self, request: dict) -> dict:
+        from bot.events import send_approval_to_telegram
+
+        provider_id = str(request.get("provider_id") or "").strip()
+        thread_id = str(request.get("thread_id") or "").strip()
+        workspace_dir = str(request.get("workspace_dir") or "").strip()
+        payload = request.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+        if not provider_id:
+            return {"ok": False, "error": "缺少 provider_id"}
+
+        ws_info, thread_info = _resolve_workspace_and_thread_for_mirror(
+            self.state,
+            provider_id,
+            thread_id,
+            workspace_dir,
+        )
+        if ws_info is None or thread_info is None:
+            return {"ok": False, "error": "缺少 workspace_dir，无法定位 provider 会话"}
+
+        topic_id = (
+            getattr(thread_info, "topic_id", None)
+            or getattr(ws_info, "topic_id", None)
+            or self.state.get_global_topic_id(provider_id)
+        )
+        if topic_id is None:
+            return {"ok": False, "error": "会话未绑定 TG topic，无法镜像审批"}
+
+        workspace_id = getattr(ws_info, "daemon_workspace_id", None) or _workspace_key(provider_id, ws_info.path)
+        command = _approval_mirror_command(payload)
+        provider = get_provider(provider_id, getattr(self.state, "config", None))
+        interactions = getattr(provider, "interactions", None) if provider is not None else None
+        mirror_policy = (
+            getattr(interactions, "mirror_approval_policy", None)
+            if interactions is not None
+            else None
+        )
+        approval_policy = {}
+        if callable(mirror_policy):
+            approval_policy = await mirror_policy(
+                self.state,
+                request,
+                ws_info,
+                thread_info,
+            )
+        if not isinstance(approval_policy, dict):
+            approval_policy = {}
+
+        hook_is_interactive = bool(approval_policy.get("interactive"))
+        runtime_state = self.state.get_provider_runtime(provider_id)
+        dedupe_key = _approval_mirror_dedupe_key(provider_id, thread_id, workspace_dir, payload)
+        now = time.time()
+        for key, (seen_at, _was_interactive) in list(runtime_state.approval_mirror_seen_at.items()):
+            if now - seen_at > APPROVAL_MIRROR_DEDUPE_SECONDS:
+                runtime_state.approval_mirror_seen_at.pop(key, None)
+
+        previous = runtime_state.approval_mirror_seen_at.get(dedupe_key)
+        if previous is not None:
+            _previous_seen_at, previous_interactive = previous
+            if previous_interactive or not hook_is_interactive:
+                logger.info(
+                    "[provider-hook-mirror] 跳过重复 CLI PermissionRequest provider=%s thread=%s interactive=%s",
+                    provider_id,
+                    thread_id[:12] if thread_id else "?",
+                    hook_is_interactive,
+                )
+                return {"ok": True, "deduped": True}
+
+        fallback_request_id = str(approval_policy.get("request_id") or "provider-cli-hook")
+        approval_source = str(
+            approval_policy.get("approval_source")
+            or request.get("source")
+            or "provider_hook_mirror"
+        )
+        info = ProviderApprovalRequest(
+            request_id=(
+                payload.get("request_id")
+                or payload.get("requestId")
+                or fallback_request_id
+            ),
+            thread_id=thread_id or None,
+            command=command or str(payload.get("tool_name") or ""),
+            reason=str(payload.get("reason") or payload.get("justification") or "源 CLI 正在请求本地权限审批。"),
+            tool_name=str(payload.get("tool_name") or ""),
+            tool_type=provider_id,
+            approval_source=approval_source,
+        )
+
+        bot = getattr(self.state, "telegram_bot", None)
+        group_chat_id = int(getattr(self.state, "group_chat_id", 0) or 0)
+        if bot is None or not group_chat_id:
+            return {"ok": False, "error": "OnlineWorker bot context unavailable"}
+
+        await send_approval_to_telegram(
+            self.state,
+            bot,
+            group_chat_id,
+            topic_id,
+            workspace_id,
+            info,
+            interactive=hook_is_interactive,
+            notice_suffix=str(
+                approval_policy.get("notice_suffix")
+                or request.get("notice_suffix")
+                or "此请求已在源 CLI 中弹出，请在源 CLI 中完成审批。"
+            ),
+        )
+        runtime_state.approval_mirror_seen_at[dedupe_key] = (now, hook_is_interactive)
+        logger.info(
+            "[provider-hook-mirror] 已镜像 CLI PermissionRequest provider=%s thread=%s topic=%s",
+            provider_id,
+            thread_id[:12] if thread_id else "?",
+            topic_id,
+        )
+        return {"ok": True}
+
     async def _handle_send_message(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
         thread_id = str(request.get("thread_id") or "").strip()
@@ -448,6 +650,7 @@ class ProviderOwnerBridge:
 
         workspace_id = getattr(ws_info, "daemon_workspace_id", None) or _workspace_key(provider_id, ws_info.path)
         ws_info.daemon_workspace_id = workspace_id
+
         if hasattr(adapter, "register_workspace_cwd"):
             try:
                 adapter.register_workspace_cwd(workspace_id, ws_info.path)
@@ -457,6 +660,27 @@ class ProviderOwnerBridge:
         message_hooks = getattr(provider, "message_hooks", None)
         if message_hooks is None:
             return {"ok": False, "error": f"Provider '{provider_id}' 不支持发送消息"}
+
+        owner_bridge_router = getattr(message_hooks, "try_route_owner_bridge_send", None)
+        if callable(owner_bridge_router) and not attachments:
+            route_result = await owner_bridge_router(
+                self.state,
+                ws_info,
+                thread_info,
+                text=text,
+            )
+            if route_result:
+                self.state.mark_provider_send_started(provider_id, thread_id)
+                return {
+                    "ok": True,
+                    "accepted": True,
+                    "provider_id": provider_id,
+                    "thread_id": thread_id,
+                    "requested_thread_id": thread_id,
+                    "remapped": False,
+                    "workspace_id": workspace_id,
+                    "transport": str(route_result) if isinstance(route_result, str) else "provider_owner_bridge",
+                }
 
         original_thread_id = thread_info.thread_id
         original_topic_id = getattr(thread_info, "topic_id", None)

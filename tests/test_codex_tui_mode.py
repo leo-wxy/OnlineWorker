@@ -76,7 +76,36 @@ async def test_message_handler_uses_tui_bridge_without_persistent_codex_adapter(
 
 
 @pytest.mark.asyncio
-async def test_message_handler_in_app_ws_mode_uses_connected_codex_adapter():
+async def test_codex_mirror_approval_policy_uses_live_tui_host_without_owned_hook_flag(monkeypatch):
+    from plugins.providers.builtin.codex.python import runtime
+
+    state = AppState(storage=AppStorage())
+    monkeypatch.setattr(
+        runtime,
+        "can_route_cli_approval_to_tui_host",
+        lambda state_obj, thread_id: state_obj is state and thread_id == "tid-cli",
+    )
+
+    policy = await runtime.mirror_approval_policy(
+        state,
+        {
+            "thread_id": "tid-cli",
+            "source": "codex_cli_hook",
+        },
+        SimpleNamespace(),
+        ThreadInfo(thread_id="tid-cli", source="app"),
+    )
+
+    assert policy == {
+        "interactive": True,
+        "request_id": "codex-tui-host:tid-cli",
+        "approval_source": "codex_tui_host",
+        "notice_suffix": "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。",
+    }
+
+
+@pytest.mark.asyncio
+async def test_message_handler_in_app_ws_mode_routes_to_codex_tui_host():
     from bot.handlers.message import make_message_handler
 
     storage = AppStorage()
@@ -133,11 +162,162 @@ async def test_message_handler_in_app_ws_mode_uses_connected_codex_adapter():
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    enqueue_mock.assert_not_awaited()
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
-    adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "你好")
+    enqueue_mock.assert_awaited_once_with(
+        state,
+        ws,
+        ctx.bot,
+        GROUP_CHAT_ID,
+        100,
+        "tid-1",
+        "你好",
+    )
+    adapter.resume_thread.assert_not_awaited()
+    adapter.send_user_message.assert_not_awaited()
     assert ws.threads["tid-1"].preview == "你好"
     save_storage_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_message_handler_in_app_mode_routes_to_live_codex_tui_host_for_same_thread():
+    from bot.handlers.message import make_message_handler
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=50,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
+    storage.workspaces["codex:onlineWorker"] = ws
+
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="stdio",
+                control_mode="app",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    adapter = MagicMock()
+    adapter.connected = True
+    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.send_user_message = AsyncMock(return_value={})
+    state = AppState(storage=storage, config=cfg)
+    state.set_adapter("codex", adapter)
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.text = "你好"
+    update.effective_message.message_thread_id = 100
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+
+    with patch(
+        "plugins.providers.builtin.codex.python.runtime.can_route_cli_approval_to_tui_host",
+        return_value=True,
+    ), patch(
+        "bot.handlers.message.enqueue_codex_tui_message",
+        new=AsyncMock(return_value=0),
+    ) as enqueue_mock, patch(
+        "bot.handlers.message.save_storage",
+    ) as save_storage_mock:
+        handler = make_message_handler(state, GROUP_CHAT_ID)
+        await handler(update, ctx)
+
+    enqueue_mock.assert_awaited_once_with(
+        state,
+        ws,
+        ctx.bot,
+        GROUP_CHAT_ID,
+        100,
+        "tid-1",
+        "你好",
+    )
+    adapter.resume_thread.assert_not_awaited()
+    adapter.send_user_message.assert_not_awaited()
+    assert ws.threads["tid-1"].preview == "你好"
+    save_storage_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_ensure_codex_tui_host_bound_starts_host_in_app_ws_mode(tmp_path, monkeypatch):
+    from plugins.providers.builtin.codex.python import tui_bridge
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path=str(tmp_path / "repo"),
+        tool="codex",
+        topic_id=50,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
+    storage.workspaces["codex:onlineWorker"] = ws
+
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        data_dir=str(tmp_path / "data"),
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="ws",
+                app_server_port=4722,
+                control_mode="app",
+            )
+        ],
+    )
+    state = AppState(storage=storage, config=cfg)
+
+    started = {}
+
+    class FakeCodexTuiHost:
+        def __init__(self, *, data_dir, thread_id, cwd, codex_bin):
+            started.update(
+                data_dir=data_dir,
+                thread_id=thread_id,
+                cwd=cwd,
+                codex_bin=codex_bin,
+            )
+            self.thread_id = thread_id
+            self.cwd = cwd
+            self.is_running = True
+
+        async def start(self):
+            started["start_called"] = True
+
+    monkeypatch.setattr(tui_bridge, "CodexTuiHost", FakeCodexTuiHost)
+    monkeypatch.setattr(tui_bridge, "_read_live_host_status", lambda state_obj: None)
+
+    await tui_bridge.ensure_codex_tui_host_bound(state, ws, "tid-1")
+
+    assert started == {
+        "data_dir": str(tmp_path / "data"),
+        "thread_id": "tid-1",
+        "cwd": str(tmp_path / "repo"),
+        "codex_bin": "codex",
+        "start_called": True,
+    }
+    host = codex_state.get_tui_host(state)
+    assert host is not None
+    assert host.thread_id == "tid-1"
 
 
 @pytest.mark.asyncio
@@ -167,7 +347,7 @@ async def test_send_default_message_marks_codex_send_started():
 
 
 @pytest.mark.asyncio
-async def test_message_handler_in_app_ws_mode_falls_back_when_codex_thread_not_materialized():
+async def test_message_handler_in_app_ws_mode_uses_tui_host_without_materialized_adapter_thread():
     from bot.handlers.message import make_message_handler
 
     storage = AppStorage()
@@ -228,9 +408,17 @@ async def test_message_handler_in_app_ws_mode_falls_back_when_codex_thread_not_m
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    enqueue_mock.assert_not_awaited()
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
-    adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "你好")
+    enqueue_mock.assert_awaited_once_with(
+        state,
+        ws,
+        ctx.bot,
+        GROUP_CHAT_ID,
+        100,
+        "tid-1",
+        "你好",
+    )
+    adapter.resume_thread.assert_not_awaited()
+    adapter.send_user_message.assert_not_awaited()
     assert ws.threads["tid-1"].preview == "你好"
     save_storage_mock.assert_called_once()
 
@@ -315,12 +503,23 @@ async def test_message_handler_in_app_ws_mode_waits_for_reconnected_codex_adapte
 
     await reconnect_task
 
-    enqueue_mock.assert_not_awaited()
+    enqueue_mock.assert_awaited_once_with(
+        state,
+        ws,
+        ctx.bot,
+        GROUP_CHAT_ID,
+        100,
+        "tid-1",
+        "你好",
+    )
     disconnected_adapter.resume_thread.assert_not_awaited()
     disconnected_adapter.send_user_message.assert_not_awaited()
-    reconnected_adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
-    reconnected_adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "你好")
-    ctx.bot.send_message.assert_not_awaited()
+    reconnected_adapter.resume_thread.assert_not_awaited()
+    reconnected_adapter.send_user_message.assert_not_awaited()
+    ack_kwargs = ctx.bot.send_message.await_args.kwargs
+    assert ack_kwargs["chat_id"] == GROUP_CHAT_ID
+    assert ack_kwargs["message_thread_id"] == 100
+    assert "处理中" in ack_kwargs["text"]
     assert ws.threads["tid-1"].preview == "你好"
     save_storage_mock.assert_called_once()
 
@@ -392,14 +591,22 @@ async def test_message_handler_in_app_ws_mode_reports_unconnected_after_reconnec
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    enqueue_mock.assert_not_awaited()
+    enqueue_mock.assert_awaited_once_with(
+        state,
+        ws,
+        ctx.bot,
+        GROUP_CHAT_ID,
+        100,
+        "tid-1",
+        "你好",
+    )
     disconnected_adapter.resume_thread.assert_not_awaited()
     disconnected_adapter.send_user_message.assert_not_awaited()
-    save_storage_mock.assert_not_called()
-    kwargs = ctx.bot.send_message.call_args.kwargs
-    assert kwargs["chat_id"] == GROUP_CHAT_ID
-    assert kwargs["message_thread_id"] == 100
-    assert kwargs["text"] == "❌ 发送失败：codex 未连接"
+    save_storage_mock.assert_called_once()
+    ack_kwargs = ctx.bot.send_message.await_args.kwargs
+    assert ack_kwargs["chat_id"] == GROUP_CHAT_ID
+    assert ack_kwargs["message_thread_id"] == 100
+    assert "处理中" in ack_kwargs["text"]
 
 
 @pytest.mark.asyncio
@@ -467,17 +674,24 @@ async def test_message_handler_in_app_ws_mode_interrupts_active_turn_before_send
     with patch(
         "bot.handlers.message.enqueue_codex_tui_message",
         new=AsyncMock(return_value=0),
-    ), patch(
+    ) as enqueue_mock, patch(
         "bot.handlers.message.save_storage",
     ) as save_storage_mock:
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    assert adapter.mock_calls[:3] == [
-        call.resume_thread("codex:onlineWorker", "tid-1"),
-        call.turn_interrupt("codex:onlineWorker", "tid-1", "turn-1"),
-        call.send_user_message("codex:onlineWorker", "tid-1", "你好"),
-    ]
+    enqueue_mock.assert_awaited_once_with(
+        state,
+        ws,
+        ctx.bot,
+        GROUP_CHAT_ID,
+        100,
+        "tid-1",
+        "你好",
+    )
+    adapter.resume_thread.assert_not_awaited()
+    adapter.turn_interrupt.assert_not_awaited()
+    adapter.send_user_message.assert_not_awaited()
     save_storage_mock.assert_called_once()
 
 
@@ -539,12 +753,21 @@ async def test_message_handler_in_app_ws_mode_continues_when_interrupt_fails():
     with patch(
         "bot.handlers.message.enqueue_codex_tui_message",
         new=AsyncMock(return_value=0),
-    ):
+    ) as enqueue_mock:
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    adapter.turn_interrupt.assert_awaited_once_with("codex:onlineWorker", "tid-1", "turn-1")
-    adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "你好")
+    enqueue_mock.assert_awaited_once_with(
+        state,
+        ws,
+        ctx.bot,
+        GROUP_CHAT_ID,
+        100,
+        "tid-1",
+        "你好",
+    )
+    adapter.turn_interrupt.assert_not_awaited()
+    adapter.send_user_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2207,7 +2430,7 @@ async def test_send_message_via_tui_bridge_uses_local_tui_host_client():
 
 
 @pytest.mark.asyncio
-async def test_send_message_via_tui_host_does_not_auto_start_managed_host_for_app_mode(tmp_path):
+async def test_send_message_via_tui_host_auto_starts_managed_host_for_app_mode(tmp_path):
     from plugins.providers.builtin.codex.python.tui_bridge import send_message_via_tui_host
 
     storage = AppStorage()
@@ -2259,11 +2482,145 @@ async def test_send_message_via_tui_host_does_not_auto_start_managed_host_for_ap
         result = await send_message_via_tui_host(state, ws, "tid-1", "你好")
 
     assert result == {"ok": True}
-    host_cls.assert_not_called()
-    host.start.assert_not_awaited()
-    assert codex_state.get_tui_host(state) is None
+    host_cls.assert_called_once_with(
+        data_dir=str(tmp_path),
+        thread_id="tid-1",
+        cwd=ws.path,
+        codex_bin="codex",
+    )
+    host.start.assert_awaited_once()
+    assert codex_state.get_tui_host(state) is host
     assert codex_state.get_runtime(state).thread_pending_send_started_at["tid-1"] > 0
     client_mock.assert_awaited_once_with(state, ws, "tid-1", "你好", topic_id=100)
+
+
+@pytest.mark.asyncio
+async def test_try_route_owner_bridge_send_auto_starts_tui_host_for_app_ws_mode(tmp_path, monkeypatch):
+    from plugins.providers.builtin.codex.python import runtime
+    from plugins.providers.builtin.codex.python import tui_bridge
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path=str(tmp_path / "repo"),
+        tool="codex",
+        topic_id=50,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    thread = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
+    ws.threads["tid-1"] = thread
+    storage.workspaces["codex:onlineWorker"] = ws
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        data_dir=str(tmp_path / "data"),
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="ws",
+                app_server_port=4722,
+                control_mode="app",
+            )
+        ],
+    )
+    state = AppState(storage=storage, config=cfg)
+
+    started = {}
+
+    class FakeCodexTuiHost:
+        def __init__(self, *, data_dir, thread_id, cwd, codex_bin):
+            started.update(data_dir=data_dir, thread_id=thread_id, cwd=cwd, codex_bin=codex_bin)
+            self.thread_id = thread_id
+            self.cwd = cwd
+            self.is_running = True
+
+        async def start(self):
+            started["start_called"] = True
+
+    send_mock = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(tui_bridge, "CodexTuiHost", FakeCodexTuiHost)
+    monkeypatch.setattr(tui_bridge, "_read_live_host_status", lambda state_obj: None)
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_host_client.send_message_to_codex_tui_host",
+        send_mock,
+    )
+
+    result = await runtime.try_route_owner_bridge_send(state, ws, thread, text="你好")
+
+    assert result == "codex_tui_host"
+    assert started["thread_id"] == "tid-1"
+    assert started["start_called"] is True
+    send_mock.assert_awaited_once_with(state, ws, "tid-1", "你好", topic_id=100)
+
+
+@pytest.mark.asyncio
+async def test_try_route_owner_bridge_send_auto_starts_tui_host_for_app_stdio_owner_bridge_mode(
+    tmp_path,
+    monkeypatch,
+):
+    from plugins.providers.builtin.codex.python import runtime
+    from plugins.providers.builtin.codex.python import tui_bridge
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path=str(tmp_path / "repo"),
+        tool="codex",
+        topic_id=50,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    thread = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
+    ws.threads["tid-1"] = thread
+    storage.workspaces["codex:onlineWorker"] = ws
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        data_dir=str(tmp_path / "data"),
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="stdio",
+                live_transport="owner_bridge",
+                control_mode="app",
+            )
+        ],
+    )
+    state = AppState(storage=storage, config=cfg)
+
+    started = {}
+
+    class FakeCodexTuiHost:
+        def __init__(self, *, data_dir, thread_id, cwd, codex_bin):
+            started.update(data_dir=data_dir, thread_id=thread_id, cwd=cwd, codex_bin=codex_bin)
+            self.thread_id = thread_id
+            self.cwd = cwd
+            self.is_running = True
+
+        async def start(self):
+            started["start_called"] = True
+
+    send_mock = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(tui_bridge, "CodexTuiHost", FakeCodexTuiHost)
+    monkeypatch.setattr(tui_bridge, "_read_live_host_status", lambda state_obj: None)
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_host_client.send_message_to_codex_tui_host",
+        send_mock,
+    )
+
+    result = await runtime.try_route_owner_bridge_send(state, ws, thread, text="你好")
+
+    assert result == "codex_tui_host"
+    assert started["thread_id"] == "tid-1"
+    assert started["start_called"] is True
+    send_mock.assert_awaited_once_with(state, ws, "tid-1", "你好", topic_id=100)
 
 
 @pytest.mark.asyncio

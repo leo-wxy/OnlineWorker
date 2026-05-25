@@ -85,6 +85,7 @@ async def test_codex_owner_bridge_falls_back_to_owner_rpc_without_workspace(tmp_
             {
                 "threadId": "tid-2",
                 "input": [{"type": "text", "text": "hello fallback"}],
+                "approvalsReviewer": "user",
             },
         ),
     ]
@@ -264,6 +265,7 @@ async def test_codex_owner_bridge_remaps_external_thread_when_send_hits_unmateri
 
 
 @pytest.mark.asyncio
+@pytest.mark.allow_missing_data_dir
 async def test_ensure_codex_owner_bridge_started_skips_when_data_dir_is_missing():
     state = AppState()
     state.set_adapter("codex", _FakeAdapter())

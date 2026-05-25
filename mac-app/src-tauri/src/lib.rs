@@ -40,7 +40,7 @@ use commands::service::{
     BotState, ServiceStatus,
 };
 use commands::telegram::{test_bot_permissions, test_bot_token, test_group_access};
-use commands::terminal::open_terminal;
+use commands::terminal::{open_codex_tui_host_terminal, open_terminal};
 use menubar::setup_menubar;
 
 #[derive(Default)]
@@ -266,6 +266,7 @@ pub fn run() {
             list_env_keys,
             reveal_env_field,
             open_terminal,
+            open_codex_tui_host_terminal,
             list_codex_threads,
             read_codex_thread,
             read_codex_thread_state,

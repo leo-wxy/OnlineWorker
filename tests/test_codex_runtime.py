@@ -10,21 +10,15 @@ from plugins.providers.builtin.codex.python import runtime as codex_runtime
 
 
 @pytest.mark.asyncio
-async def test_start_runtime_cleans_existing_onlineworker_permission_hook(monkeypatch, tmp_path):
-    hooks_path = tmp_path / "hooks.json"
-    hooks_path.write_text(
-        '{"hooks":{"PermissionRequest":[{"matcher":"","hooks":[{"type":"command","command":"onlineworker-bot --codex-hook-bridge","timeout":86400}]}]}}',
-        encoding="utf-8",
+async def test_setup_connection_does_not_start_codex_hook_bridge(tmp_path, monkeypatch):
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="codex:onlineWorker",
     )
-    monkeypatch.setattr(
-        codex_runtime,
-        "cleanup_onlineworker_codex_permission_hooks",
-        MagicMock(return_value=True),
-    )
-    monkeypatch.setattr(codex_runtime, "resolve_connection_target", AsyncMock(return_value="ws://127.0.0.1:4722"))
-    monkeypatch.setattr(codex_runtime, "connect_adapter_with_retry", AsyncMock())
-    monkeypatch.setattr(codex_runtime, "clear_stale_host_artifacts", MagicMock(return_value=False))
-
+    storage.workspaces["codex:onlineWorker"] = ws
     cfg = Config(
         telegram_token="token",
         allowed_user_id=1,
@@ -41,15 +35,30 @@ async def test_start_runtime_cleans_existing_onlineworker_permission_hook(monkey
         ],
         data_dir=str(tmp_path),
     )
+    state = AppState(config=cfg, storage=storage)
     manager = MagicMock()
-    manager.state = AppState(config=cfg)
+    manager.state = state
+    manager.storage = storage
     manager.gid = 2
-    manager.get_tui_sync_task.return_value = None
-    manager.get_tui_mirror_task.return_value = None
 
-    await codex_runtime.start_runtime(manager, MagicMock(), cfg.tools[0])
+    adapter = MagicMock()
+    adapter.configure_hook_bridge = MagicMock()
+    adapter.start_hook_bridge = AsyncMock()
+    adapter.on_event = MagicMock()
+    adapter.on_server_request = MagicMock()
+    adapter.register_workspace_cwd = MagicMock()
+    adapter._thread_workspace_map = {}
 
-    codex_runtime.cleanup_onlineworker_codex_permission_hooks.assert_called_once_with()
+    monkeypatch.setattr(codex_runtime, "prime_thread_mappings", AsyncMock())
+
+    await codex_runtime.setup_connection(manager, MagicMock(), adapter)
+
+    adapter.configure_hook_bridge.assert_not_called()
+    adapter.start_hook_bridge.assert_not_awaited()
+    adapter.register_workspace_cwd.assert_called_once_with(
+        "codex:onlineWorker",
+        "/Users/example/Projects/onlineWorker",
+    )
 
 
 @pytest.mark.asyncio

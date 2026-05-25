@@ -333,6 +333,8 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
 
 
 def _load_builtin_provider_plugin_blueprint(name: str) -> dict[str, Any] | None:
+    from core.providers.manifest import metadata_from_provider_manifest
+
     provider_id = str(name or "").strip()
     if not provider_id:
         return None
@@ -346,49 +348,43 @@ def _load_builtin_provider_plugin_blueprint(name: str) -> dict[str, Any] | None:
     if not isinstance(plugin_data, dict):
         return None
 
+    metadata = metadata_from_provider_manifest(plugin_data)
     provider_raw = plugin_data.get("provider")
     if not isinstance(provider_raw, dict):
         provider_raw = {}
-
-    capabilities = provider_raw.get("capabilities") or plugin_data.get("capabilities") or {}
-    if not isinstance(capabilities, dict):
-        capabilities = {}
-    process = provider_raw.get("process") or plugin_data.get("process") or {}
-    if not isinstance(process, dict):
-        process = {}
-    health = provider_raw.get("health") or plugin_data.get("health") or {}
-    if not isinstance(health, dict):
-        health = {}
     auth = provider_raw.get("auth") or plugin_data.get("auth") or {}
     if not isinstance(auth, dict):
         auth = {}
 
-    transport = provider_raw.get("transport") or plugin_data.get("transport") or {}
-    if not isinstance(transport, dict):
-        transport = {}
-
-    bin_value = provider_raw.get("bin") or plugin_data.get("bin") or provider_id
     return {
-        "visible": bool(provider_raw.get("visible", plugin_data.get("default_visible", True))),
-        "runtime_id": str(provider_raw.get("runtime_id") or plugin_data.get("runtime_id") or provider_id),
-        "label": str(provider_raw.get("label") or plugin_data.get("label") or provider_id),
-        "description": str(provider_raw.get("description") or plugin_data.get("description") or ""),
-        "managed": bool(provider_raw.get("managed", True)),
-        "autostart": bool(provider_raw.get("autostart", True)),
-        "codex_bin": str(bin_value),
-        "protocol": str(
-            provider_raw.get("owner_transport")
-            or plugin_data.get("owner_transport")
-            or transport.get("owner")
-            or transport.get("type")
-            or "ws"
-        ),
-        "app_server_port": int(transport.get("app_server_port") or provider_raw.get("app_server_port") or 0),
-        "app_server_url": str(transport.get("app_server_url") or provider_raw.get("app_server_url") or ""),
+        "visible": metadata.visible,
+        "runtime_id": metadata.runtime_id,
+        "label": metadata.label,
+        "description": metadata.description,
+        "managed": metadata.managed,
+        "autostart": metadata.autostart,
+        "codex_bin": metadata.bin,
+        "protocol": metadata.transport.owner,
+        "app_server_port": metadata.transport.app_server_port,
+        "app_server_url": metadata.transport.app_server_url,
         "control_mode": str(provider_raw.get("control_mode") or plugin_data.get("control_mode") or "app"),
-        "capabilities": capabilities,
-        "process": process,
-        "health": health,
+        "capabilities": {
+            "sessions": metadata.capabilities.sessions,
+            "send": metadata.capabilities.send,
+            "approvals": metadata.capabilities.approvals,
+            "questions": metadata.capabilities.questions,
+            "photos": metadata.capabilities.photos,
+            "files": metadata.capabilities.files,
+            "commands": metadata.capabilities.commands,
+            "command_wrappers": list(metadata.capabilities.command_wrappers),
+            "control_modes": list(metadata.capabilities.control_modes),
+        },
+        "process": {
+            "cleanup_matchers": list(metadata.process.cleanup_matchers),
+        },
+        "health": {
+            "url": metadata.health.url,
+        } if metadata.health.url else {},
         "auth": auth,
     }
 

@@ -409,6 +409,8 @@ export interface AppTexts {
     openSetupDescription: string;
     openSessionsTitle: string;
     openSessionsDescription: string;
+    openCodexTuiHostTitle: string;
+    openCodexTuiHostDescription: string;
     openLogsTitle: string;
     openLogsDescription: string;
   };

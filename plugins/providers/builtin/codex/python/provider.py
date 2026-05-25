@@ -4,24 +4,24 @@ import os
 from typing import Optional
 
 from core.providers.contracts import (
-    ProviderCapabilities,
     ProviderCommandHooks,
     ProviderDescriptor,
     ProviderFactsHooks,
     ProviderInteractionHooks,
     ProviderLifecycleHooks,
-    ProviderManifestCapabilities,
     ProviderMessageHooks,
-    ProviderMetadata,
-    ProviderProcessMetadata,
     ProviderRuntimeHooks,
     ProviderSessionEventHooks,
     ProviderThreadHooks,
-    ProviderTransportMetadata,
     ProviderWorkspaceHooks,
+)
+from core.providers.manifest import (
+    metadata_from_builtin_provider_manifest,
+    runtime_capabilities_from_manifest,
 )
 from plugins.providers.builtin.codex.python import runtime
 from plugins.providers.builtin.codex.python import storage_runtime
+from plugins.providers.builtin.codex.python import interactions
 from plugins.providers.builtin.codex.python.semantic_events import parse_codex_app_server_semantic_event
 
 
@@ -51,36 +51,11 @@ def _read_thread_history(thread_id: str, *, limit: int = 10, sessions_dir: Optio
 
 
 def create_provider_descriptor() -> ProviderDescriptor:
+    metadata = metadata_from_builtin_provider_manifest(__file__)
+    capabilities = metadata.capabilities
     return ProviderDescriptor(
         name="codex",
-        metadata=ProviderMetadata(
-            id="codex",
-            runtime_id="codex",
-            label="Codex",
-            description="OpenAI Codex CLI sessions",
-            visible=True,
-            managed=True,
-            autostart=True,
-            bin="codex",
-            transport=ProviderTransportMetadata(
-                owner="stdio",
-                live="owner_bridge",
-                type="stdio",
-            ),
-            capabilities=ProviderManifestCapabilities(
-                sessions=True,
-                send=True,
-                approvals=True,
-                photos=True,
-                files=True,
-                commands=True,
-                command_wrappers=("model", "review"),
-                control_modes=("app", "tui", "hybrid"),
-            ),
-            process=ProviderProcessMetadata(
-                cleanup_matchers=("codex.*app-server", "codex-aar"),
-            ),
-        ),
+        metadata=metadata,
         facts=ProviderFactsHooks(
             scan_workspaces=_scan_workspaces,
             list_threads=_list_threads,
@@ -88,20 +63,22 @@ def create_provider_descriptor() -> ProviderDescriptor:
             query_active_thread_ids=_query_active_thread_ids,
             list_subagent_thread_ids=_list_subagent_thread_ids,
         ),
-        capabilities=ProviderCapabilities(
-            command_wrappers=("model", "review"),
-            control_modes=("app", "tui", "hybrid"),
-        ),
+        capabilities=runtime_capabilities_from_manifest(capabilities),
         message_hooks=ProviderMessageHooks(
             ensure_connected=runtime.ensure_connected,
             prepare_send=runtime.prepare_send,
             send=runtime.send_message,
             handle_local_owner=runtime.handle_local_owner,
-            supports_photo=True,
-            supports_files=True,
+            try_route_owner_bridge_send=runtime.try_route_owner_bridge_send,
+            supports_photo=capabilities.photos,
+            supports_files=capabilities.files,
         ),
         interactions=ProviderInteractionHooks(
             build_approval_reply=runtime.build_approval_reply,
+            mirror_approval_policy=runtime.mirror_approval_policy,
+            parse_approval_request=interactions.parse_approval_request,
+            parse_question_request=interactions.parse_question_request,
+            server_request_methods=interactions.SERVER_REQUEST_METHODS,
         ),
         command_hooks=ProviderCommandHooks(
             build_thread_command_wrapper=runtime.build_model_wrapper,

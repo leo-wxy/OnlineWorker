@@ -532,6 +532,8 @@ export const zhTexts: AppTexts = {
       openSetupDescription: "调整 Telegram 与 provider 配置",
       openSessionsTitle: "打开 Sessions",
       openSessionsDescription: "查看 codex / Claude 会话",
+      openCodexTuiHostTitle: "打开 Codex CLI",
+      openCodexTuiHostDescription: "在当前 codex 会话中打开可见 CLI 审批链路",
       openLogsTitle: "打开 Logs",
       openLogsDescription: "查看运行日志与诊断输出",
     },

@@ -37,6 +37,9 @@ See also:
 
 - Mac app control for setup, dashboard, sessions, commands, and logs.
 - Telegram entry point for remote task submission and final updates.
+- Telegram mirrors provider approvals and questions. For Codex, approval
+  requests can be handled either from the local Codex TUI host or from the
+  Telegram buttons when the current thread is bound to the host.
 - Plugin-based notification channels, configurable from the first-class `Notifications` page.
 - Provider-driven configuration for supported CLI backends.
 - Session browsing and message sending from the app.
@@ -129,6 +132,22 @@ OnlineWorker does not read or write `ANTHROPIC_*` proxy, model, or key settings.
 
 Notification channels are exposed as a first-class `Notifications` tab. Channel switches are stored under `notifications.channels.<channel>.enabled`; plugin field values are stored under `notifications.channels.<channel>.config`.
 
+## Provider Interactions
+
+OnlineWorker routes provider-specific approval and question prompts through a
+shared interaction contract:
+
+- `core` owns the common `ProviderApprovalRequest` and `ProviderQuestionRequest`
+  structures.
+- Provider plugins parse their native events, decide whether a prompt is
+  actionable, and handle the provider-specific reply path.
+- Telegram renders the shared interaction shape and records pending callbacks.
+
+For Codex, the packaged app can bind the active session to a managed Codex TUI
+host. When that host is online, approval prompts are mirrored to Telegram with
+action buttons, and Telegram actions are written back to the same TUI host. The
+local Codex TUI remains usable for the same approval flow.
+
 ## Development
 
 ### Run the bot from source
@@ -177,6 +196,20 @@ bash scripts/build.sh
 This build path packages the base app from this repository. Additional provider packages can be mounted at runtime through `ONLINEWORKER_PROVIDER_OVERLAY`, notification packages can be mounted through `ONLINEWORKER_NOTIFICATION_OVERLAY`, and provider packages can be staged at build time through `ONLINEWORKER_PLUGIN_SOURCE_DIRS` before calling the same `scripts/build.sh`.
 
 Pushing a version tag such as `1.2.1` also builds this same Apple Silicon DMG automatically through `.github/workflows/release-dmg.yml`. The workflow uploads the DMG as a workflow artifact, creates the matching GitHub Release if needed, and then attaches the DMG to that Release asset list.
+
+After a local DMG is already built, this helper installs it into
+`/Applications`, restarts the packaged app, and verifies that both app and bot
+processes are running:
+
+```bash
+bash scripts/install-current-dmg.sh mac-app/src-tauri/target/release/bundle/dmg/OnlineWorker_1.2.1_aarch64.dmg
+```
+
+To restart the currently installed app without reinstalling a DMG:
+
+```bash
+bash scripts/restart-installed-app.sh
+```
 
 ### Intel DMG
 

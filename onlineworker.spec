@@ -11,7 +11,10 @@ a = Analysis(
     ['main.py'],
     pathex=['.'],
     binaries=[],
-    datas=[],  # No data files needed — config is external via --data-dir
+    datas=[
+        ('plugins/providers/builtin/claude/plugin.yaml', 'plugins/providers/builtin/claude'),
+        ('plugins/providers/builtin/codex/plugin.yaml', 'plugins/providers/builtin/codex'),
+    ],
     hiddenimports=[
         'yaml',
         'dotenv',

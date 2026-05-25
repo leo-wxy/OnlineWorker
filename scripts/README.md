@@ -9,6 +9,7 @@
 - 如果你维护额外 provider 包，可在本地包装脚本里设置 `ONLINEWORKER_PLUGIN_SOURCE_DIRS=...` 后复用同一套 `build.sh`。
 - `scripts/` 目录只保留当前仓库可复用的基础构建与诊断脚本，不维护仓库外部的包装逻辑。
 - `install-current-dmg.sh [path/to/OnlineWorker.dmg]`：不重新打包，直接安装最新或指定 DMG 到 `/Applications/OnlineWorker.app` 并重启。适合“DMG 已经打好，只要覆盖验证”的快路径；不替代发布前完整安装包验证链。
+- `restart-installed-app.sh [/Applications/OnlineWorker.app]`：只重启已安装的 OnlineWorker App。脚本会把 stop、等待退出、open、等待 app/bot 新进程出现作为一个闭环执行，避免只杀进程没有拉起。
 
 ## Verification shortcuts
 

@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import logging
 
+from core.providers.interactions import (
+    ProviderApprovalRequest,
+    parse_standard_question_request,
+)
 from core.providers.interaction_runtime import reply_question_via_adapter
 from core.providers.lifecycle_runtime import (
     _save_storage_via_lifecycle,
@@ -22,10 +26,57 @@ from plugins.providers.builtin.claude.python.storage_runtime import infer_claude
 logger = logging.getLogger(__name__)
 
 
+def _list_value(value) -> list:
+    return value if isinstance(value, list) else []
+
+
+def parse_approval_request(
+    payload: dict | None,
+    *,
+    request_id=None,
+    provider_id: str = "claude",
+    default_thread_id: str | None = None,
+    approval_source: str = "app_server",
+) -> ProviderApprovalRequest:
+    data = payload if isinstance(payload, dict) else {}
+    thread_id = str(data.get("threadId") or data.get("thread_id") or default_thread_id or "").strip()
+    return ProviderApprovalRequest(
+        request_id=data.get("request_id") or data.get("requestId") or request_id,
+        thread_id=thread_id or None,
+        command=str(data.get("command") or ""),
+        reason=str(data.get("reason") or data.get("justification") or ""),
+        tool_name=str(data.get("toolName") or data.get("tool_name") or "").strip(),
+        proposed_amendment=_list_value(data.get("proposedExecpolicyAmendment")),
+        amendment_decision={},
+        tool_type=str(data.get("_provider") or provider_id or "").strip(),
+        always_patterns=_list_value(data.get("_always_patterns")),
+        approval_source=approval_source,
+    )
+
+
+def parse_question_request(
+    payload: dict | None,
+    *,
+    provider_id: str = "claude",
+    default_thread_id: str | None = None,
+    question_source: str = "app_server",
+):
+    return parse_standard_question_request(
+        payload,
+        provider_id=provider_id,
+        default_thread_id=default_thread_id,
+        question_source=question_source,
+    )
+
+
 def should_materialize_unbound_thread_topic(state, ws_info, thread_info) -> bool:
     # App/Session Tab-created Claude sessions stay inside the desktop app until
     # a TG topic is explicitly bound.
     return getattr(thread_info, "topic_id", None) is not None
+
+
+def new_imported_thread_source() -> str:
+    return "imported"
 
 
 def build_approval_reply(approval, action: str) -> tuple[str, dict]:

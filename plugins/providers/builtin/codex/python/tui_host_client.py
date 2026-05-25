@@ -3,6 +3,7 @@ from typing import Optional
 
 from config import get_data_dir
 from plugins.providers.builtin.codex.python.tui_host_protocol import (
+    build_approval_action_request,
     build_send_message_request,
     decode_host_response,
     encode_host_request,
@@ -55,4 +56,45 @@ async def send_message_to_codex_tui_host(
     response = decode_host_response(raw)
     if not response.get("ok"):
         raise RuntimeError(response.get("error") or "codex TUI host 请求失败")
+    return response
+
+
+async def send_approval_action_to_codex_tui_host(
+    state: AppState,
+    thread_id: str,
+    action: str,
+    *,
+    timeout_seconds: float = 5.0,
+) -> dict:
+    data_dir = state.config.data_dir if state.config and state.config.data_dir else get_data_dir()
+    status = read_host_status(data_dir)
+    if not status:
+        raise RuntimeError("未检测到 codex TUI host，无法回复 CLI 审批")
+
+    active_thread_id = status.get("active_thread_id")
+    if active_thread_id != thread_id:
+        raise RuntimeError(
+            f"当前 TUI 绑定 thread={active_thread_id or '<none>'}，无法回复 thread={thread_id}"
+        )
+
+    socket_path = status.get("socket_path") or host_socket_path(data_dir)
+    if not socket_path:
+        raise RuntimeError("缺少 codex TUI host socket 路径")
+
+    request = build_approval_action_request(thread_id=thread_id, action=action)
+    reader, writer = await asyncio.wait_for(
+        asyncio.open_unix_connection(socket_path),
+        timeout=timeout_seconds,
+    )
+    try:
+        writer.write(encode_host_request(request))
+        await writer.drain()
+        raw = await asyncio.wait_for(reader.readline(), timeout=timeout_seconds)
+    finally:
+        writer.close()
+        await writer.wait_closed()
+
+    response = decode_host_response(raw)
+    if not response.get("ok"):
+        raise RuntimeError(response.get("error") or "codex TUI host 审批请求失败")
     return response

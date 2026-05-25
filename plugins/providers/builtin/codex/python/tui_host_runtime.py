@@ -10,6 +10,7 @@ from typing import Optional
 
 from core.providers.facts import query_provider_active_thread_ids
 from plugins.providers.builtin.codex.python.tui_host_protocol import (
+    build_approval_action_request,
     build_send_message_request,
     host_socket_path,
     write_host_status,
@@ -42,10 +43,63 @@ def build_codex_resume_command(
     return cmd
 
 
+def _config_override_value(args: list[str], index: int) -> str:
+    current = args[index]
+    if current.startswith("--config="):
+        return current.split("=", 1)[1]
+    if current.startswith("-c") and current != "-c":
+        return current[2:]
+    if index + 1 < len(args):
+        return args[index + 1]
+    return ""
+
+
+def _has_approvals_reviewer_override(args: list[str]) -> bool:
+    for index, arg in enumerate(args):
+        if arg == "--config" or arg == "-c" or arg.startswith("--config=") or (
+            arg.startswith("-c") and arg != "-c"
+        ):
+            if _config_override_value(args, index).strip().startswith("approvals_reviewer"):
+                return True
+    return False
+
+
+def ensure_codex_tui_host_extra_args(extra_args: Optional[list[str]] = None) -> list[str]:
+    args = list(extra_args or [])
+    if not _has_approvals_reviewer_override(args):
+        args.extend(["-c", 'approvals_reviewer="user"'])
+    return args
+
+
+def build_codex_tui_child_env(
+    *,
+    base_env: Optional[dict[str, str]] = None,
+    cwd: str,
+    thread_id: str,
+) -> dict[str, str]:
+    env = dict(base_env if base_env is not None else os.environ)
+    env["PWD"] = cwd
+    env["CODEX_THREAD_ID"] = thread_id
+    env["ONLINEWORKER_CODEX_TUI_HOST"] = "1"
+    return env
+
+
 def encode_terminal_input(text: str) -> bytes:
     # Use bracketed paste to reduce the chance that multiline content or special
     # characters are interpreted as interactive shortcuts.
     return b"\x1b[200~" + text.encode("utf-8") + b"\x1b[201~\r"
+
+
+def approval_action_input(action: str) -> bytes:
+    action_keys = {
+        "exec_allow": b"y",
+        "exec_allow_always": b"a",
+        "exec_deny": b"d",
+    }
+    try:
+        return action_keys[action]
+    except KeyError as exc:
+        raise ValueError(f"unsupported approval action: {action}") from exc
 
 
 def validate_thread_binding(*, active_thread_id: Optional[str], request_thread_id: str) -> None:
@@ -112,6 +166,39 @@ def resolve_host_thread_id(
     raise RuntimeError("当前工作区下没有可恢复的 codex thread，请先在 TUI 或 TG 中创建/激活一个 thread")
 
 
+async def run_codex_tui_host_once(
+    *,
+    data_dir: str,
+    cwd: str,
+    target: Optional[str] = None,
+    remote_url: Optional[str] = None,
+    codex_bin: str = "codex",
+    extra_args: Optional[list[str]] = None,
+) -> int:
+    normalized_target = str(target or "").strip()
+    explicit_thread_id = normalized_target or None
+    explicit_topic_id = None
+    if normalized_target.isdigit():
+        explicit_topic_id = int(normalized_target)
+        explicit_thread_id = None
+
+    thread_id = resolve_host_thread_id(
+        cwd=cwd,
+        data_dir=data_dir,
+        thread_id=explicit_thread_id,
+        topic_id=explicit_topic_id,
+    )
+    host = CodexTuiHost(
+        data_dir=data_dir,
+        thread_id=thread_id,
+        cwd=cwd,
+        remote_url=remote_url,
+        codex_bin=codex_bin,
+        extra_args=extra_args,
+    )
+    return await host.run()
+
+
 class CodexTuiHost:
     def __init__(
         self,
@@ -128,7 +215,7 @@ class CodexTuiHost:
         self.cwd = cwd
         self.remote_url = remote_url or ""
         self.codex_bin = codex_bin
-        self.extra_args = extra_args or []
+        self.extra_args = ensure_codex_tui_host_extra_args(extra_args)
         self.socket_path = host_socket_path(data_dir)
         if self.socket_path is None:
             raise RuntimeError("缺少 codex TUI host socket 路径")
@@ -164,6 +251,13 @@ class CodexTuiHost:
         child_pid, master_fd = pty.fork()
         if child_pid == 0:
             os.chdir(self.cwd)
+            child_env = build_codex_tui_child_env(
+                base_env=dict(os.environ),
+                cwd=self.cwd,
+                thread_id=self.thread_id,
+            )
+            os.environ.clear()
+            os.environ.update(child_env)
             os.execvp(cmd[0], cmd)
 
         self._child_pid = child_pid
@@ -217,6 +311,8 @@ class CodexTuiHost:
 
             if request_type == "send_message":
                 response = await self._handle_send_message(request)
+            elif request_type == "approval_action":
+                response = await self._handle_approval_action(request)
             elif request_type == "ping":
                 response = {
                     "ok": True,
@@ -267,6 +363,53 @@ class CodexTuiHost:
 
         try:
             os.write(self._master_fd, encode_terminal_input(text))
+        except OSError as e:
+            return {
+                "ok": False,
+                "error": f"写入 TUI 失败：{e}",
+                "active_thread_id": self.thread_id,
+            }
+
+        return {
+            "ok": True,
+            "accepted": True,
+            "active_thread_id": self.thread_id,
+        }
+
+    async def _handle_approval_action(self, request: dict) -> dict:
+        request_thread_id = str(request.get("thread_id") or "")
+        action = str(request.get("action") or "")
+
+        try:
+            validate_thread_binding(
+                active_thread_id=self.thread_id,
+                request_thread_id=request_thread_id,
+            )
+        except RuntimeError as e:
+            return {
+                "ok": False,
+                "error": str(e),
+                "active_thread_id": self.thread_id,
+            }
+
+        try:
+            payload = approval_action_input(action)
+        except ValueError as e:
+            return {
+                "ok": False,
+                "error": str(e),
+                "active_thread_id": self.thread_id,
+            }
+
+        if self._master_fd is None or self._child_pid is None:
+            return {
+                "ok": False,
+                "error": "codex TUI host 未运行",
+                "active_thread_id": self.thread_id,
+            }
+
+        try:
+            os.write(self._master_fd, payload)
         except OSError as e:
             return {
                 "ok": False,
@@ -358,6 +501,29 @@ async def send_message_request(
         writer.write(
             json.dumps(
                 build_send_message_request(thread_id=thread_id, text=text, topic_id=topic_id),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            + b"\n"
+        )
+        await writer.drain()
+        raw = await reader.readline()
+        return json.loads(raw.decode("utf-8")) if raw else {}
+    finally:
+        writer.close()
+        await writer.wait_closed()
+
+
+async def approval_action_request(
+    *,
+    socket_path: str,
+    thread_id: str,
+    action: str,
+) -> dict:
+    reader, writer = await asyncio.open_unix_connection(socket_path)
+    try:
+        writer.write(
+            json.dumps(
+                build_approval_action_request(thread_id=thread_id, action=action),
                 ensure_ascii=False,
             ).encode("utf-8")
             + b"\n"

@@ -22,7 +22,7 @@ OUT-01 流式输出架构：
 import asyncio
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Optional
 from telegram import Bot
 from core.state import AppState, PendingApproval, PendingQuestion, PendingQuestionGroup, StreamingTurn
@@ -32,6 +32,12 @@ from plugins.providers.builtin.codex.python.tui_bridge import (
 )
 from core.providers.session_events import SessionEvent, normalize_session_event
 from core.providers.topic_policy import provider_allows_unbound_thread_topic_materialization
+from core.providers.registry import get_provider, list_providers
+from core.providers.interactions import (
+    ProviderApprovalRequest as ApprovalInfo,
+    ProviderQuestionRequest,
+    parse_standard_question_request,
+)
 from core.telegram_formatting import format_telegram_assistant_final_text
 from core.notifications import NotificationEvent, build_notification_router
 from core.storage import save_storage, ThreadInfo
@@ -65,7 +71,6 @@ THROTTLE_INTERVAL = 0.6
 
 # 防止 turn/started 并发重复建同一个 thread topic
 _MATERIALIZING_THREAD_TOPICS: set[str] = set()
-
 
 def _provider_should_materialize_unbound_thread_topic(
     state: AppState,
@@ -154,21 +159,6 @@ async def _materialize_thread_topic_if_needed(
         _MATERIALIZING_THREAD_TOPICS.discard(thread_id)
 
 
-@dataclass
-class ApprovalInfo:
-    """Unified approval info extracted from different sources."""
-    request_id: Any
-    thread_id: Optional[str]
-    command: str
-    reason: str
-    tool_name: str
-    proposed_amendment: list
-    amendment_decision: dict
-    tool_type: str
-    always_patterns: list
-    approval_source: str = "app_server"
-
-
 def _repair_local_archived_thread_if_active(
     state: AppState,
     ws_info,
@@ -187,6 +177,9 @@ async def send_approval_to_telegram(
     topic_id: Optional[int],
     workspace_id: str,
     info: ApprovalInfo,
+    *,
+    interactive: bool = True,
+    notice_suffix: str = "",
 ) -> None:
     """Shared approval UI: format text, send message, record PendingApproval, attach keyboard."""
     text = tg_approval_request_text(
@@ -194,6 +187,8 @@ async def send_approval_to_telegram(
         reason=info.reason,
         tool_type=info.tool_type,
     )
+    if notice_suffix:
+        text = f"{text}\n\n{notice_suffix}"
 
     try:
         sent = await _send_to_group(
@@ -206,6 +201,10 @@ async def send_approval_to_telegram(
             return
 
         msg_id = sent.message_id
+        if not interactive:
+            logger.info(f"[approval_request] 已推送非交互镜像 tool={info.tool_type} msg_id={msg_id}")
+            return
+
         state.pending_approvals[msg_id] = PendingApproval(
             request_id=info.request_id,
             workspace_id=workspace_id,
@@ -229,6 +228,103 @@ async def send_approval_to_telegram(
         logger.error(f"推送授权请求到 Telegram 失败：{e}")
 
 
+def _question_text(info: ProviderQuestionRequest) -> str:
+    lines = []
+    if info.sub_total > 1:
+        lines.append(
+            f"❓ {info.header} ({info.sub_index + 1}/{info.sub_total})"
+            if info.header
+            else f"❓ Question ({info.sub_index + 1}/{info.sub_total})"
+        )
+    else:
+        lines.append(f"❓ {info.header}" if info.header else "❓ Question")
+    if info.question:
+        lines.append(f"\n{info.question}")
+    if info.options:
+        lines.append("")
+        for i, opt in enumerate(info.options):
+            label = opt.get("label", f"选项 {i + 1}")
+            desc = opt.get("description", "")
+            if desc:
+                lines.append(f"  {i + 1}. {label} — {desc}")
+            else:
+                lines.append(f"  {i + 1}. {label}")
+    if info.multiple:
+        lines.append("\n（多选模式，点选后点确认提交）")
+    return "\n".join(lines)
+
+
+async def send_question_to_telegram(
+    state: AppState,
+    bot: Bot,
+    group_chat_id: int,
+    topic_id: Optional[int],
+    workspace_id: str,
+    info: ProviderQuestionRequest,
+) -> None:
+    """Shared question UI: send prompt, record PendingQuestion, attach keyboard."""
+    try:
+        sent = await _send_to_group(bot, group_chat_id, _question_text(info), topic_id=topic_id)
+        if sent is None:
+            logger.error("推送 question 失败：sent=None")
+            return
+
+        msg_id = sent.message_id
+        group: PendingQuestionGroup | None = None
+        if info.sub_total > 1:
+            if info.question_id not in state.pending_question_groups:
+                group = PendingQuestionGroup(
+                    question_id=info.question_id,
+                    session_id=info.thread_id or "",
+                    workspace_id=workspace_id,
+                    total=info.sub_total,
+                )
+                state.pending_question_groups[info.question_id] = group
+            else:
+                group = state.pending_question_groups[info.question_id]
+            group.msg_ids[info.sub_index] = msg_id
+
+        cb_ts = int(time.time())
+        pq = PendingQuestion(
+            question_id=info.question_id,
+            session_id=info.thread_id or "",
+            workspace_id=workspace_id,
+            tool_name=info.tool_type,
+            header=info.header,
+            question_text=info.question,
+            options=info.options,
+            multiple=info.multiple,
+            custom=info.custom,
+            group=group,
+            sub_index=info.sub_index,
+            topic_id=topic_id,
+            cb_ts=cb_ts,
+        )
+        state.pending_questions[msg_id] = pq
+
+        keyboard = build_question_keyboard(msg_id, info.options, multiple=info.multiple, custom=info.custom)
+        await bot.edit_message_reply_markup(
+            chat_id=group_chat_id,
+            message_id=msg_id,
+            reply_markup=keyboard,
+        )
+        logger.info(
+            "[question] 已推送 tool=%s question=%s request=%s sub=%s/%s msg_id=%s "
+            "options=%s multiple=%s custom=%s",
+            info.tool_type,
+            info.question_id,
+            "-",
+            info.sub_index + 1,
+            info.sub_total,
+            msg_id,
+            len(info.options),
+            info.multiple,
+            info.custom,
+        )
+    except Exception as e:
+        logger.error(f"推送 question 到 Telegram 失败：{e}")
+
+
 def _resolve_approval_target(
     state: AppState,
     ws_daemon_id: str,
@@ -239,6 +335,38 @@ def _resolve_approval_target(
         return "", None, "approval missing thread_id"
 
     found = state.find_thread_by_id_global(thread_id)
+    if not found and ws_daemon_id:
+        ws_info = state.find_workspace_by_daemon_id(ws_daemon_id)
+        tool_name = state.get_tool_for_workspace(ws_daemon_id)
+        runtime = state.get_provider_runtime(tool_name) if tool_name else None
+        watched_threads = getattr(runtime, "watched_threads", {}) if runtime is not None else {}
+        watch_state = watched_threads.get(thread_id) if isinstance(watched_threads, dict) else None
+        if watch_state is not None:
+            workspace_id = str(getattr(watch_state, "workspace_id", "") or "")
+            topic_id = getattr(watch_state, "topic_id", None)
+            if topic_id is not None:
+                return workspace_id or getattr(ws_info, "daemon_workspace_id", "") or ws_daemon_id, topic_id, None
+    if not found and not ws_daemon_id:
+        for tool_name, runtime in state.provider_runtime_state.items():
+            watched_threads = getattr(runtime, "watched_threads", {})
+            if not isinstance(watched_threads, dict):
+                continue
+            watch_state = watched_threads.get(thread_id)
+            if watch_state is None:
+                continue
+            workspace_id = str(getattr(watch_state, "workspace_id", "") or "")
+            topic_id = getattr(watch_state, "topic_id", None)
+            if topic_id is not None:
+                return workspace_id, topic_id, None
+
+    if not found and ws_daemon_id:
+        ws_info = state.find_workspace_by_daemon_id(ws_daemon_id)
+        if ws_info is not None:
+            workspace_id = ws_info.daemon_workspace_id or ws_daemon_id
+            thread_map = getattr(ws_info, "threads", {}) or {}
+            if thread_id in thread_map:
+                found = (ws_info, thread_map[thread_id])
+
     if not found:
         return "", None, f"thread not found: {thread_id}"
 
@@ -254,6 +382,113 @@ def _resolve_approval_target(
         return workspace_id, None, f"thread topic missing: {thread_id}"
 
     return workspace_id, thread_info.topic_id, None
+
+
+def _parse_provider_approval_request(
+    provider_id: str,
+    params: dict,
+    *,
+    request_id: Any = None,
+    default_thread_id: Optional[str] = None,
+    approval_source: str = "app_server",
+) -> ApprovalInfo:
+    descriptor = get_provider(provider_id)
+    interactions = descriptor.interactions if descriptor is not None else None
+    parser = getattr(interactions, "parse_approval_request", None) if interactions is not None else None
+    if not callable(parser):
+        raise RuntimeError(f"provider does not support approval requests: {provider_id}")
+    return parser(
+        params,
+        request_id=request_id,
+        provider_id=provider_id,
+        default_thread_id=default_thread_id,
+        approval_source=approval_source,
+    )
+
+
+def _parse_provider_question_request(
+    provider_id: str,
+    params: dict,
+    *,
+    default_thread_id: Optional[str] = None,
+    question_source: str = "app_server",
+) -> ProviderQuestionRequest:
+    descriptor = get_provider(provider_id)
+    interactions = descriptor.interactions if descriptor is not None else None
+    parser = getattr(interactions, "parse_question_request", None) if interactions is not None else None
+    if callable(parser):
+        return parser(
+            params,
+            provider_id=provider_id,
+            default_thread_id=default_thread_id,
+            question_source=question_source,
+        )
+    return parse_standard_question_request(
+        params,
+        provider_id=provider_id,
+        default_thread_id=default_thread_id,
+        question_source=question_source,
+    )
+
+
+def _provider_supports_server_request_method(provider_id: str, method: str) -> bool:
+    descriptor = get_provider(provider_id)
+    interactions = descriptor.interactions if descriptor is not None else None
+    methods = getattr(interactions, "server_request_methods", ()) if interactions is not None else ()
+    return method in methods
+
+
+def _provider_for_server_request_method(
+    state: AppState,
+    method: str,
+    params: dict,
+) -> str:
+    ws_daemon_id = str(
+        params.get("_workspaceId")
+        or params.get("workspaceId")
+        or params.get("workspace_id")
+        or ""
+    )
+    if ws_daemon_id:
+        provider_id = str(state.get_tool_for_workspace(ws_daemon_id) or "").strip()
+        if provider_id and _provider_supports_server_request_method(provider_id, method):
+            return provider_id
+
+    for descriptor in list_providers():
+        interactions = descriptor.interactions
+        methods = getattr(interactions, "server_request_methods", ()) if interactions is not None else ()
+        parser = getattr(interactions, "parse_approval_request", None) if interactions is not None else None
+        if method not in methods or not callable(parser):
+            continue
+        try:
+            parsed = parser(params, provider_id=descriptor.name, approval_source=method)
+        except Exception as exc:
+            logger.debug(
+                "[server_request] provider parser failed provider=%s method=%s err=%s",
+                descriptor.name,
+                method,
+                exc,
+            )
+            continue
+        thread_id = parsed.thread_id
+        if not thread_id:
+            continue
+        found = state.find_thread_by_id_global(thread_id)
+        if found:
+            provider_id = str(found[0].tool or "").strip()
+            if provider_id == descriptor.name:
+                return descriptor.name
+        runtime = state.get_provider_runtime(descriptor.name)
+        watched_threads = getattr(runtime, "watched_threads", {}) if runtime is not None else {}
+        if isinstance(watched_threads, dict) and thread_id in watched_threads:
+            return descriptor.name
+
+    for descriptor in list_providers():
+        interactions = descriptor.interactions
+        methods = getattr(interactions, "server_request_methods", ()) if interactions is not None else ()
+        if method in methods:
+            return descriptor.name
+    return ""
 
 
 async def _notify_owner_about_unroutable_approval(
@@ -736,8 +971,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         if provider_name == "unknown":
             provider_name = ""
         if provider_name and not approval_params.get("_provider"):
-            from core.providers.registry import get_provider
-
             if get_provider(provider_name) is None:
                 provider_name = ""
         if not provider_name and thread_id:
@@ -752,37 +985,11 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 state.get_tool_for_workspace(ctx.ws_daemon_id) or ""
             ).strip()
 
-        command = approval_params.get("command") or ""
-        reason = (
-            approval_params.get("reason")
-            or approval_params.get("justification")
-            or ""
-        )
-        tool_name = str(approval_params.get("toolName") or approval_params.get("tool_name") or "").strip()
-
-        available_decisions = approval_params.get("availableDecisions", [])
-        proposed_amendment: list = []
-        amendment_decision: dict = {}
-        for d in available_decisions:
-            if isinstance(d, dict) and "acceptWithExecpolicyAmendment" in d:
-                amendment_decision = d
-                amend = d["acceptWithExecpolicyAmendment"].get("execpolicy_amendment", [])
-                if isinstance(amend, list):
-                    proposed_amendment = amend
-                break
-
-        always_patterns = approval_params.get("_always_patterns", [])
-
-        info = ApprovalInfo(
+        info = _parse_provider_approval_request(
+            provider_name or "codex",
+            approval_params,
             request_id=request_id,
-            thread_id=thread_id,
-            command=command,
-            reason=reason,
-            tool_name=tool_name,
-            proposed_amendment=proposed_amendment,
-            amendment_decision=amendment_decision,
-            tool_type=provider_name or "codex",
-            always_patterns=always_patterns,
+            default_thread_id=thread_id,
             approval_source="app_server",
         )
 
@@ -825,103 +1032,38 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
 
     async def _handle_question(ctx: EventContext) -> None:
         """question/asked"""
-        question_id = ctx.event_params.get("questionId", "")
-        header = ctx.event_params.get("header", "")
-        question_text = ctx.event_params.get("question", "")
-        options = ctx.event_params.get("options", [])
-        multiple = ctx.event_params.get("multiple", False)
-        custom = ctx.event_params.get("custom", True)
-        sub_index = ctx.event_params.get("subIndex", 0)
-        sub_total = ctx.event_params.get("subTotal", 1)
-
-        thread_id = ctx.thread_id
-        if not thread_id:
-            thread_id = ctx.event_params.get("threadId")
-
+        question_request = _parse_provider_question_request(
+            ctx.event.provider,
+            ctx.event_params,
+            default_thread_id=ctx.thread_id,
+            question_source="app_server",
+        )
+        question_id = question_request.question_id
+        thread_id = question_request.thread_id
         topic_id = _resolve_topic_id(state, ctx.ws_daemon_id, thread_id, ctx.event_params)
 
-        # Build display text (plain text, no Markdown — question content is uncontrolled)
-        lines = []
-        if sub_total > 1:
-            lines.append(f"❓ {header} ({sub_index + 1}/{sub_total})" if header else f"❓ Question ({sub_index + 1}/{sub_total})")
-        else:
-            lines.append(f"❓ {header}" if header else "❓ Question")
-        if question_text:
-            lines.append(f"\n{question_text}")
-        if options:
-            lines.append("")
-            for i, opt in enumerate(options):
-                label = opt.get("label", f"选项 {i + 1}")
-                desc = opt.get("description", "")
-                if desc:
-                    lines.append(f"  {i + 1}. {label} — {desc}")
-                else:
-                    lines.append(f"  {i + 1}. {label}")
-        if multiple:
-            lines.append("\n（多选模式，点选后点确认提交）")
-
-        text = "\n".join(lines)
-
         try:
-            sent = await _send_to_group(bot, group_chat_id, text, topic_id=topic_id)
-            if sent is None:
-                logger.error("推送 question 失败：sent=None")
-                return
-
-            msg_id = sent.message_id
-
             workspace_id = ""
-            tool_name = ""
-            if thread_id:
-                found2 = state.find_thread_by_id_global(thread_id)
+            tool_name = question_request.tool_type
+            if question_request.thread_id:
+                found2 = state.find_thread_by_id_global(question_request.thread_id)
                 if found2:
                     workspace_id = found2[0].daemon_workspace_id or ""
-                    tool_name = found2[0].tool or ""
-            if not tool_name and ctx.ws_daemon_id:
+                    tool_name = tool_name if tool_name and tool_name != "unknown" else found2[0].tool or ""
+            if not workspace_id:
+                workspace_id = ctx.ws_daemon_id
+            if (not tool_name or tool_name == "unknown") and ctx.ws_daemon_id:
                 tool_name = state.get_tool_for_workspace(ctx.ws_daemon_id) or ""
+            if tool_name and tool_name != question_request.tool_type:
+                question_request = replace(question_request, tool_type=tool_name)
 
-            group: PendingQuestionGroup | None = None
-            if sub_total > 1:
-                if question_id not in state.pending_question_groups:
-                    group = PendingQuestionGroup(
-                        question_id=question_id,
-                        session_id=thread_id or "",
-                        workspace_id=workspace_id,
-                        total=sub_total,
-                    )
-                    state.pending_question_groups[question_id] = group
-                else:
-                    group = state.pending_question_groups[question_id]
-                group.msg_ids[sub_index] = msg_id
-
-            cb_ts = int(time.time())
-
-            pq = PendingQuestion(
-                question_id=question_id,
-                session_id=thread_id or "",
-                workspace_id=workspace_id,
-                tool_name=tool_name,
-                header=header,
-                question_text=question_text,
-                options=options,
-                multiple=multiple,
-                custom=custom,
-                group=group,
-                sub_index=sub_index,
-                topic_id=topic_id,
-                cb_ts=cb_ts,
-            )
-            state.pending_questions[msg_id] = pq
-
-            keyboard = build_question_keyboard(msg_id, options, multiple=multiple, custom=custom)
-            await bot.edit_message_reply_markup(
-                chat_id=group_chat_id,
-                message_id=msg_id,
-                reply_markup=keyboard,
-            )
-            logger.info(
-                f"[question] 已推送 question={question_id} sub={sub_index + 1}/{sub_total} "
-                f"msg_id={msg_id} options={len(options)} multiple={multiple} custom={custom}"
+            await send_question_to_telegram(
+                state,
+                bot,
+                group_chat_id,
+                topic_id,
+                workspace_id,
+                question_request,
             )
             await _emit_notification(
                 ctx,
@@ -1496,52 +1638,38 @@ def make_server_request_handler(state: AppState, bot: Bot, group_chat_id: int):
     返回 daemon server request 回调（处理需要用户响应的请求）。
 
     目前处理：
-        item/commandExecution/requestApproval → 推送沙盒权限授权请求
+        Codex/Provider app-server approval requests → 推送沙盒权限授权请求
     """
     async def on_server_request(method: str, params: dict, request_id: int) -> None:
-        if method != "item/commandExecution/requestApproval":
+        provider_id = _provider_for_server_request_method(state, method, params)
+        if not provider_id:
             logger.debug(f"[server_request] 忽略未处理的 method={method}")
             return
 
-        thread_id: Optional[str] = params.get("threadId")
-        command = params.get("command") or ""
-        reason = params.get("reason") or ""
-        available_decisions = params.get("availableDecisions", [])
-
-        proposed_amendment: list = []
-        amendment_decision: dict = {}
-        for d in available_decisions:
-            if isinstance(d, dict) and "acceptWithExecpolicyAmendment" in d:
-                amendment_decision = d
-                amend = d["acceptWithExecpolicyAmendment"].get("execpolicy_amendment", [])
-                if isinstance(amend, list):
-                    proposed_amendment = amend
-                break
-
-        if not proposed_amendment:
-            proposed_amendment = params.get("proposedExecpolicyAmendment") or []
-
-        info = ApprovalInfo(
+        info = _parse_provider_approval_request(
+            provider_id,
+            params,
             request_id=request_id,
-            thread_id=thread_id,
-            command=command,
-            reason=reason,
-            tool_name="",
-            proposed_amendment=proposed_amendment if isinstance(proposed_amendment, list) else [],
-            amendment_decision=amendment_decision,
-            tool_type="codex",
-            always_patterns=[],
+            approval_source=method,
         )
+        thread_id = info.thread_id
 
+        ws_daemon_id = str(
+            params.get("_workspaceId")
+            or params.get("workspaceId")
+            or params.get("workspace_id")
+            or ""
+        )
         workspace_id, topic_id, route_error = _resolve_approval_target(
             state,
-            "",
+            ws_daemon_id,
             thread_id,
         )
         if route_error is not None:
             logger.error(
-                "[approval_route] %s tool=codex thread=%s ws=%s",
+                "[approval_route] %s tool=%s thread=%s ws=%s",
                 route_error,
+                provider_id,
                 thread_id or "N/A",
                 workspace_id or "N/A",
             )
@@ -1556,7 +1684,7 @@ def make_server_request_handler(state: AppState, bot: Bot, group_chat_id: int):
 
         logger.info(
             f"[approval_request] id={request_id} thread={thread_id[:8] if thread_id else '?'} "
-            f"cmd={command[:60]} topic={topic_id}"
+            f"cmd={info.command[:60]} topic={topic_id}"
         )
         await send_approval_to_telegram(
             state, bot, group_chat_id, topic_id, workspace_id, info,

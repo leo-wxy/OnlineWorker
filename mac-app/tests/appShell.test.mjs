@@ -76,6 +76,25 @@ test("settings exposes attachment cache controls under a maintenance section", (
   assert.match(en, /Attachment Cache/);
 });
 
+test("maintenance keeps external Codex permission hook install out of the app shell", () => {
+  const maintenance = readFileSync(join(root, "src", "components", "MaintenanceSettingsPanel.tsx"), "utf8");
+  const service = readFileSync(join(root, "src-tauri", "src", "commands", "service.rs"), "utf8");
+  const lib = readFileSync(join(root, "src-tauri", "src", "lib.rs"), "utf8");
+  const types = readFileSync(join(root, "src", "i18n", "types.ts"), "utf8");
+  const zh = readFileSync(join(root, "src", "i18n", "locales", "zh.ts"), "utf8");
+  const en = readFileSync(join(root, "src", "i18n", "locales", "en.ts"), "utf8");
+
+  assert.equal(maintenance.includes("install_codex_hook"), false);
+  assert.equal(maintenance.includes("codexHookTitle"), false);
+  assert.equal(service.includes("pub async fn install_codex_hook"), false);
+  assert.equal(service.includes("--install-codex-hook"), false);
+  assert.equal(service.includes("CodexHookInstall"), false);
+  assert.equal(lib.includes("install_codex_hook"), false);
+  assert.equal(types.includes("codexHookTitle"), false);
+  assert.equal(zh.includes("Codex 权限入口"), false);
+  assert.equal(en.includes("Codex Permission Entry"), false);
+});
+
 test("notification tab exposes split app list and plugin-defined configuration", () => {
   const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
   const panel = readFileSync(join(root, "src", "components", "NotificationSettingsPanel.tsx"), "utf8");

@@ -72,6 +72,9 @@ def test_core_runtime_files_remain_provider_generic() -> None:
         PROJECT_ROOT / "core" / "state.py",
         PROJECT_ROOT / "core" / "storage.py",
         PROJECT_ROOT / "core" / "lifecycle.py",
+        PROJECT_ROOT / "core" / "providers" / "interactions.py",
+        PROJECT_ROOT / "core" / "providers" / "manifest.py",
+        PROJECT_ROOT / "core" / "provider_owner_bridge.py",
     ]
     for path in core_files:
         source = path.read_text(encoding="utf-8")
@@ -95,3 +98,13 @@ def test_bot_events_materialization_policy_is_provider_hook_driven() -> None:
     assert "_is_unbound_claude_thread" not in source
     assert 'ws_info.tool or "").strip().lower() == "claude"' not in source
     assert "should_materialize_unbound_thread_topic" in source
+
+
+def test_bot_events_approval_route_does_not_read_provider_private_runtime() -> None:
+    source = (PROJECT_ROOT / "bot" / "events.py").read_text(encoding="utf-8")
+    start = source.index("def _resolve_approval_target")
+    end = source.index("async def _notify_owner_about_unroutable_approval")
+    route_source = source[start:end]
+
+    assert "codex_state.get_runtime" not in route_source
+    assert "claude" not in route_source

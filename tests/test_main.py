@@ -200,3 +200,17 @@ def test_main_uses_stable_default_data_dir_when_flag_missing(monkeypatch, tmp_pa
     assert observed["set_data_dir"] == [default_dir]
     assert observed["load_config"] == [default_dir]
     assert observed["flock"] == [f"{default_dir}/onlineworker.lock"]
+
+
+def test_main_has_no_codex_hook_install_one_shot():
+    source = Path(main.__file__).read_text(encoding="utf-8")
+
+    assert "--install-codex-hook" not in source
+    assert "--codex-hooks-path" not in source
+
+
+def test_main_exposes_packaged_codex_tui_host_entrypoint():
+    source = Path(main.__file__).read_text(encoding="utf-8")
+
+    assert "--codex-tui-host" in source
+    assert "run_codex_tui_host_once" in source
