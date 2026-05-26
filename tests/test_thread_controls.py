@@ -213,6 +213,137 @@ async def test_thread_topic_message_uses_registry_message_hooks_for_custom_provi
 
 
 @pytest.mark.asyncio
+async def test_thread_topic_message_normalizes_abusive_language_before_provider_send(monkeypatch):
+    from bot.handlers.message import make_message_handler
+
+    state = _build_state(tool="custom")
+    ws = state.storage.workspaces["custom:onlineWorker"]
+    ws.threads["custom-1"] = ThreadInfo(thread_id="custom-1", topic_id=100, archived=False)
+
+    adapter = MagicMock()
+    adapter.connected = True
+    state.set_adapter("custom", adapter)
+
+    custom_send = AsyncMock()
+    monkeypatch.setattr(
+        "bot.handlers.message.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            message_hooks=SimpleNamespace(
+                supports_photo=False,
+                ensure_connected=AsyncMock(return_value=adapter),
+                handle_local_owner=AsyncMock(return_value=False),
+                prepare_send=AsyncMock(return_value=True),
+                send=custom_send,
+            )
+        ) if name == "custom" else None,
+    )
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.text = "这什么傻逼问题"
+    update.effective_message.caption = None
+    update.effective_message.photo = None
+    update.effective_message.message_thread_id = 100
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+
+    handler = make_message_handler(state, GROUP_CHAT_ID)
+    await handler(update, ctx)
+
+    custom_send.assert_awaited_once()
+    assert custom_send.await_args.kwargs["text"] == "这是什么问题"
+
+
+@pytest.mark.asyncio
+async def test_thread_topic_slash_message_skips_abusive_language_normalization_for_custom_provider(monkeypatch):
+    from bot.handlers.message import make_message_handler
+
+    state = _build_state(tool="custom")
+    ws = state.storage.workspaces["custom:onlineWorker"]
+    ws.threads["custom-1"] = ThreadInfo(thread_id="custom-1", topic_id=100, archived=False)
+
+    adapter = MagicMock()
+    adapter.connected = True
+    state.set_adapter("custom", adapter)
+
+    custom_send = AsyncMock()
+    monkeypatch.setattr(
+        "bot.handlers.message.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            message_hooks=SimpleNamespace(
+                supports_photo=False,
+                ensure_connected=AsyncMock(return_value=adapter),
+                handle_local_owner=AsyncMock(return_value=False),
+                prepare_send=AsyncMock(return_value=True),
+                send=custom_send,
+            )
+        ) if name == "custom" else None,
+    )
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.text = "/review 这什么傻逼问题"
+    update.effective_message.caption = None
+    update.effective_message.photo = None
+    update.effective_message.message_thread_id = 100
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+
+    handler = make_message_handler(state, GROUP_CHAT_ID)
+    await handler(update, ctx)
+
+    custom_send.assert_awaited_once()
+    assert custom_send.await_args.kwargs["text"] == "/review 这什么傻逼问题"
+
+
+@pytest.mark.asyncio
+async def test_new_thread_handler_normalizes_initial_text_before_provider_activation(monkeypatch):
+    from bot.handlers.thread import make_new_thread_handler
+
+    state = _build_state(tool="custom")
+    ws = state.storage.workspaces["custom:onlineWorker"]
+
+    adapter = MagicMock()
+    adapter.connected = True
+    adapter.start_thread = AsyncMock(return_value={"id": "custom-new"})
+    state.set_adapter("custom", adapter)
+
+    activate_new_thread = AsyncMock()
+    monkeypatch.setattr(
+        "bot.handlers.thread.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            thread_hooks=SimpleNamespace(
+                resolve_adapter=lambda state, ws: adapter,
+                validate_new_thread=lambda state, ws, initial_text: None,
+                activate_new_thread=activate_new_thread,
+            )
+        ) if name == "custom" else None,
+    )
+
+    update = MagicMock()
+    update.effective_message = MagicMock()
+    update.effective_message.message_thread_id = 50
+
+    ctx = MagicMock()
+    ctx.args = ["这什么傻逼问题"]
+    ctx.bot = MagicMock()
+    ctx.bot.create_forum_topic = AsyncMock(return_value=MagicMock(message_thread_id=100))
+    ctx.bot.send_message = AsyncMock()
+
+    handler = make_new_thread_handler(state, GROUP_CHAT_ID)
+    await handler(update, ctx)
+
+    activate_new_thread.assert_awaited_once()
+    assert activate_new_thread.await_args.args[5] == "这是什么问题"
+
+
+@pytest.mark.asyncio
 async def test_thread_topic_message_uses_provider_local_owner_hook_for_custom_provider(monkeypatch):
     from bot.handlers.message import make_message_handler
 

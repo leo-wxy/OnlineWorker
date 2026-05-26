@@ -17,6 +17,7 @@
 
 ## Runtime helpers
 
+- `ow-codex`：Codex CLI 文明模式包装入口。它会启动本地 Codex app-server 和 OnlineWorker remote proxy，再把参数转发给 `codex --remote <proxy>`；适合在源码环境里验证外部 Codex CLI 输入改写链路。
 - `codex_tui_host.py`：Codex TUI host wrapper 的本地运行入口，仍被 TUI 主控链路使用。
 
 ## Smoke / diagnostics

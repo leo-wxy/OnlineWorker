@@ -198,6 +198,11 @@ def main() -> None:
         action="store_true",
         help="Run a visible single-owner Codex TUI host and exit when Codex exits",
     )
+    parser.add_argument(
+        "--ow-codex",
+        action="store_true",
+        help="Run Codex CLI through OnlineWorker's local message rewrite proxy",
+    )
     parser.add_argument("--codex-tui-target", default=None)
     parser.add_argument("--codex-tui-cd", default=None)
     parser.add_argument("--codex-tui-remote", default=None)
@@ -213,7 +218,7 @@ def main() -> None:
     parser.add_argument("--provider-session-id", default=None)
     parser.add_argument("--provider-workspace-dir", default=None)
     parser.add_argument("--provider-limit", type=int, default=50)
-    args, _ = parser.parse_known_args()
+    args, unknown_args = parser.parse_known_args()
 
     data_dir = args.data_dir or default_data_dir()
     set_data_dir(data_dir)
@@ -240,6 +245,17 @@ def main() -> None:
                     remote_url=args.codex_tui_remote,
                     codex_bin=args.codex_tui_bin,
                     extra_args=args.codex_tui_extra_arg,
+                )
+            )
+        )
+    if args.ow_codex:
+        from plugins.providers.builtin.codex.python.cli_wrapper import run_ow_codex_once
+
+        raise SystemExit(
+            asyncio.run(
+                run_ow_codex_once(
+                    unknown_args,
+                    data_dir=data_dir,
                 )
             )
         )

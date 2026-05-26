@@ -14,6 +14,7 @@ from core.provider_owner_bridge import provider_owner_bridge_socket_path
 
 
 CODEX_PERMISSION_HOOK_NAME = "PermissionRequest"
+CODEX_USER_PROMPT_SUBMIT_HOOK_NAME = "UserPromptSubmit"
 CODEX_HOOK_TIMEOUT_SECONDS = 86400
 
 
@@ -263,7 +264,8 @@ def run_codex_hook_bridge_once(data_dir: str | None) -> int:
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8") or "{}")
     except Exception:
         payload = {}
-    if isinstance(payload, dict):
+    event_name = str(payload.get("hook_event_name") or "").strip() if isinstance(payload, dict) else ""
+    if event_name == CODEX_PERMISSION_HOOK_NAME:
         bridge_response = mirror_codex_permission_request(data_dir, payload)
     else:
         bridge_response = {}

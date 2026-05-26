@@ -1533,6 +1533,10 @@ async def shutdown_runtime(manager) -> None:
     if tui_host is not None:
         await tui_host.stop()
         codex_state.set_tui_host(manager.state, None)
+    remote_proxy = codex_state.get_runtime(manager.state).remote_proxy
+    if remote_proxy is not None:
+        await remote_proxy.stop()
+        codex_state.get_runtime(manager.state).remote_proxy = None
     await stop_codex_owner_bridge(manager.state)
     adapter = manager.state.get_adapter("codex")
     if adapter:

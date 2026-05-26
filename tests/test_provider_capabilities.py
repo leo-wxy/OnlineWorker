@@ -26,6 +26,7 @@ def _capability_dict(capabilities) -> dict:
         "commands": capabilities.commands,
         "command_wrappers": list(capabilities.command_wrappers),
         "control_modes": list(capabilities.control_modes),
+        "message_rewrite": dict(capabilities.message_rewrite),
     }
 
 
@@ -61,6 +62,12 @@ def test_core_provider_manifest_parser_normalizes_all_capability_fields():
                     "commands": True,
                     "command_wrappers": ["model", "review"],
                     "control_modes": ["app", "tui"],
+                    "message_rewrite": {
+                        "app_send": True,
+                        "telegram": True,
+                        "external_cli": "remote_proxy",
+                        "wrapper": "ow-demo",
+                    },
                 },
                 "process": {
                     "cleanup_matchers": ["demo.*server"],
@@ -95,6 +102,12 @@ def test_core_provider_manifest_parser_normalizes_all_capability_fields():
         "commands": True,
         "command_wrappers": ["model", "review"],
         "control_modes": ["app", "tui"],
+        "message_rewrite": {
+            "app_send": True,
+            "telegram": True,
+            "external_cli": "remote_proxy",
+            "wrapper": "ow-demo",
+        },
     }
     assert metadata.process.cleanup_matchers == ("demo.*server",)
     assert metadata.health.url == "http://127.0.0.1:1234/health"
@@ -120,6 +133,7 @@ def test_builtin_provider_descriptor_capabilities_match_plugin_manifests():
             "commands": bool(expected.get("commands", False)),
             "command_wrappers": list(expected.get("command_wrappers") or []),
             "control_modes": list(expected.get("control_modes") or ["app"]),
+            "message_rewrite": dict(expected.get("message_rewrite") or {}),
         }
         assert list(descriptor.capabilities.command_wrappers) == list(
             expected.get("command_wrappers") or []
@@ -172,4 +186,5 @@ def test_builtin_provider_config_blueprint_capabilities_match_plugin_manifests()
             "commands": bool(expected.get("commands", False)),
             "command_wrappers": list(expected.get("command_wrappers") or []),
             "control_modes": list(expected.get("control_modes") or ["app"]),
+            "message_rewrite": dict(expected.get("message_rewrite") or {}),
         }

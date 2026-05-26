@@ -13,6 +13,7 @@ This milestone decouples user notifications from Telegram-only delivery so Onlin
 ## Phases
 
 - [x] **Phase 6: Notification Channel Abstraction** - Introduce a provider-neutral notification mechanism so OnlineWorker can emit concise notifications through enabled notification plugins. Core plugin/router/config UI is implemented; existing Telegram task/approval/final-reply paths remain unchanged.
+- [x] **Phase 7: OnlineWorker User Message Gateway** - Route provider-bound user text through an OnlineWorker-level gateway before provider-specific send hooks. Source-level verification is complete; packaged-app verification remains before release.
 
 ## Phase Details
 
@@ -50,3 +51,30 @@ Latest verification:
 
 Remaining Phase 6 verification:
 - None for the notification plugin boundary and Telegram builtin channel. Non-Telegram notification channels remain future plugin work.
+
+### Phase 7: OnlineWorker User Message Gateway
+
+**Goal:** Route all provider-bound user messages through one OnlineWorker-level gateway before provider-specific send hooks. The gateway should expose `before_user_message_send` hooks so cross-provider input policies can be implemented once, starting with conservative abusive-language normalization such as `这什么傻逼问题` -> `这是什么问题`.
+**Requirements**: TBD
+**Depends on:** Phase 6
+**Plans:** 3 plans
+
+Plans:
+- [x] 07-01: Add OnlineWorker user message gateway and before-send hooks
+  - [x] Core `core/user_messages/` contracts, gateway, hook runner, and built-in abusive-language normalization
+  - [x] Telegram, owner bridge, provider session bridge, and new-thread send paths routed through the gateway
+  - [x] Codex CLI `UserPromptSubmit` protocol verified; current OnlineWorker hook bridge treats it as safe pass-through because prompt replacement support was not confirmed from local protocol evidence
+- [x] 07-02: Add dictionary-backed user message neutralizer
+  - [x] Pure Python sensitive term matcher and neutralizer
+  - [x] `drop` and `replace` actions for abuse prefixes, insults, and derogatory object phrases
+  - [x] Manual test script for normalizer behavior
+- [x] 07-03: Add Codex remote app-server user message proxy
+  - [x] Real `codex --remote` WebSocket probe confirmed initial prompt text is sent through `turn/start.params.input`
+  - [x] OnlineWorker-managed Codex TUI host routes through a local fail-closed remote proxy before app-server persistence/model submission
+  - [x] Proxy reuses the shared `core/user_messages` gateway and leaves `text_elements` inputs unchanged
+
+Latest verification:
+- Focused source regression passed: `PYENV_VERSION=3.13.1 pytest -q tests/test_handlers.py tests/test_user_message_hooks.py tests/test_user_message_normalizer_script.py tests/test_config.py tests/test_thread_controls.py tests/test_provider_owner_bridge.py tests/test_provider_session_bridge.py tests/test_provider_session_bridge_attachments.py tests/test_codex_hook_bridge.py tests/test_codex_remote_proxy.py tests/test_codex_remote_proxy_probe.py tests/test_codex_tui_mode.py tests/test_codex_tui_host_wrapper.py tests/test_startup_runtime.py && git diff --check` -> `276 passed`.
+
+Remaining Phase 7 verification:
+- Packaged-app build/install/relaunch verification has not been run for Phase 7.

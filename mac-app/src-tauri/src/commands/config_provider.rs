@@ -43,6 +43,29 @@ pub(crate) struct ProviderConfigDocument {
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub(crate) struct ProviderMessageHookEntry {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) config: Option<BTreeMap<String, serde_yaml::Value>>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderMessageHookStatus {
+    pub(crate) enabled: bool,
+    pub(crate) mode: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderMessageHooksMetadata {
+    pub(crate) abusive_language_normalization: ProviderMessageHookStatus,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
 pub(crate) struct NotificationConfigDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) channels: Option<BTreeMap<String, NotificationChannelConfigEntry>>,
@@ -161,6 +184,8 @@ pub(crate) struct ProviderConfigEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) capabilities: Option<ProviderCapabilitiesEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) message_hooks: Option<BTreeMap<String, ProviderMessageHookEntry>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) install: Option<ProviderInstallEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) process: Option<ProviderProcessEntry>,
@@ -189,6 +214,21 @@ pub(crate) struct ProviderCapabilitiesEntry {
     pub(crate) command_wrappers: Vec<String>,
     #[serde(default, alias = "control_modes")]
     pub(crate) control_modes: Vec<String>,
+    #[serde(default, alias = "message_rewrite")]
+    pub(crate) message_rewrite: ProviderMessageRewriteCapabilities,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderMessageRewriteCapabilities {
+    #[serde(default, alias = "app_send")]
+    pub(crate) app_send: bool,
+    #[serde(default)]
+    pub(crate) telegram: bool,
+    #[serde(default, alias = "external_cli", skip_serializing_if = "Option::is_none")]
+    pub(crate) external_cli: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) wrapper: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
@@ -244,6 +284,7 @@ pub(crate) struct ProviderMetadata {
     pub(crate) live_transport: String,
     pub(crate) control_mode: Option<String>,
     pub(crate) capabilities: ProviderCapabilitiesEntry,
+    pub(crate) message_hooks: ProviderMessageHooksMetadata,
     pub(crate) install: ProviderInstallEntry,
     pub(crate) process: ProviderProcessEntry,
     pub(crate) icon: Option<ProviderIconEntry>,
@@ -861,6 +902,7 @@ fn plugin_manifest_to_default(manifest: ProviderPluginManifest) -> Option<Provid
             control_mode: provider.control_mode.or_else(|| Some("app".to_string())),
             auth: provider.auth,
             capabilities: Some(provider.capabilities.unwrap_or_default()),
+            message_hooks: None,
             install: Some(ProviderInstallEntry {
                 cli_names: vec![install_cli_name],
             }),
@@ -937,6 +979,7 @@ fn generic_provider_config(provider_id: &str) -> ProviderConfigEntry {
         live_transport: Some("stdio".to_string()),
         control_mode: Some("app".to_string()),
         capabilities: Some(ProviderCapabilitiesEntry::default()),
+        message_hooks: None,
         install: Some(ProviderInstallEntry {
             cli_names: vec![provider_id.to_string()],
         }),
@@ -1057,6 +1100,7 @@ fn normalize_provider_entry(provider_id: &str, provider: &mut ProviderConfigEntr
     provider.protocol = None;
     provider.transport = Some(transport);
     provider.capabilities = provider.capabilities.take().or(defaults.capabilities);
+    provider.message_hooks = provider.message_hooks.take().or(defaults.message_hooks);
     provider.install = provider.install.take().or(defaults.install);
     provider.process = provider.process.take().or(defaults.process);
     provider.icon = merge_provider_icon(provider.icon.take(), defaults.icon);
@@ -1244,6 +1288,7 @@ fn provider_metadata_from_entry(
         }),
         control_mode: provider.control_mode.clone(),
         capabilities: provider.capabilities.clone().unwrap_or_default(),
+        message_hooks: provider_message_hooks_metadata(provider),
         install: provider.install.clone().unwrap_or_default(),
         process: provider.process.clone().unwrap_or_default(),
         icon: provider.icon.clone(),
@@ -1255,6 +1300,24 @@ fn provider_metadata_from_entry(
             kind: owner,
             app_server_port: transport.app_server_port,
             app_server_url: transport.app_server_url,
+        },
+    }
+}
+
+fn provider_message_hooks_metadata(
+    provider: &ProviderConfigEntry,
+) -> ProviderMessageHooksMetadata {
+    let hook = provider
+        .message_hooks
+        .as_ref()
+        .and_then(|hooks| hooks.get("abusive_language_normalization"));
+    ProviderMessageHooksMetadata {
+        abusive_language_normalization: ProviderMessageHookStatus {
+            enabled: hook.and_then(|entry| entry.enabled).unwrap_or(true),
+            mode: hook
+                .and_then(|entry| entry.mode.clone())
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "conservative".to_string()),
         },
     }
 }
@@ -1470,6 +1533,33 @@ pub(super) fn set_provider_flags_in_document(
     doc.tools = None;
 }
 
+pub(super) fn set_provider_message_hook_enabled_in_document(
+    doc: &mut ProviderConfigDocument,
+    provider_id: &str,
+    hook_name: &str,
+    enabled: bool,
+) {
+    let normalized_provider_id = provider_id.trim();
+    let normalized_hook_name = hook_name.trim();
+    if normalized_provider_id.is_empty() || normalized_hook_name.is_empty() {
+        return;
+    }
+
+    let providers = doc.providers.get_or_insert_with(BTreeMap::new);
+    let provider = providers
+        .entry(normalized_provider_id.to_string())
+        .or_insert_with(|| disabled_provider_config(normalized_provider_id));
+    let hooks = provider.message_hooks.get_or_insert_with(BTreeMap::new);
+    let hook = hooks
+        .entry(normalized_hook_name.to_string())
+        .or_insert_with(ProviderMessageHookEntry::default);
+    hook.enabled = Some(enabled);
+    hook.mode.get_or_insert_with(|| "conservative".to_string());
+    normalize_provider_entry(normalized_provider_id, provider);
+    doc.schema_version = Some(2);
+    doc.tools = None;
+}
+
 pub(super) fn set_notification_channel_enabled_in_document(
     doc: &mut ProviderConfigDocument,
     channel_id: &str,
@@ -1529,7 +1619,8 @@ mod tests {
         overlay_env_spec_from_env_raw, provider_metadata_from_raw,
         read_manifest_files_from_overlay_path, serialize_normalized_config_with_env,
         set_notification_channel_config_in_document, set_notification_channel_enabled_in_document,
-        set_provider_flags_in_document, set_test_process_env_override, ProviderCapabilitiesEntry,
+        set_provider_flags_in_document, set_provider_message_hook_enabled_in_document,
+        set_test_process_env_override, ProviderCapabilitiesEntry,
         NOTIFICATION_OVERLAY_ENV,
     };
 
@@ -1831,6 +1922,75 @@ app_server_port: 4722
     }
 
     #[test]
+    fn provider_metadata_exposes_provider_message_hook_status_and_coverage() {
+        let raw = r#"
+schema_version: 2
+providers:
+  codex:
+    managed: true
+    message_hooks:
+      abusive_language_normalization:
+        enabled: true
+  claude:
+    managed: true
+    message_hooks:
+      abusive_language_normalization:
+        enabled: false
+"#;
+
+        let providers = provider_metadata_from_raw(raw, None).expect("metadata");
+        let codex = providers
+            .iter()
+            .find(|provider| provider.id == "codex")
+            .expect("codex");
+        let claude = providers
+            .iter()
+            .find(|provider| provider.id == "claude")
+            .expect("claude");
+
+        assert!(codex.message_hooks.abusive_language_normalization.enabled);
+        assert_eq!(
+            codex.capabilities.message_rewrite.external_cli.as_deref(),
+            Some("remote_proxy")
+        );
+        assert_eq!(
+            codex.capabilities.message_rewrite.wrapper.as_deref(),
+            Some("ow-codex")
+        );
+        assert!(!claude.message_hooks.abusive_language_normalization.enabled);
+        assert_eq!(
+            claude.capabilities.message_rewrite.external_cli.as_deref(),
+            Some("unsupported")
+        );
+    }
+
+    #[test]
+    fn set_provider_message_hook_enabled_updates_provider_config() {
+        let raw = r#"
+schema_version: 2
+providers:
+  codex:
+    managed: true
+"#;
+
+        let mut doc = normalize_provider_document(raw).expect("normalized config");
+        set_provider_message_hook_enabled_in_document(
+            &mut doc,
+            "codex",
+            "abusive_language_normalization",
+            false,
+        );
+
+        let providers = doc.providers.expect("providers");
+        let codex = providers.get("codex").expect("codex");
+        let message_hooks = codex.message_hooks.as_ref().expect("message hooks");
+        let hook = message_hooks
+            .get("abusive_language_normalization")
+            .expect("normalizer hook");
+        assert_eq!(hook.enabled, Some(false));
+    }
+
+    #[test]
     fn normalize_provider_document_does_not_backfill_claude_auth_from_legacy_env() {
         let raw = r#"
 tools:
@@ -2039,6 +2199,12 @@ providers:
                 files: true,
                 command_wrappers: vec!["model".to_string(), "review".to_string()],
                 control_modes: vec!["app".to_string(), "tui".to_string(), "hybrid".to_string()],
+                message_rewrite: super::ProviderMessageRewriteCapabilities {
+                    app_send: true,
+                    telegram: true,
+                    external_cli: Some("remote_proxy".to_string()),
+                    wrapper: Some("ow-codex".to_string()),
+                },
             }
         );
         assert_eq!(
@@ -2053,6 +2219,12 @@ providers:
                 files: true,
                 command_wrappers: Vec::new(),
                 control_modes: vec!["app".to_string()],
+                message_rewrite: super::ProviderMessageRewriteCapabilities {
+                    app_send: true,
+                    telegram: true,
+                    external_cli: Some("unsupported".to_string()),
+                    wrapper: Some(String::new()),
+                },
             }
         );
     }

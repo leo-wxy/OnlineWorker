@@ -116,6 +116,86 @@ def test_load_config_backfills_default_notification_channel(tmp_path, monkeypatc
     assert cfg.enabled_notification_channels[0].name == "telegram"
 
 
+def test_load_config_backfills_default_message_hooks(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text("logging:\n  level: \"INFO\"\n", encoding="utf-8")
+    monkeypatch.setenv("TELEGRAM_TOKEN", "123:abc")
+    monkeypatch.setenv("ALLOWED_USER_ID", "456789")
+    monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
+
+    from config import load_config
+
+    cfg = load_config(str(p))
+
+    assert cfg.message_hooks.enabled is True
+    assert cfg.message_hooks.builtin["abusive_language_normalization"].enabled is True
+    assert cfg.message_hooks.builtin["abusive_language_normalization"].mode == "conservative"
+
+
+def test_load_config_reads_message_hook_config(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        """
+message_hooks:
+  enabled: false
+  builtin:
+    abusive_language_normalization:
+      enabled: false
+      mode: off
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TELEGRAM_TOKEN", "123:abc")
+    monkeypatch.setenv("ALLOWED_USER_ID", "456789")
+    monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
+
+    from config import load_config
+
+    cfg = load_config(str(p))
+
+    assert cfg.message_hooks.enabled is False
+    assert cfg.message_hooks.builtin["abusive_language_normalization"].enabled is False
+    assert cfg.message_hooks.builtin["abusive_language_normalization"].mode == "off"
+
+
+def test_load_config_reads_provider_message_hook_enablement(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        """
+schema_version: 2
+providers:
+  codex:
+    managed: true
+    message_hooks:
+      abusive_language_normalization:
+        enabled: true
+  claude:
+    managed: true
+    message_hooks:
+      abusive_language_normalization:
+        enabled: false
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TELEGRAM_TOKEN", "123:abc")
+    monkeypatch.setenv("ALLOWED_USER_ID", "456789")
+    monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
+
+    from config import load_config
+
+    cfg = load_config(str(p))
+
+    codex = cfg.get_provider("codex")
+    claude = cfg.get_provider("claude")
+    assert codex is not None
+    assert claude is not None
+    assert codex.message_hooks.enabled is True
+    assert codex.message_hooks.builtin["abusive_language_normalization"].enabled is True
+    assert codex.message_hooks.builtin["abusive_language_normalization"].mode == "conservative"
+    assert claude.message_hooks.enabled is True
+    assert claude.message_hooks.builtin["abusive_language_normalization"].enabled is False
+
+
 def test_load_config_reads_custom_notification_channel(tmp_path, monkeypatch):
     p = tmp_path / "config.yaml"
     p.write_text(

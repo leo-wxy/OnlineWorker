@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 from pathlib import Path
 
+import pytest
+
 import main
 
 
@@ -214,3 +216,47 @@ def test_main_exposes_packaged_codex_tui_host_entrypoint():
 
     assert "--codex-tui-host" in source
     assert "run_codex_tui_host_once" in source
+
+
+def test_main_exposes_packaged_ow_codex_entrypoint():
+    source = Path(main.__file__).read_text(encoding="utf-8")
+
+    assert "--ow-codex" in source
+    assert "run_ow_codex_once" in source
+
+
+def test_main_packaged_ow_codex_entrypoint_forwards_codex_args(monkeypatch, tmp_path):
+    from plugins.providers.builtin.codex.python import cli_wrapper
+
+    calls = []
+
+    async def fake_run_ow_codex_once(codex_args, *, data_dir=None):
+        calls.append((list(codex_args), data_dir))
+        return 23
+
+    monkeypatch.setattr(
+        main.sys,
+        "argv",
+        [
+            "onlineworker-bot",
+            "--data-dir",
+            str(tmp_path),
+            "--ow-codex",
+            "-C",
+            "/tmp/project",
+            "你妈的 只回复 OK",
+        ],
+    )
+    monkeypatch.setattr(main, "set_data_dir", lambda path: None)
+    monkeypatch.setattr(cli_wrapper, "run_ow_codex_once", fake_run_ow_codex_once)
+
+    with pytest.raises(SystemExit) as exc:
+        main.main()
+
+    assert exc.value.code == 23
+    assert calls == [
+        (
+            ["-C", "/tmp/project", "你妈的 只回复 OK"],
+            str(tmp_path),
+        )
+    ]

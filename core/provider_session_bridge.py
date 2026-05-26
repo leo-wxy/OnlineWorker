@@ -3,10 +3,14 @@ from __future__ import annotations
 import importlib
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
+from config import get_data_dir, load_config
 from core.providers.overlay import iter_overlay_manifest_paths, load_manifest
 from core.providers.registry import get_provider
+from core.user_messages.contracts import UserMessageSendRequest
+from core.user_messages.gateway import prepare_user_message_text
 
 
 def _workspace_path(workspace: Any) -> str:
@@ -154,6 +158,15 @@ def _workspace_id(provider_id: str, workspace_path: str) -> str:
     normalized_provider_id = str(provider_id or "").strip()
     normalized_workspace = str(workspace_path or "").strip()
     return f"{normalized_provider_id}:{normalized_workspace}"
+
+
+def _message_gateway_state():
+    try:
+        data_dir = get_data_dir()
+        config = load_config(data_dir=data_dir) if data_dir else load_config()
+    except Exception:
+        return None
+    return SimpleNamespace(config=config)
 
 
 async def _provider_session_adapter(descriptor, provider_id: str):
@@ -348,6 +361,18 @@ async def send_provider_session_message(
     thread_info = {
         "thread_id": normalized_session_id,
     }
+    gateway_result = await prepare_user_message_text(
+        _message_gateway_state(),
+        UserMessageSendRequest(
+            source="provider_session_bridge",
+            provider_id=provider_id,
+            workspace_id=ws_info["daemon_workspace_id"],
+            thread_id=normalized_session_id,
+            text=trimmed_text,
+            attachments=normalized_attachments,
+        ),
+    )
+    trimmed_text = gateway_result.text
 
     await _invoke_message_hook_send(
         message_hooks.send,

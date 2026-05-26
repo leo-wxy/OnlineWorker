@@ -284,3 +284,154 @@ def test_send_provider_session_message_uses_generic_runtime_start_hook(monkeypat
             "protocol": "http",
         },
     }
+
+
+def test_send_provider_session_message_normalizes_text_before_provider_send(monkeypatch):
+    called = {}
+
+    class Facts:
+        @staticmethod
+        def scan_workspaces():
+            return [{"path": "/tmp/proj"}]
+
+        @staticmethod
+        def list_threads(workspace_path, limit=100):
+            return [{"id": "tid-1", "preview": "Thread 1"}]
+
+        @staticmethod
+        def query_active_thread_ids(workspace_path):
+            return {"tid-1"}
+
+        @staticmethod
+        def read_thread_history(session_id, limit=50, sessions_dir=None):
+            return []
+
+    class MessageHooks:
+        @staticmethod
+        async def send(state, adapter, ws_info, thread_info, **kwargs):
+            called["text"] = kwargs["text"]
+            called["workspace_id"] = ws_info["daemon_workspace_id"]
+            called["thread_id"] = thread_info["thread_id"]
+
+    class RuntimeHooks:
+        @staticmethod
+        async def start(manager, bot, tool_cfg):
+            manager.state.set_adapter(tool_cfg.name, {"provider_id": tool_cfg.name})
+
+    class Descriptor:
+        facts = Facts
+        message_hooks = MessageHooks
+        metadata = type(
+            "Metadata",
+            (),
+            {
+                "bin": "overlay-tool",
+                "transport": type(
+                    "Transport",
+                    (),
+                    {
+                        "app_server_port": 0,
+                        "type": "http",
+                    },
+                )(),
+                "owner_transport": "http",
+                "live_transport": "http",
+            },
+        )()
+        runtime_hooks = RuntimeHooks
+
+    async def fake_send():
+        await bridge.send_provider_session_message(
+            "overlay-tool",
+            "tid-1",
+            "这什么傻逼问题",
+            workspace_dir="/tmp/proj",
+        )
+
+    monkeypatch.setattr(bridge, "_load_provider_descriptor", lambda provider_id: Descriptor())
+
+    import asyncio
+
+    asyncio.run(fake_send())
+
+    assert called == {
+        "workspace_id": "overlay-tool:/tmp/proj",
+        "thread_id": "tid-1",
+        "text": "这是什么问题",
+    }
+
+
+def test_send_provider_session_message_respects_message_hook_config(monkeypatch):
+    from types import SimpleNamespace
+
+    called = {}
+
+    class Facts:
+        @staticmethod
+        def scan_workspaces():
+            return [{"path": "/tmp/proj"}]
+
+        @staticmethod
+        def list_threads(workspace_path, limit=100):
+            return [{"id": "tid-1", "preview": "Thread 1"}]
+
+        @staticmethod
+        def query_active_thread_ids(workspace_path):
+            return {"tid-1"}
+
+        @staticmethod
+        def read_thread_history(session_id, limit=50, sessions_dir=None):
+            return []
+
+    class MessageHooks:
+        @staticmethod
+        async def send(state, adapter, ws_info, thread_info, **kwargs):
+            called["text"] = kwargs["text"]
+
+    class RuntimeHooks:
+        @staticmethod
+        async def start(manager, bot, tool_cfg):
+            manager.state.set_adapter(tool_cfg.name, {"provider_id": tool_cfg.name})
+
+    class Descriptor:
+        facts = Facts
+        message_hooks = MessageHooks
+        metadata = type(
+            "Metadata",
+            (),
+            {
+                "bin": "overlay-tool",
+                "transport": type(
+                    "Transport",
+                    (),
+                    {
+                        "app_server_port": 0,
+                        "type": "http",
+                    },
+                )(),
+                "owner_transport": "http",
+                "live_transport": "http",
+            },
+        )()
+        runtime_hooks = RuntimeHooks
+
+    async def fake_send():
+        await bridge.send_provider_session_message(
+            "overlay-tool",
+            "tid-1",
+            "这什么傻逼问题",
+            workspace_dir="/tmp/proj",
+        )
+
+    monkeypatch.setattr(bridge, "_load_provider_descriptor", lambda provider_id: Descriptor())
+    monkeypatch.setattr(
+        bridge,
+        "load_config",
+        lambda *args, **kwargs: SimpleNamespace(message_hooks=SimpleNamespace(enabled=False)),
+    )
+
+    import asyncio
+
+    asyncio.run(fake_send())
+
+    assert called["text"] == "这什么傻逼问题"

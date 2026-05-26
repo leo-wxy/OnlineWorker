@@ -37,6 +37,8 @@ from bot.interaction_specs import (
 )
 from core.state import AppState, PendingCommandWrapper
 from core.storage import save_storage, ThreadInfo
+from core.user_messages.contracts import UserMessageSendRequest
+from core.user_messages.gateway import prepare_user_message_text
 from bot.keyboards import (
     build_command_wrapper_keyboard,
     parse_approval_callback,
@@ -200,6 +202,7 @@ async def _dispatch_thread_message(
     has_photo: bool,
     caption: str | None = None,
     attachments: list[dict] | None = None,
+    message_metadata: dict | None = None,
 ) -> None:
     unavailable = _provider_unavailable_message(state, ws_info.tool)
     if unavailable:
@@ -232,6 +235,23 @@ async def _dispatch_thread_message(
     workspace_id = ws_info.daemon_workspace_id
     if not workspace_id:
         raise RuntimeError("workspace 未关联 daemon ID。")
+
+    gateway_result = await prepare_user_message_text(
+        state,
+        UserMessageSendRequest(
+            source="telegram",
+            provider_id=str(ws_info.tool),
+            workspace_id=str(workspace_id),
+            thread_id=str(thread_info.thread_id),
+            text=send_text,
+            attachments=attachments or [],
+            metadata={
+                "source_topic_id": src_topic_id,
+                **(message_metadata or {}),
+            },
+        ),
+    )
+    send_text = gateway_result.text
 
     handle_local_owner = (
         getattr(message_hooks, "handle_local_owner", None)
@@ -270,7 +290,7 @@ async def _dispatch_thread_message(
         raise RuntimeError(f"{ws_info.tool} 未连接")
 
     should_continue = True
-    preview_value = _preview_for_message(text, caption, has_photo)
+    preview_value = _preview_for_message(send_text, None, has_photo)
     try:
         if message_hooks is not None:
             prepare_kwargs = dict(
@@ -1043,6 +1063,7 @@ def make_callback_handler(state: AppState, group_chat_id: int) -> Callable:
                         src_topic_id=getattr(getattr(query, "message", None), "message_thread_id", None),
                         text=result_text.command_text,
                         has_photo=False,
+                        message_metadata={"is_command_dispatch": True},
                     )
                 except Exception as e:
                     await _safe_answer_callback(

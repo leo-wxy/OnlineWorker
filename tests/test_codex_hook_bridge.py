@@ -129,6 +129,44 @@ def test_codex_hook_bridge_once_returns_empty_response(monkeypatch, capsys):
     assert capsys.readouterr().out == "{}"
 
 
+def test_codex_hook_bridge_leaves_user_prompt_submit_pass_through_without_permission_mirror(
+    monkeypatch,
+    capsys,
+):
+    from plugins.providers.builtin.codex.python.hook_bridge import (
+        CODEX_USER_PROMPT_SUBMIT_HOOK_NAME,
+    )
+
+    def fail_permission_mirror(data_dir, payload):
+        raise AssertionError("UserPromptSubmit must not use PermissionRequest mirror")
+
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.hook_bridge.mirror_codex_permission_request",
+        fail_permission_mirror,
+    )
+    monkeypatch.setattr(
+        "sys.stdin",
+        type(
+            "_Stdin",
+            (),
+            {
+                "buffer": BytesIO(
+                    json.dumps(
+                        {
+                            "hook_event_name": "UserPromptSubmit",
+                            "prompt": "这什么傻逼问题",
+                        }
+                    ).encode("utf-8")
+                )
+            },
+        )(),
+    )
+
+    assert CODEX_USER_PROMPT_SUBMIT_HOOK_NAME == "UserPromptSubmit"
+    assert run_codex_hook_bridge_once("/tmp/onlineworker") == 0
+    assert capsys.readouterr().out == "{}"
+
+
 def test_install_codex_permission_mirror_hook_preserves_existing_hooks(tmp_path):
     hooks_path = tmp_path / "hooks.json"
     hooks_path.write_text(

@@ -104,6 +104,55 @@ async def test_provider_owner_bridge_uses_registry_message_hooks(monkeypatch, tm
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_normalizes_text_before_registry_message_hooks(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    called = {}
+
+    class _FakeAdapter:
+        connected = True
+
+        def register_workspace_cwd(self, workspace_id: str, cwd: str) -> None:
+            pass
+
+    async def prepare_send(state_obj, current_adapter, ws_info, thread_info, **kwargs):
+        called["prepare_text"] = kwargs["text"]
+        return True
+
+    async def send(state_obj, current_adapter, ws_info, thread_info, **kwargs):
+        called["send_text"] = kwargs["text"]
+
+    state = AppState(storage=AppStorage())
+    state.set_adapter("overlay-tool", _FakeAdapter())
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            message_hooks=SimpleNamespace(
+                ensure_connected=AsyncMock(return_value=state.get_adapter(name)),
+                prepare_send=prepare_send,
+                send=send,
+            )
+        )
+        if name == "overlay-tool"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_send_message(
+        {
+            "provider_id": "overlay-tool",
+            "thread_id": "tid-1",
+            "text": "这什么傻逼问题",
+            "workspace_dir": "/tmp/project-a",
+        }
+    )
+
+    assert response["ok"] is True
+    assert called["prepare_text"] == "这是什么问题"
+    assert called["send_text"] == "这是什么问题"
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_routes_text_via_provider_owner_bridge_hook(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
@@ -175,6 +224,68 @@ async def test_provider_owner_bridge_routes_text_via_provider_owner_bridge_hook(
     provider.message_hooks.prepare_send.assert_not_awaited()
     provider.message_hooks.send.assert_not_awaited()
     assert state.get_provider_runtime("overlay-tool").thread_pending_send_started_at["tid-cli"] > 0
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_normalizes_text_before_owner_bridge_router(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    class _FakeAdapter:
+        connected = True
+
+        def register_workspace_cwd(self, workspace_id: str, cwd: str) -> None:
+            pass
+
+    storage = AppStorage()
+    storage.workspaces["overlay-tool:/tmp/project-a"] = WorkspaceInfo(
+        name="project-a",
+        path="/tmp/project-a",
+        tool="overlay-tool",
+        daemon_workspace_id="overlay-tool:/tmp/project-a",
+        threads={
+            "tid-cli": ThreadInfo(
+                thread_id="tid-cli",
+                topic_id=7653,
+                source="app",
+            )
+        },
+    )
+    state = AppState(storage=storage)
+    state.set_adapter("overlay-tool", _FakeAdapter())
+
+    route_send = AsyncMock(return_value="owned_visible_cli")
+    provider = SimpleNamespace(
+        message_hooks=SimpleNamespace(
+            ensure_connected=AsyncMock(),
+            prepare_send=AsyncMock(),
+            send=AsyncMock(),
+            try_route_owner_bridge_send=route_send,
+        )
+    )
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: provider if name == "overlay-tool" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_send_message(
+        {
+            "provider_id": "overlay-tool",
+            "thread_id": "tid-cli",
+            "text": "这什么傻逼问题",
+            "workspace_dir": "/tmp/project-a",
+        }
+    )
+
+    assert response["ok"] is True
+    route_send.assert_awaited_once_with(
+        state,
+        storage.workspaces["overlay-tool:/tmp/project-a"],
+        storage.workspaces["overlay-tool:/tmp/project-a"].threads["tid-cli"],
+        text="这是什么问题",
+    )
+    provider.message_hooks.prepare_send.assert_not_awaited()
+    provider.message_hooks.send.assert_not_awaited()
 
 
 @pytest.mark.asyncio

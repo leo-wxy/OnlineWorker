@@ -95,6 +95,15 @@ test("maintenance keeps external Codex permission hook install out of the app sh
   assert.equal(en.includes("Codex Permission Entry"), false);
 });
 
+test("provider settings exposes copyable ow-codex guidance for message rewrite wrappers", () => {
+  const panel = readFileSync(join(root, "src", "components", "ProviderSettingsPanel.tsx"), "utf8");
+
+  assert.match(panel, /cliRewriteCommand/);
+  assert.match(panel, /navigator\.clipboard\.writeText/);
+  assert.match(panel, /ow-codex|wrapper/);
+  assert.match(panel, /-C \/path\/to\/workspace/);
+});
+
 test("notification tab exposes split app list and plugin-defined configuration", () => {
   const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
   const panel = readFileSync(join(root, "src", "components", "NotificationSettingsPanel.tsx"), "utf8");

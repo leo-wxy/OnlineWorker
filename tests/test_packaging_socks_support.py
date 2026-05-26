@@ -28,3 +28,13 @@ def test_pyinstaller_specs_bundle_builtin_provider_manifests() -> None:
         spec_text = spec_path.read_text(encoding="utf-8")
         assert "'plugins/providers/builtin/claude/plugin.yaml'" in spec_text, spec_path.name
         assert "'plugins/providers/builtin/codex/plugin.yaml'" in spec_text, spec_path.name
+
+
+def test_pyinstaller_specs_include_packaged_ow_codex_entrypoint() -> None:
+    spec_paths = [
+        ROOT / "onlineworker.spec",
+        ROOT / "onlineworker-x86_64.spec",
+    ]
+    for spec_path in spec_paths:
+        spec_text = spec_path.read_text(encoding="utf-8")
+        assert "'plugins.providers.builtin.codex.python.cli_wrapper'" in spec_text, spec_path.name

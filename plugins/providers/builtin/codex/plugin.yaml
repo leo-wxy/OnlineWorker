@@ -37,6 +37,11 @@ provider:
       - app
       - tui
       - hybrid
+    message_rewrite:
+      app_send: true
+      telegram: true
+      external_cli: remote_proxy
+      wrapper: ow-codex
   process:
     cleanup_matchers:
       - "codex.*app-server"

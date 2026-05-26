@@ -74,6 +74,7 @@ class ProviderRuntimeState:
     """单个 provider 的运行时容器。"""
     owner_bridge: Any = None
     host: Any = None
+    remote_proxy: Any = None
     host_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     mirror_task: Optional[asyncio.Task] = None
     approval_mirror_task: Optional[asyncio.Task] = None

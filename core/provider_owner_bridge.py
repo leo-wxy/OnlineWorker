@@ -12,6 +12,8 @@ from core.providers.interactions import ProviderApprovalRequest
 from config import get_data_dir
 from core.providers.registry import get_provider
 from core.storage import ThreadInfo, WorkspaceInfo, save_storage
+from core.user_messages.contracts import UserMessageSendRequest
+from core.user_messages.gateway import prepare_user_message_text
 
 
 OWNER_BRIDGE_SOCKET_FILENAME = "provider_owner_bridge.sock"
@@ -697,6 +699,19 @@ class ProviderOwnerBridge:
         message_hooks = getattr(provider, "message_hooks", None)
         if message_hooks is None:
             return {"ok": False, "error": f"Provider '{provider_id}' 不支持发送消息"}
+
+        gateway_result = await prepare_user_message_text(
+            self.state,
+            UserMessageSendRequest(
+                source="owner_bridge",
+                provider_id=provider_id,
+                workspace_id=str(workspace_id),
+                thread_id=thread_id,
+                text=text,
+                attachments=attachments,
+            ),
+        )
+        text = gateway_result.text
 
         owner_bridge_router = getattr(message_hooks, "try_route_owner_bridge_send", None)
         if callable(owner_bridge_router) and not attachments:

@@ -989,6 +989,33 @@ async def test_post_init_uses_blocking_codex_hook_instead_of_current_session_app
 
 
 @pytest.mark.asyncio
+async def test_shutdown_runtime_stops_codex_remote_proxy():
+    storage = AppStorage()
+    state = AppState(storage=storage)
+    manager = LifecycleManager(
+        state,
+        storage,
+        -100123,
+        Config(
+            telegram_token="token",
+            allowed_user_id=1,
+            group_chat_id=-100123,
+            log_level="INFO",
+            tools=[],
+            delete_archived_topics=True,
+        ),
+    )
+    proxy = MagicMock()
+    proxy.stop = AsyncMock()
+    codex_state.get_runtime(state).remote_proxy = proxy
+
+    await codex_runtime.shutdown_runtime(manager)
+
+    proxy.stop.assert_awaited_once()
+    assert codex_state.get_runtime(state).remote_proxy is None
+
+
+@pytest.mark.asyncio
 async def test_post_init_skips_codex_current_session_approval_mirror_without_data_dir():
     storage = AppStorage()
     state = AppState(storage=storage)

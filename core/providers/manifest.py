@@ -49,6 +49,7 @@ def capabilities_from_manifest(raw: dict[str, Any] | None) -> ProviderManifestCa
         commands=_bool_value(data.get("commands")),
         command_wrappers=_string_tuple(data.get("command_wrappers")),
         control_modes=_string_tuple(data.get("control_modes"), ("app",)),
+        message_rewrite=dict(_mapping(data.get("message_rewrite"))),
     )
 
 

@@ -414,12 +414,13 @@ async def test_ensure_codex_tui_host_bound_starts_host_in_app_ws_mode(tmp_path, 
     started = {}
 
     class FakeCodexTuiHost:
-        def __init__(self, *, data_dir, thread_id, cwd, codex_bin):
+        def __init__(self, *, data_dir, thread_id, cwd, codex_bin, remote_url=None):
             started.update(
                 data_dir=data_dir,
                 thread_id=thread_id,
                 cwd=cwd,
                 codex_bin=codex_bin,
+                remote_url=remote_url,
             )
             self.thread_id = thread_id
             self.cwd = cwd
@@ -430,6 +431,8 @@ async def test_ensure_codex_tui_host_bound_starts_host_in_app_ws_mode(tmp_path, 
 
     monkeypatch.setattr(tui_bridge, "CodexTuiHost", FakeCodexTuiHost)
     monkeypatch.setattr(tui_bridge, "_read_live_host_status", lambda state_obj: None)
+    proxy_mock = AsyncMock(return_value="ws://127.0.0.1:58123")
+    monkeypatch.setattr(tui_bridge, "ensure_codex_remote_message_proxy", proxy_mock)
 
     await tui_bridge.ensure_codex_tui_host_bound(state, ws, "tid-1")
 
@@ -438,8 +441,10 @@ async def test_ensure_codex_tui_host_bound_starts_host_in_app_ws_mode(tmp_path, 
         "thread_id": "tid-1",
         "cwd": str(tmp_path / "repo"),
         "codex_bin": "codex",
+        "remote_url": "ws://127.0.0.1:58123",
         "start_called": True,
     }
+    proxy_mock.assert_awaited_once_with(state, "ws://127.0.0.1:4722")
     host = codex_state.get_tui_host(state)
     assert host is not None
     assert host.thread_id == "tid-1"
@@ -2601,6 +2606,9 @@ async def test_send_message_via_tui_host_auto_starts_managed_host_for_app_mode(t
         "plugins.providers.builtin.codex.python.tui_bridge.CodexTuiHost",
         return_value=host,
     ) as host_cls, patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.ensure_codex_remote_message_proxy",
+        new=AsyncMock(return_value="ws://127.0.0.1:58123"),
+    ) as proxy_mock, patch(
         "plugins.providers.builtin.codex.python.tui_bridge.send_message_to_codex_tui_host",
         new=AsyncMock(return_value={"ok": True}),
     ) as client_mock:
@@ -2611,12 +2619,133 @@ async def test_send_message_via_tui_host_auto_starts_managed_host_for_app_mode(t
         data_dir=str(tmp_path),
         thread_id="tid-1",
         cwd=ws.path,
+        remote_url="ws://127.0.0.1:58123",
         codex_bin="codex",
     )
+    proxy_mock.assert_awaited_once_with(state, "ws://127.0.0.1:4722")
     host.start.assert_awaited_once()
     assert codex_state.get_tui_host(state) is host
     assert codex_state.get_runtime(state).thread_pending_send_started_at["tid-1"] > 0
     client_mock.assert_awaited_once_with(state, ws, "tid-1", "你好", topic_id=100)
+
+
+@pytest.mark.asyncio
+async def test_send_message_via_tui_host_uses_dynamic_app_server_proxy_url(tmp_path):
+    from plugins.providers.builtin.codex.python.tui_bridge import send_message_via_tui_host
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=50,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
+    storage.workspaces["codex:onlineWorker"] = ws
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="ws",
+                app_server_port=0,
+                control_mode="app",
+            )
+        ],
+        data_dir=str(tmp_path),
+        delete_archived_topics=True,
+    )
+    state = AppState(storage=storage, config=cfg)
+    state.app_server_proc = SimpleNamespace(ws_url="ws://127.0.0.1:59431")
+
+    host = MagicMock()
+    host.start = AsyncMock()
+    host.thread_id = "tid-1"
+    host.cwd = ws.path
+    host.is_running = False
+
+    with patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.read_host_status",
+        return_value=None,
+    ), patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.CodexTuiHost",
+        return_value=host,
+    ) as host_cls, patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.ensure_codex_remote_message_proxy",
+        new=AsyncMock(return_value="ws://127.0.0.1:58124"),
+    ) as proxy_mock, patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.send_message_to_codex_tui_host",
+        new=AsyncMock(return_value={"ok": True}),
+    ):
+        await send_message_via_tui_host(state, ws, "tid-1", "你好")
+
+    proxy_mock.assert_awaited_once_with(state, "ws://127.0.0.1:59431")
+    host_cls.assert_called_once_with(
+        data_dir=str(tmp_path),
+        thread_id="tid-1",
+        cwd=ws.path,
+        remote_url="ws://127.0.0.1:58124",
+        codex_bin="codex",
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_message_via_tui_host_fails_closed_when_remote_proxy_fails(tmp_path):
+    from plugins.providers.builtin.codex.python.tui_bridge import send_message_via_tui_host
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=50,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
+    storage.workspaces["codex:onlineWorker"] = ws
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="ws",
+                app_server_port=4722,
+                control_mode="app",
+            )
+        ],
+        data_dir=str(tmp_path),
+        delete_archived_topics=True,
+    )
+    state = AppState(storage=storage, config=cfg)
+
+    with patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.read_host_status",
+        return_value=None,
+    ), patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.CodexTuiHost",
+    ) as host_cls, patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.ensure_codex_remote_message_proxy",
+        new=AsyncMock(side_effect=RuntimeError("proxy boom")),
+    ), patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.send_message_to_codex_tui_host",
+        new=AsyncMock(),
+    ) as client_mock:
+        with pytest.raises(RuntimeError, match="proxy boom"):
+            await send_message_via_tui_host(state, ws, "tid-1", "你好")
+
+    host_cls.assert_not_called()
+    client_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2657,8 +2786,14 @@ async def test_try_route_owner_bridge_send_auto_starts_tui_host_for_app_ws_mode(
     started = {}
 
     class FakeCodexTuiHost:
-        def __init__(self, *, data_dir, thread_id, cwd, codex_bin):
-            started.update(data_dir=data_dir, thread_id=thread_id, cwd=cwd, codex_bin=codex_bin)
+        def __init__(self, *, data_dir, thread_id, cwd, codex_bin, remote_url=None):
+            started.update(
+                data_dir=data_dir,
+                thread_id=thread_id,
+                cwd=cwd,
+                codex_bin=codex_bin,
+                remote_url=remote_url,
+            )
             self.thread_id = thread_id
             self.cwd = cwd
             self.is_running = True
@@ -2723,8 +2858,14 @@ async def test_try_route_owner_bridge_send_auto_starts_tui_host_for_app_stdio_ow
     started = {}
 
     class FakeCodexTuiHost:
-        def __init__(self, *, data_dir, thread_id, cwd, codex_bin):
-            started.update(data_dir=data_dir, thread_id=thread_id, cwd=cwd, codex_bin=codex_bin)
+        def __init__(self, *, data_dir, thread_id, cwd, codex_bin, remote_url=None):
+            started.update(
+                data_dir=data_dir,
+                thread_id=thread_id,
+                cwd=cwd,
+                codex_bin=codex_bin,
+                remote_url=remote_url,
+            )
             self.thread_id = thread_id
             self.cwd = cwd
             self.is_running = True

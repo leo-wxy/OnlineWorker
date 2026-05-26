@@ -33,6 +33,11 @@ provider:
     command_wrappers: []
     control_modes:
       - app
+    message_rewrite:
+      app_send: true
+      telegram: true
+      external_cli: unsupported
+      wrapper: ""
   process:
     cleanup_matchers: []
   health: {}

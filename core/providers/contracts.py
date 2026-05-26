@@ -70,6 +70,7 @@ class ProviderManifestCapabilities:
     commands: bool = False
     command_wrappers: tuple[str, ...] = ()
     control_modes: tuple[str, ...] = ("app",)
+    message_rewrite: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

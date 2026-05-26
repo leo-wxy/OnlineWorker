@@ -34,6 +34,8 @@ from core.storage import (
     ThreadInfo,
     save_storage,
 )
+from core.user_messages.contracts import UserMessageSendRequest
+from core.user_messages.gateway import prepare_user_message_text
 from bot.handlers.common import _send_to_group, reconcile_workspace_threads_with_source
 from bot.handlers.workspace import (
     _make_thread_topic_name,
@@ -186,6 +188,19 @@ async def _activate_new_thread_in_source(
     thread_id: str,
     initial_text: str | None,
 ) -> None:
+    if initial_text:
+        result = await prepare_user_message_text(
+            state,
+            UserMessageSendRequest(
+                source="telegram_new_thread",
+                provider_id=str(ws.tool),
+                workspace_id=str(workspace_id),
+                thread_id=str(thread_id),
+                text=initial_text,
+            ),
+        )
+        initial_text = result.text
+
     hooks = _get_thread_hooks(ws.tool)
     activate_new_thread = getattr(hooks, "activate_new_thread", None) if hooks is not None else None
     if callable(activate_new_thread):

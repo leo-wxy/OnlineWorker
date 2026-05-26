@@ -15,6 +15,9 @@ providers:
     control_mode: "app"
     transport:
       type: "stdio"
+    message_hooks:
+      abusive_language_normalization:
+        enabled: true
 
   claude:
     visible: true
@@ -27,6 +30,9 @@ providers:
     control_mode: "app"
     transport:
       type: "stdio"
+    message_hooks:
+      abusive_language_normalization:
+        enabled: false
 
 telegram:
   # true = delete archived thread topics.

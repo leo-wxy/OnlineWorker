@@ -31,6 +31,23 @@ export interface ProviderCapabilitiesMetadata {
   files: boolean;
   commandWrappers: string[];
   controlModes: string[];
+  messageRewrite?: ProviderMessageRewriteCapabilities | null;
+}
+
+export interface ProviderMessageRewriteCapabilities {
+  appSend: boolean;
+  telegram: boolean;
+  externalCli?: string | null;
+  wrapper?: string | null;
+}
+
+export interface ProviderMessageHookStatus {
+  enabled: boolean;
+  mode: string;
+}
+
+export interface ProviderMessageHooksMetadata {
+  abusiveLanguageNormalization: ProviderMessageHookStatus;
 }
 
 export interface ComposerAttachment {
@@ -69,6 +86,7 @@ export interface ProviderMetadata {
   liveTransport: string;
   controlMode?: string | null;
   capabilities: ProviderCapabilitiesMetadata;
+  messageHooks?: ProviderMessageHooksMetadata | null;
   install?: ProviderInstallMetadata;
   process?: ProviderProcessMetadata;
   icon?: ProviderIconMetadata | null;

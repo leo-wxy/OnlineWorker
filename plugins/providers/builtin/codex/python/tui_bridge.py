@@ -11,6 +11,7 @@ from plugins.providers.builtin.codex.python.process import AppServerProcess
 from core.providers.facts import query_provider_active_thread_ids
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
 from plugins.providers.builtin.codex.python import storage_runtime
+from plugins.providers.builtin.codex.python.remote_proxy import ensure_codex_remote_message_proxy
 from plugins.providers.builtin.codex.python.tui_host_client import send_message_to_codex_tui_host
 from plugins.providers.builtin.codex.python.tui_host_protocol import read_host_status
 from plugins.providers.builtin.codex.python.tui_host_runtime import CodexTuiHost
@@ -282,6 +283,36 @@ def _read_live_host_status(state: AppState) -> Optional[dict]:
     return status
 
 
+def _resolve_codex_remote_upstream_url(state: AppState, tool_cfg: ToolConfig) -> str:
+    proc = getattr(state, "app_server_proc", None)
+    proc_ws_url = str(getattr(proc, "ws_url", "") or "").strip()
+    if proc_ws_url.startswith("ws://"):
+        return proc_ws_url
+
+    app_server_url = str(getattr(tool_cfg, "app_server_url", "") or "").strip()
+    if app_server_url.startswith("ws://"):
+        return app_server_url
+
+    if tool_cfg.protocol == "ws" and tool_cfg.app_server_port:
+        return f"ws://127.0.0.1:{tool_cfg.app_server_port}"
+    return ""
+
+
+async def _resolve_codex_tui_host_remote_url(state: AppState, tool_cfg: ToolConfig) -> Optional[str]:
+    upstream_url = _resolve_codex_remote_upstream_url(state, tool_cfg)
+    if not upstream_url:
+        return None
+    try:
+        return await ensure_codex_remote_message_proxy(state, upstream_url)
+    except Exception:
+        logger.error(
+            "[tui-host] 启动 Codex remote message proxy 失败，已拒绝直连 upstream=%s",
+            upstream_url,
+            exc_info=True,
+        )
+        raise
+
+
 async def ensure_codex_tui_host_bound(
     state: AppState,
     ws: WorkspaceInfo,
@@ -326,11 +357,13 @@ async def ensure_codex_tui_host_bound(
             await host.stop()
             codex_state.set_tui_host(state, None)
 
+        remote_url = await _resolve_codex_tui_host_remote_url(state, tool_cfg)
         # 在同一进程内重绑最新 thread，避免继续依赖 shared 4722。
         host = CodexTuiHost(
             data_dir=data_dir,
             thread_id=thread_id,
             cwd=ws.path,
+            remote_url=remote_url,
             codex_bin=tool_cfg.codex_bin,
         )
         await host.start()
