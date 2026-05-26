@@ -34,6 +34,43 @@ test("applySessionStreamEvent replaces optimistic user turn with attachment-enri
   assert.equal(next[0].content, "图片里面主要是什么内容\n[Attached image] Image #1");
 });
 
+test("applySessionStreamEvent replaces rewritten user echo over optimistic turn", () => {
+  const initial = [{ role: "user", content: "你妈的，看下这个是什么工程" }];
+  const next = applySessionStreamEvent(initial, {
+    kind: "user_message",
+    turn: {
+      role: "user",
+      content: "看下这个是什么工程",
+      displayMode: "plain",
+    },
+  });
+
+  assert.equal(next.length, 1);
+  assert.equal(next[0].role, "user");
+  assert.equal(next[0].content, "看下这个是什么工程");
+});
+
+test("applySessionStreamEvent replaces rewritten user echo before pending assistant", () => {
+  const initial = [
+    { role: "user", content: "你妈的，看下这个是什么工程" },
+    { role: "assistant", content: "正在处理...", pending: true, displayMode: "plain" },
+  ];
+  const next = applySessionStreamEvent(initial, {
+    kind: "user_message",
+    turn: {
+      role: "user",
+      content: "看下这个是什么工程",
+      displayMode: "plain",
+    },
+  });
+
+  assert.equal(next.length, 2);
+  assert.equal(next[0].role, "user");
+  assert.equal(next[0].content, "看下这个是什么工程");
+  assert.equal(next[1].role, "assistant");
+  assert.equal(next[1].pending, true);
+});
+
 test("applySessionStreamEvent replaces optimistic user turn even when pending assistant already exists", () => {
   const initial = [
     { role: "user", content: "图片里面主要是什么内容" },

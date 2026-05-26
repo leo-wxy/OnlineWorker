@@ -59,13 +59,24 @@ function replaceTrailingUserTurnBeforePendingAssistant(turns, turn) {
     return null;
   }
 
-  const candidate = mergeSessionTurns([previous], [normalizedTurn]);
-  if (candidate.length !== 1) {
+  const next = [...turns];
+  next[next.length - 2] = normalizedTurn;
+  return next;
+}
+
+function replaceLastUserTurn(turns, turn) {
+  const normalizedTurn = normalizeSessionTurn(turn);
+  if (!normalizedTurn || normalizedTurn.role !== "user" || turns.length === 0) {
+    return null;
+  }
+
+  const last = turns[turns.length - 1];
+  if (last?.role !== "user") {
     return null;
   }
 
   const next = [...turns];
-  next[next.length - 2] = candidate[0];
+  next[next.length - 1] = normalizedTurn;
   return next;
 }
 
@@ -131,6 +142,16 @@ export function applySessionStreamEvent(turns, event) {
     case "user_message":
       {
         const replaced = replaceTrailingUserTurnBeforePendingAssistant(turns, {
+          ...event.turn,
+          displayMode: "plain",
+          pending: false,
+        });
+        if (replaced) {
+          return replaced;
+        }
+      }
+      {
+        const replaced = replaceLastUserTurn(turns, {
           ...event.turn,
           displayMode: "plain",
           pending: false,

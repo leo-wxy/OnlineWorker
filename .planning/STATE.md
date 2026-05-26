@@ -9,10 +9,10 @@
 
 - v1.2.1 is archived.
 - Phase 6, Notification Channel Abstraction, is complete.
-- Phase 7, OnlineWorker User Message Gateway, is source-verified complete for plans 07-01, 07-02, and 07-03.
+- Phase 7, OnlineWorker User Message Gateway, is closed.
 - Active requirements `NOTIFY-01` and `NOTIFY-02` are implemented.
 - Phase 6 notification mechanism, Telegram builtin channel, plugin guide assets, and UI channel configuration have been implemented and installed-app verified.
-- Phase 7 adds an OnlineWorker-level provider-bound user message gateway, a dictionary-backed conservative abusive-language neutralizer, and a Codex remote app-server proxy for OnlineWorker-managed Codex TUI host prompt rewriting; packaged-app verification has not been run for Phase 7.
+- Phase 7 adds an OnlineWorker-level provider-bound user message gateway and Codex remote app-server proxy boundary. Civility rewrite is currently paused, user text is sent unchanged, and related App entry points are hidden; installed-app verification has passed.
 
 ## Archived Milestone
 
@@ -25,7 +25,7 @@
 | Phase | Status | Next Step |
 |-------|--------|-----------|
 | 6. Notification Channel Abstraction | Completed | Archive or release milestone when ready |
-| 7. OnlineWorker User Message Gateway | Source Verified | Run packaged-app build/install/relaunch verification before release |
+| 7. OnlineWorker User Message Gateway | Closed | None |
 
 ## Key Preserved Decisions
 
@@ -49,4 +49,5 @@
 - Phase 7 plan added: 07-01 add OnlineWorker user message gateway and before-send hooks.
 - Phase 7 plan completed source verification: core gateway/config/hooks added; Telegram, owner bridge, provider session bridge, and new-thread user send paths route through the gateway; Codex `UserPromptSubmit` is explicitly modeled as pass-through pending confirmed prompt replacement protocol.
 - Phase 7 plan added and completed source verification: 07-02 dictionary-backed user message neutralizer with a manual normalizer test script.
-- Phase 7 plan added and completed source verification: 07-03 Codex remote app-server user message proxy. Real `codex --remote` traffic was probed; OnlineWorker-managed Codex TUI host sessions can now rewrite `turn/start` and `turn/steer` text before app-server persistence/model submission.
+- Phase 7 plan added and completed source verification: 07-03 Codex remote app-server user message proxy. Real `codex --remote` traffic was probed; OnlineWorker-managed Codex TUI host sessions have a gateway/proxy boundary before app-server persistence/model submission.
+- Phase 7 closed after product decision: civility rewrite is paused, App/Telegram/managed Codex paths send user text unchanged, the App settings entry is hidden, duplicate user message rendering for image sends was fixed, and fast packaged-app verification completed.

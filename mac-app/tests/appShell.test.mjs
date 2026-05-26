@@ -95,13 +95,35 @@ test("maintenance keeps external Codex permission hook install out of the app sh
   assert.equal(en.includes("Codex Permission Entry"), false);
 });
 
-test("provider settings exposes copyable ow-codex guidance for message rewrite wrappers", () => {
+test("provider settings hides message rewrite controls while paused", () => {
   const panel = readFileSync(join(root, "src", "components", "ProviderSettingsPanel.tsx"), "utf8");
+  const types = readFileSync(join(root, "src", "i18n", "types.ts"), "utf8");
+  const zh = readFileSync(join(root, "src", "i18n", "locales", "zh.ts"), "utf8");
+  const en = readFileSync(join(root, "src", "i18n", "locales", "en.ts"), "utf8");
+  const codexPlugin = readFileSync(
+    join(root, "..", "plugins", "providers", "builtin", "codex", "plugin.yaml"),
+    "utf8"
+  );
 
-  assert.match(panel, /cliRewriteCommand/);
-  assert.match(panel, /navigator\.clipboard\.writeText/);
-  assert.match(panel, /ow-codex|wrapper/);
-  assert.match(panel, /-C \/path\/to\/workspace/);
+  assert.equal(panel.includes("cliRewriteCommand"), false);
+  assert.equal(panel.includes("cliRewriteAliasCommand"), false);
+  assert.equal(panel.includes("cliRewriteHelp"), false);
+  assert.equal(panel.includes("cliRewriteAliasHelp"), false);
+  assert.equal(panel.includes("messageRewritePaused"), false);
+  assert.equal(panel.includes("set_provider_message_hook_enabled"), false);
+  assert.equal(panel.includes("abusive_language_normalization"), false);
+  assert.equal(panel.includes("texts.rewriteTitle"), false);
+  assert.equal(panel.includes("texts.rewritePausedDescription"), false);
+  assert.equal(panel.includes("navigator.clipboard.writeText"), false);
+  assert.equal(types.includes("rewriteTitle"), false);
+  assert.equal(types.includes("rewritePaused"), false);
+  assert.equal(types.includes("normalizerOn"), false);
+  assert.match(codexPlugin, /external_cli:\s*remote_proxy/);
+  assert.match(codexPlugin, /wrapper:\s*ow-codex/);
+  assert.equal(zh.includes("消息改写"), false);
+  assert.equal(zh.includes("文明模式暂时关闭"), false);
+  assert.equal(en.includes("Message rewrite"), false);
+  assert.equal(en.includes("Civility mode is temporarily disabled"), false);
 });
 
 test("notification tab exposes split app list and plugin-defined configuration", () => {

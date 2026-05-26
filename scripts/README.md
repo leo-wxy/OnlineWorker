@@ -10,6 +10,7 @@
 - `scripts/` 目录只保留当前仓库可复用的基础构建与诊断脚本，不维护仓库外部的包装逻辑。
 - `install-current-dmg.sh [path/to/OnlineWorker.dmg]`：不重新打包，直接安装最新或指定 DMG 到 `/Applications/OnlineWorker.app` 并重启。适合“DMG 已经打好，只要覆盖验证”的快路径；不替代发布前完整安装包验证链。
 - `restart-installed-app.sh [/Applications/OnlineWorker.app]`：只重启已安装的 OnlineWorker App。脚本会把 stop、等待退出、open、等待 app/bot 新进程出现作为一个闭环执行，避免只杀进程没有拉起。
+- `verify-packaged-fast.sh`：日常“开始验证”的推荐路径。它只做打包、覆盖 `/Applications/OnlineWorker.app`、重启并确认 app/bot 新进程存在，适合快速交给人工验证功能；发布、tag 或疑难排障时再跑完整安装包验证链。
 
 ## Verification shortcuts
 
@@ -17,7 +18,7 @@
 
 ## Runtime helpers
 
-- `ow-codex`：Codex CLI 文明模式包装入口。它会启动本地 Codex app-server 和 OnlineWorker remote proxy，再把参数转发给 `codex --remote <proxy>`；适合在源码环境里验证外部 Codex CLI 输入改写链路。
+- `ow-codex`：Codex CLI remote proxy 包装脚本。文明模式当前已暂停，脚本仅作为后续恢复链路的内部保留项，不作为公开入口引导使用。
 - `codex_tui_host.py`：Codex TUI host wrapper 的本地运行入口，仍被 TUI 主控链路使用。
 
 ## Smoke / diagnostics

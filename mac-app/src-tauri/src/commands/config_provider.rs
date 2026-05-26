@@ -1099,7 +1099,8 @@ fn normalize_provider_entry(provider_id: &str, provider: &mut ProviderConfigEntr
     provider.live_transport = Some(live_transport);
     provider.protocol = None;
     provider.transport = Some(transport);
-    provider.capabilities = provider.capabilities.take().or(defaults.capabilities);
+    provider.capabilities =
+        merge_provider_capabilities(provider.capabilities.take(), defaults.capabilities);
     provider.message_hooks = provider.message_hooks.take().or(defaults.message_hooks);
     provider.install = provider.install.take().or(defaults.install);
     provider.process = provider.process.take().or(defaults.process);
@@ -1127,6 +1128,45 @@ fn merge_provider_icon(
         (Some(icon), None) => Some(icon),
         (None, default_icon) => default_icon,
     }
+}
+
+fn merge_provider_capabilities(
+    capabilities: Option<ProviderCapabilitiesEntry>,
+    default_capabilities: Option<ProviderCapabilitiesEntry>,
+) -> Option<ProviderCapabilitiesEntry> {
+    match (capabilities, default_capabilities) {
+        (Some(mut capabilities), Some(default_capabilities)) => {
+            if capabilities.command_wrappers.is_empty() {
+                capabilities.command_wrappers = default_capabilities.command_wrappers;
+            }
+            if capabilities.control_modes.is_empty() {
+                capabilities.control_modes = default_capabilities.control_modes;
+            }
+            capabilities.message_rewrite = merge_provider_message_rewrite(
+                capabilities.message_rewrite,
+                default_capabilities.message_rewrite,
+            );
+            Some(capabilities)
+        }
+        (Some(capabilities), None) => Some(capabilities),
+        (None, Some(default_capabilities)) => Some(default_capabilities),
+        (None, None) => None,
+    }
+}
+
+fn merge_provider_message_rewrite(
+    mut rewrite: ProviderMessageRewriteCapabilities,
+    default_rewrite: ProviderMessageRewriteCapabilities,
+) -> ProviderMessageRewriteCapabilities {
+    rewrite.app_send = rewrite.app_send || default_rewrite.app_send;
+    rewrite.telegram = rewrite.telegram || default_rewrite.telegram;
+    if rewrite.external_cli.as_deref().unwrap_or("").trim().is_empty() {
+        rewrite.external_cli = default_rewrite.external_cli;
+    }
+    if rewrite.wrapper.as_deref().unwrap_or("").trim().is_empty() {
+        rewrite.wrapper = default_rewrite.wrapper;
+    }
+    rewrite
 }
 
 fn legacy_tool_to_provider(tool: LegacyToolConfig) -> ProviderConfigEntry {
@@ -2226,6 +2266,52 @@ providers:
                     wrapper: Some(String::new()),
                 },
             }
+        );
+    }
+
+    #[test]
+    fn provider_metadata_backfills_new_message_rewrite_fields_for_existing_config() {
+        let raw = r#"
+schema_version: 2
+providers:
+  codex:
+    managed: true
+    autostart: true
+    capabilities:
+      sessions: true
+      send: true
+      commands: true
+      approvals: true
+      questions: false
+      photos: true
+      files: true
+      commandWrappers:
+        - model
+        - review
+      controlModes:
+        - app
+        - tui
+        - hybrid
+      messageRewrite:
+        appSend: false
+        telegram: false
+"#;
+
+        let providers = provider_metadata_from_raw(raw, None).expect("metadata");
+        let codex = providers
+            .iter()
+            .find(|provider| provider.id == "codex")
+            .expect("codex");
+
+        assert!(codex.capabilities.message_rewrite.app_send);
+        assert!(codex.capabilities.message_rewrite.telegram);
+        assert_eq!(
+            codex.capabilities.message_rewrite.external_cli.as_deref(),
+            Some("remote_proxy")
+        );
+        assert_eq!(
+            codex.capabilities.message_rewrite.wrapper.as_deref(),
+            Some("ow-codex")
         );
     }
 

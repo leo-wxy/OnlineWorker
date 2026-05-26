@@ -1,6 +1,7 @@
 import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ProviderMetadata, ServiceStatus } from "../types";
+import { useI18n } from "../i18n";
 import {
   extensionProviderSettings,
   primaryProviderSettings,
@@ -48,12 +49,12 @@ function Toggle({
 }
 
 export function ProviderSettingsPanel({ mode }: Props) {
+  const { t } = useI18n();
+  const texts = t.providerSettings;
   const [providers, setProviders] = useState<ProviderMetadata[]>([]);
   const [cliAvailability, setCliAvailability] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [savingProviderId, setSavingProviderId] = useState<string | null>(null);
-  const [savingMessageHookProviderId, setSavingMessageHookProviderId] = useState<string | null>(null);
-  const [copiedCliProviderId, setCopiedCliProviderId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -121,73 +122,8 @@ export function ProviderSettingsPanel({ mode }: Props) {
     }
   };
 
-  const saveProviderMessageHook = async (
-    providerId: string,
-    enabled: boolean
-  ) => {
-    setSavingMessageHookProviderId(providerId);
-    try {
-      await invoke("set_provider_message_hook_enabled", {
-        providerId,
-        hookName: "abusive_language_normalization",
-        enabled,
-      });
-      const status = await invoke<ServiceStatus>("service_status");
-      if (status.running) {
-        await invoke("service_restart");
-      }
-      startTransition(() => {
-        void load();
-      });
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setSavingMessageHookProviderId(null);
-    }
-  };
-
-  const cliRewriteLabel = (provider: ProviderMetadata | undefined) => {
-    const rewrite = provider?.capabilities?.messageRewrite;
-    const externalCli = String(rewrite?.externalCli || "").trim();
-    const wrapper = String(rewrite?.wrapper || "").trim();
-    if (externalCli === "remote_proxy" && wrapper) {
-      return `CLI: use ${wrapper}`;
-    }
-    if (externalCli === "unsupported") {
-      return "CLI: pending";
-    }
-    if (externalCli) {
-      return `CLI: ${externalCli}`;
-    }
-    return "CLI: not declared";
-  };
-
-  const cliRewriteCommand = (provider: ProviderMetadata | undefined) => {
-    const rewrite = provider?.capabilities?.messageRewrite;
-    const externalCli = String(rewrite?.externalCli || "").trim();
-    const wrapper = String(rewrite?.wrapper || "").trim();
-    if (externalCli === "remote_proxy" && wrapper) {
-      return `${wrapper} -C /path/to/workspace "your prompt"`;
-    }
-    return null;
-  };
-
-  const copyCliRewriteCommand = async (providerId: string, command: string) => {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopiedCliProviderId(providerId);
-      window.setTimeout(() => {
-        setCopiedCliProviderId((current) => current === providerId ? null : current);
-      }, 1400);
-    } catch (err) {
-      setError(String(err));
-    }
-  };
-
-  const title = mode === "agents" ? "Agents" : "Extensions";
-  const description = mode === "agents"
-    ? "Default public agents. These are the providers OnlineWorker treats as first-class by default."
-    : "Optional providers. Disabled extensions stay out of Dashboard routing, Sessions tabs, and Commands filters.";
+  const title = mode === "agents" ? texts.titleAgents : texts.titleExtensions;
+  const description = mode === "agents" ? texts.descriptionAgents : texts.descriptionExtensions;
 
   return (
     <div className="space-y-5">
@@ -198,7 +134,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
 
       {loading && (
         <div className="rounded-2xl border border-slate-200 bg-white/80 p-5 text-sm text-slate-500">
-          Loading providers...
+          {texts.loading}
         </div>
       )}
 
@@ -210,7 +146,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
 
       {!loading && settings.length === 0 && (
         <div className="rounded-2xl border border-slate-200 bg-white/80 p-5 text-sm text-slate-500">
-          No {mode === "agents" ? "agents" : "extensions"} are available from the current provider catalog.
+          {texts.empty(mode)}
         </div>
       )}
 
@@ -218,16 +154,8 @@ export function ProviderSettingsPanel({ mode }: Props) {
         {settings.map((setting) => {
           const provider = byId.get(setting.id);
           const busy = savingProviderId === setting.id;
-          const messageHookBusy = savingMessageHookProviderId === setting.id;
           const cliAvailable = cliAvailability[setting.id] !== false;
           const canEnable = setting.enabled || cliAvailable;
-          const normalizerEnabled =
-            provider?.messageHooks?.abusiveLanguageNormalization?.enabled ?? true;
-          const rewrite = provider?.capabilities?.messageRewrite;
-          const appCovered = rewrite?.appSend === true;
-          const telegramCovered = rewrite?.telegram === true;
-          const cliCommand = cliRewriteCommand(provider);
-          const cliCommandCopied = copiedCliProviderId === setting.id;
           return (
             <div
               key={setting.id}
@@ -246,7 +174,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
                         ? "bg-emerald-100 text-emerald-700"
                         : "bg-slate-200 text-slate-600"
                     }`}>
-                      {!cliAvailable ? "CLI missing" : setting.enabled ? "Enabled" : "Disabled"}
+                      {!cliAvailable ? texts.cliMissing : setting.enabled ? texts.enabled : texts.disabled}
                     </span>
                   </div>
                   <p className="mt-1 text-sm text-slate-500">
@@ -257,11 +185,11 @@ export function ProviderSettingsPanel({ mode }: Props) {
                   </p>
                   {!cliAvailable && (
                     <p className="mt-2 text-xs font-semibold text-amber-700">
-                      Install the CLI before enabling this provider.
+                      {texts.installCliHint}
                     </p>
                   )}
                 </div>
-                {busy && <span className="text-xs font-semibold text-blue-600">Saving...</span>}
+                {busy && <span className="text-xs font-semibold text-blue-600">{texts.saving}</span>}
               </div>
 
               <div className="mt-4 flex flex-wrap items-center gap-6">
@@ -273,7 +201,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
                       void saveProviderFlags(setting.id, checked, checked ? setting.autostart : false);
                     }}
                   />
-                  <span className="text-sm font-semibold text-gray-700">Enable</span>
+                  <span className="text-sm font-semibold text-gray-700">{texts.enable}</span>
                 </label>
 
                 <label className={`flex items-center gap-3 ${!setting.enabled || busy ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
@@ -284,59 +212,8 @@ export function ProviderSettingsPanel({ mode }: Props) {
                       void saveProviderFlags(setting.id, true, checked);
                     }}
                   />
-                  <span className="text-sm font-semibold text-gray-700">Autostart</span>
+                  <span className="text-sm font-semibold text-gray-700">{texts.autostart}</span>
                 </label>
-              </div>
-
-              <div className="mt-5 rounded-xl border border-slate-200 bg-white/70 px-4 py-3">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-gray-900">文明模式</p>
-                    <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold text-slate-600">
-                      <span className={`rounded-full px-2.5 py-1 ${
-                        appCovered ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
-                      }`}>
-                        App {appCovered ? "covered" : "not declared"}
-                      </span>
-                      <span className={`rounded-full px-2.5 py-1 ${
-                        telegramCovered ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
-                      }`}>
-                        TG {telegramCovered ? "covered" : "not declared"}
-                      </span>
-                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">
-                        {cliRewriteLabel(provider)}
-                      </span>
-                    </div>
-                  </div>
-                  <label className={`flex items-center gap-3 ${messageHookBusy ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
-                    <Toggle
-                      checked={normalizerEnabled}
-                      disabled={messageHookBusy}
-                      onChange={(checked) => {
-                        void saveProviderMessageHook(setting.id, checked);
-                      }}
-                    />
-                    <span className="text-sm font-semibold text-gray-700">
-                      {messageHookBusy ? "Saving..." : normalizerEnabled ? "On" : "Off"}
-                    </span>
-                  </label>
-                </div>
-                {cliCommand && (
-                  <div className="mt-3 flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 sm:flex-row sm:items-center">
-                    <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-xs font-semibold text-slate-700">
-                      {cliCommand}
-                    </code>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void copyCliRewriteCommand(setting.id, cliCommand);
-                      }}
-                      className="shrink-0 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 transition-colors hover:border-blue-200 hover:text-blue-700"
-                    >
-                      {cliCommandCopied ? "Copied" : "Copy"}
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
           );

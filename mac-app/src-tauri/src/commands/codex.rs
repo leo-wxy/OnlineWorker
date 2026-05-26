@@ -679,6 +679,26 @@ fn is_codex_control_user_message(role: &str, content: &str) -> bool {
         || trimmed.starts_with("<skill>")
 }
 
+fn content_without_codex_attachment_summaries(content: &str) -> String {
+    content
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            !line.is_empty()
+                && !line.starts_with("[Attached image]")
+                && !line.starts_with("[Attached file]")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn codex_turn_content_is_richer(left: &str, right: &str) -> bool {
+    left.len() > right.len()
+        && (left.contains("[Attached image]") || left.contains("[Attached file]"))
+        && content_without_codex_attachment_summaries(left)
+            == content_without_codex_attachment_summaries(right)
+}
+
 fn is_codex_image_wrapper_open(text: &str) -> Option<String> {
     let trimmed = text.trim();
     if !trimmed.starts_with("<image") || !trimmed.ends_with('>') {
@@ -715,6 +735,16 @@ fn push_codex_turn(turns: &mut Vec<CodexTurn>, role: &str, content: String) {
         .unwrap_or(false)
     {
         return;
+    }
+
+    if let Some(last) = turns.last_mut() {
+        if last.role == role && codex_turn_content_is_richer(&last.content, &content) {
+            return;
+        }
+        if last.role == role && codex_turn_content_is_richer(&content, &last.content) {
+            last.content = content;
+            return;
+        }
     }
 
     turns.push(CodexTurn {
@@ -2312,6 +2342,44 @@ mod tests {
         assert_eq!(turns[0].content, "你好");
         assert_eq!(turns[1].role, "assistant");
         assert_eq!(turns[1].content, "我在。");
+
+        let _ = std::fs::remove_file(&rollout_path);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn read_codex_thread_deduplicates_image_response_item_before_event_message() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "onlineworker-codex-read-image-dedupe-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let rollout_path = temp_dir.join("rollout.jsonl");
+
+        std::fs::write(
+            &rollout_path,
+            concat!(
+                "{\"timestamp\":\"2026-05-26T10:00:00.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"帮我看看这个截图\"},{\"type\":\"input_image\",\"image_url\":\"file:///tmp/captures/screenshot.png\"}]}}\n",
+                "{\"timestamp\":\"2026-05-26T10:00:01.000Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"帮我看看这个截图\",\"images\":[],\"local_images\":[]}}\n",
+                "{\"timestamp\":\"2026-05-26T10:00:02.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"截图里是设置页面。\"}]}}\n"
+            ),
+        )
+        .expect("write rollout");
+
+        let turns = read_codex_thread(rollout_path.to_string_lossy().to_string())
+            .expect("read codex thread");
+
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].role, "user");
+        assert_eq!(
+            turns[0].content,
+            "帮我看看这个截图\n[Attached image] screenshot.png"
+        );
+        assert_eq!(turns[1].role, "assistant");
+        assert_eq!(turns[1].content, "截图里是设置页面。");
 
         let _ = std::fs::remove_file(&rollout_path);
         let _ = std::fs::remove_dir_all(&temp_dir);

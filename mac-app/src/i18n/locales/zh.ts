@@ -433,6 +433,23 @@ export const zhTexts: AppTexts = {
       scopeWorkspace: "工作区",
       scopeThread: "Thread",
     },
+    providerSettings: {
+      titleAgents: "Agents",
+      titleExtensions: "Extensions",
+      descriptionAgents:
+        "默认内置 agent。OnlineWorker 会把这些 provider 作为一等入口处理。",
+      descriptionExtensions:
+        "可选 provider。未启用的扩展不会进入总览路由、Sessions tab 和 Commands 过滤。",
+      loading: "正在加载 providers...",
+      empty: (mode) => `当前 provider catalog 中没有可用的 ${mode === "agents" ? "agents" : "extensions"}。`,
+      cliMissing: "CLI 缺失",
+      enabled: "已启用",
+      disabled: "未启用",
+      installCliHint: "请先安装对应 CLI，再启用这个 provider。",
+      saving: "保存中...",
+      enable: "启用",
+      autostart: "自启动",
+    },
     notifications: {
       title: "通知",
       description:

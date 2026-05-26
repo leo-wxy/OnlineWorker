@@ -13,7 +13,7 @@ This milestone decouples user notifications from Telegram-only delivery so Onlin
 ## Phases
 
 - [x] **Phase 6: Notification Channel Abstraction** - Introduce a provider-neutral notification mechanism so OnlineWorker can emit concise notifications through enabled notification plugins. Core plugin/router/config UI is implemented; existing Telegram task/approval/final-reply paths remain unchanged.
-- [x] **Phase 7: OnlineWorker User Message Gateway** - Route provider-bound user text through an OnlineWorker-level gateway before provider-specific send hooks. Source-level verification is complete; packaged-app verification remains before release.
+- [x] **Phase 7: OnlineWorker User Message Gateway** - Route provider-bound user text through an OnlineWorker-level gateway before provider-specific send hooks. Gateway/proxy boundaries are complete; civility rewrite is paused, related App entry points are hidden, and packaged-app verification is complete.
 
 ## Phase Details
 
@@ -75,6 +75,14 @@ Plans:
 
 Latest verification:
 - Focused source regression passed: `PYENV_VERSION=3.13.1 pytest -q tests/test_handlers.py tests/test_user_message_hooks.py tests/test_user_message_normalizer_script.py tests/test_config.py tests/test_thread_controls.py tests/test_provider_owner_bridge.py tests/test_provider_session_bridge.py tests/test_provider_session_bridge_attachments.py tests/test_codex_hook_bridge.py tests/test_codex_remote_proxy.py tests/test_codex_remote_proxy_probe.py tests/test_codex_tui_mode.py tests/test_codex_tui_host_wrapper.py tests/test_startup_runtime.py && git diff --check` -> `276 passed`.
+- Civility rewrite pause regression passed: `pytest tests/test_user_message_hooks.py tests/test_codex_remote_proxy.py` -> `16 passed`.
+- App shell regression passed: `node --test mac-app/tests/appShell.test.mjs` -> `9 passed`.
+- Frontend production build passed: `pnpm --dir mac-app build`.
+- Fast packaged-app verification passed: `bash scripts/verify-packaged-fast.sh`.
+  - DMG: `mac-app/src-tauri/target/release/bundle/dmg/OnlineWorker_1.2.1_aarch64.dmg`
+  - SHA256: `4894bdd02ec340afcb5e97a4f0dbb8267a5c77809534ec1f4916a1fda34a6be6`
+  - Installed runtime: `onlineworker-app` PID `74952`, `onlineworker-bot` PIDs `75058` and `75126`
+- Installed app UI was checked with Computer Use: `Settings → Agents` no longer shows the message rewrite/civility entry, only provider enable/autostart controls.
 
 Remaining Phase 7 verification:
-- Packaged-app build/install/relaunch verification has not been run for Phase 7.
+- None. Phase 7 is closed with the rewrite hook disabled and UI entry hidden until the feature is intentionally restored.

@@ -129,7 +129,7 @@ async def run_ow_codex_once(
 def build_ow_codex_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ow-codex",
-        description="Run Codex CLI through OnlineWorker's local message rewrite proxy.",
+        description="Run Codex CLI through OnlineWorker's local remote proxy.",
     )
     parser.add_argument(
         "--data-dir",

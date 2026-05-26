@@ -438,6 +438,23 @@ export const enTexts: AppTexts = {
       scopeWorkspace: "Workspace",
       scopeThread: "Thread",
     },
+    providerSettings: {
+      titleAgents: "Agents",
+      titleExtensions: "Extensions",
+      descriptionAgents:
+        "Default public agents. These are the providers OnlineWorker treats as first-class by default.",
+      descriptionExtensions:
+        "Optional providers. Disabled extensions stay out of Dashboard routing, Sessions tabs, and Commands filters.",
+      loading: "Loading providers...",
+      empty: (mode) => `No ${mode === "agents" ? "agents" : "extensions"} are available from the current provider catalog.`,
+      cliMissing: "CLI missing",
+      enabled: "Enabled",
+      disabled: "Disabled",
+      installCliHint: "Install the CLI before enabling this provider.",
+      saving: "Saving...",
+      enable: "Enable",
+      autostart: "Autostart",
+    },
     notifications: {
       title: "Notifications",
       description:

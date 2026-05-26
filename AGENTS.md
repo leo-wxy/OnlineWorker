@@ -60,6 +60,14 @@ rules needed to work safely in this codebase.
 - Frontend tests live under `mac-app/tests`
 - For packaged-app changes, document whether installed-app verification was
   completed or remains unverified
+- Daily packaged-app iteration should use the fast chain:
+  `bash scripts/verify-packaged-fast.sh`.
+- The fast chain means: build DMG, overwrite `/Applications/OnlineWorker.app`,
+  restart the installed app, and verify `onlineworker-app` plus
+  `onlineworker-bot` processes are running from `/Applications`.
+- Use the complete packaged-app verification chain only for release/tag
+  confidence, difficult runtime failures, suspected packaging corruption, or
+  when the user explicitly asks for full verification.
 
 ## Git Commit
 
@@ -84,11 +92,26 @@ Examples:
 - `docs(notification): 完善通知插件开发规范`
 - `chore(verify): 增加快速验证安装脚本`
 
+### Fast Packaged-App Iteration Chain
+
+When the user says "开始验证", "打包验证", "重新验证", "打包 + 覆盖", or
+similar wording during normal feature iteration, prefer the fast chain:
+
+1. Run `bash scripts/verify-packaged-fast.sh`.
+2. Confirm the command exits 0.
+3. Report the generated DMG path, installed app path, and current
+   `onlineworker-app` / `onlineworker-bot` PIDs.
+
+This is enough when the purpose is to let the user immediately test the newly
+installed app. Do not add hash, socket, log, or feature-smoke checks unless the
+user asks for deeper verification or the fast chain fails.
+
 ### Complete Packaged-App Verification Chain
 
 When the user says "开始验证", "打包验证", "重新验证", "打包 + 覆盖", or
-similar wording, treat it as the full packaged-app verification chain unless
-the user explicitly says to only build or not launch:
+similar wording for release/tag confidence, difficult runtime failures,
+suspected packaging corruption, or explicit full verification, use the full
+packaged-app verification chain:
 
 Every step must have an action and an immediate verification before moving to
 the next step. Do not merge "file copied" with "new app is running"; these are

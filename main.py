@@ -201,7 +201,7 @@ def main() -> None:
     parser.add_argument(
         "--ow-codex",
         action="store_true",
-        help="Run Codex CLI through OnlineWorker's local message rewrite proxy",
+        help="Run Codex CLI through OnlineWorker's local remote proxy",
     )
     parser.add_argument("--codex-tui-target", default=None)
     parser.add_argument("--codex-tui-cd", default=None)

@@ -338,6 +338,21 @@ export interface AppTexts {
     scopeWorkspace: string;
     scopeThread: string;
   };
+  providerSettings: {
+    titleAgents: string;
+    titleExtensions: string;
+    descriptionAgents: string;
+    descriptionExtensions: string;
+    loading: string;
+    empty: (mode: "agents" | "extensions") => string;
+    cliMissing: string;
+    enabled: string;
+    disabled: string;
+    installCliHint: string;
+    saving: string;
+    enable: string;
+    autostart: string;
+  };
   notifications: {
     title: string;
     description: string;

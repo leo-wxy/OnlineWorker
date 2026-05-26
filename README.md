@@ -148,6 +148,15 @@ host. When that host is online, approval prompts are mirrored to Telegram with
 action buttons, and Telegram actions are written back to the same TUI host. The
 local Codex TUI remains usable for the same approval flow.
 
+## Codex Text Sending
+
+Civility mode is temporarily disabled. App and Telegram send user input
+unchanged, and the related settings entry is hidden from the app.
+
+The managed remote-proxy wrapper code remains in the repository for a future
+restore, but it is not documented as a public entry point while the feature is
+paused.
+
 ## Development
 
 ### Run the bot from source

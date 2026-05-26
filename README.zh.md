@@ -146,6 +146,14 @@ Codex TUI host。host 在线时，审批会以带按钮的形式镜像到 Telegr
 Telegram 操作会写回同一个 TUI host。本地 Codex TUI 也仍然可以处理同一
 个审批流程。
 
+## Codex 文本发送
+
+文明模式已暂时关闭，App 和 Telegram 都会原样发送用户输入。相关设置入口
+不会在 App 中展示。
+
+内部仍保留受管理 remote proxy 的包装代码，方便后续重新启用时复用；当前
+不作为公开使用入口。
+
 ## 开发
 
 ### 从源码运行 bot
