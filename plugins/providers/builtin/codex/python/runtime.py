@@ -665,6 +665,12 @@ def can_route_cli_approval_to_tui_host(state, thread_id: str) -> bool:
 
 async def mirror_approval_policy(state, request: dict, ws_info, thread_info) -> dict:
     thread_id = str(request.get("thread_id") or "").strip()
+    if request.get("blocking"):
+        return {
+            "interactive": True,
+            "approval_source": str(request.get("source") or "codex_cli_hook"),
+            "notice_suffix": "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。",
+        }
     if can_route_cli_approval_to_tui_host(state, thread_id):
         return {
             "interactive": True,
@@ -673,8 +679,9 @@ async def mirror_approval_policy(state, request: dict, ws_info, thread_info) -> 
             "notice_suffix": "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。",
         }
     return {
-        "interactive": False,
+        "interactive": True,
         "approval_source": str(request.get("source") or "provider_hook_mirror"),
+        "notice_suffix": "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。",
     }
 
 
@@ -1420,9 +1427,6 @@ async def monitor_process_health(
 
 
 async def start_runtime(manager, bot, tool_cfg) -> None:
-    from plugins.providers.builtin.codex.python.current_session_approval_mirror import (
-        start_current_session_approval_mirror_loop,
-    )
     from plugins.providers.builtin.codex.python.hook_bridge import install_codex_permission_mirror_hook
     from plugins.providers.builtin.codex.python.tui_bridge import (
         is_codex_local_owner_mode,
@@ -1443,10 +1447,10 @@ async def start_runtime(manager, bot, tool_cfg) -> None:
             logger.warning("[codex] 安装 PermissionRequest 镜像 hook 失败：%s", e)
 
     runtime = codex_state.get_runtime(manager.state)
-    if data_dir:
-        approval_mirror_task = getattr(runtime, "approval_mirror_task", None)
-        if approval_mirror_task is None or approval_mirror_task.done():
-            runtime.approval_mirror_task = start_current_session_approval_mirror_loop(manager.state)
+    approval_mirror_task = getattr(runtime, "approval_mirror_task", None)
+    if approval_mirror_task is not None and not approval_mirror_task.done():
+        approval_mirror_task.cancel()
+    runtime.approval_mirror_task = None
 
     control_mode = getattr(tool_cfg, "control_mode", "app")
     if is_codex_local_owner_mode(manager.state):

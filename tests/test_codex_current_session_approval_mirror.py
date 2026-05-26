@@ -37,7 +37,7 @@ def test_codex_current_session_approval_line_builds_mirror_request():
     assert request["workspace_dir"] == "/Users/wxy/Projects/onlineworker-combined"
     assert request["owned_tui_host"] is False
     assert request["source"] == "codex_current_session_log"
-    assert request["notice_suffix"] == "此请求已在当前 Codex 会话中弹出，请在 Codex CLI/Desktop 中完成审批。"
+    assert request["notice_suffix"] == "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。"
 
     payload = request["payload"]
     assert payload["hook_event_name"] == "ExecApprovalRequest"

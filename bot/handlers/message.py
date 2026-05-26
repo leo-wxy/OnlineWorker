@@ -754,6 +754,38 @@ def make_callback_handler(state: AppState, group_chat_id: int) -> Callable:
                     )
                     return
 
+                if approval.tool_type == "codex" and approval.approval_source in {
+                    "codex_cli_hook",
+                    "codex_current_session_log",
+                }:
+                    decision = "deny" if action == "exec_deny" else "allow"
+                    resolved = state.resolve_pending_approval_decision(
+                        "codex",
+                        str(approval.request_id),
+                        decision,
+                        message="TG 已拒绝" if decision == "deny" else "",
+                    )
+                    if not resolved:
+                        state.pending_approvals.pop(msg_id, None)
+                        await query.edit_message_text(  # type: ignore[union-attr]
+                            "❌ 回复授权失败：源 CLI 已不再等待该审批。",
+                        )
+                        logger.warning(
+                            f"[approval] codex_cli_hook pending decision missing "
+                            f"request_id={approval.request_id} action={action} msg_id={msg_id}"
+                        )
+                        return
+                    state.pending_approvals.pop(msg_id, None)
+                    await query.edit_message_text(  # type: ignore[union-attr]
+                        f"{label}\n\n命令：`{approval.cmd[:200]}`",
+                        parse_mode="Markdown",
+                    )
+                    logger.info(
+                        f"[approval] codex_cli_hook request_id={approval.request_id} "
+                        f"action={action} msg_id={msg_id}"
+                    )
+                    return
+
                 tool_name = approval.tool_type or state.get_tool_for_workspace(approval.workspace_id) or ""
                 unavailable = _provider_unavailable_message(state, tool_name) if tool_name else None
                 if unavailable:

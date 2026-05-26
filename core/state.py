@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any, Optional
 from core.providers.registry import get_provider
 from core.provider_runtime_state import (
+    PendingApprovalDecision,
     ProviderInterruptionState,
     ProviderRunState,
     ProviderRuntimeState,
@@ -198,6 +199,39 @@ class AppState:
 
     def get_provider_runtime(self, tool_name: str) -> ProviderRuntimeState:
         return self.provider_runtime_state.setdefault(tool_name, ProviderRuntimeState())
+
+    def ensure_pending_approval_decision(self, tool_name: str, request_id: str) -> PendingApprovalDecision:
+        runtime = self.get_provider_runtime(tool_name)
+        key = str(request_id or "").strip()
+        pending = runtime.pending_approval_decisions.get(key)
+        if pending is None:
+            pending = PendingApprovalDecision(request_id=key)
+            runtime.pending_approval_decisions[key] = pending
+        return pending
+
+    def resolve_pending_approval_decision(
+        self,
+        tool_name: str,
+        request_id: str,
+        decision: str,
+        *,
+        message: str = "",
+    ) -> bool:
+        key = str(request_id or "").strip()
+        if not key:
+            return False
+        pending = self.get_provider_runtime(tool_name).pending_approval_decisions.get(key)
+        if pending is None:
+            return False
+        pending.decision = str(decision or "").strip()
+        pending.message = str(message or "").strip()
+        pending.event.set()
+        return True
+
+    def discard_pending_approval_decision(self, tool_name: str, request_id: str) -> None:
+        key = str(request_id or "").strip()
+        if key:
+            self.get_provider_runtime(tool_name).pending_approval_decisions.pop(key, None)
 
     def get_tool_for_workspace(self, workspace_id: str) -> Optional[str]:
         """按 storage key 或 provider 前缀解析 workspace 所属工具。"""

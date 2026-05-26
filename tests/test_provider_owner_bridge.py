@@ -658,7 +658,7 @@ async def test_provider_owner_bridge_reports_runtime_status_via_status_builder(m
 
 
 @pytest.mark.asyncio
-async def test_provider_owner_bridge_mirrors_cli_approval_without_owning_decision(monkeypatch, tmp_path):
+async def test_provider_owner_bridge_mirrors_cli_approval_with_tg_buttons_without_waiting(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
     storage = AppStorage()
@@ -713,10 +713,9 @@ async def test_provider_owner_bridge_mirrors_cli_approval_without_owning_decisio
     assert info.tool_type == "codex"
     assert info.approval_source == "codex_cli_hook"
     assert kwargs == {
-        "interactive": False,
-        "notice_suffix": "此请求已在 Codex CLI 中弹出，请在 CLI 中完成审批。",
+        "interactive": True,
+        "notice_suffix": "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。",
     }
-    assert state.pending_approvals == {}
 
 
 @pytest.mark.asyncio
@@ -907,7 +906,70 @@ async def test_provider_owner_bridge_uses_policy_notice_suffix_for_interactive_c
 
 
 @pytest.mark.asyncio
-async def test_provider_owner_bridge_keeps_external_cli_hook_mirror_noninteractive_even_if_thread_matches(monkeypatch, tmp_path):
+async def test_provider_owner_bridge_uses_provider_neutral_notice_suffix_fallback(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    storage = AppStorage()
+    storage.workspaces["custom:/tmp/project-a"] = WorkspaceInfo(
+        name="project-a",
+        path="/tmp/project-a",
+        tool="custom",
+        daemon_workspace_id="custom:/tmp/project-a",
+        threads={
+            "tid-cli": ThreadInfo(
+                thread_id="tid-cli",
+                topic_id=7653,
+                source="app",
+            )
+        },
+    )
+    state = AppState(storage=storage)
+    state.telegram_bot = object()
+    state.group_chat_id = -100123456789
+
+    sent = AsyncMock()
+    monkeypatch.setattr("bot.events.send_approval_to_telegram", sent)
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            interactions=SimpleNamespace(
+                mirror_approval_policy=AsyncMock(
+                    return_value={
+                        "interactive": True,
+                        "approval_source": "custom_cli_hook",
+                    }
+                )
+            )
+        )
+        if name == "custom"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_mirror_approval(
+        {
+            "type": "mirror_approval",
+            "provider_id": "custom",
+            "thread_id": "tid-cli",
+            "workspace_dir": "/tmp/project-a",
+            "source": "custom_cli_hook",
+            "payload": {
+                "hook_event_name": "PermissionRequest",
+                "tool_input": {"command": "/bin/zsh -lc 'ps -axo pid,command'"},
+                "tool_name": "shell",
+            },
+        }
+    )
+
+    assert response == {"ok": True}
+    assert sent.await_args.kwargs == {
+        "interactive": True,
+        "notice_suffix": "此请求已在源工具中弹出，可在源工具或 TG 中处理。",
+    }
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_makes_external_cli_hook_mirror_interactive(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
     storage = AppStorage()
@@ -930,21 +992,6 @@ async def test_provider_owner_bridge_keeps_external_cli_hook_mirror_noninteracti
 
     sent = AsyncMock()
     monkeypatch.setattr("bot.events.send_approval_to_telegram", sent)
-    monkeypatch.setattr(
-        "core.provider_owner_bridge.get_provider",
-        lambda name, *args, **kwargs: SimpleNamespace(
-            interactions=SimpleNamespace(
-                mirror_approval_policy=AsyncMock(
-                    return_value={
-                        "interactive": False,
-                        "approval_source": "codex_cli_hook",
-                    }
-                )
-            )
-        )
-        if name == "codex"
-        else None,
-    )
 
     bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
     response = await bridge._handle_mirror_approval(
@@ -956,6 +1003,7 @@ async def test_provider_owner_bridge_keeps_external_cli_hook_mirror_noninteracti
             "source": "codex_cli_hook",
             "payload": {
                 "hook_event_name": "PermissionRequest",
+                "request_id": "codex-cli-hook:tid-cli:abc",
                 "tool_input": {"command": "/bin/zsh -lc 'ps -axo pid,command'"},
                 "tool_name": "shell",
             },
@@ -963,14 +1011,17 @@ async def test_provider_owner_bridge_keeps_external_cli_hook_mirror_noninteracti
     )
 
     assert response == {"ok": True}
-    assert sent.await_args.kwargs["interactive"] is False
+    assert sent.await_args.kwargs == {
+        "interactive": True,
+        "notice_suffix": "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。",
+    }
     info = sent.await_args.args[5]
-    assert info.request_id == "provider-cli-hook"
+    assert info.request_id == "codex-cli-hook:tid-cli:abc"
     assert info.approval_source == "codex_cli_hook"
 
 
 @pytest.mark.asyncio
-async def test_provider_owner_bridge_mirrors_current_session_approval_to_global_topic_without_thread_topic(monkeypatch, tmp_path):
+async def test_provider_owner_bridge_discards_current_session_approval_without_bound_topic(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
     storage = AppStorage()
@@ -1013,22 +1064,12 @@ async def test_provider_owner_bridge_mirrors_current_session_approval_to_global_
         }
     )
 
-    assert response == {"ok": True}
-    sent.assert_awaited_once()
-    assert sent.await_args.args[:5] == (
-        state,
-        state.telegram_bot,
-        state.group_chat_id,
-        5339,
-        "codex:/tmp/project-a",
-    )
-    info = sent.await_args.args[5]
-    assert info.request_id == "codex-current-session:abc"
-    assert info.approval_source == "codex_current_session_log"
-    assert sent.await_args.kwargs == {
-        "interactive": False,
-        "notice_suffix": "此请求已在当前 Codex 会话中弹出，请在 Codex CLI/Desktop 中完成审批。",
+    assert response == {
+        "ok": True,
+        "discarded": True,
+        "reason": "会话未绑定 TG topic，已跳过 TG 审批镜像",
     }
+    sent.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1154,7 +1195,7 @@ async def test_provider_owner_bridge_dedupes_duplicate_approval_mirrors(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_provider_owner_bridge_allows_interactive_mirror_after_noninteractive_duplicate(monkeypatch, tmp_path):
+async def test_provider_owner_bridge_dedupes_duplicate_interactive_mirror(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
     storage = AppStorage()
@@ -1178,26 +1219,17 @@ async def test_provider_owner_bridge_allows_interactive_mirror_after_noninteract
     sent = AsyncMock()
     monkeypatch.setattr("bot.events.send_approval_to_telegram", sent)
 
-    policies = [
-        {
-            "interactive": False,
-            "approval_source": "codex_current_session_log",
-        },
-        {
-            "interactive": True,
-            "request_id": "codex-tui-host:tid-current",
-            "approval_source": "codex_tui_host",
-        },
-    ]
-
-    async def mirror_approval_policy(*_args, **_kwargs):
-        return policies.pop(0)
-
     monkeypatch.setattr(
         "core.provider_owner_bridge.get_provider",
         lambda name, *args, **kwargs: SimpleNamespace(
             interactions=SimpleNamespace(
-                mirror_approval_policy=mirror_approval_policy
+                mirror_approval_policy=AsyncMock(
+                    return_value={
+                        "interactive": True,
+                        "request_id": "codex-tui-host:tid-current",
+                        "approval_source": "codex_tui_host",
+                    }
+                )
             )
         )
         if name == "codex"
@@ -1221,10 +1253,8 @@ async def test_provider_owner_bridge_allows_interactive_mirror_after_noninteract
     second = await bridge._handle_mirror_approval(request)
 
     assert first == {"ok": True}
-    assert second == {"ok": True}
-    assert sent.await_count == 2
-    assert sent.await_args_list[0].kwargs["interactive"] is False
-    assert sent.await_args_list[1].kwargs["interactive"] is True
+    assert second == {"ok": True, "deduped": True}
+    sent.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1261,18 +1291,112 @@ async def test_provider_owner_bridge_mirror_approval_does_not_persist_missing_wo
         }
     )
 
-    assert response == {"ok": True}
     assert storage.workspaces == {}
     assert state.find_thread_by_id_global("tid-untracked") is None
-    sent.assert_awaited_once()
-    assert sent.await_args.args[:5] == (
-        state,
-        state.telegram_bot,
-        state.group_chat_id,
-        5339,
-        "codex:/tmp/untracked-project",
-    )
-    assert sent.await_args.kwargs == {
-        "interactive": False,
-        "notice_suffix": "此请求已在源 CLI 中弹出，请在源 CLI 中完成审批。",
+    assert response == {
+        "ok": True,
+        "discarded": True,
+        "reason": "会话未绑定 TG topic，已跳过 TG 审批镜像",
     }
+    sent.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_skips_blocking_cli_hook_without_bound_topic(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    storage = AppStorage()
+    storage.global_topic_ids = {"codex": 5339}
+    storage.workspaces["codex:/tmp/project-a"] = WorkspaceInfo(
+        name="project-a",
+        path="/tmp/project-a",
+        tool="codex",
+        daemon_workspace_id="codex:/tmp/project-a",
+        topic_id=None,
+        threads={
+            "tid-cli": ThreadInfo(
+                thread_id="tid-cli",
+                topic_id=None,
+                source="imported",
+            )
+        },
+    )
+    state = AppState(storage=storage)
+    state.telegram_bot = object()
+    state.group_chat_id = -100123456789
+
+    sent = AsyncMock()
+    monkeypatch.setattr("bot.events.send_approval_to_telegram", sent)
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_mirror_approval(
+        {
+            "type": "mirror_approval",
+            "provider_id": "codex",
+            "thread_id": "tid-cli",
+            "workspace_dir": "/tmp/project-a",
+            "source": "codex_cli_hook",
+            "blocking": True,
+            "payload": {
+                "hook_event_name": "PermissionRequest",
+                "request_id": "codex-cli-hook:tid-cli:abc",
+                "command": "/bin/zsh -lc 'printf approval'",
+            },
+        }
+    )
+
+    assert response == {
+        "ok": True,
+        "discarded": True,
+        "reason": "会话未绑定 TG topic，已跳过 TG 审批镜像",
+    }
+    sent.assert_not_awaited()
+    assert state.get_provider_runtime("codex").pending_approval_decisions == {}
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_waits_for_blocking_cli_hook_approval(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    storage = AppStorage()
+    storage.workspaces["codex:/tmp/project-a"] = WorkspaceInfo(
+        name="project-a",
+        path="/tmp/project-a",
+        tool="codex",
+        daemon_workspace_id="codex:/tmp/project-a",
+        threads={
+            "tid-cli": ThreadInfo(
+                thread_id="tid-cli",
+                topic_id=7653,
+                source="imported",
+            )
+        },
+    )
+    state = AppState(storage=storage)
+    state.telegram_bot = object()
+    state.group_chat_id = -100123456789
+
+    async def fake_send_approval_to_telegram(*args, **kwargs):
+        state.resolve_pending_approval_decision("codex", "codex-cli-hook:tid-cli:abc", "allow")
+
+    monkeypatch.setattr("bot.events.send_approval_to_telegram", fake_send_approval_to_telegram)
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_mirror_approval(
+        {
+            "type": "mirror_approval",
+            "provider_id": "codex",
+            "thread_id": "tid-cli",
+            "workspace_dir": "/tmp/project-a",
+            "source": "codex_cli_hook",
+            "blocking": True,
+            "payload": {
+                "hook_event_name": "PermissionRequest",
+                "request_id": "codex-cli-hook:tid-cli:abc",
+                "command": "/bin/zsh -lc 'ps -axo pid,command'",
+                "reason": "inspect processes",
+            },
+        }
+    )
+
+    assert response == {"ok": True, "decision": "allow"}

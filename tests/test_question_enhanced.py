@@ -344,6 +344,63 @@ async def test_codex_tui_host_approval_callback_routes_to_host_instead_of_adapte
 
 
 @pytest.mark.asyncio
+async def test_codex_cli_hook_approval_callback_resolves_pending_decision(state, mock_codex_adapter):
+    """Codex CLI hook 审批回调应写回 pending decision，让 hook 返回给 CLI。"""
+    from bot.handlers import make_callback_handler
+
+    state.set_adapter("codex", mock_codex_adapter)
+    pending = state.ensure_pending_approval_decision("codex", "codex-cli-hook:tid-1:abc")
+    state.pending_approvals[54] = PendingApproval(
+        request_id="codex-cli-hook:tid-1:abc",
+        workspace_id="codex:test",
+        thread_id="tid-1",
+        cmd="ps -axo pid,command",
+        justification="源 CLI 正在请求本地权限审批。",
+        tool_name="shell",
+        tool_type="codex",
+        approval_source="codex_cli_hook",
+    )
+
+    ts = int(time.time())
+    update, query = _make_update_with_query(f"exec_allow:54:{ts}")
+    ctx = MagicMock()
+    handler = make_callback_handler(state, GROUP_CHAT_ID)
+    await handler(update, ctx)
+
+    assert pending.event.is_set()
+    assert pending.decision == "allow"
+    mock_codex_adapter.reply_server_request.assert_not_awaited()
+    assert 54 not in state.pending_approvals
+    query.edit_message_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_codex_cli_hook_approval_callback_removes_expired_pending_when_waiter_missing(state):
+    """hook 等待状态丢失时清掉按钮，避免误报审批成功。"""
+    from bot.handlers import make_callback_handler
+
+    state.pending_approvals[55] = PendingApproval(
+        request_id="codex-cli-hook:tid-1:missing",
+        workspace_id="codex:test",
+        thread_id="tid-1",
+        cmd="ps -axo pid,command",
+        justification="源 CLI 正在请求本地权限审批。",
+        tool_name="shell",
+        tool_type="codex",
+        approval_source="codex_cli_hook",
+    )
+
+    ts = int(time.time())
+    update, query = _make_update_with_query(f"exec_allow:55:{ts}")
+    ctx = MagicMock()
+    handler = make_callback_handler(state, GROUP_CHAT_ID)
+    await handler(update, ctx)
+
+    assert 55 not in state.pending_approvals
+    query.edit_message_text.assert_awaited_once_with("❌ 回复授权失败：源 CLI 已不再等待该审批。")
+
+
+@pytest.mark.asyncio
 async def test_q_ans_single_select(state, mock_cm_adapter):
     """单选回调：点击立即提交"""
     from bot.handlers import make_callback_handler

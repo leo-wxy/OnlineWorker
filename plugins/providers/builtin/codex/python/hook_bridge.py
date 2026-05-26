@@ -8,12 +8,13 @@ import socket
 import sys
 import tempfile
 from typing import Any
+import hashlib
 
 from core.provider_owner_bridge import provider_owner_bridge_socket_path
 
 
 CODEX_PERMISSION_HOOK_NAME = "PermissionRequest"
-CODEX_HOOK_TIMEOUT_SECONDS = 5
+CODEX_HOOK_TIMEOUT_SECONDS = 86400
 
 
 def _codex_hooks_settings_path(path: str | os.PathLike[str] | None = None) -> Path:
@@ -180,6 +181,16 @@ def _infer_workspace_dir(payload: dict[str, Any]) -> str:
     return str(os.environ.get("PWD") or "").strip()
 
 
+def _stable_hook_request_id(payload: dict[str, Any]) -> str:
+    explicit = str(payload.get("request_id") or payload.get("requestId") or "").strip()
+    if explicit:
+        return explicit
+    thread_id = _infer_thread_id(payload)
+    digest_payload = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    digest = hashlib.sha1(digest_payload.encode("utf-8")).hexdigest()[:20]
+    return f"codex-cli-hook:{thread_id or 'unknown'}:{digest}"
+
+
 def _is_owned_tui_host_invocation(payload: dict[str, Any]) -> bool:
     value = str(payload.get("onlineworker_codex_tui_host") or "").strip().lower()
     if value in {"1", "true", "yes"}:
@@ -187,35 +198,64 @@ def _is_owned_tui_host_invocation(payload: dict[str, Any]) -> bool:
     return str(os.environ.get("ONLINEWORKER_CODEX_TUI_HOST") or "").strip() == "1"
 
 
-def mirror_codex_permission_request(data_dir: str | None, payload: dict[str, Any]) -> bool:
+def mirror_codex_permission_request(data_dir: str | None, payload: dict[str, Any]) -> dict[str, Any]:
     if str(payload.get("hook_event_name") or "").strip() != CODEX_PERMISSION_HOOK_NAME:
-        return False
+        return {}
     socket_path = provider_owner_bridge_socket_path(data_dir)
     if not socket_path:
-        return False
+        return {}
+    request_id = _stable_hook_request_id(payload)
+    payload_with_request_id = dict(payload)
+    payload_with_request_id["request_id"] = request_id
 
     request = {
         "type": "mirror_approval",
         "provider_id": "codex",
-        "thread_id": _infer_thread_id(payload),
-        "workspace_dir": _infer_workspace_dir(payload),
+        "thread_id": _infer_thread_id(payload_with_request_id),
+        "workspace_dir": _infer_workspace_dir(payload_with_request_id),
         "owned_tui_host": _is_owned_tui_host_invocation(payload),
-        "payload": payload,
+        "blocking": True,
+        "payload": payload_with_request_id,
         "source": "codex_cli_hook",
-        "notice_suffix": "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。"
-        if _is_owned_tui_host_invocation(payload)
-        else "此请求已在 Codex CLI 中弹出，请在 CLI 中完成审批。",
+        "notice_suffix": "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。",
     }
 
     try:
         with socket.socket(socket.AF_UNIX) as client:
-            client.settimeout(0.75)
+            client.settimeout(CODEX_HOOK_TIMEOUT_SECONDS)
             client.connect(socket_path)
             client.sendall((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
-            client.recv(4096)
-        return True
+            raw = client.recv(4096)
     except OSError:
-        return False
+        return {}
+    try:
+        response = json.loads(raw.decode("utf-8").strip() or "{}")
+    except Exception:
+        return {}
+    return response if isinstance(response, dict) else {}
+
+
+def _codex_permission_hook_output(decision_response: dict[str, Any]) -> dict[str, Any]:
+    decision = str(decision_response.get("decision") or "").strip().lower()
+    if decision == "allow":
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": CODEX_PERMISSION_HOOK_NAME,
+                "decision": {"behavior": "allow"},
+            }
+        }
+    if decision == "deny":
+        decision_payload = {"behavior": "deny"}
+        message = str(decision_response.get("message") or "").strip()
+        if message:
+            decision_payload["message"] = message
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": CODEX_PERMISSION_HOOK_NAME,
+                "decision": decision_payload,
+            }
+        }
+    return {}
 
 
 def run_codex_hook_bridge_once(data_dir: str | None) -> int:
@@ -224,8 +264,12 @@ def run_codex_hook_bridge_once(data_dir: str | None) -> int:
     except Exception:
         payload = {}
     if isinstance(payload, dict):
-        mirror_codex_permission_request(data_dir, payload)
-    response = default_codex_hook_response(payload if isinstance(payload, dict) else {})
+        bridge_response = mirror_codex_permission_request(data_dir, payload)
+    else:
+        bridge_response = {}
+    response = _codex_permission_hook_output(bridge_response)
+    if not response:
+        response = default_codex_hook_response(payload if isinstance(payload, dict) else {})
     sys.stdout.write(json.dumps(response, ensure_ascii=False))
     sys.stdout.flush()
     return 0

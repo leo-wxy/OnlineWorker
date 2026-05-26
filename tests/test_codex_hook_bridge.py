@@ -168,7 +168,7 @@ def test_install_codex_permission_mirror_hook_preserves_existing_hooks(tmp_path)
     assert installed["type"] == "command"
     assert "--codex-hook-bridge" in installed["command"]
     assert "--data-dir" in installed["command"]
-    assert installed["timeout"] == 5
+    assert installed["timeout"] == 86400
 
 
 def test_install_codex_permission_mirror_hook_runs_before_existing_permission_hooks(tmp_path):
@@ -268,7 +268,7 @@ def test_install_codex_permission_mirror_hook_removes_duplicate_onlineworker_hoo
     assert permission_hooks[1]["hooks"][0]["command"] == "/usr/local/bin/other-permission-hook"
 
 
-def test_codex_hook_bridge_mirrors_permission_request_and_keeps_cli_response_empty(monkeypatch, capsys):
+def test_codex_hook_bridge_mirrors_permission_request_and_returns_tg_allow_to_codex(monkeypatch, capsys):
     sent_payloads = []
 
     class _FakeSocket:
@@ -288,7 +288,7 @@ def test_codex_hook_bridge_mirrors_permission_request_and_keeps_cli_response_emp
             sent_payloads.append(json.loads(raw.decode("utf-8").strip()))
 
         def recv(self, size):
-            return b'{"ok":true}\n'
+            return b'{"ok":true,"decision":"allow"}\n'
 
     monkeypatch.setattr(
         "plugins.providers.builtin.codex.python.hook_bridge.provider_owner_bridge_socket_path",
@@ -320,7 +320,12 @@ def test_codex_hook_bridge_mirrors_permission_request_and_keeps_cli_response_emp
     )
 
     assert run_codex_hook_bridge_once("/tmp/onlineworker") == 0
-    assert capsys.readouterr().out == "{}"
+    assert json.loads(capsys.readouterr().out) == {
+        "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": {"behavior": "allow"},
+        }
+    }
     assert sent_payloads == [
         {
             "type": "mirror_approval",
@@ -328,17 +333,76 @@ def test_codex_hook_bridge_mirrors_permission_request_and_keeps_cli_response_emp
             "thread_id": "tid-1",
             "workspace_dir": "/tmp/workspace",
             "owned_tui_host": False,
+            "blocking": True,
             "payload": {
                 "hook_event_name": "PermissionRequest",
                 "threadId": "tid-1",
                 "cwd": "/tmp/workspace",
                 "command": "ps -axo pid,command",
                 "reason": "inspect processes",
+                "request_id": "codex-cli-hook:tid-1:62c1b31f665418e68845",
             },
             "source": "codex_cli_hook",
-            "notice_suffix": "此请求已在 Codex CLI 中弹出，请在 CLI 中完成审批。",
+            "notice_suffix": "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。",
         }
     ]
+
+
+def test_codex_hook_bridge_returns_tg_deny_to_codex(monkeypatch, capsys):
+    class _FakeSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def settimeout(self, timeout):
+            self.timeout = timeout
+
+        def connect(self, path):
+            self.path = path
+
+        def sendall(self, raw):
+            self.raw = raw
+
+        def recv(self, size):
+            return b'{"ok":true,"decision":"deny","message":"TG denied"}\n'
+
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.hook_bridge.provider_owner_bridge_socket_path",
+        lambda data_dir: "/tmp/provider_owner_bridge.sock",
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.hook_bridge.socket.socket",
+        lambda *args, **kwargs: _FakeSocket(),
+    )
+    monkeypatch.setattr(
+        "sys.stdin",
+        type(
+            "_Stdin",
+            (),
+            {
+                "buffer": BytesIO(
+                    json.dumps(
+                        {
+                            "hook_event_name": "PermissionRequest",
+                            "threadId": "tid-1",
+                            "cwd": "/tmp/workspace",
+                            "command": "ps -axo pid,command",
+                        }
+                    ).encode("utf-8")
+                )
+            },
+        )(),
+    )
+
+    assert run_codex_hook_bridge_once("/tmp/onlineworker") == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": {"behavior": "deny", "message": "TG denied"},
+        }
+    }
 
 
 def test_codex_hook_bridge_marks_owned_tui_host_for_interactive_tg(monkeypatch, capsys):
@@ -393,6 +457,7 @@ def test_codex_hook_bridge_marks_owned_tui_host_for_interactive_tg(monkeypatch, 
     )
 
     assert run_codex_hook_bridge_once("/tmp/onlineworker") == 0
-    assert capsys.readouterr().out == "{}"
+    assert json.loads(capsys.readouterr().out) == {}
     assert sent_payloads[0]["owned_tui_host"] is True
+    assert sent_payloads[0]["blocking"] is True
     assert sent_payloads[0]["notice_suffix"] == "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。"

@@ -942,7 +942,7 @@ async def test_post_init_passes_codex_stdio_protocol_to_app_server_process():
 
 
 @pytest.mark.asyncio
-async def test_post_init_starts_codex_current_session_approval_mirror_when_packaged_data_dir(tmp_path):
+async def test_post_init_uses_blocking_codex_hook_instead_of_current_session_approval_mirror(tmp_path):
     storage = AppStorage()
     state = AppState(storage=storage)
     cfg = Config(
@@ -969,8 +969,6 @@ async def test_post_init_starts_codex_current_session_approval_mirror_when_packa
 
     proc = MagicMock()
     proc.start = AsyncMock(return_value="stdio://")
-    approval_mirror_task = MagicMock()
-
     with patch("plugins.providers.builtin.codex.python.runtime.AppServerProcess", return_value=proc), patch(
         "core.lifecycle.save_storage"
     ), patch("plugins.providers.builtin.codex.python.runtime.connect_adapter_with_retry", new=AsyncMock()), patch.object(
@@ -982,12 +980,12 @@ async def test_post_init_starts_codex_current_session_approval_mirror_when_packa
         return_value=MagicMock(),
     ), patch(
         "plugins.providers.builtin.codex.python.current_session_approval_mirror.start_current_session_approval_mirror_loop",
-        return_value=approval_mirror_task,
+        return_value=MagicMock(),
     ) as approval_mirror_mock:
         await manager.post_init(SimpleNamespace(bot=bot))
 
-    approval_mirror_mock.assert_called_once_with(state)
-    assert codex_state.get_runtime(state).approval_mirror_task is approval_mirror_task
+    approval_mirror_mock.assert_not_called()
+    assert codex_state.get_runtime(state).approval_mirror_task is None
 
 
 @pytest.mark.asyncio

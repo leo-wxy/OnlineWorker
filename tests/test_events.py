@@ -129,6 +129,38 @@ async def test_noninteractive_approval_notification_does_not_create_tg_decision_
     bot.edit_message_reply_markup.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_interactive_mirror_approval_creates_tg_decision_state(monkeypatch):
+    state = AppState(storage=AppStorage())
+    bot = MagicMock()
+    bot.edit_message_reply_markup = AsyncMock()
+    send_mock = AsyncMock(return_value=MagicMock(message_id=88))
+    monkeypatch.setattr("bot.events._send_to_group", send_mock)
+
+    await send_approval_to_telegram(
+        state,
+        bot,
+        -100123456789,
+        7653,
+        "codex:/tmp/project-a",
+        ProviderApprovalRequest(
+            request_id="codex-cli-hook:tid-cli:abc",
+            thread_id="tid-cli",
+            command="ps -axo pid,command",
+            reason="源 CLI 正在请求本地权限审批。",
+            tool_name="shell",
+            tool_type="codex",
+            approval_source="codex_cli_hook",
+        ),
+        interactive=True,
+        notice_suffix="此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。",
+    )
+
+    assert state.pending_approvals[88].request_id == "codex-cli-hook:tid-cli:abc"
+    assert state.pending_approvals[88].approval_source == "codex_cli_hook"
+    bot.edit_message_reply_markup.assert_awaited_once()
+
+
 # ── _extract_thread_id ────────────────────────────────────────────────────────
 
 class TestExtractThreadId:

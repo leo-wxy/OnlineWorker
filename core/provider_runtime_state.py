@@ -37,6 +37,15 @@ class ProviderInterruptionState:
 
 
 @dataclass
+class PendingApprovalDecision:
+    """等待 TG 回调写入的 provider hook 审批结果。"""
+    request_id: str
+    event: asyncio.Event = field(default_factory=asyncio.Event)
+    decision: str = ""
+    message: str = ""
+
+
+@dataclass
 class ProviderRunState:
     """一次 provider run 的运行时 ledger 条目。"""
     run_id: str
@@ -69,6 +78,7 @@ class ProviderRuntimeState:
     mirror_task: Optional[asyncio.Task] = None
     approval_mirror_task: Optional[asyncio.Task] = None
     approval_mirror_seen_at: dict[str, tuple[float, bool]] = field(default_factory=dict)
+    pending_approval_decisions: dict[str, PendingApprovalDecision] = field(default_factory=dict)
     last_watch_state_touch: float = 0.0
     last_synced_assistant: dict[str, str] = field(default_factory=dict)
     runs: dict[str, ProviderRunState] = field(default_factory=dict)

@@ -98,11 +98,7 @@ def build_current_session_approval_request(line: str, *, data_dir: Optional[str]
         "owned_tui_host": owned_tui_host,
         "payload": payload,
         "source": "codex_current_session_log",
-        "notice_suffix": (
-            "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。"
-            if owned_tui_host
-            else "此请求已在当前 Codex 会话中弹出，请在 Codex CLI/Desktop 中完成审批。"
-        ),
+        "notice_suffix": "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。",
     }
 
 
