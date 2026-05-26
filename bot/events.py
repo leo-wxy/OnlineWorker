@@ -698,6 +698,14 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         turn_id = _extract_turn_id(ctx.event_params)
         return str(turn_id or fallback_id or thread_id or ctx.ws_daemon_id or "task")
 
+    def _notification_task_summary(agent_id: str, thread_id: Optional[str]) -> str:
+        if not agent_id or not thread_id:
+            return ""
+        run = state.get_provider_current_run(agent_id, thread_id)
+        if run is not None and getattr(run, "task_summary", ""):
+            return str(run.task_summary)
+        return state.get_provider_task_summary(agent_id, thread_id)
+
     async def _emit_notification(
         ctx: "EventContext",
         *,
@@ -718,6 +726,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 message=message,
                 task_id=task_id or _notification_task_id(ctx, thread_id),
                 agent_id=agent_id,
+                task_summary=_notification_task_summary(agent_id, thread_id),
             )
             result = await notification_router.notify(event)
         except Exception as e:

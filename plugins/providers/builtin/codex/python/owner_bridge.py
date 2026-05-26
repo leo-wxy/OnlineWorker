@@ -258,6 +258,7 @@ class CodexOwnerBridge:
 
         try:
             codex_state.mark_send_started(self.state, effective_thread_id)
+            self.state.mark_provider_task_summary("codex", effective_thread_id, text)
             if workspace_id:
                 try:
                     await _send_on_thread(adapter, workspace_id, effective_thread_id, text, attachments)
@@ -275,6 +276,7 @@ class CodexOwnerBridge:
                     )
                     created_new_thread = effective_thread_id != requested_thread_id
                     codex_state.mark_send_started(self.state, effective_thread_id)
+                    self.state.mark_provider_task_summary("codex", effective_thread_id, text)
                     await _send_on_thread(
                         adapter,
                         workspace_id,

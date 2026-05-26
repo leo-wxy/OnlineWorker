@@ -430,6 +430,7 @@ async def send_message_via_tui_host(
     if thread is not None:
         topic_id = thread.topic_id
     codex_state.mark_send_started(state, thread_id)
+    state.mark_provider_task_summary("codex", thread_id, text)
     return await send_message_to_codex_tui_host(
         state,
         ws,

@@ -57,6 +57,7 @@ class ProviderRunState:
     final_reply_at: float = 0.0
     tg_synced_at: float = 0.0
     session_tab_visible_at: float = 0.0
+    task_summary: str = ""
 
 
 @dataclass
@@ -73,6 +74,7 @@ class ProviderRuntimeState:
     runs: dict[str, ProviderRunState] = field(default_factory=dict)
     thread_current_runs: dict[str, str] = field(default_factory=dict)
     thread_pending_send_started_at: dict[str, float] = field(default_factory=dict)
+    thread_task_summaries: dict[str, str] = field(default_factory=dict)
     interruptions: dict[str, ProviderInterruptionState] = field(default_factory=dict)
     watched_threads: dict[str, ProviderWatchState] = field(default_factory=dict)
     thread_locks: dict[str, asyncio.Lock] = field(default_factory=dict)

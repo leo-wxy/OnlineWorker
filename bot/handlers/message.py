@@ -270,6 +270,7 @@ async def _dispatch_thread_message(
         raise RuntimeError(f"{ws_info.tool} 未连接")
 
     should_continue = True
+    preview_value = _preview_for_message(text, caption, has_photo)
     try:
         if message_hooks is not None:
             prepare_kwargs = dict(
@@ -294,6 +295,9 @@ async def _dispatch_thread_message(
 
         if not should_continue:
             return
+
+        if preview_value:
+            state.mark_provider_task_summary(ws_info.tool, thread_info.thread_id, preview_value)
 
         if message_hooks is not None:
             send_kwargs = dict(
@@ -339,7 +343,6 @@ async def _dispatch_thread_message(
 
     remapped = thread_info.thread_id != original_thread_id
     source_changed = str(getattr(thread_info, "source", "") or "unknown") != original_source
-    preview_value = _preview_for_message(text, caption, has_photo)
     preview_changed = False
     if not thread_info.preview and preview_value and preview_value != thread_info.preview:
         thread_info.preview = preview_value

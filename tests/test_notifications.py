@@ -73,6 +73,20 @@ def test_notification_event_formats_minimal_text_and_dedupe_key():
     assert format_notification_text(event) == "需要处理 · Codex · Phase 6\n需要处理"
 
 
+def test_notification_event_formats_current_task_summary_when_available():
+    event = _event(
+        status="completed",
+        message="任务已完成",
+        task_summary="把通知功能再完善一下",
+    )
+
+    assert format_notification_text(event) == (
+        "完成 · Codex · Phase 6\n"
+        "当前任务：把通知功能再完善一下\n"
+        "任务已完成"
+    )
+
+
 def test_notification_runtime_builds_router_from_enabled_config(monkeypatch):
     captured = {}
 

@@ -23,6 +23,7 @@ class NotificationEvent:
     message: str
     task_id: str
     agent_id: str
+    task_summary: str = ""
 
     def __post_init__(self) -> None:
         normalized_status = _clean(self.status)
@@ -36,6 +37,8 @@ class NotificationEvent:
                 raise ValueError(f"NotificationEvent.{field_name} is required")
             object.__setattr__(self, field_name, value)
 
+        object.__setattr__(self, "task_summary", _clean(self.task_summary))
+
     @property
     def dedupe_key(self) -> str:
         return f"{self.task_id}:{self.agent_id}:{self.status}"
@@ -43,4 +46,8 @@ class NotificationEvent:
 
 def format_notification_text(event: NotificationEvent) -> str:
     label = STATUS_LABELS[event.status]
-    return f"{label} · {event.agent_name} · {event.task_name}\n{event.message}"
+    lines = [f"{label} · {event.agent_name} · {event.task_name}"]
+    if event.task_summary:
+        lines.append(f"当前任务：{event.task_summary}")
+    lines.append(event.message)
+    return "\n".join(lines)

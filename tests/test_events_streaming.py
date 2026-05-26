@@ -211,6 +211,7 @@ async def test_turn_completed_sends_task_notification():
         workspace_id="codex:onlineWorker",
         thread_id="tid-123",
         turn_id="turn-123",
+        task_summary="把通知功能再完善一下",
     )
 
     bot = SimpleNamespace()
@@ -242,6 +243,7 @@ async def test_turn_completed_sends_task_notification():
     assert event.agent_name == "Codex"
     assert event.agent_id == "codex"
     assert event.task_name == "Phase 6 通知机制"
+    assert event.task_summary == "把通知功能再完善一下"
     assert event.task_id == "turn-123"
     assert event.message == "任务已完成"
 

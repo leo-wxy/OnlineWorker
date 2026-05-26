@@ -380,6 +380,17 @@ class AppState:
         )
         return now
 
+    def mark_provider_task_summary(self, tool_name: str, thread_id: str, summary: str) -> str:
+        runtime = self.get_provider_runtime(tool_name)
+        normalized = " ".join(str(summary or "").split())[:120].strip()
+        if normalized:
+            runtime.thread_task_summaries[thread_id] = normalized
+        return normalized
+
+    def get_provider_task_summary(self, tool_name: str, thread_id: str) -> str:
+        runtime = self.get_provider_runtime(tool_name)
+        return runtime.thread_task_summaries.get(thread_id, "")
+
     def start_provider_run(
         self,
         tool_name: str,
@@ -387,6 +398,7 @@ class AppState:
         workspace_id: str,
         thread_id: str,
         turn_id: str,
+        task_summary: str = "",
     ) -> ProviderRunState:
         runtime = self.get_provider_runtime(tool_name)
         now = time.time()
@@ -403,6 +415,7 @@ class AppState:
             updated_at=now,
             send_started_at=send_started_at,
             bridge_accepted_at=now,
+            task_summary=task_summary or runtime.thread_task_summaries.get(thread_id, ""),
         )
         runtime.runs[run_id] = run
         runtime.thread_current_runs[thread_id] = run_id

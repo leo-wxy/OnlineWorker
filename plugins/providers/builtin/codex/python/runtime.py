@@ -755,6 +755,7 @@ async def send_message(
     attachments=None,
 ) -> None:
     codex_state.mark_send_started(state, thread_info.thread_id)
+    state.mark_provider_task_summary("codex", thread_info.thread_id, text)
     if attachments:
         await adapter.send_user_message(
             ws_info.daemon_workspace_id,

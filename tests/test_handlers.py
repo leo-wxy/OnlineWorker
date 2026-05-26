@@ -689,6 +689,47 @@ async def test_message_handler_tracks_last_tg_user_message_id_per_thread():
 
 
 @pytest.mark.asyncio
+async def test_message_handler_tracks_current_task_summary_per_thread():
+    from bot.handlers.message import make_message_handler
+
+    state = AppState()
+    state.storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="demo",
+        path="/tmp/demo",
+        tool="dummy",
+        topic_id=50,
+        daemon_workspace_id="dummy:demo",
+    )
+    ws.threads["tid-123"] = ThreadInfo(thread_id="tid-123", topic_id=100, archived=False)
+    state.storage.workspaces["dummy:demo"] = ws
+
+    adapter = MagicMock()
+    adapter.connected = True
+    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.send_user_message = AsyncMock(return_value={})
+    state.set_adapter("dummy", adapter)
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.text = "把通知功能再完善一下\n\n完成后贴当前会话关键字"
+    update.effective_message.caption = None
+    update.effective_message.photo = None
+    update.effective_message.message_id = 321
+    update.effective_message.message_thread_id = 100
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+
+    handler = make_message_handler(state, GROUP_CHAT_ID)
+    await handler(update, ctx)
+
+    assert state.get_provider_task_summary("dummy", "tid-123") == "把通知功能再完善一下 完成后贴当前会话关键字"
+
+
+@pytest.mark.asyncio
 async def test_message_handler_forwards_document_attachment_to_provider_runtime(tmp_path):
     from bot.handlers.message import make_message_handler
 

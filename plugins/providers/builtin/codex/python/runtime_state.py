@@ -58,12 +58,14 @@ def start_run(
     workspace_id: str,
     thread_id: str,
     turn_id: str,
+    task_summary: str = "",
 ) -> ProviderRunState:
     return state.start_provider_run(
         TOOL_NAME,
         workspace_id=workspace_id,
         thread_id=thread_id,
         turn_id=turn_id,
+        task_summary=task_summary,
     )
 
 
