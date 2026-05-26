@@ -602,10 +602,7 @@ async def handle_local_owner(
     from bot.handlers.common import _send_to_group, tg_processing_ack_text, tg_send_failed_text
     from bot.handlers import message as message_handler
 
-    should_route_to_tui = (
-        message_handler.should_route_codex_messages_to_tui_host(state, ws_info)
-        or can_route_cli_approval_to_tui_host(state, thread_info.thread_id)
-    )
+    should_route_to_tui = message_handler.should_route_codex_messages_to_tui_host(state, ws_info)
     if not should_route_to_tui:
         return False
 

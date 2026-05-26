@@ -178,7 +178,7 @@ async def test_message_handler_in_app_ws_mode_routes_to_codex_tui_host():
 
 
 @pytest.mark.asyncio
-async def test_message_handler_in_app_mode_routes_to_live_codex_tui_host_for_same_thread():
+async def test_message_handler_in_app_stdio_mode_keeps_ordinary_messages_on_app_adapter_when_approval_host_is_live():
     from bot.handlers.message import make_message_handler
 
     storage = AppStorage()
@@ -219,6 +219,8 @@ async def test_message_handler_in_app_mode_routes_to_live_codex_tui_host_for_sam
     update.effective_user.id = 1
     update.effective_message = MagicMock()
     update.effective_message.text = "你好"
+    update.effective_message.caption = None
+    update.effective_message.photo = None
     update.effective_message.message_thread_id = 100
 
     ctx = MagicMock()
@@ -237,17 +239,9 @@ async def test_message_handler_in_app_mode_routes_to_live_codex_tui_host_for_sam
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    enqueue_mock.assert_awaited_once_with(
-        state,
-        ws,
-        ctx.bot,
-        GROUP_CHAT_ID,
-        100,
-        "tid-1",
-        "你好",
-    )
-    adapter.resume_thread.assert_not_awaited()
-    adapter.send_user_message.assert_not_awaited()
+    enqueue_mock.assert_not_awaited()
+    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
+    adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "你好")
     assert ws.threads["tid-1"].preview == "你好"
     save_storage_mock.assert_called_once()
 
@@ -304,6 +298,73 @@ async def test_message_handler_in_app_stdio_owner_bridge_mode_uses_app_adapter_f
     ctx.bot.send_message = AsyncMock()
 
     with patch(
+        "bot.handlers.message.enqueue_codex_tui_message",
+        new=AsyncMock(return_value=0),
+    ) as enqueue_mock:
+        handler = make_message_handler(state, GROUP_CHAT_ID)
+        await handler(update, ctx)
+
+    enqueue_mock.assert_not_awaited()
+    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
+    adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "你好")
+    ctx.bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_message_handler_in_app_stdio_owner_bridge_mode_uses_app_adapter_when_tui_host_is_live():
+    from bot.handlers.message import make_message_handler
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=50,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
+    storage.workspaces["codex:onlineWorker"] = ws
+
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="stdio",
+                live_transport="owner_bridge",
+                control_mode="app",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    adapter = MagicMock()
+    adapter.connected = True
+    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.send_user_message = AsyncMock(return_value={})
+    state = AppState(storage=storage, config=cfg)
+    state.set_adapter("codex", adapter)
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.text = "你好"
+    update.effective_message.caption = None
+    update.effective_message.photo = None
+    update.effective_message.message_thread_id = 100
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+
+    with patch(
+        "plugins.providers.builtin.codex.python.runtime.can_route_cli_approval_to_tui_host",
+        return_value=True,
+    ), patch(
         "bot.handlers.message.enqueue_codex_tui_message",
         new=AsyncMock(return_value=0),
     ) as enqueue_mock:
