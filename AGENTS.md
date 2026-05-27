@@ -42,6 +42,14 @@ rules needed to work safely in this codebase.
 - Intel packaging is documented in [deploy/BUILD.md](deploy/BUILD.md)
 - `scripts/build.sh` is the shared build pipeline
 - `ONLINEWORKER_PLUGIN_SOURCE_DIRS` is the public build-time extension hook
+- App package version truth source: `VERSION`.
+- Before tagging, pulling a release tag, or packaging, verify `VERSION`,
+  `mac-app/package.json`, `mac-app/src-tauri/Cargo.toml`, and
+  `mac-app/src-tauri/tauri.conf.json` resolve to the same version.
+- `scripts/build.sh` runs `scripts/sync-app-version.py` before packaging; do
+  not bypass this sync when producing a DMG.
+- A Git tag alone is not a packaging version source. If a tag changes, update
+  `VERSION` first, then let the sync script update the App packaging fields.
 
 ## Runtime and Storage
 

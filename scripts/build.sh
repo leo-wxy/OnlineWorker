@@ -93,6 +93,10 @@ echo "Target:  $TARGET_TRIPLE"
 echo "Plugin sources: ${ONLINEWORKER_PLUGIN_SOURCE_DIRS:-<none>}"
 echo ""
 
+echo "=== Sync app version ==="
+python3 "$PROJECT_ROOT/scripts/sync-app-version.py" --root "$PROJECT_ROOT"
+echo ""
+
 cleanup_previous_bundle_outputs
 
 # Step 1: Use arm64 Python for PyInstaller

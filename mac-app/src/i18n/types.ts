@@ -352,6 +352,13 @@ export interface AppTexts {
     saving: string;
     enable: string;
     autostart: string;
+    civilityModeTitle: string;
+    civilityModeDescription: string;
+    externalCliTitle: string;
+    externalCliBin: string;
+    externalCliUpstreamBaseUrl: string;
+    externalCliLauncherWrapsClaude: string;
+    externalCliSave: string;
   };
   notifications: {
     title: string;
@@ -382,6 +389,7 @@ export interface AppTexts {
     pluginIdLabel: string;
     fieldLabels: Record<string, Record<string, string>>;
     fieldDescriptions: Record<string, Record<string, string>>;
+    optionLabels: Record<string, Record<string, Record<string, string>>>;
     channelDescriptions: Record<string, string>;
   };
   dashboard: {

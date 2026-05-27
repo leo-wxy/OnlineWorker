@@ -50,6 +50,11 @@ export interface ProviderMessageHooksMetadata {
   abusiveLanguageNormalization: ProviderMessageHookStatus;
 }
 
+export interface ProviderExternalCliConfig {
+  upstreamBaseUrl?: string | null;
+  launcherWrapsClaude: boolean;
+}
+
 export interface ComposerAttachment {
   id: string;
   kind: "image" | "file";
@@ -87,6 +92,7 @@ export interface ProviderMetadata {
   controlMode?: string | null;
   capabilities: ProviderCapabilitiesMetadata;
   messageHooks?: ProviderMessageHooksMetadata | null;
+  externalCli: ProviderExternalCliConfig;
   install?: ProviderInstallMetadata;
   process?: ProviderProcessMetadata;
   icon?: ProviderIconMetadata | null;

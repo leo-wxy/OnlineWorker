@@ -454,6 +454,13 @@ export const enTexts: AppTexts = {
       saving: "Saving...",
       enable: "Enable",
       autostart: "Autostart",
+      civilityModeTitle: "Civility mode",
+      civilityModeDescription: "Rewrite abusive language into neutral wording before sending.",
+      externalCliTitle: "External CLI",
+      externalCliBin: "Launch command",
+      externalCliUpstreamBaseUrl: "Upstream Base URL",
+      externalCliLauncherWrapsClaude: "Open Claude CLI after launcher starts",
+      externalCliSave: "Save CLI config",
     },
     notifications: {
       title: "Notifications",
@@ -488,15 +495,27 @@ export const enTexts: AppTexts = {
           bot_token: "Bot Token",
           recipient_user_id: "Recipient User ID",
         },
+        popo: {
+          target_type: "Target",
+          receiver: "Receiver",
+          popo_cli_path: "popo-cli Path",
+        },
       },
       fieldDescriptions: {
         telegram: {
           bot_token: "Telegram bot token used for notification delivery.",
           recipient_user_id: "Telegram user ID that receives notification messages.",
         },
+        popo: {
+          target_type: "Send notifications to File Helper, a direct POPO account, or a group chat.",
+          receiver: "Direct Message uses a POPO account. Group Chat uses a group tid. File Helper ignores this field.",
+          popo_cli_path: "Optional popo-cli executable path. Leave as popo-cli to resolve from PATH.",
+        },
       },
+      optionLabels: {},
       channelDescriptions: {
         telegram: "Send concise task notifications through a dedicated Telegram bot.",
+        popo: "Send concise task notifications through POPO.",
       },
     },
     dashboard: {

@@ -102,10 +102,7 @@ struct ManagedProcessCleanupPolicy {
 }
 
 fn cleanup_process_matchers(policy: ManagedProcessCleanupPolicy) -> Vec<String> {
-    let mut matchers = vec![
-        "onlineworker-bot".to_string(),
-        "python.*main.py".to_string(),
-    ];
+    let mut matchers = vec![];
     for matcher in policy.provider_matchers {
         let matcher = matcher.trim();
         if matcher.is_empty() || is_unsafe_global_cleanup_matcher(matcher) {
@@ -150,8 +147,72 @@ fn cleanup_policy_from_config() -> ManagedProcessCleanupPolicy {
     ManagedProcessCleanupPolicy { provider_matchers }
 }
 
+fn is_onlineworker_cli_wrapper_command(command_line: &str) -> bool {
+    let mut args = command_line.split_whitespace();
+    args.any(|arg| matches!(arg, "--ow-codex" | "--ow-claude" | "--codex-tui-host"))
+}
+
+fn is_packaged_onlineworker_bot_command(command: &str) -> bool {
+    command.ends_with("/onlineworker-bot") || command == "onlineworker-bot"
+}
+
+fn is_source_onlineworker_bot_command(command_line: &str) -> bool {
+    let mut args = command_line.split_whitespace();
+    let command = args.next().unwrap_or("");
+    if !command.ends_with("python") && !command.ends_with("python3") && !command.contains("python")
+    {
+        return false;
+    }
+    args.any(|arg| arg.ends_with("/main.py") || arg == "main.py")
+}
+
+fn managed_bot_cleanup_pids_from_rows(output: &[u8], data_dir: &Path) -> Vec<u32> {
+    let expected_arg = format!(" --data-dir {}", data_dir.to_string_lossy());
+    std::str::from_utf8(output)
+        .ok()
+        .map(|text| {
+            text.lines()
+                .filter_map(|line| {
+                    let trimmed = line.trim_start();
+                    let (pid_raw, command_line) = trimmed.split_once(char::is_whitespace)?;
+                    let pid = pid_raw.parse::<u32>().ok()?;
+                    if is_onlineworker_cli_wrapper_command(command_line) {
+                        return None;
+                    }
+                    if !command_line.contains(&expected_arg) {
+                        return None;
+                    }
+                    let command = command_line.split_whitespace().next()?;
+                    if is_packaged_onlineworker_bot_command(command)
+                        || is_source_onlineworker_bot_command(command_line)
+                    {
+                        Some(pid)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn cleanup_managed_bot_processes(data_dir: &Path) {
+    let Ok(output) = std::process::Command::new("ps")
+        .args(["-axo", "pid=,command="])
+        .output()
+    else {
+        return;
+    };
+    for pid in managed_bot_cleanup_pids_from_rows(&output.stdout, data_dir) {
+        kill_pid(pid);
+    }
+}
+
 fn cleanup_managed_processes(policy: ManagedProcessCleanupPolicy) {
-    // 1. kill bot 进程
+    if let Ok(data_dir) = ensure_data_dir() {
+        cleanup_managed_bot_processes(&data_dir);
+    }
+
     for matcher in cleanup_process_matchers(policy) {
         let _ = std::process::Command::new("pkill")
             .args(["-9", "-f", &matcher])
@@ -169,6 +230,31 @@ fn pids_from_output(output: &[u8]) -> Vec<u32> {
         .map(|text| {
             text.lines()
                 .filter_map(|line| line.trim().parse::<u32>().ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn pids_from_bot_process_rows(output: &[u8], data_dir: &Path) -> Vec<u32> {
+    let expected_arg = format!(" --data-dir {}", data_dir.to_string_lossy());
+    std::str::from_utf8(output)
+        .ok()
+        .map(|text| {
+            text.lines()
+                .filter_map(|line| {
+                    let trimmed = line.trim_start();
+                    let (pid_raw, command_line) = trimmed.split_once(char::is_whitespace)?;
+                    let pid = pid_raw.parse::<u32>().ok()?;
+                    let command = command_line.split_whitespace().next()?;
+                    if !command.ends_with("/onlineworker-bot") && command != "onlineworker-bot" {
+                        return None;
+                    }
+                    if command_line.contains(&expected_arg) {
+                        Some(pid)
+                    } else {
+                        None
+                    }
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -289,15 +375,31 @@ fn cleanup_tracked_process_tree(root_pid: Option<u32>) {
 }
 
 fn find_external_bot_pid(data_dir: &std::path::Path) -> Option<u32> {
-    let pattern = format!("onlineworker-bot --data-dir {}", data_dir.to_string_lossy());
     let output = std::process::Command::new("pgrep")
-        .args(["-f", &pattern])
+        .args(["-x", "onlineworker-bot"])
         .output()
         .ok()?;
     if !output.status.success() {
         return None;
     }
     let pids = pids_from_output(&output.stdout);
+    if pids.is_empty() {
+        return None;
+    }
+
+    let pid_arg = pids
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let command_output = std::process::Command::new("ps")
+        .args(["-o", "pid=,command=", "-p", &pid_arg])
+        .output()
+        .ok()?;
+    if !command_output.status.success() {
+        return None;
+    }
+    let pids = pids_from_bot_process_rows(&command_output.stdout, data_dir);
     if pids.is_empty() {
         return None;
     }
@@ -317,7 +419,6 @@ fn find_external_bot_pid(data_dir: &std::path::Path) -> Option<u32> {
     if !ps_output.status.success() {
         return pids.last().copied();
     }
-
     let parents = pid_parent_pairs_from_output(&ps_output.stdout);
     select_primary_pid(&pids, &parents).or_else(|| pids.last().copied())
 }
@@ -772,14 +873,16 @@ mod tests {
     use super::{
         apply_manual_stop_policy, apply_service_start_policy,
         cleanup_owner_bridge_socket_files_in_dir, cleanup_process_matchers, compute_service_status,
-        overlay_env_spec, overlay_env_spec_from_app_env, pid_parent_pairs_from_output,
-        pids_from_output, probe_http_health, process_tree_pids, read_env_key, select_primary_pid,
+        managed_bot_cleanup_pids_from_rows, overlay_env_spec, overlay_env_spec_from_app_env,
+        pid_parent_pairs_from_output, pids_from_bot_process_rows, pids_from_output,
+        probe_http_health, process_tree_pids, read_env_key, select_primary_pid,
         should_attempt_background_service_recovery, BotState, ManagedProcessCleanupPolicy,
     };
     use std::collections::HashMap;
     use std::fs;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::path::Path;
     use std::thread;
     use std::time::Duration;
     use tauri_plugin_shell::process::CommandEvent;
@@ -921,8 +1024,8 @@ mod tests {
         let matchers = cleanup_process_matchers(ManagedProcessCleanupPolicy {
             provider_matchers: vec![],
         });
-        assert!(matchers.contains(&"onlineworker-bot".to_string()));
-        assert!(matchers.contains(&"python.*main.py".to_string()));
+        assert!(!matchers.contains(&"onlineworker-bot".to_string()));
+        assert!(!matchers.contains(&"python.*main.py".to_string()));
         assert!(!matchers.contains(&"codex.*app-server".to_string()));
         assert!(!matchers.contains(&"custom-provider.*serve".to_string()));
     }
@@ -1048,5 +1151,71 @@ mod tests {
         let parents = HashMap::from([(100, 1), (110, 100), (120, 110), (200, 1), (210, 200)]);
 
         assert_eq!(process_tree_pids(100, &parents), vec![120, 110, 100]);
+    }
+
+    #[test]
+    fn find_external_bot_pid_ignores_other_processes_with_bot_command_text() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "onlineworker-data-dir with spaces {}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&data_dir).expect("create temp data dir");
+        let pattern = format!("onlineworker-bot --data-dir {}", data_dir.to_string_lossy());
+        let mut child = std::process::Command::new("python3")
+            .arg("-c")
+            .arg("import time; time.sleep(10)")
+            .arg("onlineworker-bot")
+            .arg("--data-dir")
+            .arg(data_dir.to_string_lossy().to_string())
+            .spawn()
+            .expect("spawn decoy process");
+
+        let visible = (0..20).any(|_| {
+            let status = std::process::Command::new("pgrep")
+                .args(["-f", &pattern])
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false);
+            if !status {
+                thread::sleep(Duration::from_millis(50));
+            }
+            status
+        });
+        assert!(visible, "decoy process should be visible in command text");
+
+        let detected = super::find_external_bot_pid(&data_dir);
+
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = fs::remove_dir_all(&data_dir);
+
+        assert_eq!(detected, None);
+    }
+
+    #[test]
+    fn pids_from_bot_process_rows_matches_data_dir_with_spaces() {
+        let data_dir = Path::new("/Users/wxy/Library/Application Support/OnlineWorker");
+        let rows = b" 123 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/wxy/Library/Application Support/OnlineWorker\n 456 /usr/bin/python3 -c sleep onlineworker-bot --data-dir /Users/wxy/Library/Application Support/OnlineWorker\n";
+
+        assert_eq!(pids_from_bot_process_rows(rows, data_dir), vec![123]);
+    }
+
+    #[test]
+    fn managed_bot_cleanup_pids_exclude_cli_wrappers_for_same_data_dir() {
+        let data_dir = Path::new("/Users/wxy/Library/Application Support/OnlineWorker");
+        let rows = b"\
+ 101 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/wxy/Library/Application Support/OnlineWorker
+ 102 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/wxy/Library/Application Support/OnlineWorker --ow-codex
+ 103 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/wxy/Library/Application Support/OnlineWorker --ow-claude
+ 104 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --ow-claude --data-dir /Users/wxy/Library/Application Support/OnlineWorker
+ 105 /usr/bin/python3 /repo/main.py --data-dir /Users/wxy/Library/Application Support/OnlineWorker
+ 106 /usr/bin/python3 /repo/main.py --data-dir /Users/wxy/Library/Application Support/OnlineWorker --ow-codex
+ 107 /usr/bin/python3 /repo/main.py --ow-claude --data-dir /Users/wxy/Library/Application Support/OnlineWorker
+";
+
+        assert_eq!(
+            managed_bot_cleanup_pids_from_rows(rows, data_dir),
+            vec![101, 105]
+        );
     }
 }

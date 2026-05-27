@@ -196,6 +196,38 @@ providers:
     assert claude.message_hooks.builtin["abusive_language_normalization"].enabled is False
 
 
+def test_load_config_reads_provider_external_cli_settings(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        """
+schema_version: 2
+providers:
+  claude:
+    managed: true
+    bin: "company-launcher start"
+    external_cli:
+      upstream_base_url: "https://upstream.example.test/anthropic"
+      launcher_wraps_claude: true
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TELEGRAM_TOKEN", "123:abc")
+    monkeypatch.setenv("ALLOWED_USER_ID", "456789")
+    monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
+
+    from config import load_config
+
+    cfg = load_config(str(p))
+    claude = cfg.get_provider("claude")
+
+    assert claude is not None
+    assert claude.codex_bin == "company-launcher start"
+    assert claude.external_cli == {
+        "upstream_base_url": "https://upstream.example.test/anthropic",
+        "launcher_wraps_claude": True,
+    }
+
+
 def test_load_config_reads_custom_notification_channel(tmp_path, monkeypatch):
     p = tmp_path / "config.yaml"
     p.write_text(

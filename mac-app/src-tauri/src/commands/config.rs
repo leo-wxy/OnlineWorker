@@ -6,9 +6,10 @@ use super::config_provider::{
     normalize_config_for_display, normalize_provider_document_with_env,
     notification_channel_metadata_from_raw, serialize_config_document_for_persistence,
     serialize_normalized_config_with_env, set_notification_channel_config_in_document,
-    set_notification_channel_enabled_in_document, set_provider_flags_in_document,
-    set_provider_message_hook_enabled_in_document, visible_provider_ids_from_raw,
-    NotificationChannelMetadata, ProviderMetadata, ProviderRuntimePolicy,
+    set_notification_channel_enabled_in_document, set_provider_cli_config_in_document,
+    set_provider_flags_in_document, set_provider_message_hook_enabled_in_document,
+    visible_provider_ids_from_raw, NotificationChannelMetadata, ProviderExternalCliConfig,
+    ProviderMetadata, ProviderRuntimePolicy,
 };
 
 pub(crate) const DEFAULT_APP_NAME: &str = "OnlineWorker";
@@ -205,6 +206,28 @@ pub async fn set_provider_message_hook_enabled(
 
     let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
     set_provider_message_hook_enabled_in_document(&mut doc, &provider_id, &hook_name, enabled);
+    let serialized = serialize_config_document_for_persistence(doc, &raw)?;
+    std::fs::write(&path, serialized).map_err(|e| format!("Cannot write config.yaml: {}", e))
+}
+
+#[tauri::command]
+pub async fn set_provider_cli_config(
+    provider_id: String,
+    bin: Option<String>,
+    external_cli: ProviderExternalCliConfig,
+) -> Result<(), String> {
+    let dir = ensure_data_dir()?;
+    cleanup_legacy_claude_config(&dir)?;
+    let path = dir.join("config.yaml");
+    let raw = if path.exists() {
+        std::fs::read_to_string(&path).map_err(|e| format!("Cannot read config.yaml: {}", e))?
+    } else {
+        include_str!("../../default-config.yaml").to_string()
+    };
+    let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
+
+    let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
+    set_provider_cli_config_in_document(&mut doc, &provider_id, bin, external_cli);
     let serialized = serialize_config_document_for_persistence(doc, &raw)?;
     std::fs::write(&path, serialized).map_err(|e| format!("Cannot write config.yaml: {}", e))
 }

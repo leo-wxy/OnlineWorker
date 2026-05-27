@@ -95,7 +95,7 @@ test("maintenance keeps external Codex permission hook install out of the app sh
   assert.equal(en.includes("Codex Permission Entry"), false);
 });
 
-test("provider settings hides message rewrite controls while paused", () => {
+test("provider settings exposes civility mode controls for rewrite-capable agents", () => {
   const panel = readFileSync(join(root, "src", "components", "ProviderSettingsPanel.tsx"), "utf8");
   const types = readFileSync(join(root, "src", "i18n", "types.ts"), "utf8");
   const zh = readFileSync(join(root, "src", "i18n", "locales", "zh.ts"), "utf8");
@@ -104,26 +104,56 @@ test("provider settings hides message rewrite controls while paused", () => {
     join(root, "..", "plugins", "providers", "builtin", "codex", "plugin.yaml"),
     "utf8"
   );
+  const claudePlugin = readFileSync(
+    join(root, "..", "plugins", "providers", "builtin", "claude", "plugin.yaml"),
+    "utf8"
+  );
 
-  assert.equal(panel.includes("cliRewriteCommand"), false);
-  assert.equal(panel.includes("cliRewriteAliasCommand"), false);
-  assert.equal(panel.includes("cliRewriteHelp"), false);
-  assert.equal(panel.includes("cliRewriteAliasHelp"), false);
-  assert.equal(panel.includes("messageRewritePaused"), false);
-  assert.equal(panel.includes("set_provider_message_hook_enabled"), false);
-  assert.equal(panel.includes("abusive_language_normalization"), false);
-  assert.equal(panel.includes("texts.rewriteTitle"), false);
-  assert.equal(panel.includes("texts.rewritePausedDescription"), false);
+  assert.match(panel, /supportsMessageRewrite/);
+  assert.match(panel, /set_provider_message_hook_enabled/);
+  assert.match(panel, /abusive_language_normalization/);
+  assert.match(panel, /texts\.civilityModeTitle/);
+  assert.match(panel, /provider\?\.messageHooks\?\.abusiveLanguageNormalization\.enabled/);
   assert.equal(panel.includes("navigator.clipboard.writeText"), false);
-  assert.equal(types.includes("rewriteTitle"), false);
-  assert.equal(types.includes("rewritePaused"), false);
-  assert.equal(types.includes("normalizerOn"), false);
+  assert.match(types, /civilityModeTitle:\s*string/);
+  assert.match(types, /civilityModeDescription:\s*string/);
   assert.match(codexPlugin, /external_cli:\s*remote_proxy/);
   assert.match(codexPlugin, /wrapper:\s*ow-codex/);
-  assert.equal(zh.includes("消息改写"), false);
-  assert.equal(zh.includes("文明模式暂时关闭"), false);
-  assert.equal(en.includes("Message rewrite"), false);
-  assert.equal(en.includes("Civility mode is temporarily disabled"), false);
+  assert.match(claudePlugin, /external_cli:\s*http_proxy/);
+  assert.match(claudePlugin, /wrapper:\s*ow-claude/);
+  assert.match(zh, /文明模式/);
+  assert.match(en, /Civility mode/);
+});
+
+test("provider settings exposes external CLI rewrite configuration in the app", () => {
+  const panel = readFileSync(join(root, "src", "components", "ProviderSettingsPanel.tsx"), "utf8");
+  const types = readFileSync(join(root, "src", "types.ts"), "utf8");
+  const i18nTypes = readFileSync(join(root, "src", "i18n", "types.ts"), "utf8");
+  const zh = readFileSync(join(root, "src", "i18n", "locales", "zh.ts"), "utf8");
+  const en = readFileSync(join(root, "src", "i18n", "locales", "en.ts"), "utf8");
+  const rustConfig = readFileSync(join(root, "src-tauri", "src", "commands", "config.rs"), "utf8");
+  const rustLib = readFileSync(join(root, "src-tauri", "src", "lib.rs"), "utf8");
+
+  assert.match(types, /export interface ProviderExternalCliConfig/);
+  assert.match(types, /externalCli:\s*ProviderExternalCliConfig;/);
+  assert.match(panel, /set_provider_cli_config/);
+  assert.match(panel, /externalCliUpstreamBaseUrl/);
+  assert.match(panel, /externalCliLauncherWrapsClaude/);
+  assert.match(panel, /supportsClaudeLauncher/);
+  assert.match(panel, /providerId === "claude"/);
+  assert.match(panel, /supportsClaudeLauncher\(setting\.id\)/);
+  assert.match(panel, /provider\?\.capabilities\.messageRewrite\?\.externalCli/);
+  assert.match(i18nTypes, /externalCliTitle:\s*string/);
+  assert.match(zh, /外部 CLI/);
+  assert.equal(zh.includes("外挂 CLI"), false);
+  assert.equal(zh.includes("启动器会再调用 claude"), false);
+  assert.match(zh, /发送前将不文明表达改写为普通表达。/);
+  assert.match(zh, /启动后进入 Claude CLI/);
+  assert.match(en, /External CLI/);
+  assert.match(en, /Rewrite abusive language into neutral wording before sending./);
+  assert.match(en, /Open Claude CLI after launcher starts/);
+  assert.match(rustConfig, /pub async fn set_provider_cli_config/);
+  assert.match(rustLib, /set_provider_cli_config/);
 });
 
 test("notification tab exposes split app list and plugin-defined configuration", () => {
@@ -160,6 +190,11 @@ test("notification tab exposes split app list and plugin-defined configuration",
   assert.equal((panel.match(/notifications\.enableChannel/g) ?? []).length, 1);
   assert.match(i18nTypes, /notifications:\s*\{/);
   assert.match(zh, /通知渠道/);
+  assert.match(zh, /文件助手/);
+  assert.match(zh, /私聊/);
+  assert.match(zh, /群聊/);
+  assert.match(zh, /接收人/);
+  assert.match(zh, /通过 POPO 发送简短任务通知。/);
   assert.match(en, /Notification channels/);
   assert.match(panel, /ChannelIcon/);
   assert.match(panel, /settingsFields/);

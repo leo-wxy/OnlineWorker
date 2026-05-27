@@ -103,6 +103,7 @@ class ToolConfig:
     process: dict[str, Any] = field(default_factory=dict)
     health: dict[str, Any] = field(default_factory=dict)
     auth: dict[str, str] = field(default_factory=dict)
+    external_cli: dict[str, Any] = field(default_factory=dict)
     message_hooks: "MessageHooksConfig | None" = None
 
     def __post_init__(self) -> None:
@@ -132,6 +133,7 @@ class ToolConfig:
             for k, v in (self.auth or {}).items()
             if k is not None
         }
+        self.external_cli = dict(self.external_cli or {})
 
 
 @dataclass
@@ -377,6 +379,7 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
             },
             "health": {},
             "auth": {},
+            "external_cli": {},
         }
     if name == "claude":
         return {
@@ -407,6 +410,7 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
             },
             "health": {},
             "auth": {},
+            "external_cli": {},
         }
     return {
         "visible": True,
@@ -424,6 +428,7 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
         "process": {},
         "health": {},
         "auth": {},
+        "external_cli": {},
     }
 
 
@@ -482,6 +487,7 @@ def _load_builtin_provider_plugin_blueprint(name: str) -> dict[str, Any] | None:
             "url": metadata.health.url,
         } if metadata.health.url else {},
         "auth": auth,
+        "external_cli": provider_raw.get("external_cli") if isinstance(provider_raw.get("external_cli"), dict) else {},
     }
 
 
@@ -709,6 +715,7 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
         process=raw.get("process") if isinstance(raw.get("process"), dict) else defaults["process"],
         health=raw.get("health") if isinstance(raw.get("health"), dict) else defaults["health"],
         auth=auth,
+        external_cli=raw.get("external_cli") if isinstance(raw.get("external_cli"), dict) else defaults["external_cli"],
         message_hooks=_message_hooks_from_raw(raw.get("message_hooks")),
     )
 

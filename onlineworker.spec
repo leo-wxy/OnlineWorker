@@ -27,6 +27,8 @@ a = Analysis(
         'websockets.legacy.client',
         'telegram',
         'telegram.ext',
+        'plugins.providers.builtin.claude.python.cli_wrapper',
+        'plugins.providers.builtin.claude.python.http_proxy',
         'plugins.providers.builtin.codex.python.cli_wrapper',
     ],
     hookspath=[],

@@ -449,6 +449,13 @@ export const zhTexts: AppTexts = {
       saving: "保存中...",
       enable: "启用",
       autostart: "自启动",
+      civilityModeTitle: "文明模式",
+      civilityModeDescription: "发送前将不文明表达改写为普通表达。",
+      externalCliTitle: "外部 CLI",
+      externalCliBin: "启动命令",
+      externalCliUpstreamBaseUrl: "上游 Base URL",
+      externalCliLauncherWrapsClaude: "启动后进入 Claude CLI",
+      externalCliSave: "保存 CLI 配置",
     },
     notifications: {
       title: "通知",
@@ -483,15 +490,35 @@ export const zhTexts: AppTexts = {
           bot_token: "Bot Token",
           recipient_user_id: "接收用户 ID",
         },
+        popo: {
+          target_type: "接收方式",
+          receiver: "接收人",
+          popo_cli_path: "popo-cli 路径",
+        },
       },
       fieldDescriptions: {
         telegram: {
           bot_token: "用于发送通知的 Telegram Bot Token。",
           recipient_user_id: "接收通知消息的 Telegram 用户 ID。",
         },
+        popo: {
+          target_type: "选择发送到文件助手、POPO 私聊或 POPO 群聊。",
+          receiver: "私聊填写 POPO 账号，群聊填写群 tid；文件助手无需填写。",
+          popo_cli_path: "可选的 popo-cli 可执行文件路径。默认从 PATH 中查找。",
+        },
+      },
+      optionLabels: {
+        popo: {
+          target_type: {
+            filehelper: "文件助手",
+            p2p: "私聊",
+            team: "群聊",
+          },
+        },
       },
       channelDescriptions: {
         telegram: "通过独立 Telegram Bot 发送简短任务通知。",
+        popo: "通过 POPO 发送简短任务通知。",
       },
     },
     dashboard: {

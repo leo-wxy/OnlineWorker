@@ -19,6 +19,16 @@ function providerSettingClass(enabled: boolean) {
     : "border-slate-200/80 bg-slate-50/80 opacity-75";
 }
 
+function supportsClaudeLauncher(providerId: string) {
+  return providerId === "claude";
+}
+
+interface ProviderCliDraft {
+  bin: string;
+  upstreamBaseUrl: string;
+  launcherWrapsClaude: boolean;
+}
+
 function Toggle({
   checked,
   disabled,
@@ -55,6 +65,9 @@ export function ProviderSettingsPanel({ mode }: Props) {
   const [cliAvailability, setCliAvailability] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [savingProviderId, setSavingProviderId] = useState<string | null>(null);
+  const [savingCliProviderId, setSavingCliProviderId] = useState<string | null>(null);
+  const [savingHookProviderId, setSavingHookProviderId] = useState<string | null>(null);
+  const [cliDrafts, setCliDrafts] = useState<Record<string, ProviderCliDraft>>({});
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -62,6 +75,16 @@ export function ProviderSettingsPanel({ mode }: Props) {
     try {
       const metadata = await invoke<ProviderMetadata[]>("get_provider_metadata");
       setProviders(metadata);
+      setCliDrafts(Object.fromEntries(
+        metadata.map((provider) => [
+          provider.id,
+          {
+            bin: provider.bin ?? provider.install?.cliNames?.[0] ?? provider.id,
+            upstreamBaseUrl: provider.externalCli?.upstreamBaseUrl ?? "",
+            launcherWrapsClaude: provider.externalCli?.launcherWrapsClaude ?? false,
+          },
+        ])
+      ));
       const availabilityEntries = await Promise.all(
         metadata.map(async (provider) => {
           const bin = provider.bin || provider.install?.cliNames?.[0] || provider.id;
@@ -122,6 +145,76 @@ export function ProviderSettingsPanel({ mode }: Props) {
     }
   };
 
+  const updateCliDraft = (
+    providerId: string,
+    patch: Partial<ProviderCliDraft>
+  ) => {
+    setCliDrafts((current) => {
+      const provider = byId.get(providerId);
+      const previous = current[providerId] ?? {
+        bin: provider?.bin ?? provider?.install?.cliNames?.[0] ?? providerId,
+        upstreamBaseUrl: provider?.externalCli?.upstreamBaseUrl ?? "",
+        launcherWrapsClaude: provider?.externalCli?.launcherWrapsClaude ?? false,
+      };
+      return {
+        ...current,
+        [providerId]: {
+          ...previous,
+          ...patch,
+        },
+      };
+    });
+  };
+
+  const saveProviderCliConfig = async (provider: ProviderMetadata) => {
+    const draft = cliDrafts[provider.id] ?? {
+      bin: provider.bin ?? provider.install?.cliNames?.[0] ?? provider.id,
+      upstreamBaseUrl: provider.externalCli?.upstreamBaseUrl ?? "",
+      launcherWrapsClaude: provider.externalCli?.launcherWrapsClaude ?? false,
+    };
+    setSavingCliProviderId(provider.id);
+    try {
+      await invoke("set_provider_cli_config", {
+        providerId: provider.id,
+        bin: draft.bin.trim(),
+        externalCli: {
+          upstreamBaseUrl: draft.upstreamBaseUrl.trim() || null,
+          launcherWrapsClaude: supportsClaudeLauncher(provider.id) && draft.launcherWrapsClaude,
+        },
+      });
+      startTransition(() => {
+        void load();
+      });
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSavingCliProviderId(null);
+    }
+  };
+
+  const saveProviderCivilityMode = async (
+    providerId: string,
+    enabled: boolean
+  ) => {
+    setSavingHookProviderId(providerId);
+    try {
+      await invoke("set_provider_message_hook_enabled", {
+        providerId,
+        hookName: "abusive_language_normalization",
+        enabled,
+      });
+      startTransition(() => {
+        void load();
+      });
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSavingHookProviderId(null);
+    }
+  };
+
   const title = mode === "agents" ? texts.titleAgents : texts.titleExtensions;
   const description = mode === "agents" ? texts.descriptionAgents : texts.descriptionExtensions;
 
@@ -154,8 +247,23 @@ export function ProviderSettingsPanel({ mode }: Props) {
         {settings.map((setting) => {
           const provider = byId.get(setting.id);
           const busy = savingProviderId === setting.id;
+          const cliBusy = savingCliProviderId === setting.id;
+          const hookBusy = savingHookProviderId === setting.id;
           const cliAvailable = cliAvailability[setting.id] !== false;
           const canEnable = setting.enabled || cliAvailable;
+          const supportsExternalCliRewrite = Boolean(provider?.capabilities.messageRewrite?.externalCli);
+          const supportsClaudeCliLauncher = supportsClaudeLauncher(setting.id);
+          const supportsMessageRewrite = Boolean(
+            provider?.capabilities.messageRewrite?.appSend ||
+            provider?.capabilities.messageRewrite?.telegram ||
+            provider?.capabilities.messageRewrite?.externalCli
+          );
+          const civilityModeEnabled = provider?.messageHooks?.abusiveLanguageNormalization.enabled ?? true;
+          const draft = cliDrafts[setting.id] ?? {
+            bin: provider?.bin ?? provider?.install?.cliNames?.[0] ?? setting.id,
+            upstreamBaseUrl: provider?.externalCli?.upstreamBaseUrl ?? "",
+            launcherWrapsClaude: provider?.externalCli?.launcherWrapsClaude ?? false,
+          };
           return (
             <div
               key={setting.id}
@@ -214,7 +322,72 @@ export function ProviderSettingsPanel({ mode }: Props) {
                   />
                   <span className="text-sm font-semibold text-gray-700">{texts.autostart}</span>
                 </label>
+
+                {provider && supportsMessageRewrite && (
+                  <label className={`flex items-center gap-3 ${hookBusy ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
+                    <Toggle
+                      checked={civilityModeEnabled}
+                      disabled={hookBusy}
+                      onChange={(checked) => {
+                        void saveProviderCivilityMode(setting.id, checked);
+                      }}
+                    />
+                    <span className="grid gap-0.5">
+                      <span className="text-sm font-semibold text-gray-700">{texts.civilityModeTitle}</span>
+                      <span className="text-xs font-medium text-slate-500">{texts.civilityModeDescription}</span>
+                    </span>
+                  </label>
+                )}
               </div>
+
+              {provider && supportsExternalCliRewrite && (
+                <div className="mt-5 grid gap-3 rounded-xl border border-slate-200/80 bg-white/70 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <h4 className="text-sm font-bold text-gray-900">{texts.externalCliTitle}</h4>
+                    {cliBusy && <span className="text-xs font-semibold text-blue-600">{texts.saving}</span>}
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="grid gap-1.5 text-xs font-bold text-slate-600">
+                      {texts.externalCliBin}
+                      <input
+                        value={draft.bin}
+                        disabled={cliBusy}
+                        onChange={(event) => updateCliDraft(setting.id, { bin: event.currentTarget.value })}
+                        className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-mono text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                      />
+                    </label>
+                    <label className="grid gap-1.5 text-xs font-bold text-slate-600">
+                      {texts.externalCliUpstreamBaseUrl}
+                      <input
+                        value={draft.upstreamBaseUrl}
+                        disabled={cliBusy}
+                        onChange={(event) => updateCliDraft(setting.id, { upstreamBaseUrl: event.currentTarget.value })}
+                        className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-mono text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                      />
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-end gap-3">
+                    {supportsClaudeCliLauncher && (
+                      <label className={`mr-auto flex items-center gap-3 ${cliBusy ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
+                        <Toggle
+                          checked={draft.launcherWrapsClaude}
+                          disabled={cliBusy}
+                          onChange={(checked) => updateCliDraft(setting.id, { launcherWrapsClaude: checked })}
+                        />
+                        <span className="text-sm font-semibold text-gray-700">{texts.externalCliLauncherWrapsClaude}</span>
+                      </label>
+                    )}
+                    <button
+                      type="button"
+                      disabled={cliBusy || !draft.bin.trim()}
+                      onClick={() => void saveProviderCliConfig(provider)}
+                      className="h-9 rounded-lg bg-slate-900 px-3 text-sm font-bold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    >
+                      {texts.externalCliSave}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

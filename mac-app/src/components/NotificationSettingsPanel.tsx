@@ -113,6 +113,7 @@ function guideHtmlFor(channel: NotificationChannelMetadata, locale: string) {
 }
 
 function FieldInput({
+  channel,
   channelId,
   field,
   value,
@@ -120,12 +121,13 @@ function FieldInput({
   onChange,
   labels,
 }: {
+  channel: NotificationChannelMetadata;
   channelId: string;
   field: NotificationSettingsField;
   value: unknown;
   disabled: boolean;
   onChange: (value: unknown) => void;
-  labels: Pick<NotificationTexts, "enabled" | "disabled">;
+  labels: Pick<NotificationTexts, "enabled" | "disabled" | "optionLabels">;
 }) {
   const id = `notification-${channelId}-${field.key}`;
   const baseClass = "block w-full rounded-2xl border border-[var(--ow-line)] bg-white/92 px-4 py-3 text-sm font-medium text-gray-900 outline-none transition-colors placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400";
@@ -153,7 +155,9 @@ function FieldInput({
         className={baseClass}
       >
         {field.options.map((option) => (
-          <option key={option.value} value={option.value}>{option.label}</option>
+          <option key={option.value} value={option.value}>
+            {labels.optionLabels[channel.id]?.[field.key]?.[option.value] || option.label}
+          </option>
         ))}
       </select>
     );
@@ -471,6 +475,7 @@ export function NotificationSettingsPanel() {
                                     )}
                                   </div>
                                   <FieldInput
+                                    channel={channel}
                                     channelId={channel.id}
                                     field={field}
                                     value={channelDraft[field.key]}

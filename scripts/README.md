@@ -19,6 +19,7 @@
 ## Runtime helpers
 
 - `ow-codex`：Codex CLI remote proxy 包装脚本。文明模式当前已暂停，脚本仅作为后续恢复链路的内部保留项，不作为公开入口引导使用。
+- `ow-claude`：Claude CLI HTTP proxy 包装脚本。默认通过 `ANTHROPIC_BASE_URL` 把 Claude 请求导入本地代理，并按 Claude provider 的文明模式配置改写 Anthropic `messages[].content` 用户文本。可加 `--probe` 打印请求摘要，加 `--no-rewrite` 只探测不改写。若某个外部 launcher 会先运行自身逻辑再启动名为 `claude` 的二级进程，可显式传 `--launcher-wraps-claude --upstream-base-url <url>`，脚本会临时把 `claude` shim 放到 PATH 前面；具体 launcher 名称和 upstream 由用户配置提供，通用代码不内置私有命令或私有地址。
 - `codex_tui_host.py`：Codex TUI host wrapper 的本地运行入口，仍被 TUI 主控链路使用。
 
 ## Smoke / diagnostics

@@ -36,8 +36,8 @@ provider:
     message_rewrite:
       app_send: true
       telegram: true
-      external_cli: unsupported
-      wrapper: ""
+      external_cli: http_proxy
+      wrapper: ow-claude
   process:
     cleanup_matchers: []
   health: {}

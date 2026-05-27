@@ -65,6 +65,19 @@ pub(crate) struct ProviderMessageHooksMetadata {
     pub(crate) abusive_language_normalization: ProviderMessageHookStatus,
 }
 
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderExternalCliConfig {
+    #[serde(
+        default,
+        alias = "upstream_base_url",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(crate) upstream_base_url: Option<String>,
+    #[serde(default, alias = "launcher_wraps_claude")]
+    pub(crate) launcher_wraps_claude: bool,
+}
+
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 pub(crate) struct NotificationConfigDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -181,6 +194,8 @@ pub(crate) struct ProviderConfigEntry {
     control_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     auth: Option<BTreeMap<String, String>>,
+    #[serde(alias = "externalCli", skip_serializing_if = "Option::is_none")]
+    external_cli: Option<BTreeMap<String, serde_yaml::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) capabilities: Option<ProviderCapabilitiesEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -225,7 +240,11 @@ pub(crate) struct ProviderMessageRewriteCapabilities {
     pub(crate) app_send: bool,
     #[serde(default)]
     pub(crate) telegram: bool,
-    #[serde(default, alias = "external_cli", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "external_cli",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub(crate) external_cli: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) wrapper: Option<String>,
@@ -285,6 +304,7 @@ pub(crate) struct ProviderMetadata {
     pub(crate) control_mode: Option<String>,
     pub(crate) capabilities: ProviderCapabilitiesEntry,
     pub(crate) message_hooks: ProviderMessageHooksMetadata,
+    pub(crate) external_cli: ProviderExternalCliConfig,
     pub(crate) install: ProviderInstallEntry,
     pub(crate) process: ProviderProcessEntry,
     pub(crate) icon: Option<ProviderIconEntry>,
@@ -1160,7 +1180,13 @@ fn merge_provider_message_rewrite(
 ) -> ProviderMessageRewriteCapabilities {
     rewrite.app_send = rewrite.app_send || default_rewrite.app_send;
     rewrite.telegram = rewrite.telegram || default_rewrite.telegram;
-    if rewrite.external_cli.as_deref().unwrap_or("").trim().is_empty() {
+    if rewrite
+        .external_cli
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+    {
         rewrite.external_cli = default_rewrite.external_cli;
     }
     if rewrite.wrapper.as_deref().unwrap_or("").trim().is_empty() {
@@ -1329,6 +1355,7 @@ fn provider_metadata_from_entry(
         control_mode: provider.control_mode.clone(),
         capabilities: provider.capabilities.clone().unwrap_or_default(),
         message_hooks: provider_message_hooks_metadata(provider),
+        external_cli: provider_external_cli_config(provider),
         install: provider.install.clone().unwrap_or_default(),
         process: provider.process.clone().unwrap_or_default(),
         icon: provider.icon.clone(),
@@ -1344,9 +1371,45 @@ fn provider_metadata_from_entry(
     }
 }
 
-fn provider_message_hooks_metadata(
-    provider: &ProviderConfigEntry,
-) -> ProviderMessageHooksMetadata {
+fn value_as_string(value: &serde_yaml::Value) -> Option<String> {
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn value_as_bool(value: &serde_yaml::Value) -> Option<bool> {
+    value.as_bool().or_else(|| {
+        value.as_str().and_then(|raw| {
+            let normalized = raw.trim().to_lowercase();
+            match normalized.as_str() {
+                "true" | "1" | "yes" | "on" => Some(true),
+                "false" | "0" | "no" | "off" => Some(false),
+                _ => None,
+            }
+        })
+    })
+}
+
+fn provider_external_cli_config(provider: &ProviderConfigEntry) -> ProviderExternalCliConfig {
+    let Some(config) = provider.external_cli.as_ref() else {
+        return ProviderExternalCliConfig::default();
+    };
+    ProviderExternalCliConfig {
+        upstream_base_url: config
+            .get("upstream_base_url")
+            .and_then(value_as_string)
+            .or_else(|| config.get("upstreamBaseUrl").and_then(value_as_string)),
+        launcher_wraps_claude: config
+            .get("launcher_wraps_claude")
+            .and_then(value_as_bool)
+            .or_else(|| config.get("launcherWrapsClaude").and_then(value_as_bool))
+            .unwrap_or(false),
+    }
+}
+
+fn provider_message_hooks_metadata(provider: &ProviderConfigEntry) -> ProviderMessageHooksMetadata {
     let hook = provider
         .message_hooks
         .as_ref()
@@ -1600,6 +1663,62 @@ pub(super) fn set_provider_message_hook_enabled_in_document(
     doc.tools = None;
 }
 
+pub(super) fn set_provider_cli_config_in_document(
+    doc: &mut ProviderConfigDocument,
+    provider_id: &str,
+    bin: Option<String>,
+    external_cli: ProviderExternalCliConfig,
+) {
+    let normalized_provider_id = provider_id.trim();
+    if normalized_provider_id.is_empty() {
+        return;
+    }
+
+    let providers = doc.providers.get_or_insert_with(BTreeMap::new);
+    let provider = providers
+        .entry(normalized_provider_id.to_string())
+        .or_insert_with(|| disabled_provider_config(normalized_provider_id));
+
+    if let Some(bin) = bin.map(|value| value.trim().to_string()) {
+        if !bin.is_empty() {
+            provider.bin = Some(bin);
+        }
+    }
+
+    let config = provider.external_cli.get_or_insert_with(BTreeMap::new);
+    config.remove("upstreamBaseUrl");
+    config.remove("launcherWrapsClaude");
+
+    match external_cli
+        .upstream_base_url
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        Some(upstream_base_url) => {
+            config.insert(
+                "upstream_base_url".to_string(),
+                serde_yaml::Value::String(upstream_base_url),
+            );
+        }
+        None => {
+            config.remove("upstream_base_url");
+        }
+    }
+
+    config.insert(
+        "launcher_wraps_claude".to_string(),
+        serde_yaml::Value::Bool(external_cli.launcher_wraps_claude),
+    );
+
+    if config.is_empty() {
+        provider.external_cli = None;
+    }
+
+    normalize_provider_entry(normalized_provider_id, provider);
+    doc.schema_version = Some(2);
+    doc.tools = None;
+}
+
 pub(super) fn set_notification_channel_enabled_in_document(
     doc: &mut ProviderConfigDocument,
     channel_id: &str,
@@ -1659,9 +1778,9 @@ mod tests {
         overlay_env_spec_from_env_raw, provider_metadata_from_raw,
         read_manifest_files_from_overlay_path, serialize_normalized_config_with_env,
         set_notification_channel_config_in_document, set_notification_channel_enabled_in_document,
-        set_provider_flags_in_document, set_provider_message_hook_enabled_in_document,
-        set_test_process_env_override, ProviderCapabilitiesEntry,
-        NOTIFICATION_OVERLAY_ENV,
+        set_provider_cli_config_in_document, set_provider_flags_in_document,
+        set_provider_message_hook_enabled_in_document, set_test_process_env_override,
+        ProviderCapabilitiesEntry, ProviderExternalCliConfig, NOTIFICATION_OVERLAY_ENV,
     };
 
     #[test]
@@ -2000,8 +2119,91 @@ providers:
         assert!(!claude.message_hooks.abusive_language_normalization.enabled);
         assert_eq!(
             claude.capabilities.message_rewrite.external_cli.as_deref(),
-            Some("unsupported")
+            Some("http_proxy")
         );
+        assert_eq!(
+            claude.capabilities.message_rewrite.wrapper.as_deref(),
+            Some("ow-claude")
+        );
+    }
+
+    #[test]
+    fn provider_metadata_exposes_provider_external_cli_settings() {
+        let raw = r#"
+schema_version: 2
+providers:
+  claude:
+    managed: true
+    bin: "company-launcher start"
+    external_cli:
+      upstream_base_url: "https://upstream.example.test/anthropic"
+      launcher_wraps_claude: true
+"#;
+
+        let providers = provider_metadata_from_raw(raw, None).expect("metadata");
+        let claude = providers
+            .iter()
+            .find(|provider| provider.id == "claude")
+            .expect("claude");
+
+        assert_eq!(claude.bin.as_deref(), Some("company-launcher start"));
+        assert_eq!(
+            claude.external_cli.upstream_base_url.as_deref(),
+            Some("https://upstream.example.test/anthropic")
+        );
+        assert!(claude.external_cli.launcher_wraps_claude);
+    }
+
+    #[test]
+    fn set_provider_cli_config_updates_provider_bin_and_external_cli_settings() {
+        let raw = r#"
+schema_version: 2
+providers:
+  claude:
+    managed: true
+    bin: "claude"
+    external_cli:
+      private_key: "keep"
+      upstreamBaseUrl: "https://old.example.test"
+      launcherWrapsClaude: false
+"#;
+
+        let mut doc = normalize_provider_document(raw).expect("normalized config");
+        set_provider_cli_config_in_document(
+            &mut doc,
+            "claude",
+            Some("company-launcher start".to_string()),
+            ProviderExternalCliConfig {
+                upstream_base_url: Some("https://upstream.example.test/anthropic".to_string()),
+                launcher_wraps_claude: true,
+            },
+        );
+
+        let providers = doc.providers.expect("providers");
+        let claude = providers.get("claude").expect("claude");
+        assert_eq!(claude.bin.as_deref(), Some("company-launcher start"));
+
+        let external_cli = claude.external_cli.as_ref().expect("external cli");
+        assert_eq!(
+            external_cli
+                .get("upstream_base_url")
+                .and_then(|value| value.as_str()),
+            Some("https://upstream.example.test/anthropic")
+        );
+        assert_eq!(
+            external_cli
+                .get("launcher_wraps_claude")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            external_cli
+                .get("private_key")
+                .and_then(|value| value.as_str()),
+            Some("keep")
+        );
+        assert!(external_cli.get("upstreamBaseUrl").is_none());
+        assert!(external_cli.get("launcherWrapsClaude").is_none());
     }
 
     #[test]
@@ -2262,8 +2464,8 @@ providers:
                 message_rewrite: super::ProviderMessageRewriteCapabilities {
                     app_send: true,
                     telegram: true,
-                    external_cli: Some("unsupported".to_string()),
-                    wrapper: Some(String::new()),
+                    external_cli: Some("http_proxy".to_string()),
+                    wrapper: Some("ow-claude".to_string()),
                 },
             }
         );
@@ -2313,6 +2515,26 @@ providers:
             codex.capabilities.message_rewrite.wrapper.as_deref(),
             Some("ow-codex")
         );
+    }
+
+    #[test]
+    fn normalize_provider_document_preserves_provider_external_cli_settings() {
+        let raw = r#"
+schema_version: 2
+providers:
+  claude:
+    managed: true
+    bin: "company-launcher start"
+    external_cli:
+      upstream_base_url: "https://upstream.example.test/anthropic"
+      launcher_wraps_claude: true
+"#;
+
+        let rendered = serialize_normalized_config_with_env(raw, None).expect("rendered yaml");
+
+        assert!(rendered.contains("external_cli:"));
+        assert!(rendered.contains("upstream_base_url: https://upstream.example.test/anthropic"));
+        assert!(rendered.contains("launcher_wraps_claude: true"));
     }
 
     #[test]

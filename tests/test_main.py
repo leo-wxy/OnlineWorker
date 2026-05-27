@@ -225,6 +225,13 @@ def test_main_exposes_packaged_ow_codex_entrypoint():
     assert "run_ow_codex_once" in source
 
 
+def test_main_exposes_packaged_ow_claude_entrypoint():
+    source = Path(main.__file__).read_text(encoding="utf-8")
+
+    assert "--ow-claude" in source
+    assert "run_ow_claude_from_args" in source
+
+
 def test_main_packaged_ow_codex_entrypoint_forwards_codex_args(monkeypatch, tmp_path):
     from plugins.providers.builtin.codex.python import cli_wrapper
 
@@ -260,3 +267,39 @@ def test_main_packaged_ow_codex_entrypoint_forwards_codex_args(monkeypatch, tmp_
             str(tmp_path),
         )
     ]
+
+
+def test_main_packaged_ow_claude_entrypoint_forwards_claude_args(monkeypatch, tmp_path):
+    from plugins.providers.builtin.claude.python import cli_wrapper
+
+    calls = []
+
+    async def fake_run_ow_claude_from_args(args):
+        calls.append(args)
+        return 24
+
+    monkeypatch.setattr(
+        main.sys,
+        "argv",
+        [
+            "onlineworker-bot",
+            "--data-dir",
+            str(tmp_path),
+            "--ow-claude",
+            "--probe",
+            "-p",
+            "你妈的 只回复 OK",
+        ],
+    )
+    monkeypatch.setattr(main, "set_data_dir", lambda path: None)
+    monkeypatch.setattr(cli_wrapper, "run_ow_claude_from_args", fake_run_ow_claude_from_args)
+
+    with pytest.raises(SystemExit) as exc:
+        main.main()
+
+    assert exc.value.code == 24
+    assert len(calls) == 1
+    assert calls[0].data_dir == str(tmp_path)
+    assert calls[0].probe is True
+    assert calls[0].rewrite is True
+    assert calls[0].claude_args == ["-p", "你妈的 只回复 OK"]
