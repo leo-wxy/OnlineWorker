@@ -383,7 +383,7 @@ async def test_run_ow_claude_once_uses_provider_external_cli_defaults(monkeypatc
     assert events[2] == ("stop_proxy",)
 
 
-def test_ow_claude_script_rewrites_configured_external_launcher_request(tmp_path):
+def test_ow_claude_script_forwards_original_external_launcher_request_while_message_rewrite_is_sealed(tmp_path):
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -507,10 +507,8 @@ logging:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "UPSTREAM_OK"
-    assert '"event": "rewrite"' in result.stderr
-    assert '"before": "你妈的，只回复 OK"' in result.stderr
-    assert '"after": "只回复 OK"' in result.stderr
+    assert '"event": "rewrite"' not in result.stderr
     assert captured["payload"] == {
         "model": "test-model",
-        "messages": [{"role": "user", "content": "只回复 OK"}],
+        "messages": [{"role": "user", "content": "你妈的，只回复 OK"}],
     }

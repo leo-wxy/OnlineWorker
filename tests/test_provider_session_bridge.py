@@ -286,7 +286,7 @@ def test_send_provider_session_message_uses_generic_runtime_start_hook(monkeypat
     }
 
 
-def test_send_provider_session_message_normalizes_text_before_provider_send(monkeypatch):
+def test_send_provider_session_message_keeps_text_while_message_rewrite_is_sealed(monkeypatch):
     called = {}
 
     class Facts:
@@ -357,7 +357,7 @@ def test_send_provider_session_message_normalizes_text_before_provider_send(monk
     assert called == {
         "workspace_id": "overlay-tool:/tmp/proj",
         "thread_id": "tid-1",
-        "text": "这是什么问题",
+        "text": "这什么傻逼问题",
     }
 
 

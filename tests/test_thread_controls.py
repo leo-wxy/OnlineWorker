@@ -213,7 +213,7 @@ async def test_thread_topic_message_uses_registry_message_hooks_for_custom_provi
 
 
 @pytest.mark.asyncio
-async def test_thread_topic_message_normalizes_abusive_language_before_provider_send(monkeypatch):
+async def test_thread_topic_message_keeps_original_text_while_message_rewrite_is_sealed(monkeypatch):
     from bot.handlers.message import make_message_handler
 
     state = _build_state(tool="custom")
@@ -254,7 +254,7 @@ async def test_thread_topic_message_normalizes_abusive_language_before_provider_
     await handler(update, ctx)
 
     custom_send.assert_awaited_once()
-    assert custom_send.await_args.kwargs["text"] == "这是什么问题"
+    assert custom_send.await_args.kwargs["text"] == "这什么傻逼问题"
 
 
 @pytest.mark.asyncio
@@ -303,7 +303,7 @@ async def test_thread_topic_slash_message_skips_abusive_language_normalization_f
 
 
 @pytest.mark.asyncio
-async def test_new_thread_handler_normalizes_initial_text_before_provider_activation(monkeypatch):
+async def test_new_thread_handler_keeps_initial_text_while_message_rewrite_is_sealed(monkeypatch):
     from bot.handlers.thread import make_new_thread_handler
 
     state = _build_state(tool="custom")
@@ -340,7 +340,7 @@ async def test_new_thread_handler_normalizes_initial_text_before_provider_activa
     await handler(update, ctx)
 
     activate_new_thread.assert_awaited_once()
-    assert activate_new_thread.await_args.args[5] == "这是什么问题"
+    assert activate_new_thread.await_args.args[5] == "这什么傻逼问题"
 
 
 @pytest.mark.asyncio

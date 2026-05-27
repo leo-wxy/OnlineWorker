@@ -150,7 +150,7 @@ async def test_before_send_hooks_treat_builtin_mode_off_as_disabled():
 
 
 @pytest.mark.asyncio
-async def test_gateway_returns_original_text_while_message_rewrite_is_paused():
+async def test_gateway_returns_original_text_while_message_rewrite_is_sealed():
     from core.user_messages.contracts import UserMessageSendRequest
     from core.user_messages.gateway import prepare_user_message_text
 
@@ -168,10 +168,11 @@ async def test_gateway_returns_original_text_while_message_rewrite_is_paused():
 
     assert result.text == "这什么傻逼问题"
     assert result.changed is False
+    assert result.hook_id == ""
 
 
 @pytest.mark.asyncio
-async def test_gateway_ignores_provider_message_hook_enablement_while_paused():
+async def test_gateway_ignores_provider_message_hook_enablement_while_message_rewrite_is_sealed():
     from types import SimpleNamespace
 
     from core.user_messages.contracts import UserMessageSendRequest

@@ -9,7 +9,7 @@ from plugins.providers.builtin.codex.python.remote_proxy import rewrite_codex_re
 
 
 @pytest.mark.asyncio
-async def test_codex_remote_proxy_keeps_turn_start_text_while_message_rewrite_is_paused():
+async def test_codex_remote_proxy_keeps_turn_start_text_while_message_rewrite_is_sealed():
     state = AppState()
     raw = json.dumps(
         {
@@ -31,6 +31,9 @@ async def test_codex_remote_proxy_keeps_turn_start_text_while_message_rewrite_is
 
     assert rewritten == raw
     assert changed is False
+    payload = json.loads(rewritten)
+    assert payload["params"]["input"][0]["text"] == "你妈的，这什么傻逼问题"
+    assert payload["params"]["input"][1]["path"] == "/tmp/a.png"
 
 
 @pytest.mark.asyncio
@@ -91,7 +94,7 @@ async def test_codex_remote_proxy_skips_text_with_ui_spans():
 
 
 @pytest.mark.asyncio
-async def test_codex_remote_proxy_keeps_turn_steer_text_while_message_rewrite_is_paused():
+async def test_codex_remote_proxy_keeps_turn_steer_text_while_message_rewrite_is_sealed():
     state = AppState()
     raw = json.dumps(
         {
@@ -110,6 +113,8 @@ async def test_codex_remote_proxy_keeps_turn_steer_text_while_message_rewrite_is
 
     assert rewritten == raw
     assert changed is False
+    payload = json.loads(rewritten)
+    assert payload["params"]["input"][0]["text"] == "妈的，继续"
 
 
 @pytest.mark.asyncio

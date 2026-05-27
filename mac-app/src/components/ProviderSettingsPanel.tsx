@@ -23,6 +23,8 @@ function supportsClaudeLauncher(providerId: string) {
   return providerId === "claude";
 }
 
+const CIVILITY_MODE_SEALED = true;
+
 interface ProviderCliDraft {
   bin: string;
   upstreamBaseUrl: string;
@@ -253,7 +255,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
           const canEnable = setting.enabled || cliAvailable;
           const supportsExternalCliRewrite = Boolean(provider?.capabilities.messageRewrite?.externalCli);
           const supportsClaudeCliLauncher = supportsClaudeLauncher(setting.id);
-          const supportsMessageRewrite = Boolean(
+          const supportsMessageRewrite = !CIVILITY_MODE_SEALED && Boolean(
             provider?.capabilities.messageRewrite?.appSend ||
             provider?.capabilities.messageRewrite?.telegram ||
             provider?.capabilities.messageRewrite?.externalCli

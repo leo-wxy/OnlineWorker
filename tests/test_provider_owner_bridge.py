@@ -104,7 +104,7 @@ async def test_provider_owner_bridge_uses_registry_message_hooks(monkeypatch, tm
 
 
 @pytest.mark.asyncio
-async def test_provider_owner_bridge_normalizes_text_before_registry_message_hooks(monkeypatch, tmp_path):
+async def test_provider_owner_bridge_keeps_text_before_registry_message_hooks_while_rewrite_is_sealed(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
     called = {}
@@ -148,8 +148,8 @@ async def test_provider_owner_bridge_normalizes_text_before_registry_message_hoo
     )
 
     assert response["ok"] is True
-    assert called["prepare_text"] == "这是什么问题"
-    assert called["send_text"] == "这是什么问题"
+    assert called["prepare_text"] == "这什么傻逼问题"
+    assert called["send_text"] == "这什么傻逼问题"
 
 
 @pytest.mark.asyncio
@@ -227,7 +227,7 @@ async def test_provider_owner_bridge_routes_text_via_provider_owner_bridge_hook(
 
 
 @pytest.mark.asyncio
-async def test_provider_owner_bridge_normalizes_text_before_owner_bridge_router(monkeypatch, tmp_path):
+async def test_provider_owner_bridge_keeps_text_before_owner_bridge_router_while_rewrite_is_sealed(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
     class _FakeAdapter:
@@ -282,7 +282,7 @@ async def test_provider_owner_bridge_normalizes_text_before_owner_bridge_router(
         state,
         storage.workspaces["overlay-tool:/tmp/project-a"],
         storage.workspaces["overlay-tool:/tmp/project-a"].threads["tid-cli"],
-        text="这是什么问题",
+        text="这什么傻逼问题",
     )
     provider.message_hooks.prepare_send.assert_not_awaited()
     provider.message_hooks.send.assert_not_awaited()

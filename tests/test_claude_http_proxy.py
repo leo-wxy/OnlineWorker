@@ -9,7 +9,7 @@ from core.state import AppState
 
 
 @pytest.mark.asyncio
-async def test_claude_http_proxy_rewrites_messages_text_block_when_provider_enabled():
+async def test_claude_http_proxy_keeps_messages_text_block_while_message_rewrite_is_sealed():
     from plugins.providers.builtin.claude.python.http_proxy import rewrite_claude_json_payload
 
     state = AppState(
@@ -53,20 +53,15 @@ async def test_claude_http_proxy_rewrites_messages_text_block_when_provider_enab
         source="claude_http_proxy",
     )
 
-    assert changed is True
-    assert changes == [
-        {
-            "path": "messages[0].content[0].text",
-            "before": "你妈的，这什么傻逼问题",
-            "after": "这是什么问题",
-        }
-    ]
-    assert rewritten["messages"][0]["content"][0]["text"] == "这是什么问题"
+    assert changed is False
+    assert changes == []
+    assert rewritten == payload
+    assert rewritten["messages"][0]["content"][0]["text"] == "你妈的，这什么傻逼问题"
     assert rewritten["messages"][0]["content"][1]["type"] == "image"
 
 
 @pytest.mark.asyncio
-async def test_claude_http_proxy_rewrites_messages_string_content_when_provider_enabled():
+async def test_claude_http_proxy_keeps_messages_string_content_while_message_rewrite_is_sealed():
     from plugins.providers.builtin.claude.python.http_proxy import rewrite_claude_json_payload
 
     state = AppState(
@@ -100,19 +95,14 @@ async def test_claude_http_proxy_rewrites_messages_string_content_when_provider_
         source="claude_http_proxy",
     )
 
-    assert changed is True
-    assert changes == [
-        {
-            "path": "messages[1].content",
-            "before": "妈的，继续解释",
-            "after": "继续解释",
-        }
-    ]
-    assert rewritten["messages"][1]["content"] == "继续解释"
+    assert changed is False
+    assert changes == []
+    assert rewritten == payload
+    assert rewritten["messages"][1]["content"] == "妈的，继续解释"
 
 
 @pytest.mark.asyncio
-async def test_claude_http_proxy_skips_claude_system_reminder_text_blocks():
+async def test_claude_http_proxy_keeps_all_text_blocks_while_message_rewrite_is_sealed():
     from plugins.providers.builtin.claude.python.http_proxy import rewrite_claude_json_payload
 
     state = AppState(
@@ -152,16 +142,11 @@ async def test_claude_http_proxy_skips_claude_system_reminder_text_blocks():
         source="claude_http_proxy",
     )
 
-    assert changed is True
-    assert changes == [
-        {
-            "path": "messages[0].content[1].text",
-            "before": "你妈的，只回复 OK",
-            "after": "只回复 OK",
-        }
-    ]
+    assert changed is False
+    assert changes == []
+    assert rewritten == payload
     assert rewritten["messages"][0]["content"][0]["text"] == system_reminder
-    assert rewritten["messages"][0]["content"][1]["text"] == "只回复 OK"
+    assert rewritten["messages"][0]["content"][1]["text"] == "你妈的，只回复 OK"
 
 
 @pytest.mark.asyncio
@@ -233,7 +218,7 @@ def test_claude_http_proxy_summarizes_rewritten_payload_without_secrets():
 
 
 @pytest.mark.asyncio
-async def test_claude_http_proxy_forwards_rewritten_json_to_upstream():
+async def test_claude_http_proxy_forwards_original_json_while_message_rewrite_is_sealed():
     from plugins.providers.builtin.claude.python.http_proxy import ClaudeHttpProxy
 
     captured: dict[str, object] = {}
@@ -296,7 +281,7 @@ async def test_claude_http_proxy_forwards_rewritten_json_to_upstream():
             )
         assert response.status_code == 200
         assert captured["body"] == {
-            "messages": [{"role": "user", "content": "这是什么问题"}]
+            "messages": [{"role": "user", "content": "这什么傻逼问题"}]
         }
     finally:
         await proxy.stop()
@@ -359,7 +344,7 @@ async def test_claude_http_proxy_probe_writes_visible_request_event(capsys):
         assert "[claude-http-proxy]" in stderr
         assert '"event": "request"' in stderr
         assert '"path": "/v1/messages"' in stderr
-        assert '"authorization": "[REDACTED]"' in stderr
+        assert '"Authorization": "[REDACTED]"' in stderr
         assert "Bearer secret" not in stderr
         assert "model=claude-sonnet-4-5" in stderr
         assert "text=你妈的，继续解释" in stderr

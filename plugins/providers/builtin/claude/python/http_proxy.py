@@ -30,6 +30,7 @@ HOP_BY_HOP_HEADERS = {
     "transfer-encoding",
     "upgrade",
 }
+MESSAGE_REWRITE_TEMPORARILY_DISABLED = True
 
 
 def _truncate(value: str, limit: int = 240) -> str:
@@ -114,6 +115,11 @@ async def rewrite_claude_json_payload(
     *,
     source: str = "claude_http_proxy",
 ) -> tuple[dict[str, Any], bool, list[dict[str, str]]]:
+    _ = state
+    _ = source
+    if MESSAGE_REWRITE_TEMPORARILY_DISABLED:
+        return payload, False, []
+
     if not isinstance(payload, dict):
         return payload, False, []
 

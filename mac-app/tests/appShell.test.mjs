@@ -95,7 +95,7 @@ test("maintenance keeps external Codex permission hook install out of the app sh
   assert.equal(en.includes("Codex Permission Entry"), false);
 });
 
-test("provider settings exposes civility mode controls for rewrite-capable agents", () => {
+test("provider settings keeps civility mode controls sealed while rewrite is parked", () => {
   const panel = readFileSync(join(root, "src", "components", "ProviderSettingsPanel.tsx"), "utf8");
   const types = readFileSync(join(root, "src", "i18n", "types.ts"), "utf8");
   const zh = readFileSync(join(root, "src", "i18n", "locales", "zh.ts"), "utf8");
@@ -109,7 +109,9 @@ test("provider settings exposes civility mode controls for rewrite-capable agent
     "utf8"
   );
 
+  assert.match(panel, /const CIVILITY_MODE_SEALED = true/);
   assert.match(panel, /supportsMessageRewrite/);
+  assert.match(panel, /!CIVILITY_MODE_SEALED && Boolean/);
   assert.match(panel, /set_provider_message_hook_enabled/);
   assert.match(panel, /abusive_language_normalization/);
   assert.match(panel, /texts\.civilityModeTitle/);
