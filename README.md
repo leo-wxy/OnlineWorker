@@ -19,9 +19,32 @@ See also:
 
 ## Screenshots
 
+These screenshots are generated from the real app UI with sanitized demo data.
+They do not contain live tokens, user IDs, filesystem paths, session content, or
+private extension configuration.
+
 <p align="center">
-  <img src="./docs/screenshots/dashboard.png" alt="OnlineWorker dashboard" width="49%" />
-  <img src="./docs/screenshots/setup.png" alt="OnlineWorker setup" width="49%" />
+  <img src="./docs/screenshots/dashboard.png" alt="OnlineWorker dashboard" width="88%" />
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/sessions-overview.png" alt="OnlineWorker sessions" width="88%" />
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/usage.png" alt="OnlineWorker usage" width="88%" />
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/ai-services.png" alt="OnlineWorker AI services" width="88%" />
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/ai-scenarios.png" alt="OnlineWorker AI scenarios" width="88%" />
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/setup.png" alt="OnlineWorker setup" width="88%" />
 </p>
 
 ## Overview

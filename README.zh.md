@@ -19,9 +19,31 @@ English version: [README.md](README.md)
 
 ## 截图
 
+以下截图基于真实 App UI 和脱敏 demo 数据生成，不包含真实 token、用户 ID、
+本机路径、会话内容或私有扩展配置。
+
 <p align="center">
-  <img src="./docs/screenshots/dashboard.png" alt="OnlineWorker 总览页" width="49%" />
-  <img src="./docs/screenshots/setup.png" alt="OnlineWorker 设置页" width="49%" />
+  <img src="./docs/screenshots/dashboard.png" alt="OnlineWorker 总览页" width="88%" />
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/sessions-overview.png" alt="OnlineWorker 会话页" width="88%" />
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/usage.png" alt="OnlineWorker 用量页" width="88%" />
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/ai-services.png" alt="OnlineWorker AI 服务配置" width="88%" />
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/ai-scenarios.png" alt="OnlineWorker AI 场景配置" width="88%" />
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/setup.png" alt="OnlineWorker 设置页" width="88%" />
 </p>
 
 ## 概览
