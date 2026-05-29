@@ -284,6 +284,8 @@ class CodexAdapter:
         return await self._call("thread/resume", params)
 
     async def archive_thread(self, workspace_id: str, thread_id: str) -> dict:
+        if thread_id and workspace_id:
+            self._thread_workspace_map[thread_id] = workspace_id
         return await self._call("thread/archive", {"threadId": thread_id})
 
     async def send_user_message(

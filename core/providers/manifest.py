@@ -46,6 +46,7 @@ def capabilities_from_manifest(raw: dict[str, Any] | None) -> ProviderManifestCa
         questions=_bool_value(data.get("questions")),
         photos=_bool_value(data.get("photos")),
         files=_bool_value(data.get("files")),
+        usage=_bool_value(data.get("usage")),
         commands=_bool_value(data.get("commands")),
         command_wrappers=_string_tuple(data.get("command_wrappers")),
         control_modes=_string_tuple(data.get("control_modes"), ("app",)),

@@ -1,6 +1,7 @@
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
@@ -18,11 +19,12 @@ use super::codex::{
     list_codex_threads, read_codex_thread_updates, send_codex_thread_message, CodexThreadCursor,
 };
 use super::config::ensure_data_dir;
-use super::config::read_provider_metadata_from_disk;
-use super::config_provider::ProviderMetadata;
+use super::provider_bridge_common::{
+    provider_bridge_env, provider_owner_bridge_socket_path, require_runtime_provider,
+};
+use super::session_state::load_local_thread_overlays;
 
 static PROVIDER_SESSION_STREAM_GENERATION: OnceLock<Arc<AtomicU64>> = OnceLock::new();
-const PROVIDER_OVERLAY_ENV: &str = "ONLINEWORKER_PROVIDER_OVERLAY";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,78 +51,6 @@ fn provider_session_stream_generation() -> Arc<AtomicU64> {
     PROVIDER_SESSION_STREAM_GENERATION
         .get_or_init(|| Arc::new(AtomicU64::new(0)))
         .clone()
-}
-
-fn provider_not_enabled_message(provider_id: &str) -> String {
-    format!("Provider '{}' is not enabled", provider_id.trim())
-}
-
-fn require_runtime_provider(provider_id: &str) -> Result<ProviderMetadata, String> {
-    let normalized = provider_id.trim();
-    if normalized.is_empty() {
-        return Err(provider_not_enabled_message("unknown"));
-    }
-
-    let provider = read_provider_metadata_from_disk()?
-        .into_iter()
-        .find(|provider| provider.id == normalized)
-        .ok_or_else(|| provider_not_enabled_message(normalized))?;
-
-    Ok(provider)
-}
-
-fn provider_session_bridge_path(home: &str) -> String {
-    format!(
-        "{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-        home
-    )
-}
-
-fn provider_session_overlay_env_spec_from_app_env(data_dir: &Path) -> Option<String> {
-    let raw = std::fs::read_to_string(data_dir.join(".env")).ok()?;
-    raw.lines().find_map(|line| {
-        let (line_key, value) = line.split_once('=')?;
-        if line_key.trim() != PROVIDER_OVERLAY_ENV {
-            return None;
-        }
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    })
-}
-
-fn provider_session_overlay_env_spec(data_dir: &Path) -> Option<String> {
-    std::env::var(PROVIDER_OVERLAY_ENV)
-        .ok()
-        .and_then(|value| {
-            let trimmed = value.trim().to_string();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed)
-            }
-        })
-        .or_else(|| provider_session_overlay_env_spec_from_app_env(data_dir))
-}
-
-fn provider_session_bridge_env(data_dir: &Path) -> Vec<(String, String)> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let mut envs = vec![
-        ("PATH".to_string(), provider_session_bridge_path(&home)),
-        ("HOME".to_string(), home),
-        ("LANG".to_string(), "en_US.UTF-8".to_string()),
-    ];
-    if let Some(overlay_env) = provider_session_overlay_env_spec(data_dir) {
-        envs.push((PROVIDER_OVERLAY_ENV.to_string(), overlay_env));
-    }
-    envs
-}
-
-fn provider_owner_bridge_socket_path(data_dir: &Path) -> std::path::PathBuf {
-    data_dir.join("provider_owner_bridge.sock")
 }
 
 fn provider_session_read_uses_owner_bridge(runtime_id: &str) -> bool {
@@ -325,6 +255,69 @@ fn list_provider_sessions_via_owner_bridge(
         .unwrap_or(Value::Array(vec![])))
 }
 
+fn archive_provider_session_via_owner_bridge(
+    data_dir: &Path,
+    provider_id: &str,
+    session_id: &str,
+    workspace_dir: Option<&str>,
+) -> Result<Value, String> {
+    let socket_path = provider_owner_bridge_socket_path(data_dir);
+    if !socket_path.exists() {
+        return Err(format!(
+            "provider owner bridge not ready: {}",
+            socket_path.display()
+        ));
+    }
+
+    let mut socket = UnixStream::connect(&socket_path)
+        .map_err(|e| format!("connect provider owner bridge failed: {e}"))?;
+
+    let mut payload = serde_json::json!({
+        "type": "archive_session",
+        "provider_id": provider_id,
+        "session_id": session_id,
+    });
+    if let Some(workspace_dir) = workspace_dir.filter(|value| !value.trim().is_empty()) {
+        payload["workspace_dir"] = Value::String(workspace_dir.to_string());
+    }
+
+    let raw_request = format!("{}\n", payload);
+    socket
+        .write_all(raw_request.as_bytes())
+        .map_err(|e| format!("write provider owner bridge request failed: {e}"))?;
+    socket
+        .shutdown(Shutdown::Write)
+        .map_err(|e| format!("shutdown provider owner bridge write failed: {e}"))?;
+
+    let mut response_line = String::new();
+    let mut reader = BufReader::new(socket);
+    reader
+        .read_line(&mut response_line)
+        .map_err(|e| format!("read provider owner bridge response failed: {e}"))?;
+
+    let response = serde_json::from_str::<Value>(response_line.trim())
+        .map_err(|e| format!("parse provider owner bridge response failed: {e}"))?;
+    if response.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err(response
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("provider owner bridge request failed")
+            .to_string());
+    }
+
+    Ok(response)
+}
+
+fn owner_bridge_archive_error_allows_sidecar(error: &str) -> bool {
+    let lowered = error.to_ascii_lowercase();
+    lowered.contains("provider owner bridge not ready")
+        || lowered.contains("connect provider owner bridge failed")
+        || lowered.contains("write provider owner bridge request failed")
+        || lowered.contains("shutdown provider owner bridge write failed")
+        || lowered.contains("read provider owner bridge response failed")
+        || lowered.contains("parse provider owner bridge response failed")
+}
+
 fn send_provider_session_message_via_owner_bridge_with_retry(
     data_dir: &Path,
     provider_id: &str,
@@ -400,7 +393,7 @@ async fn run_provider_session_bridge(
     }
 
     let mut sidecar = sidecar.args(args);
-    for (key, value) in provider_session_bridge_env(&data_dir) {
+    for (key, value) in provider_bridge_env(&data_dir) {
         sidecar = sidecar.env(&key, value);
     }
 
@@ -426,6 +419,215 @@ async fn run_provider_session_bridge(
         .map_err(|error| format!("provider session bridge returned invalid JSON: {}", error))
 }
 
+async fn run_provider_session_archive_bridge(
+    app: &AppHandle,
+    provider_id: &str,
+    session_id: &str,
+    workspace_dir: Option<&str>,
+) -> Result<Value, String> {
+    run_provider_session_bridge(app, provider_id, "archive", Some(session_id), workspace_dir).await
+}
+
+fn session_state_path(data_dir: &Path) -> std::path::PathBuf {
+    data_dir.join("onlineworker_state.json")
+}
+
+fn state_workspace_key(provider_id: &str, workspace_dir: &str) -> String {
+    format!("{provider_id}:{workspace_dir}")
+}
+
+fn workspace_name_from_path(workspace_dir: &str) -> String {
+    Path::new(workspace_dir)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(workspace_dir)
+        .to_string()
+}
+
+fn overlay_provider_sessions(data_dir: &Path, provider_id: &str, sessions: Value) -> Value {
+    let mut rows = match sessions {
+        Value::Array(rows) => rows,
+        other => return other,
+    };
+    let overlays = load_local_thread_overlays(&session_state_path(data_dir), provider_id);
+    if overlays.is_empty() {
+        return Value::Array(rows);
+    }
+
+    for row in rows.iter_mut() {
+        let Some(object) = row.as_object_mut() else {
+            continue;
+        };
+        let session_id = object
+            .get("id")
+            .or_else(|| object.get("sessionId"))
+            .or_else(|| object.get("thread_id"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        if session_id.is_empty() {
+            continue;
+        }
+        if let Some(overlay) = overlays.get(&session_id) {
+            object.insert("archived".to_string(), Value::Bool(overlay.archived));
+            if !overlay.workspace_path.is_empty() {
+                object.insert(
+                    "workspace".to_string(),
+                    Value::String(overlay.workspace_path.clone()),
+                );
+            }
+            if let Some(preview) = &overlay.preview {
+                object.insert("title".to_string(), Value::String(preview.clone()));
+            }
+        }
+    }
+
+    let existing_ids = rows
+        .iter()
+        .filter_map(|row| {
+            row.get("id")
+                .or_else(|| row.get("sessionId"))
+                .or_else(|| row.get("thread_id"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    for (session_id, overlay) in overlays {
+        if !overlay.archived || existing_ids.contains(&session_id) {
+            continue;
+        }
+        rows.push(serde_json::json!({
+            "id": session_id,
+            "title": overlay.preview.unwrap_or_else(|| session_id.clone()),
+            "workspace": overlay.workspace_path,
+            "archived": true,
+            "updatedAt": 0,
+            "createdAt": 0,
+        }));
+    }
+
+    Value::Array(rows)
+}
+
+fn persist_provider_session_archived_state(
+    data_dir: &Path,
+    provider_id: &str,
+    session_id: &str,
+    workspace_dir: &str,
+    preview: Option<&str>,
+) -> Result<(), String> {
+    let state_path = session_state_path(data_dir);
+    let mut state = match std::fs::read_to_string(&state_path) {
+        Ok(raw) => serde_json::from_str::<Value>(&raw)
+            .map_err(|e| format!("parse onlineworker_state.json failed: {e}"))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
+        Err(error) => return Err(format!("read onlineworker_state.json failed: {error}")),
+    };
+
+    if !state.is_object() {
+        state = serde_json::json!({});
+    }
+    let root = state
+        .as_object_mut()
+        .ok_or("onlineworker_state root must be an object".to_string())?;
+    let workspaces = root
+        .entry("workspaces".to_string())
+        .or_insert_with(|| Value::Object(Default::default()));
+    if !workspaces.is_object() {
+        *workspaces = Value::Object(Default::default());
+    }
+    let workspaces = workspaces
+        .as_object_mut()
+        .ok_or("onlineworker_state.workspaces must be an object".to_string())?;
+
+    let workspace_key = state_workspace_key(provider_id, workspace_dir);
+    let workspace = workspaces.entry(workspace_key.clone()).or_insert_with(|| {
+        serde_json::json!({
+            "name": workspace_name_from_path(workspace_dir),
+            "path": workspace_dir,
+            "tool": provider_id,
+            "topic_id": null,
+            "daemon_workspace_id": workspace_key,
+            "threads": {}
+        })
+    });
+    if !workspace.is_object() {
+        *workspace = serde_json::json!({});
+    }
+    let workspace = workspace
+        .as_object_mut()
+        .ok_or("workspace state must be an object".to_string())?;
+    workspace
+        .entry("name".to_string())
+        .or_insert_with(|| Value::String(workspace_name_from_path(workspace_dir)));
+    workspace
+        .entry("path".to_string())
+        .or_insert_with(|| Value::String(workspace_dir.to_string()));
+    workspace
+        .entry("tool".to_string())
+        .or_insert_with(|| Value::String(provider_id.to_string()));
+    workspace
+        .entry("daemon_workspace_id".to_string())
+        .or_insert_with(|| Value::String(workspace_key));
+    let threads = workspace
+        .entry("threads".to_string())
+        .or_insert_with(|| Value::Object(Default::default()));
+    if !threads.is_object() {
+        *threads = Value::Object(Default::default());
+    }
+    let threads = threads
+        .as_object_mut()
+        .ok_or("workspace threads must be an object".to_string())?;
+    let thread = threads.entry(session_id.to_string()).or_insert_with(|| {
+        serde_json::json!({
+            "thread_id": session_id,
+            "topic_id": null,
+            "preview": null,
+            "archived": false,
+            "streaming_msg_id": null,
+            "last_tg_user_message_id": null,
+            "history_sync_cursor": null,
+            "is_active": false,
+            "source": "app"
+        })
+    });
+    if !thread.is_object() {
+        *thread = Value::Object(Default::default());
+    }
+    let thread = thread
+        .as_object_mut()
+        .ok_or("thread state must be an object".to_string())?;
+    thread.insert(
+        "thread_id".to_string(),
+        Value::String(session_id.to_string()),
+    );
+    thread.insert("archived".to_string(), Value::Bool(true));
+    thread.insert("is_active".to_string(), Value::Bool(false));
+    if let Some(preview) = preview.map(str::trim).filter(|value| !value.is_empty()) {
+        thread.insert("preview".to_string(), Value::String(preview.to_string()));
+    }
+    thread
+        .entry("source".to_string())
+        .or_insert_with(|| Value::String("app".to_string()));
+
+    std::fs::create_dir_all(data_dir).map_err(|e| format!("create data dir failed: {e}"))?;
+    let mut sorted = BTreeMap::new();
+    if let Some(object) = state.as_object() {
+        for (key, value) in object {
+            sorted.insert(key.clone(), value.clone());
+        }
+    }
+    let payload = serde_json::to_string_pretty(&Value::Object(sorted.into_iter().collect()))
+        .map_err(|e| format!("serialize onlineworker_state failed: {e}"))?;
+    let tmp_path = state_path.with_extension("json.tmp");
+    std::fs::write(&tmp_path, payload)
+        .map_err(|e| format!("write onlineworker_state tmp failed: {e}"))?;
+    std::fs::rename(&tmp_path, &state_path)
+        .map_err(|e| format!("replace onlineworker_state failed: {e}"))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn list_provider_sessions(app: AppHandle, provider_id: String) -> Result<Value, String> {
     let provider = require_runtime_provider(&provider_id)?;
@@ -436,10 +638,14 @@ pub async fn list_provider_sessions(app: AppHandle, provider_id: String) -> Resu
         }
         _ => {
             let data_dir = ensure_data_dir()?;
-            match list_provider_sessions_via_owner_bridge(&data_dir, &provider.id, 100) {
-                Ok(value) => Ok(value),
-                Err(_) => run_provider_session_bridge(&app, &provider.id, "list", None, None).await,
-            }
+            let sessions =
+                match list_provider_sessions_via_owner_bridge(&data_dir, &provider.id, 100) {
+                    Ok(value) => Ok(value),
+                    Err(_) => {
+                        run_provider_session_bridge(&app, &provider.id, "list", None, None).await
+                    }
+                }?;
+            Ok(overlay_provider_sessions(&data_dir, &provider.id, sessions))
         }
     }
 }
@@ -518,6 +724,89 @@ pub async fn send_provider_session_message(
             provider.runtime_id
         )),
     }
+}
+
+#[tauri::command]
+pub async fn archive_provider_session(
+    app: AppHandle,
+    provider_id: String,
+    session_id: String,
+    workspace_dir: Option<String>,
+    session_title: Option<String>,
+) -> Result<Value, String> {
+    let provider = require_runtime_provider(&provider_id)?;
+    let normalized_session_id = session_id.trim().to_string();
+    if normalized_session_id.is_empty() {
+        return Err("session_id is required".to_string());
+    }
+    let normalized_workspace_dir = workspace_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let data_dir = ensure_data_dir()?;
+
+    let result = match archive_provider_session_via_owner_bridge(
+        &data_dir,
+        &provider.id,
+        &normalized_session_id,
+        normalized_workspace_dir.as_deref(),
+    ) {
+        Ok(value) => Ok(value),
+        Err(owner_error) => {
+            if !owner_bridge_archive_error_allows_sidecar(&owner_error) {
+                return Err(owner_error);
+            }
+            match run_provider_session_archive_bridge(
+                &app,
+                &provider.id,
+                &normalized_session_id,
+                normalized_workspace_dir.as_deref(),
+            )
+            .await
+            {
+                Ok(value) => Ok(value),
+                Err(sidecar_error) => Err(format!(
+                    "真实归档失败: owner bridge: {owner_error}; sidecar: {sidecar_error}"
+                )),
+            }
+        }
+    }?;
+
+    let workspace_for_state = normalized_workspace_dir
+        .or_else(|| {
+            result
+                .get("workspace_dir")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            result
+                .get("workspaceId")
+                .or_else(|| result.get("workspace_id"))
+                .and_then(Value::as_str)
+                .and_then(|workspace_id| {
+                    workspace_id
+                        .split_once(':')
+                        .map(|(_, path)| path.to_string())
+                })
+        })
+        .ok_or("真实归档成功，但缺少 workspace_dir，无法更新本地归档状态".to_string())?;
+
+    persist_provider_session_archived_state(
+        &data_dir,
+        &provider.id,
+        &normalized_session_id,
+        &workspace_for_state,
+        session_title.as_deref(),
+    )?;
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "providerId": provider.id,
+        "sessionId": normalized_session_id,
+        "workspaceDir": workspace_for_state,
+    }))
 }
 
 #[tauri::command]
@@ -654,14 +943,16 @@ pub async fn stop_provider_session_stream(
 #[cfg(test)]
 mod tests {
     use super::{
-        provider_not_enabled_message, provider_owner_bridge_socket_path,
-        provider_session_bridge_env, provider_session_bridge_path,
-        provider_session_read_uses_owner_bridge, provider_session_send_uses_owner_bridge,
-        send_provider_session_message_via_owner_bridge,
+        archive_provider_session_via_owner_bridge, owner_bridge_archive_error_allows_sidecar,
+        persist_provider_session_archived_state, provider_session_read_uses_owner_bridge,
+        provider_session_send_uses_owner_bridge, send_provider_session_message_via_owner_bridge,
         send_provider_session_message_via_owner_bridge_with_retry, ComposerAttachment,
-        PROVIDER_OVERLAY_ENV,
     };
     use crate::commands::config_provider::provider_metadata_from_raw;
+    use crate::commands::provider_bridge_common::{
+        provider_bridge_env, provider_bridge_path, provider_not_enabled_message,
+        provider_owner_bridge_socket_path, PROVIDER_OVERLAY_ENV,
+    };
     use std::fs;
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixListener;
@@ -699,7 +990,7 @@ mod tests {
 
     #[test]
     fn provider_session_bridge_path_prefers_local_bins() {
-        let path = provider_session_bridge_path("/Users/test");
+        let path = provider_bridge_path("/Users/test");
         assert_eq!(
             path,
             "/Users/test/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -716,7 +1007,7 @@ mod tests {
         fs::create_dir_all(&dir).expect("create data dir");
         std::env::set_var(PROVIDER_OVERLAY_ENV, "/tmp/provider-overlay");
 
-        let envs = provider_session_bridge_env(&dir);
+        let envs = provider_bridge_env(&dir);
         let overlay = envs
             .iter()
             .find(|(key, _)| key == PROVIDER_OVERLAY_ENV)
@@ -744,7 +1035,7 @@ mod tests {
         .expect("write env file");
         std::env::remove_var(PROVIDER_OVERLAY_ENV);
 
-        let envs = provider_session_bridge_env(&dir);
+        let envs = provider_bridge_env(&dir);
         let overlay = envs
             .iter()
             .find(|(key, _)| key == PROVIDER_OVERLAY_ENV)
@@ -955,6 +1246,166 @@ mod tests {
         );
 
         server.join().expect("join owner bridge server");
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn owner_bridge_can_archive_provider_session_payload() {
+        let temp_dir = std::env::temp_dir().join(format!("ow-pobr-archive-{}", std::process::id()));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let socket_path = provider_owner_bridge_socket_path(&temp_dir);
+        let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept owner bridge socket");
+            let mut request = String::new();
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            reader
+                .read_line(&mut request)
+                .expect("read owner bridge request");
+            let payload: serde_json::Value =
+                serde_json::from_str(request.trim()).expect("parse owner bridge request");
+            assert_eq!(payload["type"], "archive_session");
+            assert_eq!(payload["provider_id"], "overlay-tool");
+            assert_eq!(payload["session_id"], "tid-archive");
+            assert_eq!(payload["workspace_dir"], "/tmp/workspace");
+
+            let response = serde_json::json!({
+                "ok": true,
+                "provider_id": "overlay-tool",
+                "thread_id": "tid-archive",
+                "workspace_id": "overlay-tool:/tmp/workspace",
+                "workspace_dir": "/tmp/workspace"
+            });
+            writeln!(stream, "{response}").expect("write response");
+        });
+
+        let result = archive_provider_session_via_owner_bridge(
+            &temp_dir,
+            "overlay-tool",
+            "tid-archive",
+            Some("/tmp/workspace"),
+        )
+        .expect("archive via owner bridge");
+
+        assert_eq!(
+            result,
+            serde_json::json!({
+                "ok": true,
+                "provider_id": "overlay-tool",
+                "thread_id": "tid-archive",
+                "workspace_id": "overlay-tool:/tmp/workspace",
+                "workspace_dir": "/tmp/workspace"
+            })
+        );
+
+        server.join().expect("join owner bridge server");
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn owner_bridge_archive_errors_only_fall_back_for_transport_failures() {
+        assert!(owner_bridge_archive_error_allows_sidecar(
+            "provider owner bridge not ready: /tmp/provider_owner_bridge.sock"
+        ));
+        assert!(owner_bridge_archive_error_allows_sidecar(
+            "connect provider owner bridge failed: connection refused"
+        ));
+        assert!(owner_bridge_archive_error_allows_sidecar(
+            "read provider owner bridge response failed: early eof"
+        ));
+
+        assert!(!owner_bridge_archive_error_allows_sidecar(
+            "Provider 'claude' 不支持真实归档"
+        ));
+        assert!(!owner_bridge_archive_error_allows_sidecar(
+            "source archive failed"
+        ));
+    }
+
+    #[test]
+    fn persist_provider_session_archived_state_updates_state_file() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("ow-state-archive-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+
+        persist_provider_session_archived_state(
+            &temp_dir,
+            "overlay-tool",
+            "tid-archive",
+            "/tmp/workspace",
+            Some("Archived title"),
+        )
+        .expect("persist archived state");
+
+        let raw = fs::read_to_string(temp_dir.join("onlineworker_state.json"))
+            .expect("read persisted state");
+        let state: serde_json::Value = serde_json::from_str(&raw).expect("parse persisted state");
+        let thread = &state["workspaces"]["overlay-tool:/tmp/workspace"]["threads"]["tid-archive"];
+
+        assert_eq!(thread["thread_id"], "tid-archive");
+        assert_eq!(thread["archived"], true);
+        assert_eq!(thread["is_active"], false);
+        assert_eq!(thread["preview"], "Archived title");
+        assert_eq!(thread["source"], "app");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn overlay_provider_sessions_adds_archived_state_only_rows() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("ow-state-overlay-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+
+        persist_provider_session_archived_state(
+            &temp_dir,
+            "overlay-tool",
+            "ses-archived",
+            "/tmp/workspace",
+            Some("Archived Overlay Session"),
+        )
+        .expect("persist archived state");
+
+        let result = super::overlay_provider_sessions(
+            &temp_dir,
+            "overlay-tool",
+            serde_json::json!([
+                {
+                    "id": "ses-active",
+                    "title": "Active Overlay Session",
+                    "workspace": "/tmp/workspace",
+                    "archived": false,
+                    "updatedAt": 20,
+                    "createdAt": 10
+                }
+            ]),
+        );
+
+        assert_eq!(
+            result,
+            serde_json::json!([
+                {
+                    "id": "ses-active",
+                    "title": "Active Overlay Session",
+                    "workspace": "/tmp/workspace",
+                    "archived": false,
+                    "updatedAt": 20,
+                    "createdAt": 10
+                },
+                {
+                    "id": "ses-archived",
+                    "title": "Archived Overlay Session",
+                    "workspace": "/tmp/workspace",
+                    "archived": true,
+                    "updatedAt": 0,
+                    "createdAt": 0
+                }
+            ])
+        );
+
         let _ = fs::remove_dir_all(&temp_dir);
     }
 }

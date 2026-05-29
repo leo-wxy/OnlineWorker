@@ -6,14 +6,16 @@
 
 ## Current Milestone
 
-**Theme:** Notification Extensibility
+**Theme:** General AI Capability and Session Operations
 
-This milestone decouples user notifications from Telegram-only delivery so OnlineWorker can notify through additional apps/channels while preserving Telegram as the first supported channel.
+This milestone adds a shared AI capability layer and strengthens user-visible session operations. AI service connection settings stay separate from per-scenario prompt settings, so notification summary can be the first consumer while future scenarios reuse the same capability boundary. Session archive actions must execute against the real provider source and only update local state after the provider archive succeeds.
 
 ## Phases
 
 - [x] **Phase 6: Notification Channel Abstraction** - Introduce a provider-neutral notification mechanism so OnlineWorker can emit concise notifications through enabled notification plugins. Core plugin/router/config UI is implemented; existing Telegram task/approval/final-reply paths remain unchanged.
 - [x] **Phase 7: OnlineWorker User Message Gateway** - Route provider-bound user text through an OnlineWorker-level gateway before provider-specific send hooks. Gateway/proxy boundaries are complete; civility rewrite is paused, related App entry points are hidden, and packaged-app verification is complete.
+- [x] **Phase 8: General AI Capability Layer** - Add a top-level AI sidebar tab plus a provider-neutral AI capability layer. Service API settings and scenario prompt settings are separate; notification summary is the first scenario, current local summary rules remain the fallback, and packaged-app verification is complete.
+- [x] **Phase 9: Session Archive Actions** - Add Session tab archive actions and adjacent provider usage operations. Archive executes the provider's real source operation, archived rows remain visible through post-success local overlay, `/token_usage` is scoped to agent topics, and packaged-app verification is complete.
 
 ## Phase Details
 
@@ -86,3 +88,110 @@ Latest verification:
 
 Remaining Phase 7 verification:
 - None. Phase 7 is closed with the rewrite hook disabled and UI entry hidden until the feature is intentionally restored.
+
+### Phase 8: General AI Capability Layer
+
+**Goal:** Add shared AI configuration and runtime support that can power multiple OnlineWorker scenarios through prompt-driven configuration, starting with notification completion summary.
+**Requirements**: TBD
+**Depends on:** Phase 6
+**Plans:** 1 plan
+
+Plans:
+- [x] 08-01: Add general AI capability layer and first-class AI configuration tab
+  - [x] Add `core/ai/` service/scenario contracts, config parsing, direct runtime adapters, prompt rendering, and fallback signaling.
+  - [x] Add sidebar top-level `AI` tab with separate `Services` and `Scenarios` configuration surfaces.
+  - [x] Wire notification summary through the `notification_summary` scenario while preserving local summary rules as fallback.
+  - [x] Add service connection testing and store service API settings through the normal AI config flow, without requiring users to manage environment variable names.
+  - [x] Keep notification preview title limiting in the scenario/fallback boundary while avoiding legacy body truncation for AI summaries.
+
+Success Criteria (what must be TRUE):
+  1. `AI` is a first-class sidebar tab, not a nested `Setup` or notification-only control.
+  2. OpenAI and Claude are fixed built-in service choices in the AI tab; users do not type protocol, service id, or environment variable names.
+  3. API key, endpoint/Base URL, model list, selected/default model, timeout, and enablement are service connection settings.
+  4. Prompt template, selected service, output schema, limits, enablement, and fallback policy are scenario settings.
+  5. A scenario selects exactly one configured service. Multiple enabled services are not called in priority order.
+  6. Scenario model selection follows the selected service's configured model; the scenario page does not require manual model entry.
+  7. The AI settings UI follows the Notifications settings layout, including an enable switch in the detail header top-right area.
+  8. Notification completion summary is implemented as the first scenario/function and can be disabled independently.
+  9. Existing deterministic local summary rules still run when AI is unavailable, disabled, or invalid.
+  10. AI calls do not create provider sessions, Codex sessions, Claude sessions, or Telegram topics.
+
+Fast verification path:
+- Use source/dev verification for UI iteration: `cd mac-app && ./node_modules/.bin/tsc --noEmit && npm run tauri dev`.
+- Use focused Python/Node/Rust tests for behavior regressions.
+- Run packaged-app verification only after explicit approval or release validation.
+
+Latest verification:
+- Source verification passed:
+  - `PYENV_VERSION=3.13.1 pytest -q tests/test_ai_config.py tests/test_ai_scenarios.py tests/test_events_streaming.py tests/test_notifications.py` -> passed.
+  - `node --test mac-app/tests/appTabs.test.mjs mac-app/tests/appShell.test.mjs` -> passed.
+  - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml config_provider --quiet` -> `30 passed`.
+  - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml ai_config --quiet` -> `3 passed`.
+  - `./node_modules/.bin/tsc --noEmit` from `mac-app/` -> passed.
+  - `npm run tauri dev` from `mac-app/` -> Vite/Tauri dev startup passed.
+  - `git -C OnlineWorker diff --check` -> passed.
+- Packaged-app verification passed after explicit approval: `bash verify-packaged-fast.sh` -> `Combined fast packaged verification complete (103s)`.
+  - DMG: `OnlineWorker/mac-app/src-tauri/target/release/bundle/dmg/OnlineWorker_1.3.0_aarch64.dmg`
+  - SHA256: `3f0fb03b277c6926c7cd753f3fbe1dddfc92f2f664e2020528defefc4a5c04d6`
+  - Installed runtime: `/Applications/OnlineWorker.app`
+
+Remaining Phase 8 verification:
+- None for the general AI capability layer and notification summary scenario. Future AI scenarios remain separate phase work.
+
+### Phase 9: Session Archive Actions
+
+**Goal:** Let users archive concrete sessions directly from the Session tab without creating a local-only illusion. The UI action must call the provider-backed real archive operation, surface errors, and then refresh the session list after local archived state is persisted.
+**Requirements**: TBD
+**Depends on:** Phase 7 provider owner/session bridge boundaries
+**Plans:** 1 plan
+
+Plans:
+- [x] 09-01: Add provider-backed Session tab archive action
+  - [x] Add a right-click context menu and visible row action menu on Session tab session rows.
+  - [x] Add a Tauri archive command that invokes a real provider archive operation through the running owner bridge or a real sidecar archive path.
+  - [x] Use sidecar archive only when owner bridge transport is unavailable; provider-reported archive failures are returned to the UI directly.
+  - [x] Persist local `onlineworker_state.json` archived state only after the real provider archive succeeds.
+  - [x] Merge post-success archived overlays back into provider session lists so Archived view remains useful when a provider source omits archived rows.
+  - [x] Show a visible UI error when the real archive fails; do not hide, mark, or move the session on failure.
+  - [x] Expose provider usage through provider metadata/hooks and add `/token_usage` as an agent-topic local bot command.
+
+Success Criteria (what must be TRUE):
+  1. Right-clicking a concrete session row or opening its visible row action menu in the Session tab exposes an Archive action.
+  2. Archive calls the provider's real source archive path; there is no local-only archive fallback.
+  3. Providers without real archive support return a clear failure instead of silently marking the session archived.
+  4. Local archived state changes only after the provider archive succeeds.
+  5. The selected session and list refresh correctly after a successful archive, and archived rows remain visible in the Archived filter through post-success local overlay if the source no longer returns them.
+  6. Focused Python, Rust, Node, and TypeScript checks cover the command boundary and UI entry point.
+  7. Usage-capable providers appear in the Usage tab dynamically, and `/token_usage` rejects non-agent topics clearly.
+
+Fast verification path:
+- Use focused source verification for this phase:
+  - `PYENV_VERSION=3.13.1 pytest -q tests/test_provider_session_bridge.py tests/test_provider_owner_bridge.py`
+  - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml provider_sessions --quiet`
+  - `node --test mac-app/tests/sessionArchiveContextMenu.test.mjs`
+  - `cd mac-app && ./node_modules/.bin/tsc --noEmit`
+- Run packaged-app verification only after explicit approval.
+
+Latest verification:
+- Focused source verification passed:
+  - `PYENV_VERSION=3.13.1 python -m pytest -q OnlineWorker/tests/test_provider_session_bridge.py OnlineWorker/tests/test_provider_owner_bridge.py` -> `45 passed`.
+  - `cargo test --manifest-path OnlineWorker/mac-app/src-tauri/Cargo.toml provider_sessions --quiet` -> `13 passed`.
+  - `node --test OnlineWorker/mac-app/tests/sessionArchiveContextMenu.test.mjs` -> `2 passed`.
+  - `cd OnlineWorker/mac-app && ./node_modules/.bin/tsc --noEmit` -> passed.
+  - `git -C OnlineWorker diff --check` -> passed.
+- Additional archived overlay verification passed:
+  - `cd OnlineWorker/mac-app/src-tauri && cargo test provider_sessions::tests --lib` -> `14 passed`.
+  - `node --test OnlineWorker/mac-app/tests/sessionArchiveContextMenu.test.mjs` -> `2 passed`.
+  - `cd OnlineWorker/mac-app && ./node_modules/.bin/tsc --noEmit` -> passed.
+  - `python3 -m pytest OnlineWorker/tests/test_provider_session_bridge.py -q` -> passed.
+- Provider usage and `/token_usage` verification passed:
+  - `PYENV_VERSION=3.13.1 python -m pytest -q tests/test_provider_session_bridge.py tests/test_provider_owner_bridge.py tests/test_slash_router.py tests/test_command_rules.py tests/test_notifications.py tests/test_events_streaming.py` -> `118 passed`.
+  - `node --test mac-app/tests/sessionArchiveContextMenu.test.mjs mac-app/tests/usageBrowser.test.mjs mac-app/tests/usageProviders.test.mjs` -> `5 passed`.
+  - `git -C OnlineWorker diff --check` -> passed.
+- Packaged-app verification passed after explicit approval: `bash verify-packaged-fast.sh` -> `Combined fast packaged verification complete (103s)`.
+  - DMG: `OnlineWorker/mac-app/src-tauri/target/release/bundle/dmg/OnlineWorker_1.3.0_aarch64.dmg`
+  - SHA256: `3f0fb03b277c6926c7cd753f3fbe1dddfc92f2f664e2020528defefc4a5c04d6`
+  - Installed runtime: `/Applications/OnlineWorker.app`
+
+Remaining Phase 9 verification:
+- None for provider-backed session archive action. Providers without real archive support intentionally continue to fail clearly.

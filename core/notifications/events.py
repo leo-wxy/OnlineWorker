@@ -15,6 +15,18 @@ def _clean(value: str) -> str:
     return str(value or "").strip()
 
 
+def _compact(value: str) -> str:
+    return "".join(_clean(value).lower().split())
+
+
+def _should_include_task_summary(task_name: str, task_summary: str) -> bool:
+    name = _compact(task_name)
+    summary = _compact(task_summary)
+    if not name or not summary:
+        return bool(summary)
+    return name not in summary and summary not in name
+
+
 @dataclass(frozen=True)
 class NotificationEvent:
     status: str
@@ -47,7 +59,7 @@ class NotificationEvent:
 def format_notification_text(event: NotificationEvent) -> str:
     label = STATUS_LABELS[event.status]
     lines = [f"{label} · {event.agent_name} · {event.task_name}"]
-    if event.task_summary:
-        lines.append(f"当前任务：{event.task_summary}")
+    if event.task_summary and _should_include_task_summary(event.task_name, event.task_summary):
+        lines.append(event.task_summary)
     lines.append(event.message)
     return "\n".join(lines)

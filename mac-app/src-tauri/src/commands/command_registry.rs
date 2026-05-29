@@ -264,7 +264,13 @@ fn load_registry_store(path: &Path) -> Result<CommandRegistryStore, String> {
 fn load_or_initialize_store(data_dir: &Path) -> Result<CommandRegistryStore, String> {
     let path = command_registry_path(data_dir);
     if path.exists() {
-        return load_registry_store(&path);
+        let store = load_registry_store(&path)?;
+        let refreshed =
+            merge_registry_with_discovery(&store, discover_commands(), current_epoch_seconds());
+        if refreshed != store {
+            save_registry_store(&path, &refreshed)?;
+        }
+        return Ok(refreshed);
     }
 
     let initial = merge_registry_with_discovery(
@@ -879,10 +885,10 @@ mod tests {
     use super::{
         apply_publish_success, build_publish_scopes, build_publishable_commands, build_response,
         command_registry_path, discover_codex_file_commands_from_roots,
-        discover_downstream_commands, discover_skill_commands_from_roots, load_registry_store,
-        merge_registry_with_discovery, preferred_telegram_name, save_registry_store,
-        CommandBackend, CommandRegistryEntry, CommandRegistryStore, CommandScope, CommandSource,
-        CommandStatus, DiscoveredCommand,
+        discover_downstream_commands, discover_skill_commands_from_roots, load_or_initialize_store,
+        load_registry_store, merge_registry_with_discovery, preferred_telegram_name,
+        save_registry_store, CommandBackend, CommandRegistryEntry, CommandRegistryStore,
+        CommandScope, CommandSource, CommandStatus, DiscoveredCommand,
     };
     use crate::commands::telegram::TelegramCommandScope;
     use std::collections::HashSet;
@@ -1224,6 +1230,56 @@ mod tests {
         let loaded = load_registry_store(&path).expect("load registry");
 
         assert_eq!(loaded, original);
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn load_or_initialize_store_refreshes_existing_catalog_metadata() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "onlineworker-command-registry-refresh-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let path = command_registry_path(&temp_dir);
+
+        let mut stale = entry(
+            "bot:token_usage",
+            "token_usage",
+            CommandSource::Bot,
+            CommandBackend::Local,
+            CommandStatus::Active,
+            true,
+            true,
+            "old token usage",
+        );
+        stale.scope = CommandScope::Thread;
+        save_registry_store(
+            &path,
+            &CommandRegistryStore {
+                commands: vec![stale],
+                last_refreshed_epoch: Some(10),
+                last_published_epoch: Some(20),
+            },
+        )
+        .expect("save stale registry");
+
+        let loaded = load_or_initialize_store(&temp_dir).expect("load registry");
+        let token_usage = loaded
+            .commands
+            .iter()
+            .find(|command| command.id == "bot:token_usage")
+            .expect("token usage command");
+
+        assert_eq!(token_usage.scope, CommandScope::Global);
+        assert!(token_usage.description.contains("用量"));
+        assert!(token_usage.enabled_for_telegram);
+        assert!(token_usage.published_to_telegram);
+        assert_eq!(loaded.last_published_epoch, Some(20));
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&temp_dir);

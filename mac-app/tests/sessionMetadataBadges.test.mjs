@@ -10,6 +10,8 @@ const root = join(__dirname, "..");
 test("codex session metadata badges are wired through the session browser", () => {
   const sessionBrowser = readFileSync(join(root, "src", "pages", "SessionBrowser.tsx"), "utf8");
   const api = readFileSync(join(root, "src", "components", "session-browser", "api.ts"), "utf8");
+  const badges = readFileSync(join(root, "src", "components", "session-browser", "badges.tsx"), "utf8");
+  const codexChat = readFileSync(join(root, "src", "components", "session-browser", "CodexChat.tsx"), "utf8");
   const types = readFileSync(join(root, "src", "types.ts"), "utf8");
 
   assert.match(types, /modelProvider\?: string \| null;/);
@@ -20,25 +22,30 @@ test("codex session metadata badges are wired through the session browser", () =
   assert.match(api, /source:\s*thread\.source \?\? null/);
   assert.match(api, /isSmoke:\s*Boolean\(thread\.is_smoke\)/);
 
-  assert.match(sessionBrowser, /function CodexSessionBadges/);
-  assert.match(sessionBrowser, /<CodexSessionBadges session=\{activeSession\} \/>/);
+  assert.match(badges, /export function CodexSessionBadges/);
+  assert.match(badges, /providerBadge\(session\.modelProvider\)/);
+  assert.match(badges, /sourceBadge\(session\.source\)/);
+  assert.match(badges, /smokeBadge/);
+  assert.match(codexChat, /<CodexSessionBadges session=\{activeSession\} \/>/);
   assert.match(sessionBrowser, /<CodexSessionBadges session=\{session\.raw as CodexSession\} compact \/>/);
 });
 
 test("generic provider sessions render a reusable chat surface with composer wiring", () => {
   const sessionBrowser = readFileSync(join(root, "src", "pages", "SessionBrowser.tsx"), "utf8");
   const api = readFileSync(join(root, "src", "components", "session-browser", "api.ts"), "utf8");
+  const genericChat = readFileSync(join(root, "src", "components", "session-browser", "GenericProviderChat.tsx"), "utf8");
 
   assert.match(api, /export async function fetchProviderSession\(/);
   assert.match(api, /export async function sendProviderSessionMessage\(/);
-  assert.match(sessionBrowser, /function GenericProviderChat/);
-  assert.match(sessionBrowser, /const turns = await fetchProviderSession\(session\.type, session\.id, session\.workspace\)/);
+  assert.match(sessionBrowser, /<GenericProviderChat/);
+  assert.match(genericChat, /export function GenericProviderChat/);
+  assert.match(genericChat, /const turns = await fetchProviderSession\(session\.type, session\.id, session\.workspace\)/);
   assert.match(
-    sessionBrowser,
+    genericChat,
     /await sendProviderSessionMessage\(session\.type,\s*session\.id,\s*trimmedText,\s*nextAttachments,\s*session\.workspace\)/,
   );
-  assert.match(sessionBrowser, /<SessionComposer/);
-  assert.doesNotMatch(sessionBrowser, /chat is not available/);
+  assert.match(genericChat, /<SessionComposer/);
+  assert.doesNotMatch(genericChat, /chat is not available/);
 });
 
 test("claude session composer sends through the provider owner bridge", () => {

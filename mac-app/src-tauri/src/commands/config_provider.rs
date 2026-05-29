@@ -7,6 +7,11 @@ use std::path::{Path, PathBuf};
 
 use super::config::app_support_dir_name;
 
+#[path = "config_provider/ai_config_store.rs"]
+mod ai_config_store;
+pub(super) use ai_config_store::set_ai_config_in_document;
+use ai_config_store::{ai_metadata_from_document, normalize_ai_document};
+
 const BUILTIN_CODEX_PLUGIN_MANIFEST: &str =
     include_str!("../../../../plugins/providers/builtin/codex/plugin.yaml");
 const BUILTIN_CLAUDE_PLUGIN_MANIFEST: &str =
@@ -26,6 +31,10 @@ const BUILTIN_TELEGRAM_NOTIFICATION_GUIDE_EN: &str =
 const PROVIDER_OVERLAY_ENV: &str = "ONLINEWORKER_PROVIDER_OVERLAY";
 const NOTIFICATION_OVERLAY_ENV: &str = "ONLINEWORKER_NOTIFICATION_OVERLAY";
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 pub(crate) struct ProviderConfigDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -40,6 +49,8 @@ pub(crate) struct ProviderConfigDocument {
     telegram: Option<serde_yaml::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) notifications: Option<NotificationConfigDocument>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) ai: Option<AiConfigDocument>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
@@ -94,6 +105,96 @@ pub(crate) struct NotificationChannelConfigEntry {
     pub(crate) description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) config: Option<BTreeMap<String, serde_yaml::Value>>,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub(crate) struct AiConfigDocument {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) services: Option<Vec<AiServiceConfigEntry>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) scenarios: Option<BTreeMap<String, AiScenarioConfigEntry>>,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AiServiceConfigEntry {
+    #[serde(default)]
+    pub(crate) id: String,
+    #[serde(default)]
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) protocol: String,
+    #[serde(default, alias = "base_url")]
+    pub(crate) base_url: String,
+    #[serde(default)]
+    pub(crate) endpoint: String,
+    #[serde(default, alias = "api_key")]
+    pub(crate) api_key: String,
+    #[serde(default, alias = "api_key_env")]
+    pub(crate) api_key_env: String,
+    #[serde(default)]
+    pub(crate) models: Vec<String>,
+    #[serde(default, alias = "default_model")]
+    pub(crate) default_model: String,
+    #[serde(default, alias = "timeout_seconds")]
+    pub(crate) timeout_seconds: u32,
+    #[serde(default = "default_true")]
+    pub(crate) enabled: bool,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AiScenarioConfigEntry {
+    #[serde(default)]
+    pub(crate) enabled: bool,
+    #[serde(default, alias = "service_id")]
+    pub(crate) service_id: String,
+    #[serde(default)]
+    pub(crate) model: String,
+    #[serde(default, alias = "output_schema")]
+    pub(crate) output_schema: String,
+    #[serde(default)]
+    pub(crate) fallback: String,
+    #[serde(default)]
+    pub(crate) limits: BTreeMap<String, u32>,
+    #[serde(default, alias = "prompt_template")]
+    pub(crate) prompt_template: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AiServiceMetadata {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) protocol: String,
+    pub(crate) base_url: String,
+    pub(crate) endpoint: String,
+    pub(crate) api_key: String,
+    pub(crate) api_key_env: String,
+    pub(crate) models: Vec<String>,
+    pub(crate) default_model: String,
+    pub(crate) timeout_seconds: u32,
+    pub(crate) enabled: bool,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AiScenarioMetadata {
+    pub(crate) id: String,
+    pub(crate) enabled: bool,
+    pub(crate) service_id: String,
+    pub(crate) model: String,
+    pub(crate) output_schema: String,
+    pub(crate) fallback: String,
+    pub(crate) limits: BTreeMap<String, u32>,
+    pub(crate) prompt_template: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AiConfigMetadata {
+    pub(crate) services: Vec<AiServiceMetadata>,
+    pub(crate) scenarios: Vec<AiScenarioMetadata>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
@@ -225,6 +326,8 @@ pub(crate) struct ProviderCapabilitiesEntry {
     pub(crate) photos: bool,
     #[serde(default)]
     pub(crate) files: bool,
+    #[serde(default)]
+    pub(crate) usage: bool,
     #[serde(default, alias = "command_wrappers")]
     pub(crate) command_wrappers: Vec<String>,
     #[serde(default, alias = "control_modes")]
@@ -573,6 +676,7 @@ fn read_process_env_value(env_key: &str) -> Option<String> {
     env::var(env_key).ok().and_then(trimmed_env_value)
 }
 
+#[cfg(test)]
 fn overlay_env_spec_from_env_raw(raw: &str) -> Option<String> {
     overlay_env_spec_from_env_raw_for_key(raw, PROVIDER_OVERLAY_ENV)
 }
@@ -1156,6 +1260,7 @@ fn merge_provider_capabilities(
 ) -> Option<ProviderCapabilitiesEntry> {
     match (capabilities, default_capabilities) {
         (Some(mut capabilities), Some(default_capabilities)) => {
+            capabilities.usage = capabilities.usage || default_capabilities.usage;
             if capabilities.command_wrappers.is_empty() {
                 capabilities.command_wrappers = default_capabilities.command_wrappers;
             }
@@ -1295,6 +1400,7 @@ pub(super) fn normalize_provider_document_with_env(
     doc.schema_version = Some(2);
     doc.tools = None;
     normalize_notification_document(&mut doc);
+    normalize_ai_document(&mut doc);
     Ok(doc)
 }
 
@@ -1510,6 +1616,14 @@ pub(crate) fn notification_channel_metadata_from_raw(
     }
 
     Ok(ordered)
+}
+
+pub(crate) fn ai_config_metadata_from_raw(
+    raw: &str,
+    env_raw: Option<&str>,
+) -> Result<AiConfigMetadata, String> {
+    let doc = normalize_provider_document_with_env(raw, env_raw)?;
+    Ok(ai_metadata_from_document(doc))
 }
 
 fn notification_channel_metadata_from_entry(
@@ -1777,9 +1891,10 @@ mod tests {
         normalize_provider_document_with_env, notification_channel_metadata_from_raw,
         overlay_env_spec_from_env_raw, provider_metadata_from_raw,
         read_manifest_files_from_overlay_path, serialize_normalized_config_with_env,
-        set_notification_channel_config_in_document, set_notification_channel_enabled_in_document,
-        set_provider_cli_config_in_document, set_provider_flags_in_document,
-        set_provider_message_hook_enabled_in_document, set_test_process_env_override,
+        set_ai_config_in_document, set_notification_channel_config_in_document,
+        set_notification_channel_enabled_in_document, set_provider_cli_config_in_document,
+        set_provider_flags_in_document, set_provider_message_hook_enabled_in_document,
+        set_test_process_env_override, AiScenarioConfigEntry, AiServiceConfigEntry,
         ProviderCapabilitiesEntry, ProviderExternalCliConfig, NOTIFICATION_OVERLAY_ENV,
     };
 
@@ -1932,6 +2047,136 @@ notifications:
         assert_eq!(metadata[1].description, "Custom WeChat notifier");
         assert!(metadata[1].enabled);
         assert!(!metadata[1].builtin);
+    }
+
+    #[test]
+    fn set_ai_config_keeps_services_and_scenarios_separate() {
+        let mut doc = normalize_provider_document("").expect("normalized config");
+        let services = vec![AiServiceConfigEntry {
+            id: "openai_default".to_string(),
+            name: "OpenAI".to_string(),
+            protocol: "openai_compatible_chat".to_string(),
+            base_url: "https://api.openai.com/v1/".to_string(),
+            endpoint: String::new(),
+            api_key: "sk-test".to_string(),
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            models: vec!["gpt-5.4".to_string()],
+            default_model: "gpt-5.4".to_string(),
+            timeout_seconds: 20,
+            enabled: true,
+        }];
+        let mut scenarios = BTreeMap::new();
+        scenarios.insert(
+            "notification_summary".to_string(),
+            AiScenarioConfigEntry {
+                enabled: true,
+                service_id: "openai_default".to_string(),
+                model: "gpt-5.4".to_string(),
+                output_schema: "notification_summary_v1".to_string(),
+                fallback: "local_notification_summary_rules".to_string(),
+                limits: BTreeMap::new(),
+                prompt_template: "Return JSON for {{final_message}}".to_string(),
+            },
+        );
+
+        set_ai_config_in_document(&mut doc, services, scenarios);
+
+        let ai = doc.ai.expect("ai config");
+        let service = ai
+            .services
+            .expect("services")
+            .into_iter()
+            .find(|service| service.id == "openai_default")
+            .expect("openai service");
+        assert_eq!(service.base_url, "https://api.openai.com/v1");
+        assert_eq!(service.api_key_env, "OPENAI_API_KEY");
+        let mut scenarios = ai.scenarios.expect("scenarios");
+        let scenario = scenarios
+            .remove("notification_summary")
+            .expect("notification summary");
+        assert_eq!(scenario.service_id, "openai_default");
+        assert_eq!(
+            scenario.prompt_template,
+            "Return JSON for {{final_message}}"
+        );
+        assert_eq!(scenario.limits.get("preview_title"), Some(&16));
+        assert_eq!(scenario.limits.get("summary"), None);
+    }
+
+    #[test]
+    fn normalize_ai_document_backfills_scenario_service_id() {
+        let raw = r#"
+schema_version: 2
+ai:
+  services:
+    - id: openai_default
+      name: OpenAI
+      models:
+        - gpt-5.4
+      default_model: gpt-5.4
+  scenarios:
+    notification_summary:
+      enabled: true
+      service_id: ""
+"#;
+
+        let doc = normalize_provider_document(raw).expect("normalized config");
+        let scenario = doc
+            .ai
+            .expect("ai config")
+            .scenarios
+            .expect("scenarios")
+            .remove("notification_summary")
+            .expect("notification summary");
+
+        assert_eq!(scenario.service_id, "openai_default");
+    }
+
+    #[test]
+    fn normalize_ai_document_migrates_legacy_notification_summary_prompt() {
+        let raw = r#"
+schema_version: 2
+ai:
+  services:
+    - id: openai_default
+      name: OpenAI
+      models:
+        - gpt-5.4
+      default_model: gpt-5.4
+  scenarios:
+    notification_summary:
+      enabled: true
+      service_id: openai_default
+      output_schema: notification_summary_v1
+      fallback: local_notification_summary_rules
+      limits:
+        preview_title: 16
+      prompt_template: |
+        You summarize OnlineWorker task completion notifications.
+        Return compact JSON with preview_title and summary.
+        preview_title identifies the completed task.
+        summary explains the completed result.
+
+        Current task:
+        {{task_summary}}
+
+        Final assistant message:
+        {{final_message}}
+"#;
+
+        let doc = normalize_provider_document(raw).expect("normalized config");
+        let scenario = doc
+            .ai
+            .expect("ai config")
+            .scenarios
+            .expect("scenarios")
+            .remove("notification_summary")
+            .expect("notification summary");
+
+        assert!(scenario
+            .prompt_template
+            .contains("complete short Chinese title"));
+        assert!(!scenario.prompt_template.contains("Return compact JSON"));
     }
 
     #[test]
@@ -2439,6 +2684,7 @@ providers:
                 questions: false,
                 photos: true,
                 files: true,
+                usage: true,
                 command_wrappers: vec!["model".to_string(), "review".to_string()],
                 control_modes: vec!["app".to_string(), "tui".to_string(), "hybrid".to_string()],
                 message_rewrite: super::ProviderMessageRewriteCapabilities {
@@ -2459,6 +2705,7 @@ providers:
                 questions: true,
                 photos: true,
                 files: true,
+                usage: true,
                 command_wrappers: Vec::new(),
                 control_modes: vec!["app".to_string()],
                 message_rewrite: super::ProviderMessageRewriteCapabilities {

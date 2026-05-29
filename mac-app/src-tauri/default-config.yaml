@@ -39,3 +39,52 @@ notifications:
       config:
         bot_token: ""
         recipient_user_id: ""
+
+ai:
+  services:
+    - id: openai_default
+      name: OpenAI
+      protocol: openai_compatible_chat
+      base_url: https://api.openai.com/v1
+      api_key: ""
+      models:
+        - gpt-5.4
+      default_model: gpt-5.4
+      timeout_seconds: 20
+      enabled: false
+
+    - id: claude_default
+      name: Claude
+      protocol: claude_messages
+      endpoint: https://api.anthropic.com/v1/messages
+      api_key: ""
+      models:
+        - claude-sonnet-4-6
+      default_model: claude-sonnet-4-6
+      timeout_seconds: 20
+      enabled: false
+
+  scenarios:
+    notification_summary:
+      enabled: false
+      service_id: openai_default
+      output_schema: notification_summary_v1
+      fallback: local_notification_summary_rules
+      limits:
+        preview_title: 16
+      prompt_template: |
+        You summarize OnlineWorker task completion notifications.
+        Return JSON only, without markdown:
+        {"preview_title": "...", "summary": "..."}
+
+        Rules:
+        - preview_title must be a complete short Chinese title, ideally 6 to 12 Chinese characters.
+        - Avoid English in preview_title unless it is a product or provider name.
+        - Do not return truncated words, ellipsis, code fences, or punctuation-only titles.
+        - summary must be one concise Chinese sentence describing what was completed.
+
+        Current task:
+        {{task_summary}}
+
+        Final assistant message:
+        {{final_message}}

@@ -29,6 +29,7 @@ export interface ProviderCapabilitiesMetadata {
   questions: boolean;
   photos: boolean;
   files: boolean;
+  usage: boolean;
   commandWrappers: string[];
   controlModes: string[];
   messageRewrite?: ProviderMessageRewriteCapabilities | null;
@@ -130,6 +131,41 @@ export interface NotificationSettingsField {
   default?: unknown;
   description: string;
   options: NotificationSettingsOption[];
+}
+
+export interface AiServiceMetadata {
+  id: string;
+  name: string;
+  protocol: string;
+  baseUrl?: string | null;
+  endpoint?: string | null;
+  apiKey?: string | null;
+  models: string[];
+  defaultModel: string;
+  timeoutSeconds: number;
+  enabled: boolean;
+}
+
+export interface AiScenarioMetadata {
+  id: string;
+  enabled: boolean;
+  serviceId: string;
+  model: string;
+  outputSchema: string;
+  fallback: string;
+  limits: Record<string, number>;
+  promptTemplate: string;
+}
+
+export interface AiConfigMetadata {
+  services: AiServiceMetadata[];
+  scenarios: AiScenarioMetadata[];
+}
+
+export interface AiConnectionTestResult {
+  ok: boolean;
+  status?: number | null;
+  message: string;
 }
 
 export interface DashboardAlert {

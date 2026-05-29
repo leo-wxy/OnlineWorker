@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchProviderUsageSummary } from "../components/session-browser/api";
+import { fetchProviderMetadata, fetchProviderUsageSummary } from "../components/session-browser/api";
 import { StatePanel, getProviderUi } from "../components/session-browser/presentation";
 import { useI18n } from "../i18n";
-import type { ProviderUsageQuery, ProviderUsageSummary } from "../types";
+import type { ProviderMetadata, ProviderUsageQuery, ProviderUsageSummary } from "../types";
+import { visibleUsageProviders } from "../utils/usageProviders";
 
-const PROVIDER_TABS = ["codex", "claude"] as const;
 const DEFAULT_RANGE_DAYS = 7;
-type UsageProviderTab = typeof PROVIDER_TABS[number];
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
@@ -19,9 +18,12 @@ function formatCost(value?: number | null) {
   return `$${value.toFixed(2)}`;
 }
 
-function chartBackground(providerId: UsageProviderTab) {
+function chartBackground(providerId: string) {
   if (providerId === "codex") {
     return "linear-gradient(180deg, rgba(139,92,246,0.95) 0%, rgba(167,139,250,0.82) 100%)";
+  }
+  if (providerId === "claude") {
+    return "linear-gradient(180deg, rgba(71,85,105,0.95) 0%, rgba(148,163,184,0.82) 100%)";
   }
   return "linear-gradient(180deg, rgba(71,85,105,0.95) 0%, rgba(148,163,184,0.82) 100%)";
 }
@@ -41,16 +43,59 @@ function buildDefaultQuery(): ProviderUsageQuery {
 
 export function UsageBrowser() {
   const { t } = useI18n();
-  const [activeProvider, setActiveProvider] = useState<UsageProviderTab>("codex");
+  const [providers, setProviders] = useState<ProviderMetadata[]>([]);
+  const [activeProviderId, setActiveProviderId] = useState<string | null>(null);
   const [query, setQuery] = useState<ProviderUsageQuery>(() => buildDefaultQuery());
   const [draftQuery, setDraftQuery] = useState<ProviderUsageQuery>(() => buildDefaultQuery());
   const [summary, setSummary] = useState<ProviderUsageSummary | null>(null);
+  const [providersLoading, setProvidersLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasLoadedRef = useRef(false);
 
-  const loadSummary = useCallback(async (providerId: UsageProviderTab, query: ProviderUsageQuery) => {
+  const usageProviders = useMemo(() => visibleUsageProviders(providers), [providers]);
+  const activeProvider = useMemo(() => {
+    return usageProviders.find((provider) => provider.id === activeProviderId) ?? usageProviders[0] ?? null;
+  }, [activeProviderId, usageProviders]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setProvidersLoading(true);
+    fetchProviderMetadata()
+      .then((metadata) => {
+        if (cancelled) {
+          return;
+        }
+        const nextProviders = visibleUsageProviders(metadata);
+        setProviders(nextProviders);
+        setActiveProviderId((current) => (
+          current && nextProviders.some((provider) => provider.id === current)
+            ? current
+            : nextProviders[0]?.id ?? null
+        ));
+        setError(null);
+      })
+      .catch((loadError) => {
+        if (cancelled) {
+          return;
+        }
+        setProviders([]);
+        setActiveProviderId(null);
+        setSummary(null);
+        setError((loadError as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setProvidersLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const loadSummary = useCallback(async (providerId: string, query: ProviderUsageQuery) => {
     const hasLoadedBefore = hasLoadedRef.current;
     setLoading(!hasLoadedBefore);
     setRefreshing(hasLoadedBefore);
@@ -69,15 +114,21 @@ export function UsageBrowser() {
   }, []);
 
   useEffect(() => {
-    void loadSummary(activeProvider, query);
-  }, [activeProvider, loadSummary, query]);
+    if (!activeProvider?.id) {
+      setLoading(false);
+      setRefreshing(false);
+      setSummary(null);
+      return;
+    }
+    void loadSummary(activeProvider.id, query);
+  }, [activeProvider?.id, loadSummary, query]);
 
   useEffect(() => {
     setDraftQuery(query);
   }, [query]);
 
   const providerUi = useMemo(() => {
-    return getProviderUi(activeProvider, t.usage.providerTabs[activeProvider]);
+    return getProviderUi(activeProvider?.id ?? "provider", activeProvider?.label);
   }, [activeProvider, t]);
 
   const totals = useMemo(() => {
@@ -106,23 +157,29 @@ export function UsageBrowser() {
         </div>
         <button
           type="button"
-          onClick={() => void loadSummary(activeProvider, query)}
+          onClick={() => activeProvider?.id && void loadSummary(activeProvider.id, query)}
           className="ow-btn rounded-xl px-3 py-2 text-sm font-semibold"
-          disabled={loading || refreshing}
+          disabled={!activeProvider || loading || refreshing}
         >
           {refreshing ? t.usage.applying : t.usage.refresh}
         </button>
       </div>
 
-      <div className="ow-segment grid w-full grid-cols-2 rounded-2xl p-1">
-        {PROVIDER_TABS.map((providerId) => {
-          const ui = getProviderUi(providerId, t.usage.providerTabs[providerId]);
-          const selected = providerId === activeProvider;
+      <div
+        className="ow-segment grid w-full rounded-2xl p-1"
+        style={{ gridTemplateColumns: `repeat(${Math.max(1, usageProviders.length)}, minmax(0, 1fr))` }}
+      >
+        {usageProviders.map((provider) => {
+          const ui = getProviderUi(provider.id, provider.label);
+          const selected = provider.id === activeProvider?.id;
           return (
             <button
-              key={providerId}
+              key={provider.id}
               type="button"
-              onClick={() => setActiveProvider(providerId)}
+              onClick={() => {
+                hasLoadedRef.current = false;
+                setActiveProviderId(provider.id);
+              }}
               className={`rounded-xl px-3 py-2 text-sm font-bold transition-all ${
                 selected ? "ow-segment-button-active" : "ow-segment-button hover:text-gray-700"
               }`}
@@ -220,7 +277,7 @@ export function UsageBrowser() {
                         className="w-full rounded-t-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.32)]"
                         style={{
                           height: `${height}px`,
-                          background: chartBackground(activeProvider),
+                          background: chartBackground(activeProvider?.id ?? ""),
                         }}
                       />
                       <div className="text-[11px] font-medium text-slate-500">{day.date.slice(5)}</div>
@@ -250,15 +307,18 @@ export function UsageBrowser() {
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        {loading && <StatePanel message={t.usage.applying} />}
+        {(providersLoading || loading) && <StatePanel message={t.usage.applying} />}
         {!loading && error && <StatePanel message={error} tone="error" />}
         {!loading && !error && summary?.unsupportedReason && (
           <StatePanel message={summary.unsupportedReason || t.usage.unavailable} tone="warning" />
         )}
-        {!loading && !error && !summary?.unsupportedReason && (!summary || summary.days.length === 0) && (
+        {!providersLoading && !loading && !error && !activeProvider && (
+          <StatePanel message={t.usage.unavailable} tone="warning" />
+        )}
+        {!providersLoading && !loading && !error && activeProvider && !summary?.unsupportedReason && (!summary || summary.days.length === 0) && (
           <StatePanel message={t.usage.empty} />
         )}
-        {!loading && !error && summary && !summary.unsupportedReason && summary.days.length > 0 && (
+        {!providersLoading && !loading && !error && summary && !summary.unsupportedReason && summary.days.length > 0 && (
           <div className="min-h-0 flex-1 overflow-auto rounded-2xl border border-[var(--ow-line-soft)] bg-white">
             <table className="min-w-full border-collapse text-sm">
               <thead className="sticky top-0 z-[1] bg-slate-50/95">

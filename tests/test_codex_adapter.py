@@ -474,6 +474,7 @@ async def test_archive_thread_calls_app_server_archive_method():
         {"threadId": "tid-archived"},
     )
     assert result == {"id": "tid-archived"}
+    assert adapter._thread_workspace_map["tid-archived"] == "codex:onlineWorker"
 
 
 def test_disconnect_diagnostics_include_recent_inbound_and_outbound_context():

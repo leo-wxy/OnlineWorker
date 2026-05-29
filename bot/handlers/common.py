@@ -7,10 +7,12 @@ import logging
 import os
 import sys
 import time
-from typing import Callable, Optional
+from datetime import date, timedelta
+from typing import Any, Callable, Optional
 from telegram import Bot, Update
 from telegram.ext import ContextTypes
 from config import is_provider_exposed
+from core.provider_session_bridge import get_provider_usage_summary
 from core.providers.facts import list_provider_threads, query_provider_active_thread_ids
 from core.providers.registry import get_provider
 from core.state import AppState
@@ -279,6 +281,7 @@ def make_help_handler(state: AppState, group_chat_id: int) -> Callable:
                 "*onlineWorker 全局命令*\n\n"
                 "/workspace — 查看并打开 workspace\n"
                 "/status — 查看 bot 和各 provider 当前状态\n"
+                "/token_usage — 查看当前 agent 最近用量\n"
                 "/help — 显示此帮助\n\n"
                 "_在全局 Topic 里打开 workspace 后，会创建对应的 Workspace Topic。_"
             )
@@ -343,6 +346,178 @@ def make_help_handler(state: AppState, group_chat_id: int) -> Callable:
         )
 
     return help_handler
+
+
+def _token_usage_today() -> date:
+    return date.today()
+
+
+def _default_token_usage_range() -> tuple[str, str]:
+    end_date = _token_usage_today()
+    start_date = end_date - timedelta(days=6)
+    return start_date.isoformat(), end_date.isoformat()
+
+
+def _usage_int(summary: dict[str, Any], key: str) -> int:
+    try:
+        return int(summary.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _usage_cost(summary: dict[str, Any]) -> float | None:
+    value = summary.get("totalCostUsd")
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _aggregate_usage_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    days = summary.get("days") if isinstance(summary.get("days"), list) else []
+    totals = {
+        "totalTokens": _usage_int(summary, "totalTokens"),
+        "inputTokens": _usage_int(summary, "inputTokens"),
+        "outputTokens": _usage_int(summary, "outputTokens"),
+        "cacheCreationTokens": _usage_int(summary, "cacheCreationTokens"),
+        "cacheReadTokens": _usage_int(summary, "cacheReadTokens"),
+        "totalCostUsd": _usage_cost(summary),
+    }
+
+    day_total_tokens = 0
+    cost_values: list[float] = []
+    for day in days:
+        if not isinstance(day, dict):
+            continue
+        day_total_tokens += _usage_int(day, "totalTokens")
+        day_cost = _usage_cost(day)
+        if day_cost is not None:
+            cost_values.append(day_cost)
+
+    if totals["totalTokens"] <= 0 and day_total_tokens > 0:
+        totals["totalTokens"] = day_total_tokens
+        totals["inputTokens"] = sum(
+            _usage_int(day, "inputTokens") for day in days if isinstance(day, dict)
+        )
+        totals["outputTokens"] = sum(
+            _usage_int(day, "outputTokens") for day in days if isinstance(day, dict)
+        )
+        totals["cacheCreationTokens"] = sum(
+            _usage_int(day, "cacheCreationTokens") for day in days if isinstance(day, dict)
+        )
+        totals["cacheReadTokens"] = sum(
+            _usage_int(day, "cacheReadTokens") for day in days if isinstance(day, dict)
+        )
+    if totals["totalCostUsd"] is None and cost_values:
+        totals["totalCostUsd"] = sum(cost_values)
+
+    return totals
+
+
+def _format_token_count(value: int) -> str:
+    return f"{value:,}"
+
+
+def _format_usage_cost(value: float | None) -> str:
+    return "-" if value is None else f"${value:.6f}"
+
+
+def _format_token_usage_summary(
+    provider_id: str,
+    summary: dict[str, Any],
+    start_date: str,
+    end_date: str,
+) -> str:
+    unsupported_reason = str(summary.get("unsupportedReason") or "").strip()
+    if unsupported_reason:
+        return f"{provider_id} 暂不支持用量读取：{unsupported_reason}"
+
+    totals = _aggregate_usage_summary(summary)
+    lines = [
+        f"{provider_id} 用量",
+        f"范围：{start_date} ~ {end_date}",
+        f"总 token：{_format_token_count(totals['totalTokens'])}",
+        f"输入：{_format_token_count(totals['inputTokens'])}",
+        f"输出：{_format_token_count(totals['outputTokens'])}",
+        f"Cache 写入：{_format_token_count(totals['cacheCreationTokens'])}",
+        f"Cache 读取：{_format_token_count(totals['cacheReadTokens'])}",
+        f"成本：{_format_usage_cost(totals['totalCostUsd'])}",
+    ]
+
+    days = [
+        day for day in (summary.get("days") if isinstance(summary.get("days"), list) else [])
+        if isinstance(day, dict) and str(day.get("date") or "").strip()
+    ]
+    if days:
+        lines.append("")
+        lines.append("最近记录：")
+        for day in days[:7]:
+            day_date = str(day.get("date") or "").strip()
+            day_tokens = _format_token_count(_usage_int(day, "totalTokens"))
+            day_cost = _format_usage_cost(_usage_cost(day))
+            lines.append(f"• {day_date}：{day_tokens} token，成本 {day_cost}")
+    else:
+        lines.append("")
+        lines.append("当前范围暂无用量记录。")
+
+    return "\n".join(lines)
+
+
+def make_token_usage_handler(state: AppState, group_chat_id: int) -> Callable:
+    async def token_usage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        msg = update.effective_message
+        if msg is None:
+            return
+
+        topic_id: Optional[int] = msg.message_thread_id
+        provider_id = str(state.get_tool_by_global_topic(topic_id) or "").strip()
+        if not provider_id:
+            await _send_to_group(
+                context.bot,
+                group_chat_id,
+                "/token_usage 只能在 agent topic 中使用。",
+                topic_id=topic_id,
+            )
+            return
+
+        start_date, end_date = _default_token_usage_range()
+
+        try:
+            summary = get_provider_usage_summary(provider_id, start_date, end_date)
+        except ValueError as exc:
+            await _send_to_group(
+                context.bot,
+                group_chat_id,
+                f"{provider_id} 暂不支持用量读取：{exc}",
+                topic_id=topic_id,
+            )
+            return
+        except Exception as exc:
+            logger.warning(
+                "[token_usage] provider 用量读取失败，provider=%s range=%s..%s err=%s",
+                provider_id,
+                start_date,
+                end_date,
+                exc,
+            )
+            await _send_to_group(
+                context.bot,
+                group_chat_id,
+                f"{provider_id} 用量读取失败：{exc}",
+                topic_id=topic_id,
+            )
+            return
+
+        await _send_to_group(
+            context.bot,
+            group_chat_id,
+            _format_token_usage_summary(provider_id, summary, start_date, end_date),
+            topic_id=topic_id,
+        )
+
+    return token_usage
 
 
 def make_status_handler(state: AppState, group_chat_id: int) -> Callable:

@@ -32,6 +32,7 @@ See also:
 - Builtin providers in this repository: `codex` and `claude`.
 - Builtin notification channel in this repository: `telegram`, with external notification channels mountable through plugins.
 - A first-class `Usage` page for recent provider consumption, with `Codex / Claude` switching inside the app.
+- A first-class `AI` page for shared AI service configuration and scenario-specific prompts.
 
 ## Features
 
@@ -43,9 +44,12 @@ See also:
 - Plugin-based notification channels, configurable from the first-class `Notifications` page.
 - Provider-driven configuration for supported CLI backends.
 - Session browsing and message sending from the app.
+- Session rows can be archived from the Sessions page. Archive actions call the provider's real archive operation first; local archived state is updated only after that operation succeeds.
 - Session Browser supports text plus image/file attachment sends from the desktop app, with one user message shown per send.
 - A dedicated `Usage` page for recent provider usage, with a default 7-day window, date filtering, summary cards, and daily charts.
 - Usage aggregation stays behind provider/plugin adapters instead of pushing provider-specific parsing into shared React surfaces.
+- `/token_usage` is a local bot command for agent topics. It reports provider usage where supported and rejects concrete conversation topics instead of forwarding into an agent session.
+- Shared AI services can be configured once and reused by scenarios. Notification completion summary is the first built-in scenario and falls back to deterministic local summary rules when AI is disabled or unavailable.
 - Markdown rendering for final replies.
 - Installer-friendly macOS packaging through Tauri and PyInstaller.
 
@@ -132,6 +136,17 @@ OnlineWorker does not read or write `ANTHROPIC_*` proxy, model, or key settings.
 
 Notification channels are exposed as a first-class `Notifications` tab. Channel switches are stored under `notifications.channels.<channel>.enabled`; plugin field values are stored under `notifications.channels.<channel>.config`.
 
+AI services and scenarios are configured from the first-class `AI` tab. Service
+settings such as API key, endpoint, model list, selected model, timeout, and
+enablement are separate from scenario prompt settings. Scenario settings choose
+one configured service and define the prompt, output schema, limits, enablement,
+and fallback behavior for a specific use case.
+
+The current built-in AI service choices are OpenAI-compatible chat completions
+and Claude-compatible messages. Users choose and test those fixed service
+cards; they do not need to type protocol names or environment variable names for
+this feature.
+
 ## Provider Interactions
 
 OnlineWorker routes provider-specific approval and question prompts through a
@@ -156,6 +171,42 @@ unchanged, and the related settings entry is hidden from the app.
 The managed remote-proxy wrapper code remains in the repository for a future
 restore, but it is not documented as a public entry point while the feature is
 paused.
+
+## Session Operations
+
+Sessions can be browsed, messaged, filtered by active/archived state, and
+archived from the Sessions page. A row-level action menu and the context menu
+both expose archive when the selected provider supports a real archive path.
+
+Archive is provider-backed. OnlineWorker calls the provider source first, then
+persists a local archived overlay only after success. If the provider reports
+failure or does not support real archive, the UI shows the error and leaves the
+session unchanged locally. Archived overlays are merged back into provider
+session lists so the Archived filter can still show rows when a provider source
+omits archived sessions.
+
+## Usage
+
+Usage data is exposed through provider metadata and usage hooks. The app shows
+usage-capable providers dynamically on the Usage page, so new providers can
+participate without hard-coded React parsing.
+
+Telegram also supports `/token_usage` as a local command in agent topics. The
+command is handled by OnlineWorker and is not forwarded into the active
+conversation. Concrete session topics reject it with guidance because usage is
+meaningful at the agent/provider topic level.
+
+## AI Scenarios
+
+The AI layer is a shared app capability, not a provider session. AI scenario
+calls are direct API requests and do not create Codex sessions, Claude sessions,
+provider conversations, or Telegram topics.
+
+Notification completion summary uses the `notification_summary` scenario when
+enabled and correctly configured. If the scenario is disabled, invalid, or the
+service call fails, OnlineWorker falls back to local summary rules. Preview
+titles remain length-limited, while AI-generated summary bodies are kept intact
+apart from lightweight cleanup.
 
 ## Development
 

@@ -34,6 +34,11 @@ class ProviderMessageHooks:
 
 
 @dataclass(frozen=True)
+class ProviderUsageHooks:
+    get_summary: Optional[Callable] = None
+
+
+@dataclass(frozen=True)
 class ProviderInteractionHooks:
     build_approval_reply: Optional[Callable] = None
     reply_question: Optional[Callable] = None
@@ -67,6 +72,7 @@ class ProviderManifestCapabilities:
     questions: bool = False
     photos: bool = False
     files: bool = False
+    usage: bool = False
     commands: bool = False
     command_wrappers: tuple[str, ...] = ()
     control_modes: tuple[str, ...] = ("app",)
@@ -153,6 +159,7 @@ class ProviderDescriptor:
     capabilities: ProviderCapabilities = ProviderCapabilities()
     metadata: Optional[ProviderMetadata] = None
     message_hooks: Optional[ProviderMessageHooks] = None
+    usage_hooks: Optional[ProviderUsageHooks] = None
     interactions: Optional[ProviderInteractionHooks] = None
     command_hooks: Optional[ProviderCommandHooks] = None
     workspace_hooks: Optional[ProviderWorkspaceHooks] = None

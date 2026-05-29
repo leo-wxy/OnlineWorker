@@ -38,6 +38,11 @@ rules needed to work safely in this codebase.
 
 ## Packaging
 
+- Do not build, package, install, restart, or run packaged-app verification
+  without explicit user permission in the current conversation. This includes
+  `bash scripts/build.sh`, `bash scripts/verify-packaged-fast.sh`, DMG creation
+  or mounting, copying to `/Applications/OnlineWorker.app`, and launching the
+  installed app.
 - Apple Silicon packaging entry point: `bash scripts/build.sh`
 - Intel packaging is documented in [deploy/BUILD.md](deploy/BUILD.md)
 - `scripts/build.sh` is the shared build pipeline
@@ -66,6 +71,8 @@ rules needed to work safely in this codebase.
 - Python tests live under `tests/`
 - Rust/Tauri tests live under `mac-app/src-tauri`
 - Frontend tests live under `mac-app/tests`
+- Packaged-app verification requires explicit user permission in the current
+  conversation.
 - For packaged-app changes, document whether installed-app verification was
   completed or remains unverified
 - Daily packaged-app iteration should use the fast chain:

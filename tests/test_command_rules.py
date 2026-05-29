@@ -48,3 +48,13 @@ def test_permissions_command_is_thread_passthrough_not_wrapper():
     assert rule.scope_policy == "strict"
     assert rule.executor == "downstream"
     assert rule.telegram_behavior == "passthrough"
+
+
+def test_token_usage_command_is_global_local_bot_command():
+    rule = get_command_rule("token_usage")
+
+    assert rule is not None
+    assert rule.scope == "global"
+    assert rule.scope_policy == "strict"
+    assert rule.executor == "bot"
+    assert rule.telegram_behavior == "passthrough"

@@ -986,8 +986,7 @@ class ClaudeAdapter:
         return {"id": thread_id}
 
     async def archive_thread(self, workspace_id: str, thread_id: str) -> dict:
-        self._thread_workspace_map[thread_id] = workspace_id
-        return {"id": thread_id, "status": "archived"}
+        raise RuntimeError("Claude provider does not expose a real source archive operation yet.")
 
     async def inspect_thread_activity(self, thread_id: str) -> dict[str, Any]:
         session_file = _find_claude_project_session_file(thread_id)

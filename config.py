@@ -7,6 +7,16 @@ from pathlib import Path
 from typing import Any, Optional
 from dotenv import dotenv_values
 
+from core.ai.config import (
+    build_ai_scenario_config,
+    build_ai_service_config,
+    default_ai_service_raw,
+    iter_ai_scenario_raws,
+    iter_ai_service_raws,
+    load_ai_config,
+    positive_int_value,
+)
+from core.ai.contracts import AiConfig, AiScenarioConfig, AiServiceConfig
 from core.providers.overlay import load_overlay_provider_raws, manifest_to_provider_raw
 
 DEFAULT_CONFIG_PATH = "config.yaml"
@@ -196,6 +206,7 @@ class Config:
     schema_version: int = 1  # 1=legacy tools[]; 2=provider-centric
     notification_channels: dict[str, NotificationChannelConfig] = field(default_factory=dict)
     message_hooks: MessageHooksConfig = field(default_factory=MessageHooksConfig)
+    ai: AiConfig = field(default_factory=AiConfig)
 
     def __post_init__(self) -> None:
         if self.providers and not self.tools:
@@ -345,6 +356,15 @@ def _message_hooks_from_raw(raw: Any) -> MessageHooksConfig | None:
     )
 
 
+_positive_int_value = positive_int_value
+_build_ai_service_config = build_ai_service_config
+_default_ai_service_raw = default_ai_service_raw
+_build_ai_scenario_config = build_ai_scenario_config
+_iter_ai_service_raws = iter_ai_service_raws
+_iter_ai_scenario_raws = iter_ai_scenario_raws
+_load_ai_config = load_ai_config
+
+
 def _default_provider_blueprint(name: str) -> dict[str, Any]:
     plugin_blueprint = _load_builtin_provider_plugin_blueprint(name)
     if plugin_blueprint is not None:
@@ -370,6 +390,7 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
                 "questions": False,
                 "photos": False,
                 "files": False,
+                "usage": True,
                 "commands": True,
                 "command_wrappers": ["model", "review"],
                 "control_modes": ["app", "tui", "hybrid"],
@@ -401,6 +422,7 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
                 "questions": True,
                 "photos": False,
                 "files": False,
+                "usage": True,
                 "commands": True,
                 "command_wrappers": [],
                 "control_modes": ["app"],
@@ -475,6 +497,7 @@ def _load_builtin_provider_plugin_blueprint(name: str) -> dict[str, Any] | None:
             "questions": metadata.capabilities.questions,
             "photos": metadata.capabilities.photos,
             "files": metadata.capabilities.files,
+            "usage": metadata.capabilities.usage,
             "commands": metadata.capabilities.commands,
             "command_wrappers": list(metadata.capabilities.command_wrappers),
             "control_modes": list(metadata.capabilities.control_modes),
@@ -846,4 +869,5 @@ def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None)
         schema_version=schema_version,
         notification_channels=_load_notification_channels(data),
         message_hooks=_load_message_hooks(data),
+        ai=_load_ai_config(data),
     )

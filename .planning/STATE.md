@@ -1,8 +1,8 @@
 # Project State
 
-**Updated:** 2026-05-26
-**Current milestone:** Notification Extensibility
-**Current phase:** None
+**Updated:** 2026-05-29
+**Current milestone:** General AI Capability and Session Operations
+**Current phase:** 9. Session Archive Actions
 **Last archived milestone:** v1.2.1
 
 ## Current Status
@@ -10,9 +10,13 @@
 - v1.2.1 is archived.
 - Phase 6, Notification Channel Abstraction, is complete.
 - Phase 7, OnlineWorker User Message Gateway, is closed.
+- Phase 8, General AI Capability Layer, is complete and packaged-app verified.
+- Phase 9, Session Archive Actions, is complete and packaged-app verified.
 - Active requirements `NOTIFY-01` and `NOTIFY-02` are implemented.
 - Phase 6 notification mechanism, Telegram builtin channel, plugin guide assets, and UI channel configuration have been implemented and installed-app verified.
 - Phase 7 adds an OnlineWorker-level provider-bound user message gateway and Codex remote app-server proxy boundary. Civility rewrite is currently paused, user text is sent unchanged, and related App entry points are hidden; installed-app verification has passed.
+- Phase 8 adds a top-level AI sidebar tab and a shared AI capability layer. OpenAI and Claude are fixed built-in service choices; scenarios select exactly one configured service; service API settings and prompt/scenario settings are intentionally separate; notification summary is the first implemented consumer and local summary rules remain the fallback.
+- Phase 9 adds Session tab archive actions and adjacent provider usage operations. Archive executes against the real provider source first, then persists local archived state; failures are visible, do not mark sessions archived locally, and post-success overlays keep archived rows visible when provider sources omit them. Provider usage is exposed through provider metadata/hooks, and `/token_usage` runs only in agent topics.
 
 ## Archived Milestone
 
@@ -26,6 +30,8 @@
 |-------|--------|-----------|
 | 6. Notification Channel Abstraction | Completed | Archive or release milestone when ready |
 | 7. OnlineWorker User Message Gateway | Closed | None |
+| 8. General AI Capability Layer | Completed and packaged-app verified | None |
+| 9. Session Archive Actions | Completed and packaged-app verified | None |
 
 ## Key Preserved Decisions
 
@@ -34,11 +40,25 @@
 - Installed-app behavior remains the source of truth for packaged-app changes.
 - Telegram remains the current default remote task, approval, status, and final-reply channel.
 - New notification work should make notification delivery plugin-based without breaking existing Telegram behavior.
+- Shared AI capability configuration belongs in a top-level AI tab, with service connection settings separate from scenario prompt settings.
+- AI service choices are fixed product cards for OpenAI and Claude in Phase 8. Users should not type protocol, service id, or environment variable names.
+- Scenarios choose one configured service from the UI. Multiple enabled services are not called in priority order.
+- Scenario model selection follows the selected service's configured model.
+- Prompt templates are configured by scenario/function. Notification summary is one scenario, and future scenarios should reuse the same AI capability layer.
+- Current deterministic notification summary rules remain the fallback path when AI is disabled or unavailable.
+- AI service API settings, including API keys, are configured in the AI service configuration flow; users do not need to manage environment variable names for this feature.
+- Notification preview titles stay length-limited, while AI-generated notification summary bodies are not truncated by the old deterministic body limit.
+- Phase 8 UI iteration should use dev verification first: `cd mac-app && ./node_modules/.bin/tsc --noEmit && npm run tauri dev`. Full packaging is reserved for explicit packaged-app validation or release readiness.
+- Session archive actions must not use local-only fallback behavior. If provider source archive fails or is unsupported, the UI should show the failure and leave local session state unchanged.
+- Session archive local state persistence is a post-success synchronization step after real provider archive.
+- Session archive list rendering should merge post-success archived overlays back into provider session lists so Archived view can show rows even when provider sources omit archived sessions.
+- Provider usage belongs behind provider metadata and usage hooks. UI and Telegram command surfaces should discover usage-capable providers from metadata instead of hard-coding a private provider list.
+- `/token_usage` is a local bot command scoped to agent topics. It must reject concrete thread topics and must not forward into provider conversations.
 - Explicit Claude fork UX remains future work; v1.2.1 only removed implicit fork/remap from normal sends and added the safe resume guard.
 
 ## Pending Todos
 
-- Decide whether to archive the Notification Extensibility milestone as the next released version.
+- Decide whether to archive the completed General AI Capability and Session Operations milestone as a released version.
 
 ## Roadmap Evolution
 
@@ -51,3 +71,9 @@
 - Phase 7 plan added and completed source verification: 07-02 dictionary-backed user message neutralizer with a manual normalizer test script.
 - Phase 7 plan added and completed source verification: 07-03 Codex remote app-server user message proxy. Real `codex --remote` traffic was probed; OnlineWorker-managed Codex TUI host sessions have a gateway/proxy boundary before app-server persistence/model submission.
 - Phase 7 closed after product decision: civility rewrite is paused, App/Telegram/managed Codex paths send user text unchanged, the App settings entry is hidden, duplicate user message rendering for image sends was fixed, and fast packaged-app verification completed.
+- Phase 8 added: General AI Capability Layer, including a first-class AI sidebar tab, separate service connection and scenario prompt configuration, direct AI runtime calls, and notification summary as the first scenario with local summary rules as fallback.
+- Phase 8 plan added: 08-01 add general AI capability layer and first-class AI configuration tab.
+- Phase 8 08-01 completed: `core/ai/` direct AI scenario runtime, `ai.services`/`ai.scenarios` config parsing, fixed OpenAI/Claude service cards, AI sidebar tab, notification-style AI service/scenario UI, Tauri config read/write command, service connection testing, notification summary AI-first/fallback behavior, external local summary fallback rules, and installed-app verification.
+- Phase 9 added: Session Archive Actions, covering Session tab right-click Archive, provider-backed real archive execution, failure visibility, and local archived state persistence only after source archive success.
+- Phase 9 plan added: 09-01 add provider-backed Session tab archive action.
+- Phase 9 09-01 completed: Session tab right-click and visible action Archive UI, `archive_provider_session` Tauri command, owner bridge and sidecar real archive paths, post-success local state persistence, archived overlay list merging, provider usage capability discovery, `/token_usage` agent-topic command handling, and failure-visible no-local-fallback behavior. Sidecar archive is used only when owner bridge transport is unavailable; provider-reported archive failures return directly to the UI. Focused Python/Rust/Node/TypeScript verification and installed-app verification passed.

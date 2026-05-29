@@ -315,7 +315,7 @@ async def test_run_ow_claude_once_wraps_external_launcher_with_claude_path_shim(
 
 
 @pytest.mark.asyncio
-async def test_run_ow_claude_once_uses_provider_external_cli_defaults(monkeypatch, tmp_path):
+async def test_run_ow_claude_once_ignores_configured_upstream_base_url(monkeypatch, tmp_path):
     from plugins.providers.builtin.claude.python import cli_wrapper
 
     real_bin_dir = tmp_path / "real-bin"
@@ -376,10 +376,10 @@ async def test_run_ow_claude_once_uses_provider_external_cli_defaults(monkeypatc
         probe=True,
     )
 
-    assert events[0] == ("init_proxy", "https://config.example.test/anthropic", True, True)
+    assert events[0] == ("init_proxy", None, True, True)
     child_event = events[1]
     assert child_event[1] == ["company-launcher", "start", "-p", "hello"]
-    assert "ONLINEWORKER_CLAUDE_UPSTREAM_BASE_URL='https://config.example.test/anthropic'" in child_event[2]
+    assert "ONLINEWORKER_CLAUDE_UPSTREAM_BASE_URL=''" in child_event[2]
     assert events[2] == ("stop_proxy",)
 
 
@@ -465,7 +465,6 @@ providers:
     transport:
       type: stdio
     external_cli:
-      upstream_base_url: "{upstream_url}"
       launcher_wraps_claude: true
     message_hooks:
       abusive_language_normalization:
@@ -483,6 +482,7 @@ logging:
         "TELEGRAM_TOKEN": "test:token",
         "ALLOWED_USER_ID": "1",
         "GROUP_CHAT_ID": "-1",
+        "ANTHROPIC_BASE_URL": upstream_url,
     }
     try:
         result = subprocess.run(

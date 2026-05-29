@@ -28,6 +28,7 @@ from bot.handlers.common import (
     make_start_handler,
     make_status_handler,
     make_stop_handler,
+    make_token_usage_handler,
 )
 from bot.handlers.message import make_message_handler
 from bot.handlers.thread import (
@@ -195,6 +196,12 @@ def _scope_label(scope: CommandContext) -> str:
     return "当前 topic"
 
 
+def _scope_label_for_command(command_name: str, scope: CommandContext) -> str:
+    if command_name == "token_usage" and scope == "global":
+        return "agent topic"
+    return _scope_label(scope)
+
+
 def _provider_unavailable_message(cfg: Config | None, tool_name: str) -> str | None:
     if cfg is None:
         return None
@@ -214,7 +221,7 @@ async def _send_scope_rejection(
     await _send_to_group(
         bot,
         group_chat_id,
-        f"`/{command_name}` 只能在 {_scope_label(required_scope)} 中使用。",
+        f"`/{command_name}` 只能在 {_scope_label_for_command(command_name, required_scope)} 中使用。",
         topic_id=topic_id,
         parse_mode="Markdown",
     )
@@ -302,6 +309,7 @@ def make_slash_command_handler(
         "archive": make_archive_thread_handler(state, group_chat_id),
         "skills": make_skills_handler(state, group_chat_id),
         "history": make_history_handler(state, group_chat_id),
+        "token_usage": make_token_usage_handler(state, group_chat_id),
         "restart": make_restart_handler(group_chat_id),
         "stop": make_stop_handler(group_chat_id),
     }

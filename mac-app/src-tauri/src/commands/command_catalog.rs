@@ -156,6 +156,14 @@ pub fn bot_commands() -> Vec<DiscoveredCommand> {
             "查看当前 thread 历史",
         ),
         discovered(
+            "bot:token_usage",
+            "token_usage",
+            CommandSource::Bot,
+            CommandBackend::Local,
+            CommandScope::Global,
+            "查看当前 provider 最近用量",
+        ),
+        discovered(
             "bot:restart",
             "restart",
             CommandSource::Bot,
@@ -243,9 +251,25 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        downstream_commands_for_visible_provider_ids, downstream_commands_from_manifest_source,
+        bot_commands, downstream_commands_for_visible_provider_ids,
+        downstream_commands_from_manifest_source,
     };
-    use crate::commands::command_registry::CommandBackend;
+    use crate::commands::command_registry::{CommandBackend, CommandScope, CommandSource};
+
+    #[test]
+    fn bot_catalog_includes_token_usage_agent_command() {
+        let commands = bot_commands();
+        let command = commands
+            .iter()
+            .find(|command| command.id == "bot:token_usage")
+            .expect("token usage command");
+
+        assert_eq!(command.name, "token_usage");
+        assert_eq!(command.source, CommandSource::Bot);
+        assert_eq!(command.backend, CommandBackend::Local);
+        assert_eq!(command.scope, CommandScope::Global);
+        assert!(command.description.contains("用量"));
+    }
 
     #[test]
     fn public_default_downstream_catalog_omits_private_provider() {

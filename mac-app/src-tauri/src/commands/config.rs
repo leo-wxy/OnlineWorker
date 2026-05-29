@@ -3,13 +3,15 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use super::config_provider::{
-    normalize_config_for_display, normalize_provider_document_with_env,
-    notification_channel_metadata_from_raw, serialize_config_document_for_persistence,
-    serialize_normalized_config_with_env, set_notification_channel_config_in_document,
+    ai_config_metadata_from_raw, normalize_config_for_display,
+    normalize_provider_document_with_env, notification_channel_metadata_from_raw,
+    serialize_config_document_for_persistence, serialize_normalized_config_with_env,
+    set_ai_config_in_document, set_notification_channel_config_in_document,
     set_notification_channel_enabled_in_document, set_provider_cli_config_in_document,
     set_provider_flags_in_document, set_provider_message_hook_enabled_in_document,
-    visible_provider_ids_from_raw, NotificationChannelMetadata, ProviderExternalCliConfig,
-    ProviderMetadata, ProviderRuntimePolicy,
+    visible_provider_ids_from_raw, AiConfigMetadata, AiScenarioConfigEntry, AiServiceConfigEntry,
+    NotificationChannelMetadata, ProviderExternalCliConfig, ProviderMetadata,
+    ProviderRuntimePolicy,
 };
 
 pub(crate) const DEFAULT_APP_NAME: &str = "OnlineWorker";
@@ -41,7 +43,7 @@ fn config_path() -> PathBuf {
     data_dir().join("config.yaml")
 }
 
-fn env_path() -> PathBuf {
+pub(crate) fn env_path() -> PathBuf {
     data_dir().join(".env")
 }
 
@@ -265,6 +267,12 @@ pub(crate) fn read_notification_channels_from_disk(
     notification_channel_metadata_from_raw(&config_raw, Some(&env_raw))
 }
 
+pub(crate) fn read_ai_config_from_disk() -> Result<AiConfigMetadata, String> {
+    let config_raw = std::fs::read_to_string(config_path()).unwrap_or_default();
+    let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
+    ai_config_metadata_from_raw(&config_raw, Some(&env_raw))
+}
+
 pub(crate) fn read_visible_provider_ids_from_disk() -> Result<Vec<String>, String> {
     let config_raw = std::fs::read_to_string(config_path()).unwrap_or_default();
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
@@ -279,6 +287,32 @@ pub async fn get_provider_metadata() -> Result<Vec<ProviderMetadata>, String> {
 #[tauri::command]
 pub async fn get_notification_channels() -> Result<Vec<NotificationChannelMetadata>, String> {
     read_notification_channels_from_disk()
+}
+
+#[tauri::command]
+pub async fn get_ai_config() -> Result<AiConfigMetadata, String> {
+    read_ai_config_from_disk()
+}
+
+#[tauri::command]
+pub async fn set_ai_config(
+    services: Vec<AiServiceConfigEntry>,
+    scenarios: BTreeMap<String, AiScenarioConfigEntry>,
+) -> Result<(), String> {
+    let dir = ensure_data_dir()?;
+    cleanup_legacy_claude_config(&dir)?;
+    let path = dir.join("config.yaml");
+    let raw = if path.exists() {
+        std::fs::read_to_string(&path).map_err(|e| format!("Cannot read config.yaml: {}", e))?
+    } else {
+        include_str!("../../default-config.yaml").to_string()
+    };
+    let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
+
+    let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
+    set_ai_config_in_document(&mut doc, services, scenarios);
+    let serialized = serialize_config_document_for_persistence(doc, &raw)?;
+    std::fs::write(&path, serialized).map_err(|e| format!("Cannot write config.yaml: {}", e))
 }
 
 #[tauri::command]

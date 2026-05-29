@@ -14,6 +14,10 @@ from core.notifications.registry import (
 )
 from core.notifications.router import NotificationRouter, NotificationSendResult
 from core.notifications.runtime import build_notification_channels, build_notification_router
+from core.notifications.summary_rules import (
+    load_notification_summary_rules,
+    title_from_summary,
+)
 from plugins.notifications.builtin.telegram.python.channel import (
     TelegramNotificationChannel,
     create_notification_descriptor,
@@ -82,8 +86,49 @@ def test_notification_event_formats_current_task_summary_when_available():
 
     assert format_notification_text(event) == (
         "完成 · Codex · Phase 6\n"
-        "当前任务：把通知功能再完善一下\n"
+        "把通知功能再完善一下\n"
         "任务已完成"
+    )
+
+
+def test_notification_event_formats_readable_task_title_without_repeating_summary():
+    event = _event(
+        status="completed",
+        task_name="修复用量统计",
+        message="任务已完成",
+        task_summary="接入 Codex、Claude 和扩展 provider 的用量读取，并修复 /token_usage 命令范围",
+    )
+
+    assert format_notification_text(event) == (
+        "完成 · Codex · 修复用量统计\n"
+        "接入 Codex、Claude 和扩展 provider 的用量读取，并修复 /token_usage 命令范围\n"
+        "任务已完成"
+    )
+
+
+def test_notification_event_omits_summary_when_title_already_contains_it():
+    event = _event(
+        status="completed",
+        task_name="扩展 provider 用量",
+        message="完成摘要：已修复通知正文重复问题。",
+        task_summary="扩展 provider 用量",
+    )
+
+    assert format_notification_text(event) == (
+        "完成 · Codex · 扩展 provider 用量\n"
+        "完成摘要：已修复通知正文重复问题。"
+    )
+
+
+def test_default_notification_summary_rules_generate_packaging_guard_title():
+    rules = load_notification_summary_rules()
+
+    assert (
+        title_from_summary(
+            "已把无明确许可不允许打包写入 AGENTS.md 和 OnlineWorker/AGENTS.md。",
+            rules,
+        )
+        == "无许可打包规则"
     )
 
 

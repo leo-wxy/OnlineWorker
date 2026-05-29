@@ -1,1021 +1,39 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent } from "react";
 import { useI18n } from "../i18n";
-import { useCodexThreadStream } from "../hooks/useCodexThreadStream";
 import {
-  fetchClaudeMessages,
   fetchClaudeSessions,
   fetchCodexSessions,
-  fetchProviderSession,
-  fetchCodexThreadState,
-  fetchCodexThreadUpdates,
   fetchProviderMetadata,
   fetchProviderSessions,
-  sendClaudeMessage,
-  sendCodexMessage,
-  sendProviderSessionMessage,
-  stageComposerAttachments,
 } from "../components/session-browser/api";
 import {
-  BACKGROUND_REPLY_POLL,
-  CODEX_BACKGROUND_REPLY_POLL,
-  CODEX_FOREGROUND_REPLY_POLL,
-  FOREGROUND_REPLY_POLL,
-  limitSessionTurns,
-  mergeSessionTurns,
-  ReplyWatchState,
-  SessionComposer,
-  TurnBubble,
-} from "../components/session-browser/shared";
+  archiveSessionWithFeedback,
+  SessionActionMenu,
+  type ArchiveNotice,
+  type SessionActionMenuState,
+} from "../components/session-browser/archive";
+import { CodexSessionBadges } from "../components/session-browser/badges";
+import { ClaudeChat } from "../components/session-browser/ClaudeChat";
+import { CodexChat } from "../components/session-browser/CodexChat";
+import { GenericProviderChat } from "../components/session-browser/GenericProviderChat";
+import { normalizeGenericProviderSessions } from "../components/session-browser/sessionData";
 import {
-  PROVIDER_UI,
+  SessionListPanel,
+  SessionProviderToolbar,
+  WorkspaceSidebar,
+} from "../components/session-browser/navigation";
+import {
   StatePanel,
-  getProviderUi,
   type ArchiveFilter,
   type ProviderFilter,
   type UnifiedSession,
 } from "../components/session-browser/presentation";
-import { applyCodexStreamEvent } from "../utils/codexSessionStream.js";
 import { visibleSessionProviders } from "../utils/sessionProviders.js";
-import {
-  buildSnapshotSignature,
-  countAssistantEntries,
-  pollAssistantReply,
-  startActiveSessionRefresh,
-} from "../utils/sessionPolling.js";
-import { shouldClearReplyWatch } from "../utils/replyWatch.js";
 import type {
   ClaudeSession,
-  ComposerAttachment,
   CodexSession,
-  CodexThreadCursor,
-  CodexThreadStreamEvent,
   ProviderMetadata,
-  SessionTurn,
 } from "../types";
-
-async function readFileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error("Failed to read attachment"));
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
-      const commaIndex = result.indexOf(",");
-      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-async function stageBrowserFiles(files: File[]): Promise<ComposerAttachment[]> {
-  const payload = await Promise.all(
-    files.map(async (file) => ({
-      path: "",
-      name: file.name,
-      mimeType: file.type || null,
-      sizeBytes: file.size,
-      base64Data: await readFileAsBase64(file),
-    })),
-  );
-  return stageComposerAttachments(payload);
-}
-
-function sleepMs(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-type GenericProviderSessionRaw = {
-  id?: string;
-  sessionId?: string;
-  session_id?: string;
-  title?: string;
-  directory?: string;
-  workspace?: string;
-  cwd?: string;
-  archived?: boolean;
-};
-
-function normalizeGenericProviderSessions(
-  provider: ProviderFilter,
-  rows: unknown[],
-  fallbackWorkspace: string,
-): UnifiedSession[] {
-  return rows.flatMap((row, index) => {
-    const session = row as GenericProviderSessionRaw;
-    const id = session.id ?? session.sessionId ?? session.session_id;
-    if (!id) {
-      return [];
-    }
-    const workspace = session.workspace ?? session.directory ?? session.cwd ?? fallbackWorkspace;
-    return [{
-      id,
-      type: provider,
-      workspace,
-      title: session.title || id,
-      archived: session.archived ?? false,
-      raw: { ...session, index },
-    }];
-  });
-}
-
-function CodexSessionBadges({ session, compact = false }: { session: CodexSession; compact?: boolean }) {
-  const { t } = useI18n();
-  const badges = [
-    session.modelProvider ? t.sessions.providerBadge(session.modelProvider) : null,
-    session.source ? t.sessions.sourceBadge(session.source) : null,
-    session.isSmoke ? t.sessions.smokeBadge : null,
-  ].filter((value): value is string => Boolean(value));
-
-  if (badges.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className={`flex flex-wrap items-center gap-2 ${compact ? "" : "mt-3"}`}>
-      {badges.map((badge) => (
-        <span
-          key={badge}
-          className="inline-flex items-center rounded-full border border-slate-200 bg-white/88 px-2.5 py-1 text-[10px] font-semibold tracking-[0.04em] text-slate-500"
-        >
-          {badge}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function CodexChat({ session }: { session: UnifiedSession }) {
-  const { t } = useI18n();
-  const rawSession = session.raw as CodexSession;
-  const providerSupportsAttachments = true;
-  const [activeSession, setActiveSession] = useState<CodexSession>(rawSession);
-  
-  const [turns, setTurns] = useState<SessionTurn[]>([]);
-  const [turnsLoading, setTurnsLoading] = useState(false);
-  const [turnsError, setTurnsError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
-  const [stagingAttachments, setStagingAttachments] = useState(false);
-  const [replyWatchState, setReplyWatchState] = useState<ReplyWatchState | null>(null);
-  const turnsEndRef = useRef<HTMLDivElement>(null);
-  const replyWatchTokenRef = useRef(0);
-  const turnsRef = useRef<SessionTurn[]>([]);
-  const codexCursorRef = useRef<CodexThreadCursor | null>(null);
-  const [codexStreamCursor, setCodexStreamCursor] = useState<CodexThreadCursor | null>(null);
-
-  const resolveCodexSessionByThreadId = useCallback(async (threadId: string) => {
-    for (let attempt = 0; attempt < 12; attempt += 1) {
-      const sessions = await fetchCodexSessions();
-      const matched = sessions.find((item) => item.threadId === threadId);
-      if (matched?.rolloutPath) {
-        return matched;
-      }
-      await sleepMs(100);
-    }
-    throw new Error(`Failed to resolve remapped Codex session: ${threadId}`);
-  }, []);
-
-  const cancelReplyWatch = useCallback(() => {
-    replyWatchTokenRef.current += 1;
-    setReplyWatchState(null);
-  }, []);
-
-  const loadTurns = useCallback(async () => {
-    setTurnsLoading(true);
-    setTurnsError(null);
-    setTurns([]);
-    turnsRef.current = [];
-    codexCursorRef.current = null;
-    setCodexStreamCursor(null);
-    try {
-      const [history, snapshot] = await Promise.all([
-        fetchProviderSession("codex", activeSession.threadId, activeSession.cwd),
-        fetchCodexThreadState(activeSession.rolloutPath ?? ""),
-      ]);
-      codexCursorRef.current = snapshot.cursor;
-      turnsRef.current = history;
-      setTurns(history);
-      setCodexStreamCursor(snapshot.cursor);
-      setReplyWatchState((current) => (current === "expired" ? null : current));
-    } catch (loadError) {
-      setTurnsError((loadError as Error).message);
-    } finally {
-      setTurnsLoading(false);
-    }
-  }, [activeSession.rolloutPath]);
-
-  useEffect(() => {
-    setActiveSession(rawSession);
-  }, [
-    session.id,
-    rawSession.rolloutPath,
-    rawSession.threadId,
-    rawSession.cwd,
-    rawSession.title,
-    rawSession.archived,
-    rawSession.modelProvider,
-    rawSession.source,
-    rawSession.isSmoke,
-  ]);
-
-  useEffect(() => {
-    cancelReplyWatch();
-    setAttachments([]);
-    void loadTurns();
-    return () => {
-      replyWatchTokenRef.current += 1;
-    };
-  }, [session.id, activeSession.rolloutPath, loadTurns, cancelReplyWatch]);
-
-  useEffect(() => {
-    turnsRef.current = turns;
-  }, [turns]);
-
-  useEffect(() => {
-    turnsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [turns]);
-
-  const handleCodexStreamEvent = useCallback((event: CodexThreadStreamEvent) => {
-    if (event.cursor) {
-      codexCursorRef.current = event.cursor;
-    }
-    if (event.kind === "error") {
-      setTurnsError(event.error ?? "codex stream error");
-      cancelReplyWatch();
-      return;
-    }
-
-    const previousTurns = turnsRef.current;
-    const nextTurns = limitSessionTurns(applyCodexStreamEvent(previousTurns, event));
-    turnsRef.current = nextTurns;
-    setTurns(nextTurns);
-
-    if (shouldClearReplyWatch(previousTurns, nextTurns, event)) {
-      cancelReplyWatch();
-    }
-  }, [cancelReplyWatch]);
-
-  useCodexThreadStream({
-    enabled: Boolean(activeSession.rolloutPath && codexStreamCursor),
-    rolloutPath: activeSession.rolloutPath ?? null,
-    cursor: codexStreamCursor,
-    onEvent: handleCodexStreamEvent,
-  });
-
-  const handleSend = async (text: string, nextAttachments: ComposerAttachment[]) => {
-    if (!activeSession.rolloutPath || (!text.trim() && nextAttachments.length === 0) || sending) {
-      return;
-    }
-
-    const trimmedText = text.trim();
-    let rolloutPath = activeSession.rolloutPath;
-    const threadId = activeSession.threadId;
-    const previousTurns = turnsRef.current;
-    const baselineAssistantCount = countAssistantEntries(previousTurns);
-    const replyWatchToken = replyWatchTokenRef.current + 1;
-    const optimisticTurns = limitSessionTurns([
-      ...previousTurns,
-      { role: "user" as const, content: trimmedText },
-    ]);
-
-    replyWatchTokenRef.current = replyWatchToken;
-
-    setSending(true);
-    setTurnsError(null);
-    setReplyWatchState("foreground");
-    turnsRef.current = optimisticTurns;
-    setTurns(optimisticTurns);
-
-    try {
-      const sendResult = await sendCodexMessage(threadId, trimmedText, nextAttachments, activeSession.cwd);
-      let effectiveThreadId = threadId;
-      let effectiveWorkspaceCwd = activeSession.cwd;
-      if (sendResult.threadId && sendResult.threadId !== threadId) {
-        const remappedSession = await resolveCodexSessionByThreadId(sendResult.threadId);
-        setActiveSession(remappedSession);
-        rolloutPath = remappedSession.rolloutPath ?? "";
-        effectiveThreadId = remappedSession.threadId;
-        effectiveWorkspaceCwd = remappedSession.cwd;
-      } else if (sendResult.threadId) {
-        effectiveThreadId = sendResult.threadId;
-      }
-      setAttachments([]);
-
-      const shouldContinue = () => replyWatchTokenRef.current === replyWatchToken;
-      const loadSnapshot = async () => {
-        const currentCursor = codexCursorRef.current;
-        const cursorResult = currentCursor
-          ? await fetchCodexThreadUpdates(rolloutPath, currentCursor)
-          : await fetchCodexThreadState(rolloutPath);
-        if (shouldContinue()) {
-          codexCursorRef.current = cursorResult.cursor;
-        }
-        const nextTurns = await fetchProviderSession("codex", effectiveThreadId, effectiveWorkspaceCwd);
-        const mergedTurns = mergeSessionTurns(previousTurns, nextTurns);
-        if (shouldContinue()) {
-          turnsRef.current = mergedTurns;
-        }
-        return mergedTurns;
-      };
-      const applySnapshot = (snapshot: SessionTurn[]) => {
-        const nextTurns = mergeSessionTurns(previousTurns, snapshot);
-        if (shouldContinue()) {
-          turnsRef.current = nextTurns;
-          setTurns(nextTurns);
-        }
-      };
-
-      const foregroundResult = await pollAssistantReply({
-        loadSnapshot,
-        getAssistantCount: countAssistantEntries,
-        getSignature: buildSnapshotSignature,
-        baselineAssistantCount,
-        baselineSnapshot: previousTurns,
-        onUpdate: applySnapshot,
-        shouldContinue,
-        ...CODEX_FOREGROUND_REPLY_POLL,
-      });
-      if (!shouldContinue()) {
-        return;
-      }
-
-      turnsRef.current = foregroundResult.snapshot;
-      setTurns(foregroundResult.snapshot);
-      if (foregroundResult.settled) {
-        setReplyWatchState(null);
-        return;
-      }
-
-      setReplyWatchState("background");
-      void (async () => {
-        const backgroundResult = await pollAssistantReply({
-          loadSnapshot,
-          getAssistantCount: countAssistantEntries,
-          getSignature: buildSnapshotSignature,
-          baselineAssistantCount,
-          baselineSnapshot: previousTurns,
-          onUpdate: applySnapshot,
-          shouldContinue,
-          ...CODEX_BACKGROUND_REPLY_POLL,
-        });
-        if (!shouldContinue()) {
-          return;
-        }
-
-        turnsRef.current = backgroundResult.snapshot;
-        setTurns(backgroundResult.snapshot);
-        setReplyWatchState(backgroundResult.settled ? null : "expired");
-      })();
-    } catch (sendError) {
-      cancelReplyWatch();
-      setTurnsError((sendError as Error).message);
-      turnsRef.current = previousTurns;
-      setTurns(previousTurns);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const replyWatchText = replyWatchState === "foreground"
-    ? t.sessions.waitingForReply
-    : replyWatchState === "background"
-      ? t.sessions.waitingInBackground
-      : replyWatchState === "expired"
-        ? t.sessions.waitingExpired
-        : null;
-
-  return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/60 bg-white/58 shadow-[0_18px_40px_rgba(15,23,42,0.06)] backdrop-blur-xl">
-      <div className="border-b border-[var(--ow-line-soft)] bg-white/74 px-5 py-4 backdrop-blur-xl">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${PROVIDER_UI.codex.chip}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${PROVIDER_UI.codex.dot}`}></span>
-                Codex
-              </span>
-              <span className="rounded-full border border-slate-200 bg-white/88 px-2.5 py-1 font-mono text-[10px] text-slate-500">
-                {activeSession.threadId.slice(0, 12)}
-              </span>
-            </div>
-            <h3 className="truncate text-base font-bold tracking-[-0.02em] text-gray-950">{activeSession.title || session.title}</h3>
-            <CodexSessionBadges session={activeSession} />
-          </div>
-
-          <button
-            onClick={() => void loadTurns()}
-            disabled={turnsLoading}
-            className="ow-btn inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-slate-600 transition-colors hover:text-gray-900 disabled:opacity-50"
-            title={t.sessions.reloadMessages}
-          >
-            <svg className={`h-4 w-4 ${turnsLoading ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-            </svg>
-            Reload
-          </button>
-        </div>
-      </div>
-
-      <div className="chat-bg min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        <div className="mx-auto flex max-w-4xl flex-col gap-6">
-          {turnsLoading ? (
-            <StatePanel message={t.common.loading} />
-          ) : turnsError ? (
-            <StatePanel message={turnsError} tone="error" />
-          ) : turns.length === 0 ? (
-            <StatePanel message={t.sessions.noMessages} />
-          ) : (
-            turns.map((turn, index) => (
-              <TurnBubble key={`${turn.role}-${index}-${turn.content}`} turn={turn} assistantLabel="Codex" />
-            ))
-          )}
-          {replyWatchText && (
-            <p className={`px-3 pb-1 text-center text-xs ${replyWatchState === "expired" ? "text-amber-600" : "text-slate-400"}`}>
-              {replyWatchText}
-            </p>
-          )}
-          <div ref={turnsEndRef} />
-        </div>
-      </div>
-
-      <SessionComposer
-        resetKey={session.id}
-        sending={sending}
-        stagingAttachments={stagingAttachments}
-        disabled={!activeSession.rolloutPath}
-        placeholder={t.sessions.sendPlaceholder}
-        sendLabel={t.sessions.send}
-        assistantLabel="Codex"
-        attachments={attachments}
-        onAttachmentsChange={setAttachments}
-        supportsAttachments={providerSupportsAttachments}
-        onPickFiles={async (_kind, files) => {
-          if (!providerSupportsAttachments) {
-            setTurnsError(t.sessions.attachmentUnsupported);
-            return;
-          }
-          setStagingAttachments(true);
-          try {
-            const staged = await stageBrowserFiles(Array.from(files as FileList));
-            setTurnsError(null);
-            setAttachments((current) => [...current, ...staged]);
-          } catch (error) {
-            setTurnsError((error as Error).message);
-          } finally {
-            setStagingAttachments(false);
-          }
-        }}
-        attachmentButtonLabel={t.sessions.attachFile}
-        imageButtonLabel={t.sessions.attachImage}
-        onSend={handleSend}
-      />
-    </div>
-  );
-}
-
-function ClaudeChat({ session, refreshSessions }: { session: UnifiedSession; refreshSessions: () => Promise<void> }) {
-  const { t } = useI18n();
-  const rawSession = session.raw as ClaudeSession;
-  
-  const [messages, setMessages] = useState<SessionTurn[]>([]);
-  const [msgLoading, setMsgLoading] = useState(false);
-  const [msgError, setMsgError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
-  const [stagingAttachments, setStagingAttachments] = useState(false);
-  const providerSupportsAttachments = true;
-  const [replyWatchState, setReplyWatchState] = useState<ReplyWatchState | null>(null);
-  const msgEndRef = useRef<HTMLDivElement>(null);
-  const replyWatchTokenRef = useRef(0);
-  const messagesRef = useRef<SessionTurn[]>([]);
-  const sendingRef = useRef(false);
-  const replyWatchStateRef = useRef<ReplyWatchState | null>(null);
-
-  const cancelReplyWatch = useCallback(() => {
-    replyWatchTokenRef.current += 1;
-    setReplyWatchState(null);
-  }, []);
-
-  const loadMessages = useCallback(async () => {
-    setMsgLoading(true);
-    setMsgError(null);
-    setMessages([]);
-    messagesRef.current = [];
-    try {
-      const nextMessages = await fetchClaudeMessages(rawSession.sessionId, rawSession.workspace);
-      messagesRef.current = nextMessages;
-      setMessages(nextMessages);
-      setReplyWatchState((current) => (current === "expired" ? null : current));
-    } catch (loadError) {
-      setMsgError((loadError as Error).message);
-    } finally {
-      setMsgLoading(false);
-    }
-  }, [rawSession.sessionId, rawSession.workspace]);
-
-  useEffect(() => {
-    cancelReplyWatch();
-    setAttachments([]);
-    void loadMessages();
-    return () => {
-      replyWatchTokenRef.current += 1;
-    };
-  }, [session.id, loadMessages, cancelReplyWatch]);
-
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
-
-  useEffect(() => {
-    sendingRef.current = sending;
-  }, [sending]);
-
-  useEffect(() => {
-    replyWatchStateRef.current = replyWatchState;
-  }, [replyWatchState]);
-
-  useEffect(() => startActiveSessionRefresh<SessionTurn>({
-    getCurrentSnapshot: () => messagesRef.current,
-    loadSnapshot: () => fetchClaudeMessages(rawSession.sessionId, rawSession.workspace),
-    onSnapshot: (nextMessages) => {
-      messagesRef.current = nextMessages;
-      setMessages(nextMessages);
-      setReplyWatchState((current) => (current === "expired" ? null : current));
-    },
-    shouldSkip: () => (
-      sendingRef.current ||
-      replyWatchStateRef.current === "foreground" ||
-      replyWatchStateRef.current === "background"
-    ),
-    onError: (error) => {
-      console.warn("Failed to refresh Claude session", error);
-    },
-  }), [rawSession.sessionId, rawSession.workspace]);
-
-  useEffect(() => {
-    msgEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const handleSend = async (text: string, nextAttachments: ComposerAttachment[]) => {
-    if ((!text.trim() && nextAttachments.length === 0) || sending) {
-      return;
-    }
-
-    const trimmedText = text.trim();
-    const originalSessionId = rawSession.sessionId;
-    const previousMessages = messagesRef.current;
-    const baselineAssistantCount = countAssistantEntries(previousMessages);
-    const replyWatchToken = replyWatchTokenRef.current + 1;
-
-    replyWatchTokenRef.current = replyWatchToken;
-
-    setSending(true);
-    setMsgError(null);
-    setReplyWatchState("foreground");
-
-    const tempMsg: SessionTurn = {
-      role: "user",
-      content: trimmedText,
-    };
-    messagesRef.current = limitSessionTurns([...previousMessages, tempMsg]);
-    setMessages(messagesRef.current);
-
-    try {
-      const sendResult = await sendClaudeMessage(
-        originalSessionId,
-        trimmedText,
-        nextAttachments,
-        rawSession.workspace,
-      );
-      setAttachments([]);
-      const activeSessionId = sendResult.sessionId || originalSessionId;
-      const bridgePrefix = activeSessionId === originalSessionId ? [] : previousMessages;
-
-      if (activeSessionId !== originalSessionId) {
-        // Here we just refresh sessions, since the parent will update the selected session
-        // we might not get the immediate re-render here, but the data will be fresh
-        void refreshSessions();
-      }
-
-      const shouldContinue = () => replyWatchTokenRef.current === replyWatchToken;
-      const applySnapshot = (snapshot: SessionTurn[]) => {
-        const nextSnapshot = bridgePrefix.length === 0
-          ? snapshot
-          : mergeSessionTurns(bridgePrefix, snapshot);
-        if (shouldContinue()) {
-          messagesRef.current = nextSnapshot;
-          setMessages(nextSnapshot);
-        }
-      };
-
-      const foregroundResult = await pollAssistantReply({
-        loadSnapshot: async () => {
-          const snapshot = await fetchClaudeMessages(activeSessionId, rawSession.workspace);
-          return bridgePrefix.length === 0
-            ? snapshot
-            : mergeSessionTurns(bridgePrefix, snapshot);
-        },
-        getAssistantCount: countAssistantEntries,
-        getSignature: buildSnapshotSignature,
-        baselineAssistantCount,
-        baselineSnapshot: previousMessages,
-        onUpdate: applySnapshot,
-        shouldContinue,
-        ...FOREGROUND_REPLY_POLL,
-      });
-      if (!shouldContinue()) {
-        return;
-      }
-
-      messagesRef.current = foregroundResult.snapshot;
-      setMessages(foregroundResult.snapshot);
-      if (foregroundResult.settled) {
-        setReplyWatchState(null);
-        return;
-      }
-
-      setReplyWatchState("background");
-      void (async () => {
-        const backgroundResult = await pollAssistantReply({
-          loadSnapshot: async () => {
-            const snapshot = await fetchClaudeMessages(activeSessionId, rawSession.workspace);
-            return bridgePrefix.length === 0
-              ? snapshot
-              : mergeSessionTurns(bridgePrefix, snapshot);
-          },
-          getAssistantCount: countAssistantEntries,
-          getSignature: buildSnapshotSignature,
-          baselineAssistantCount,
-          baselineSnapshot: previousMessages,
-          onUpdate: applySnapshot,
-          shouldContinue,
-          ...BACKGROUND_REPLY_POLL,
-        });
-        if (!shouldContinue()) {
-          return;
-        }
-
-        messagesRef.current = backgroundResult.snapshot;
-        setMessages(backgroundResult.snapshot);
-        setReplyWatchState(backgroundResult.settled ? null : "expired");
-      })();
-    } catch (sendError) {
-      cancelReplyWatch();
-      setMsgError((sendError as Error).message);
-      messagesRef.current = previousMessages;
-      setMessages(previousMessages);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const replyWatchText = replyWatchState === "foreground"
-    ? t.sessions.waitingForReply
-    : replyWatchState === "background"
-      ? t.sessions.waitingInBackground
-      : replyWatchState === "expired"
-        ? t.sessions.waitingExpired
-        : null;
-
-  return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/60 bg-white/58 shadow-[0_18px_40px_rgba(15,23,42,0.06)] backdrop-blur-xl">
-      <div className="border-b border-[var(--ow-line-soft)] bg-white/74 px-5 py-4 backdrop-blur-xl">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${PROVIDER_UI.claude.chip}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${PROVIDER_UI.claude.dot}`}></span>
-                Claude
-              </span>
-              <span className="rounded-full border border-slate-200 bg-white/88 px-2.5 py-1 font-mono text-[10px] text-slate-500">
-                {session.id.slice(0, 12)}
-              </span>
-            </div>
-            <h3 className="truncate text-base font-bold tracking-[-0.02em] text-gray-950">{session.title}</h3>
-          </div>
-
-          <button
-            onClick={() => void loadMessages()}
-            disabled={msgLoading}
-            className="ow-btn inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-slate-600 transition-colors hover:text-gray-900 disabled:opacity-50"
-            title={t.sessions.reloadMessages}
-          >
-            <svg className={`h-4 w-4 ${msgLoading ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-            </svg>
-            Reload
-          </button>
-        </div>
-      </div>
-
-      <div className="chat-bg min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        <div className="mx-auto flex max-w-4xl flex-col gap-6">
-          {msgLoading ? (
-            <StatePanel message={t.common.loading} />
-          ) : msgError ? (
-            <StatePanel message={msgError} tone="error" />
-          ) : messages.length === 0 ? (
-            <StatePanel message={t.sessions.noMessages} />
-          ) : (
-            messages.map((turn, index) => (
-              <TurnBubble key={`${turn.role}-${index}-${turn.content}`} turn={turn} assistantLabel="Claude" />
-            ))
-          )}
-          {replyWatchText && (
-            <p className={`px-3 pb-1 text-center text-xs ${replyWatchState === "expired" ? "text-amber-600" : "text-slate-400"}`}>
-              {replyWatchText}
-            </p>
-          )}
-          <div ref={msgEndRef} />
-        </div>
-      </div>
-
-      <SessionComposer
-        resetKey={session.id}
-        sending={sending}
-        stagingAttachments={stagingAttachments}
-        placeholder={t.sessions.sendPlaceholder}
-        sendLabel={t.sessions.send}
-        assistantLabel="Claude"
-        attachments={attachments}
-        onAttachmentsChange={setAttachments}
-        supportsAttachments={providerSupportsAttachments}
-        onPickFiles={async (_kind, files) => {
-          if (!providerSupportsAttachments) {
-            setMsgError(t.sessions.attachmentUnsupported);
-            return;
-          }
-          setStagingAttachments(true);
-          try {
-            const staged = await stageBrowserFiles(Array.from(files as FileList));
-            setMsgError(null);
-            setAttachments((current) => [...current, ...staged]);
-          } catch (error) {
-            setMsgError((error as Error).message);
-          } finally {
-            setStagingAttachments(false);
-          }
-        }}
-        attachmentButtonLabel={t.sessions.attachFile}
-        imageButtonLabel={t.sessions.attachImage}
-        onSend={handleSend}
-      />
-    </div>
-  );
-}
-
-function GenericProviderChat({
-  session,
-  providerSupportsAttachments,
-}: {
-  session: UnifiedSession;
-  providerSupportsAttachments: boolean;
-}) {
-  const { t } = useI18n();
-  const providerLabel = getProviderUi(session.type).label;
-  const [messages, setMessages] = useState<SessionTurn[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
-  const [stagingAttachments, setStagingAttachments] = useState(false);
-  const [replyWatchState, setReplyWatchState] = useState<ReplyWatchState | null>(null);
-  const endRef = useRef<HTMLDivElement>(null);
-  const replyWatchTokenRef = useRef(0);
-  const messagesRef = useRef<SessionTurn[]>([]);
-
-  const cancelReplyWatch = useCallback(() => {
-    replyWatchTokenRef.current += 1;
-    setReplyWatchState(null);
-  }, []);
-
-  const loadMessages = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setMessages([]);
-    messagesRef.current = [];
-    try {
-      const turns = await fetchProviderSession(session.type, session.id, session.workspace);
-      messagesRef.current = turns;
-      setMessages(turns);
-      setReplyWatchState((current) => (current === "expired" ? null : current));
-    } catch (loadError) {
-      setError((loadError as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [session.id, session.type, session.workspace]);
-
-  useEffect(() => {
-    cancelReplyWatch();
-    setAttachments([]);
-    void loadMessages();
-    return () => {
-      replyWatchTokenRef.current += 1;
-    };
-  }, [loadMessages, cancelReplyWatch]);
-
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const handleSend = async (trimmedText: string, nextAttachments: ComposerAttachment[]) => {
-    if (!trimmedText.trim() && nextAttachments.length === 0) {
-      return;
-    }
-
-    const previousMessages = messagesRef.current;
-    const optimisticMessages = limitSessionTurns([
-      ...previousMessages,
-      {
-        role: "user" as const,
-        content: trimmedText,
-        displayMode: "plain" as const,
-      },
-    ]);
-
-    const replyWatchToken = replyWatchTokenRef.current + 1;
-    replyWatchTokenRef.current = replyWatchToken;
-    const shouldContinue = () => replyWatchTokenRef.current === replyWatchToken;
-
-    setSending(true);
-    setError(null);
-    messagesRef.current = optimisticMessages;
-    setMessages(optimisticMessages);
-    setReplyWatchState("foreground");
-
-    const baselineAssistantCount = countAssistantEntries(previousMessages);
-
-    try {
-      await sendProviderSessionMessage(session.type, session.id, trimmedText, nextAttachments, session.workspace);
-      setAttachments([]);
-
-      const loadSnapshot = async () => {
-        const snapshot = await fetchProviderSession(session.type, session.id, session.workspace);
-        if (shouldContinue()) {
-          messagesRef.current = snapshot;
-        }
-        return snapshot;
-      };
-      const applySnapshot = (snapshot: SessionTurn[]) => {
-        if (shouldContinue()) {
-          messagesRef.current = snapshot;
-          setMessages(snapshot);
-        }
-      };
-
-      const foregroundResult = await pollAssistantReply({
-        loadSnapshot,
-        getAssistantCount: countAssistantEntries,
-        getSignature: buildSnapshotSignature,
-        baselineAssistantCount,
-        baselineSnapshot: previousMessages,
-        onUpdate: applySnapshot,
-        shouldContinue,
-        ...FOREGROUND_REPLY_POLL,
-      });
-      if (!shouldContinue()) {
-        return;
-      }
-
-      messagesRef.current = foregroundResult.snapshot;
-      setMessages(foregroundResult.snapshot);
-      if (foregroundResult.settled) {
-        setReplyWatchState(null);
-        return;
-      }
-
-      setReplyWatchState("background");
-      void (async () => {
-        const backgroundResult = await pollAssistantReply({
-          loadSnapshot,
-          getAssistantCount: countAssistantEntries,
-          getSignature: buildSnapshotSignature,
-          baselineAssistantCount,
-          baselineSnapshot: previousMessages,
-          onUpdate: applySnapshot,
-          shouldContinue,
-          ...BACKGROUND_REPLY_POLL,
-        });
-        if (!shouldContinue()) {
-          return;
-        }
-
-        messagesRef.current = backgroundResult.snapshot;
-        setMessages(backgroundResult.snapshot);
-        setReplyWatchState(backgroundResult.settled ? null : "expired");
-      })();
-    } catch (sendError) {
-      cancelReplyWatch();
-      setError((sendError as Error).message);
-      messagesRef.current = previousMessages;
-      setMessages(previousMessages);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const replyWatchText = replyWatchState === "foreground"
-    ? t.sessions.waitingForReply
-    : replyWatchState === "background"
-      ? t.sessions.waitingInBackground
-      : replyWatchState === "expired"
-        ? t.sessions.waitingExpired
-        : null;
-
-  return (
-    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/60 bg-white/58 shadow-[0_18px_40px_rgba(15,23,42,0.06)] backdrop-blur-xl">
-      <div className="border-b border-[var(--ow-line-soft)] bg-white/74 px-5 py-4 backdrop-blur-xl">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-700">
-                <span className="h-1.5 w-1.5 rounded-full bg-slate-500"></span>
-                {providerLabel}
-              </span>
-              <span className="rounded-full border border-slate-200 bg-white/88 px-2.5 py-1 font-mono text-[10px] text-slate-500">
-                {session.id.slice(0, 12)}
-              </span>
-            </div>
-            <h3 className="truncate text-base font-bold tracking-[-0.02em] text-gray-950">{session.title}</h3>
-          </div>
-
-          <button
-            onClick={() => void loadMessages()}
-            disabled={loading}
-            className="ow-btn inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-slate-600 transition-colors hover:text-gray-900 disabled:opacity-50"
-            title={t.sessions.reloadMessages}
-          >
-            <svg className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-            </svg>
-            Reload
-          </button>
-        </div>
-      </div>
-
-      <div className="chat-bg flex-1 overflow-y-auto px-5 py-5">
-        <div className="mx-auto flex max-w-4xl flex-col gap-6">
-          {loading ? (
-            <StatePanel message={t.common.loading} />
-          ) : error ? (
-            <StatePanel message={error} tone="error" />
-          ) : messages.length === 0 ? (
-            <StatePanel message={t.sessions.noMessages} />
-          ) : (
-            messages.map((turn, index) => (
-              <TurnBubble
-                key={`${turn.role}-${index}-${turn.content}`}
-                turn={turn}
-                assistantLabel={providerLabel}
-              />
-            ))
-          )}
-          {replyWatchText && (
-            <p className={`px-3 pb-1 text-center text-xs ${replyWatchState === "expired" ? "text-amber-600" : "text-slate-400"}`}>
-              {replyWatchText}
-            </p>
-          )}
-          <div ref={endRef} />
-        </div>
-      </div>
-
-      <SessionComposer
-        resetKey={session.id}
-        sending={sending}
-        placeholder={t.sessions.sendPlaceholder}
-        sendLabel={t.sessions.send}
-        assistantLabel={providerLabel}
-        stagingAttachments={stagingAttachments}
-        attachments={attachments}
-        onAttachmentsChange={setAttachments}
-        supportsAttachments={providerSupportsAttachments}
-        onPickFiles={async (_kind, files) => {
-          if (!providerSupportsAttachments) {
-            setError(t.sessions.attachmentUnsupported);
-            return;
-          }
-          setStagingAttachments(true);
-          try {
-            const staged = await stageBrowserFiles(Array.from(files as FileList));
-            setError(null);
-            setAttachments((current) => [...current, ...staged]);
-          } catch (error) {
-            setError((error as Error).message);
-          } finally {
-            setStagingAttachments(false);
-          }
-        }}
-        attachmentButtonLabel={t.sessions.attachFile}
-        imageButtonLabel={t.sessions.attachImage}
-        onSend={handleSend}
-      />
-    </div>
-  );
-}
 
 export function SessionBrowser() {
   const { t } = useI18n();
@@ -1029,6 +47,9 @@ export function SessionBrowser() {
   const [archiveFilter, setArchiveFilter] = useState<ArchiveFilter>("active");
   const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [sessionContextMenu, setSessionContextMenu] = useState<SessionActionMenuState | null>(null);
+  const [archivingSessionId, setArchivingSessionId] = useState<string | null>(null);
+  const [archiveNotice, setArchiveNotice] = useState<ArchiveNotice | null>(null);
   const loadedProvidersRef = useRef<Set<ProviderFilter>>(new Set());
   const loadTokenRef = useRef(0);
   const visibleProviders = useMemo(
@@ -1070,7 +91,33 @@ export function SessionBrowser() {
   useEffect(() => {
     setSelectedWorkspace(null);
     setSelectedSessionId(null);
+    setSessionContextMenu(null);
+    setArchiveNotice(null);
   }, [providerFilter]);
+
+  useEffect(() => {
+    if (sessionContextMenu === null) {
+      return;
+    }
+
+    const closeMenu = () => setSessionContextMenu(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeMenu();
+      }
+    };
+
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("contextmenu", closeMenu);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("blur", closeMenu);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("contextmenu", closeMenu);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("blur", closeMenu);
+    };
+  }, [sessionContextMenu]);
 
   const loadProvider = useCallback(async (
     provider: ProviderFilter,
@@ -1118,6 +165,55 @@ export function SessionBrowser() {
   const refreshCurrentProvider = useCallback(async () => {
     await loadProvider(providerFilter, { force: true });
   }, [loadProvider, providerFilter]);
+
+  const openSessionContextMenu = useCallback((
+    event: MouseEvent<HTMLElement>,
+    session: UnifiedSession,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setArchiveNotice(null);
+    setSessionContextMenu({
+      session,
+      x: Math.min(event.clientX, window.innerWidth - 180),
+      y: Math.min(event.clientY, window.innerHeight - 72),
+    });
+  }, []);
+
+  const openSessionActionMenu = useCallback((
+    event: MouseEvent<HTMLElement>,
+    session: UnifiedSession,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setArchiveNotice(null);
+    setSessionContextMenu({
+      session,
+      x: Math.min(Math.max(rect.right - 176, 8), window.innerWidth - 180),
+      y: Math.min(rect.bottom + 6, window.innerHeight - 72),
+    });
+  }, []);
+
+  const handleArchiveSession = useCallback(async (session: UnifiedSession) => {
+    setSessionContextMenu(null);
+    if (session.archived || archivingSessionId !== null) {
+      return;
+    }
+
+    setArchivingSessionId(session.id);
+    setArchiveNotice(null);
+    const nextNotice = await archiveSessionWithFeedback({
+      session,
+      selectedSessionId,
+      refreshCurrentProvider,
+      onArchivedSelection: () => setSelectedSessionId(null),
+      successText: t.sessions.archiveSucceeded,
+      failureText: t.sessions.archiveFailed,
+    });
+    setArchiveNotice(nextNotice);
+    setArchivingSessionId(null);
+  }, [archivingSessionId, refreshCurrentProvider, selectedSessionId, t.sessions]);
 
   const unifiedSessions = useMemo<UnifiedSession[]>(() => {
     if (providerFilter === "codex") {
@@ -1169,183 +265,52 @@ export function SessionBrowser() {
 
   return (
     <div className="ow-page-frame flex h-full flex-1 flex-col overflow-hidden rounded-[30px]">
-      <div className="border-b border-[var(--ow-line-soft)] px-4 py-3">
-        <div className="ow-toolbar flex items-center justify-between gap-3 rounded-[22px] px-3 py-2.5">
-          <div className="ow-segment inline-flex rounded-2xl p-1">
-            {visibleProviders.map((provider) => {
-              const p = provider.id;
-              const ui = getProviderUi(p, provider.label);
-              return (
-              <button
-                key={p}
-                onClick={() => setProviderFilter(p)}
-                className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-all ${
-                  providerFilter === p
-                    ? `${ui.tabActive}`
-                    : "text-slate-500 hover:text-gray-800"
-                }`}
-              >
-                <span className={`h-2 w-2 rounded-full ${ui.dot}`}></span>
-                {ui.label}
-              </button>
-              );
-            })}
-          </div>
-
-          <button
-            onClick={() => void refreshCurrentProvider()}
-            className="ow-btn inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold text-slate-600 transition-colors hover:text-gray-900"
-          >
-            <svg className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-            </svg>
-            Refresh
-          </button>
-        </div>
-      </div>
+      <SessionProviderToolbar
+        providers={visibleProviders}
+        providerFilter={providerFilter}
+        loading={loading}
+        onProviderChange={setProviderFilter}
+        onRefresh={() => void refreshCurrentProvider()}
+      />
 
       <div className="flex flex-1 gap-3 overflow-hidden p-3">
-        <div className="ow-page-frame-soft flex w-[268px] shrink-0 flex-col overflow-hidden rounded-[26px]">
-          <div className="border-b border-[var(--ow-line-soft)] px-4 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Workspaces</p>
-                <p className="mt-1 text-xs text-slate-400">Filter by project path</p>
+        <WorkspaceSidebar
+          workspaces={workspaces}
+          sessions={unifiedSessions}
+          providerFilter={providerFilter}
+          providerLabels={providerLabels}
+          selectedWorkspace={selectedWorkspace}
+          noSessionsLabel={t.sessions.noSessions}
+          onSelectWorkspace={setSelectedWorkspace}
+        />
+
+        <SessionListPanel
+          sessions={filteredSessions}
+          providerFilter={providerFilter}
+          providerLabels={providerLabels}
+          selectedSessionId={selectedSessionId}
+          archiveFilter={archiveFilter}
+          archivingSessionId={archivingSessionId}
+          archiveNotice={archiveNotice}
+          labels={{
+            active: "Active",
+            archived: "Archived",
+            archivingSession: t.sessions.archivingSession,
+            noSessions: t.sessions.noSessions,
+            sessionActions: t.sessions.sessionActions,
+          }}
+          renderSessionMeta={(session) => (
+            session.type === "codex" ? (
+              <div className="pl-1">
+                <CodexSessionBadges session={session.raw as CodexSession} compact />
               </div>
-              <span className="rounded-full border border-white/80 bg-white/85 px-2.5 py-1 text-[11px] font-semibold text-slate-500 shadow-sm">
-                {workspaces.length}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
-            {workspaces.length === 0 ? (
-              <StatePanel message={t.sessions.noSessions} />
-            ) : workspaces.map((ws) => {
-              const name = ws.split("/").pop() || ws;
-              const count = unifiedSessions.filter((s) => s.workspace === ws).length;
-              const isActive = selectedWorkspace === ws;
-              const providerUi = getProviderUi(providerFilter, providerLabels[providerFilter]);
-              const activeClasses = isActive
-                ? providerUi.workspaceActive
-                : "border-transparent bg-white/50 hover:border-[var(--ow-line)] hover:bg-white/88";
-
-              return (
-                <button
-                  key={ws}
-                  onClick={() => setSelectedWorkspace(isActive ? null : ws)}
-                  className={`group flex w-full items-center gap-3 rounded-[20px] border px-3 py-3 text-left transition-all ${activeClasses}`}
-                >
-                  <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-2xl ${
-                    isActive
-                      ? providerUi.iconActive
-                      : "bg-white/88 text-slate-400 group-hover:text-slate-600"
-                  }`}>
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
-                    </svg>
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className={`block truncate text-sm ${isActive ? "font-semibold text-gray-950" : "font-medium text-gray-700"}`}>{name}</span>
-                    <span className="mt-1 block truncate text-[11px] text-slate-400">{ws}</span>
-                  </span>
-                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                    isActive
-                      ? "border border-white/80 bg-white/92 text-slate-700 shadow-sm"
-                      : "bg-slate-100/90 text-slate-500"
-                  }`}>
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="ow-page-frame-soft flex w-[328px] shrink-0 flex-col overflow-hidden rounded-[26px]">
-          <div className="border-b border-[var(--ow-line-soft)] px-4 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Sessions</p>
-                <p className="mt-1 text-xs text-slate-400">Keep the reading path unchanged</p>
-              </div>
-              {(() => {
-                const providerUi = getProviderUi(providerFilter, providerLabels[providerFilter]);
-                return (
-                  <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${providerUi.chip}`}>
-                    <span className={`h-1.5 w-1.5 rounded-full ${providerUi.dot}`}></span>
-                    {providerUi.label}
-                  </span>
-                );
-              })()}
-            </div>
-
-            <div className="ow-segment mt-3 grid grid-cols-2 rounded-2xl p-1">
-              <button
-                onClick={() => setArchiveFilter("active")}
-                className={`rounded-xl px-3 py-2 text-xs font-semibold transition-all ${
-                  archiveFilter === "active"
-                    ? "ow-segment-button-active"
-                    : "ow-segment-button hover:text-gray-700"
-                }`}
-              >
-                Active
-              </button>
-              <button
-                onClick={() => setArchiveFilter("archived")}
-                className={`rounded-xl px-3 py-2 text-xs font-semibold transition-all ${
-                  archiveFilter === "archived"
-                    ? "ow-segment-button-active"
-                    : "ow-segment-button hover:text-gray-700"
-                }`}
-              >
-                Archived
-              </button>
-            </div>
-          </div>
-
-          <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
-            {filteredSessions.length === 0 ? (
-              <StatePanel message={t.sessions.noSessions} />
-            ) : filteredSessions.map((session) => {
-              const isActive = selectedSessionId === session.id;
-              const ui = getProviderUi(session.type, providerLabels[session.type]);
-
-              return (
-                <button
-                  key={session.id}
-                  onClick={() => setSelectedSessionId(session.id)}
-                  className={`relative flex w-full flex-col rounded-[22px] border px-4 py-4 text-left transition-all ${
-                    isActive
-                      ? `${ui.sessionActive} shadow-[0_12px_28px_rgba(15,23,42,0.08)]`
-                      : "border-transparent bg-white/72 hover:border-[var(--ow-line)] hover:bg-white"
-                  }`}
-                >
-                  {isActive && (
-                    <span className={`absolute left-0 top-4 bottom-4 w-1 rounded-r-full ${ui.dot}`}></span>
-                  )}
-                  <div className="mb-2 flex items-center justify-between gap-2 pl-1">
-                    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${ui.chip}`}>
-                      <span className={`h-1.5 w-1.5 rounded-full ${ui.dot}`}></span>
-                      {ui.label}
-                    </span>
-                  </div>
-                  <h4 className={`line-clamp-2 pl-1 text-sm leading-6 ${isActive ? "font-semibold text-gray-950" : "font-medium text-gray-700"}`}>
-                    {session.title}
-                  </h4>
-                  {session.type === "codex" ? (
-                    <div className="pl-1">
-                      <CodexSessionBadges session={session.raw as CodexSession} compact />
-                    </div>
-                  ) : null}
-                  <p className="mt-2 truncate pl-1 font-mono text-[11px] text-slate-400">
-                    {session.id.slice(0, 12)}
-                  </p>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+            ) : null
+          )}
+          onArchiveFilterChange={setArchiveFilter}
+          onSelectSession={setSelectedSessionId}
+          onOpenContextMenu={openSessionContextMenu}
+          onOpenActionMenu={openSessionActionMenu}
+        />
 
         <div className="min-w-0 flex-1 overflow-hidden rounded-[28px]">
           {selectedSession ? (
@@ -1366,6 +331,18 @@ export function SessionBrowser() {
           )}
         </div>
       </div>
+      {sessionContextMenu ? (
+        <SessionActionMenu
+          menu={sessionContextMenu}
+          archivingSessionId={archivingSessionId}
+          labels={{
+            archiveSession: t.sessions.archiveSession,
+            archivingSession: t.sessions.archivingSession,
+            alreadyArchived: t.sessions.alreadyArchived,
+          }}
+          onArchive={(session) => void handleArchiveSession(session)}
+        />
+      ) : null}
     </div>
   );
 }

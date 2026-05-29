@@ -8,6 +8,69 @@ from core.storage import AppStorage, ThreadInfo, WorkspaceInfo
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_serves_provider_usage_summary(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    called = {}
+
+    def get_summary(start_date, end_date):
+        called["range"] = (start_date, end_date)
+        return {
+            "days": [
+                {
+                    "date": "2026-05-21",
+                    "inputTokens": 9,
+                    "outputTokens": 1,
+                    "cacheCreationTokens": 2,
+                    "cacheReadTokens": 3,
+                    "totalTokens": 15,
+                    "totalCostUsd": None,
+                }
+            ]
+        }
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            usage_hooks=SimpleNamespace(get_summary=get_summary)
+        )
+        if name == "overlay-tool"
+        else None,
+    )
+    monkeypatch.setattr("core.provider_session_bridge._unix_time_seconds", lambda: 1770000000)
+
+    bridge = ProviderOwnerBridge(AppState(storage=AppStorage()), data_dir=str(tmp_path))
+    response = await bridge._handle_usage_summary(
+        {
+            "provider_id": "overlay-tool",
+            "start_date": "2026-05-20",
+            "end_date": "2026-05-21",
+        }
+    )
+
+    assert called["range"] == ("2026-05-20", "2026-05-21")
+    assert response == {
+        "ok": True,
+        "summary": {
+            "providerId": "overlay-tool",
+            "days": [
+                {
+                    "date": "2026-05-21",
+                    "inputTokens": 9,
+                    "outputTokens": 1,
+                    "cacheCreationTokens": 2,
+                    "cacheReadTokens": 3,
+                    "totalTokens": 15,
+                    "totalCostUsd": None,
+                }
+            ],
+            "updatedAtEpoch": 1770000000,
+            "unsupportedReason": None,
+        },
+    }
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_uses_registry_message_hooks(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
@@ -732,6 +795,133 @@ async def test_provider_owner_bridge_lists_sessions_via_provider_facts(monkeypat
         ("/tmp/beta", 77),
         ("/tmp/alpha", 77),
     ]
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_archives_session_via_real_thread_hook(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    archived = {}
+    saved = {}
+    storage = AppStorage()
+    storage.workspaces["overlay-tool:/tmp/project-a"] = WorkspaceInfo(
+        name="project-a",
+        path="/tmp/project-a",
+        tool="overlay-tool",
+        daemon_workspace_id="overlay-tool:/tmp/project-a",
+        threads={
+            "tid-archive": ThreadInfo(
+                thread_id="tid-archive",
+                archived=False,
+                is_active=True,
+                source="app",
+            )
+        },
+    )
+    state = AppState(storage=storage)
+    adapter = SimpleNamespace(
+        connected=True,
+        register_workspace_cwd=lambda workspace_id, cwd: archived.update(
+            {"registered": (workspace_id, cwd)}
+        ),
+    )
+    state.set_adapter("overlay-tool", adapter)
+
+    async def archive_thread(app_state, ws_info, thread_id, active_adapter):
+        archived["workspace_id"] = ws_info.daemon_workspace_id
+        archived["workspace_path"] = ws_info.path
+        archived["thread_id"] = thread_id
+        archived["adapter"] = active_adapter
+        archived["state"] = app_state
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            thread_hooks=SimpleNamespace(archive_thread=archive_thread)
+        )
+        if name == "overlay-tool"
+        else None,
+    )
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.save_storage",
+        lambda storage_arg: saved.update({"storage": storage_arg}),
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_archive_session(
+        {
+            "provider_id": "overlay-tool",
+            "session_id": "tid-archive",
+            "workspace_dir": "/tmp/project-a",
+        }
+    )
+
+    assert response == {
+        "ok": True,
+        "provider_id": "overlay-tool",
+        "thread_id": "tid-archive",
+        "workspace_id": "overlay-tool:/tmp/project-a",
+        "workspace_dir": "/tmp/project-a",
+    }
+    assert archived["registered"] == ("overlay-tool:/tmp/project-a", "/tmp/project-a")
+    assert archived["workspace_id"] == "overlay-tool:/tmp/project-a"
+    assert archived["workspace_path"] == "/tmp/project-a"
+    assert archived["thread_id"] == "tid-archive"
+    assert archived["adapter"] is adapter
+    assert archived["state"] is state
+    assert saved["storage"] is storage
+    thread = storage.workspaces["overlay-tool:/tmp/project-a"].threads["tid-archive"]
+    assert thread.archived is True
+    assert thread.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_archive_failure_keeps_local_state(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    storage = AppStorage()
+    storage.workspaces["overlay-tool:/tmp/project-a"] = WorkspaceInfo(
+        name="project-a",
+        path="/tmp/project-a",
+        tool="overlay-tool",
+        daemon_workspace_id="overlay-tool:/tmp/project-a",
+        threads={
+            "tid-archive": ThreadInfo(
+                thread_id="tid-archive",
+                archived=False,
+                is_active=True,
+                source="app",
+            )
+        },
+    )
+    state = AppState(storage=storage)
+    state.set_adapter("overlay-tool", SimpleNamespace(connected=True))
+
+    async def archive_thread(_state, _ws_info, _thread_id, _adapter):
+        raise RuntimeError("source archive failed")
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            thread_hooks=SimpleNamespace(archive_thread=archive_thread)
+        )
+        if name == "overlay-tool"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_archive_session(
+        {
+            "provider_id": "overlay-tool",
+            "session_id": "tid-archive",
+            "workspace_dir": "/tmp/project-a",
+        }
+    )
+
+    assert response == {"ok": False, "error": "source archive failed"}
+    thread = storage.workspaces["overlay-tool:/tmp/project-a"].threads["tid-archive"]
+    assert thread.archived is False
+    assert thread.is_active is True
 
 
 @pytest.mark.asyncio

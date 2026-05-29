@@ -40,6 +40,16 @@ from core.providers.interactions import (
 )
 from core.telegram_formatting import format_telegram_assistant_final_text
 from core.notifications import NotificationEvent, build_notification_router
+from core.notifications.result_summary import (
+    notification_result_message as _notification_result_message,
+    notification_result_task_override_with_ai,
+    notification_safe_preview_title as _notification_safe_preview_title,
+    notification_summary_text as _notification_summary_text,
+    notification_text_is_url_only as _notification_text_is_url_only,
+    notification_title_from_summary as _notification_title_from_summary,
+    short_notification_title as _short_notification_title,
+)
+from core.ai.scenarios import run_ai_scenario
 from core.storage import save_storage, ThreadInfo
 from bot.handlers.common import (
     _send_to_group,
@@ -68,6 +78,13 @@ logger = logging.getLogger(__name__)
 
 # 流式输出节流间隔（秒）
 THROTTLE_INTERVAL = 0.6
+
+
+async def _notification_result_task_override_with_ai(**kwargs):
+    return await notification_result_task_override_with_ai(
+        **kwargs,
+        run_scenario=run_ai_scenario,
+    )
 
 # 防止 turn/started 并发重复建同一个 thread topic
 _MATERIALIZING_THREAD_TOPICS: set[str] = set()
@@ -666,6 +683,28 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         }
         return known.get(name.lower(), name[:1].upper() + name[1:])
 
+    def _notification_explicit_task_summary(agent_id: str, thread_id: Optional[str]) -> str:
+        if not agent_id or not thread_id:
+            return ""
+        run = state.get_provider_current_run(agent_id, thread_id)
+        if run is not None and getattr(run, "task_summary", ""):
+            return str(run.task_summary)
+        summary = state.get_provider_task_summary(agent_id, thread_id)
+        if summary:
+            return str(summary)
+        return ""
+
+    def _notification_raw_task_summary(agent_id: str, thread_id: Optional[str]) -> str:
+        summary = _notification_explicit_task_summary(agent_id, thread_id)
+        if summary:
+            return summary
+        found = state.find_thread_by_id_global(thread_id)
+        if found:
+            _ws_info, thread_info = found
+            if not _notification_text_is_url_only(thread_info.preview):
+                return str(thread_info.preview or "")
+        return ""
+
     def _notification_context(ctx: "EventContext", thread_id: Optional[str]):
         ws_info = _resolve_workspace_info(state, ctx.ws_daemon_id, thread_id)
         thread_info = None
@@ -680,12 +719,19 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             or state.get_tool_for_workspace(ctx.ws_daemon_id)
             or "agent"
         ).strip()
-        task_name = str(
-            (thread_info.preview if thread_info is not None else "")
-            or (ws_info.name if ws_info is not None else "")
+        explicit_summary = _notification_explicit_task_summary(agent_id, thread_id)
+        preview_title = (
+            _notification_safe_preview_title(thread_info.preview)
+            if thread_info is not None
+            else ""
+        )
+        task_name = (
+            _notification_title_from_summary(explicit_summary)
+            or preview_title
+            or _short_notification_title(ws_info.name if ws_info is not None else "")
             or (thread_id[:8] if thread_id else "")
             or "Task"
-        ).strip()
+        )
         return agent_id, _display_agent_name(agent_id), task_name
 
     def _notification_task_id(ctx: "EventContext", thread_id: Optional[str], fallback_id: str = "") -> str:
@@ -699,12 +745,10 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         return str(turn_id or fallback_id or thread_id or ctx.ws_daemon_id or "task")
 
     def _notification_task_summary(agent_id: str, thread_id: Optional[str]) -> str:
-        if not agent_id or not thread_id:
+        summary = _notification_raw_task_summary(agent_id, thread_id)
+        if _notification_text_is_url_only(summary):
             return ""
-        run = state.get_provider_current_run(agent_id, thread_id)
-        if run is not None and getattr(run, "task_summary", ""):
-            return str(run.task_summary)
-        return state.get_provider_task_summary(agent_id, thread_id)
+        return _notification_summary_text(summary)
 
     async def _emit_notification(
         ctx: "EventContext",
@@ -713,11 +757,19 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         status: str,
         message: str,
         task_id: str = "",
+        task_name_override: str = "",
+        task_summary_override: str | None = None,
     ) -> None:
         if notification_router is None:
             return
 
         agent_id, agent_name, task_name = _notification_context(ctx, thread_id)
+        task_name = task_name_override or task_name
+        task_summary = (
+            task_summary_override
+            if task_summary_override is not None
+            else _notification_task_summary(agent_id, thread_id)
+        )
         try:
             event = NotificationEvent(
                 status=status,
@@ -726,7 +778,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 message=message,
                 task_id=task_id or _notification_task_id(ctx, thread_id),
                 agent_id=agent_id,
-                task_summary=_notification_task_summary(agent_id, thread_id),
+                task_summary=task_summary,
             )
             result = await notification_router.notify(event)
         except Exception as e:
@@ -1265,6 +1317,10 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             phase = str(item.get("phase", "") or "")
             notification_status = ""
             notification_message = ""
+            notification_task_name_override = ""
+            notification_task_summary_override: str | None = None
+            notification_task_name_snapshot = ""
+            notification_task_summary_snapshot: str | None = None
             if semantic_payload:
                 text = str(semantic_payload.get("text") or text).strip()
                 phase = str(semantic_payload.get("phase") or phase or "")
@@ -1295,6 +1351,27 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                     {"status": "completed"},
                     ctx,
                 )
+            if phase == "final_answer" and notification_status == "completed":
+                (
+                    _snapshot_agent_id,
+                    _snapshot_agent_name,
+                    notification_task_name_snapshot,
+                ) = _notification_context(ctx, thread_id)
+                notification_task_summary_snapshot = _notification_task_summary(_snapshot_agent_id, thread_id)
+                (
+                    notification_task_name_override,
+                    result_task_summary,
+                    notification_message,
+                ) = await _notification_result_task_override_with_ai(
+                    final_message=text,
+                    current_title=notification_task_name_snapshot,
+                    current_task_summary=notification_task_summary_snapshot,
+                    agent_name=_snapshot_agent_name,
+                    status="completed",
+                    provider_id=_snapshot_agent_id,
+                )
+                if result_task_summary or notification_task_name_override:
+                    notification_task_summary_override = result_task_summary
 
             st = state.streaming_turns.get(thread_id)
             ws = _resolve_workspace_info(state, ctx.ws_daemon_id, thread_id)
@@ -1361,6 +1438,12 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                     thread_id=thread_id,
                     status=notification_status,
                     message=notification_message,
+                    task_name_override=notification_task_name_override or notification_task_name_snapshot,
+                    task_summary_override=(
+                        notification_task_summary_override
+                        if notification_task_summary_override is not None
+                        else notification_task_summary_snapshot
+                    ),
                 )
                 if st is not None:
                     st.notification_emitted = True

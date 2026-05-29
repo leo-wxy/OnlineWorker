@@ -13,6 +13,7 @@ from core.providers.contracts import (
     ProviderRuntimeHooks,
     ProviderSessionEventHooks,
     ProviderThreadHooks,
+    ProviderUsageHooks,
     ProviderWorkspaceHooks,
 )
 from core.providers.manifest import (
@@ -72,6 +73,9 @@ def create_provider_descriptor() -> ProviderDescriptor:
             try_route_owner_bridge_send=runtime.try_route_owner_bridge_send,
             supports_photo=capabilities.photos,
             supports_files=capabilities.files,
+        ),
+        usage_hooks=ProviderUsageHooks(
+            get_summary=storage_runtime.summarize_codex_usage,
         ),
         interactions=ProviderInteractionHooks(
             build_approval_reply=runtime.build_approval_reply,

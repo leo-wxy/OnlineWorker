@@ -27,7 +27,6 @@ const CIVILITY_MODE_SEALED = true;
 
 interface ProviderCliDraft {
   bin: string;
-  upstreamBaseUrl: string;
   launcherWrapsClaude: boolean;
 }
 
@@ -82,7 +81,6 @@ export function ProviderSettingsPanel({ mode }: Props) {
           provider.id,
           {
             bin: provider.bin ?? provider.install?.cliNames?.[0] ?? provider.id,
-            upstreamBaseUrl: provider.externalCli?.upstreamBaseUrl ?? "",
             launcherWrapsClaude: provider.externalCli?.launcherWrapsClaude ?? false,
           },
         ])
@@ -155,7 +153,6 @@ export function ProviderSettingsPanel({ mode }: Props) {
       const provider = byId.get(providerId);
       const previous = current[providerId] ?? {
         bin: provider?.bin ?? provider?.install?.cliNames?.[0] ?? providerId,
-        upstreamBaseUrl: provider?.externalCli?.upstreamBaseUrl ?? "",
         launcherWrapsClaude: provider?.externalCli?.launcherWrapsClaude ?? false,
       };
       return {
@@ -171,7 +168,6 @@ export function ProviderSettingsPanel({ mode }: Props) {
   const saveProviderCliConfig = async (provider: ProviderMetadata) => {
     const draft = cliDrafts[provider.id] ?? {
       bin: provider.bin ?? provider.install?.cliNames?.[0] ?? provider.id,
-      upstreamBaseUrl: provider.externalCli?.upstreamBaseUrl ?? "",
       launcherWrapsClaude: provider.externalCli?.launcherWrapsClaude ?? false,
     };
     setSavingCliProviderId(provider.id);
@@ -180,7 +176,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
         providerId: provider.id,
         bin: draft.bin.trim(),
         externalCli: {
-          upstreamBaseUrl: draft.upstreamBaseUrl.trim() || null,
+          upstreamBaseUrl: null,
           launcherWrapsClaude: supportsClaudeLauncher(provider.id) && draft.launcherWrapsClaude,
         },
       });
@@ -263,7 +259,6 @@ export function ProviderSettingsPanel({ mode }: Props) {
           const civilityModeEnabled = provider?.messageHooks?.abusiveLanguageNormalization.enabled ?? true;
           const draft = cliDrafts[setting.id] ?? {
             bin: provider?.bin ?? provider?.install?.cliNames?.[0] ?? setting.id,
-            upstreamBaseUrl: provider?.externalCli?.upstreamBaseUrl ?? "",
             launcherWrapsClaude: provider?.externalCli?.launcherWrapsClaude ?? false,
           };
           return (
@@ -348,22 +343,13 @@ export function ProviderSettingsPanel({ mode }: Props) {
                     <h4 className="text-sm font-bold text-gray-900">{texts.externalCliTitle}</h4>
                     {cliBusy && <span className="text-xs font-semibold text-blue-600">{texts.saving}</span>}
                   </div>
-                  <div className="grid gap-3 md:grid-cols-2">
+                  <div className="grid gap-3">
                     <label className="grid gap-1.5 text-xs font-bold text-slate-600">
                       {texts.externalCliBin}
                       <input
                         value={draft.bin}
                         disabled={cliBusy}
                         onChange={(event) => updateCliDraft(setting.id, { bin: event.currentTarget.value })}
-                        className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-mono text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
-                      />
-                    </label>
-                    <label className="grid gap-1.5 text-xs font-bold text-slate-600">
-                      {texts.externalCliUpstreamBaseUrl}
-                      <input
-                        value={draft.upstreamBaseUrl}
-                        disabled={cliBusy}
-                        onChange={(event) => updateCliDraft(setting.id, { upstreamBaseUrl: event.currentTarget.value })}
                         className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-mono text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
                       />
                     </label>

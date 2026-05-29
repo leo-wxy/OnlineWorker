@@ -344,7 +344,9 @@ async def test_claude_http_proxy_probe_writes_visible_request_event(capsys):
         assert "[claude-http-proxy]" in stderr
         assert '"event": "request"' in stderr
         assert '"path": "/v1/messages"' in stderr
-        assert '"Authorization": "[REDACTED]"' in stderr
+        event = json.loads(stderr.split("[claude-http-proxy] ", 1)[1])
+        headers = {key.lower(): value for key, value in event["headers"].items()}
+        assert headers["authorization"] == "[REDACTED]"
         assert "Bearer secret" not in stderr
         assert "model=claude-sonnet-4-5" in stderr
         assert "text=你妈的，继续解释" in stderr

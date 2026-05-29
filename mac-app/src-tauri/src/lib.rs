@@ -11,6 +11,7 @@ use tauri::Manager;
 use tokio::sync::Mutex;
 
 use commands::attachment_cache::{clear_attachment_cache, get_attachment_cache_stats};
+use commands::ai_config::test_ai_service_connection;
 use commands::claude::{list_claude_sessions, read_claude_session, send_claude_session_message};
 use commands::codex::{
     list_codex_threads, read_codex_thread, read_codex_thread_state, read_codex_thread_updates,
@@ -21,16 +22,16 @@ use commands::command_registry::{
     set_command_telegram_enabled,
 };
 use commands::config::{
-    check_first_run, create_default_config, get_notification_channels, get_provider_metadata,
+    check_first_run, create_default_config, get_ai_config, get_notification_channels, get_provider_metadata,
     list_env_keys, read_config, read_env, read_env_field, read_env_raw,
     read_provider_runtime_policies_from_disk, reveal_env_field, set_notification_channel_config,
-    set_notification_channel_enabled, set_provider_cli_config, set_provider_flags,
+    set_notification_channel_enabled, set_ai_config, set_provider_cli_config, set_provider_flags,
     set_provider_message_hook_enabled, write_config, write_env, write_env_field,
 };
 use commands::dashboard::get_dashboard_state;
 use commands::logs::{get_log_file_path, start_log_tail, stop_log_tail};
 use commands::provider_sessions::{
-    list_provider_sessions, read_provider_session, send_provider_session_message,
+    archive_provider_session, list_provider_sessions, read_provider_session, send_provider_session_message,
     stage_session_composer_attachments, start_provider_session_stream,
     stop_provider_session_stream,
 };
@@ -72,7 +73,7 @@ impl AppExitState {
     }
 }
 
-fn should_exit_app_on_window_close(window_label: &str, app_is_exiting: bool) -> bool {
+fn should_hide_window_on_close(window_label: &str, app_is_exiting: bool) -> bool {
     window_label == "main" && !app_is_exiting
 }
 
@@ -244,6 +245,7 @@ pub fn run() {
             service_restart,
             service_stop,
             service_status,
+            test_ai_service_connection,
             get_dashboard_state,
             check_http_health,
             check_cli,
@@ -262,6 +264,8 @@ pub fn run() {
             set_provider_flags,
             set_provider_cli_config,
             set_provider_message_hook_enabled,
+            get_ai_config,
+            set_ai_config,
             get_notification_channels,
             set_notification_channel_config,
             set_notification_channel_enabled,
@@ -282,6 +286,7 @@ pub fn run() {
             send_claude_session_message,
             list_provider_sessions,
             read_provider_session,
+            archive_provider_session,
             send_provider_session_message,
             stage_session_composer_attachments,
             start_provider_session_stream,
@@ -298,13 +303,12 @@ pub fn run() {
             create_default_config,
         ])
         .on_window_event(|window, event| match event {
-            tauri::WindowEvent::CloseRequested { .. } => {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
                 let app = window.app_handle().clone();
                 let exit_state = app.state::<AppExitState>();
-                if should_exit_app_on_window_close(window.label(), exit_state.is_exiting()) {
-                    exit_state.mark_exiting();
-                    cleanup_managed_processes_for_exit_once(&app);
-                    app.exit(0);
+                if should_hide_window_on_close(window.label(), exit_state.is_exiting()) {
+                    api.prevent_close();
+                    let _ = window.hide();
                 }
             }
             tauri::WindowEvent::Destroyed => {
@@ -351,24 +355,24 @@ mod tests {
         default_provider_overlay_env, launch_service_self_check_delay,
         service_guard_check_interval, should_auto_start_service_after_launch,
         should_auto_start_service_in_session, should_cleanup_on_destroy,
-        should_exit_app_on_window_close, should_restore_main_window_on_reopen, AppExitState,
+        should_hide_window_on_close, should_restore_main_window_on_reopen, AppExitState,
     };
     use crate::commands::service::ServiceStatus;
     use std::{fs, time::Duration};
 
     #[test]
-    fn main_window_close_requests_app_exit_when_app_is_not_exiting() {
-        assert!(should_exit_app_on_window_close("main", false));
+    fn main_window_close_hides_window_when_app_is_not_exiting() {
+        assert!(should_hide_window_on_close("main", false));
     }
 
     #[test]
-    fn main_window_close_does_not_request_duplicate_exit_when_app_is_already_exiting() {
-        assert!(!should_exit_app_on_window_close("main", true));
+    fn main_window_close_does_not_hide_window_when_app_is_already_exiting() {
+        assert!(!should_hide_window_on_close("main", true));
     }
 
     #[test]
-    fn non_main_window_close_does_not_request_app_exit() {
-        assert!(!should_exit_app_on_window_close("settings", false));
+    fn non_main_window_close_does_not_hide_window() {
+        assert!(!should_hide_window_on_close("settings", false));
     }
 
     #[test]

@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -368,6 +369,146 @@ async def test_slash_router_handles_help_locally_in_thread_topic():
     ctx.bot.send_message.assert_awaited_once()
     sent_text = ctx.bot.send_message.await_args.kwargs["text"]
     assert "Thread Topic 命令" in sent_text
+
+
+@pytest.mark.asyncio
+async def test_slash_router_handles_token_usage_locally_in_agent_topic(monkeypatch):
+    from bot.handlers.slash import make_slash_command_handler
+
+    state = _build_state(tool="custom")
+    ws = state.storage.workspaces["custom:onlineWorker"]
+    ws.threads["custom-1"] = ThreadInfo(
+        thread_id="custom-1",
+        topic_id=100,
+        archived=False,
+        preview="existing preview",
+    )
+
+    adapter = MagicMock()
+    adapter.connected = True
+    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.send_user_message = AsyncMock(return_value={})
+    state.set_adapter("custom", adapter)
+
+    calls = []
+
+    def fake_usage_summary(provider_id, start_date, end_date):
+        calls.append((provider_id, start_date, end_date))
+        return {
+            "providerId": provider_id,
+            "startDate": start_date,
+            "endDate": end_date,
+            "days": [
+                {
+                    "date": "2026-05-28",
+                    "totalTokens": 1234,
+                    "inputTokens": 100,
+                    "outputTokens": 200,
+                    "cacheCreationTokens": 30,
+                    "cacheReadTokens": 40,
+                    "totalCostUsd": 0.12,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        "bot.handlers.common.get_provider_usage_summary",
+        fake_usage_summary,
+    )
+    monkeypatch.setattr(
+        "bot.handlers.common._token_usage_today",
+        lambda: date(2026, 5, 28),
+    )
+    monkeypatch.setattr(
+        "bot.handlers.slash.classify_provider",
+        lambda name, cfg: "available" if name == "custom" else "unknown_provider",
+    )
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.message_id = 506
+    update.effective_message.text = "/token_usage"
+    update.effective_message.caption = None
+    update.effective_message.photo = None
+    update.effective_message.message_thread_id = 10
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+    ctx.args = None
+
+    handler = make_slash_command_handler(state, GROUP_CHAT_ID, state.config)
+    await handler(update, ctx)
+
+    assert calls == [("custom", "2026-05-22", "2026-05-28")]
+    adapter.resume_thread.assert_not_awaited()
+    adapter.send_user_message.assert_not_awaited()
+    ctx.bot.send_message.assert_awaited_once()
+    sent = ctx.bot.send_message.await_args.kwargs
+    assert sent["message_thread_id"] == 10
+    assert "custom 用量" in sent["text"]
+    assert "2026-05-22 ~ 2026-05-28" in sent["text"]
+    assert "总 token：1,234" in sent["text"]
+    assert "输入：100" in sent["text"]
+    assert "输出：200" in sent["text"]
+    assert "成本：$0.120000" in sent["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_router_rejects_token_usage_in_thread_topic(monkeypatch):
+    from bot.handlers.slash import make_slash_command_handler
+
+    state = _build_state(tool="custom")
+    ws = state.storage.workspaces["custom:onlineWorker"]
+    ws.threads["custom-1"] = ThreadInfo(
+        thread_id="custom-1",
+        topic_id=100,
+        archived=False,
+        preview="existing preview",
+    )
+
+    adapter = MagicMock()
+    adapter.connected = True
+    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.send_user_message = AsyncMock(return_value={})
+    state.set_adapter("custom", adapter)
+
+    usage_summary = MagicMock()
+    monkeypatch.setattr(
+        "bot.handlers.common.get_provider_usage_summary",
+        usage_summary,
+    )
+    monkeypatch.setattr(
+        "bot.handlers.slash.classify_provider",
+        lambda name, cfg: "available" if name == "custom" else "unknown_provider",
+    )
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.message_id = 507
+    update.effective_message.text = "/token_usage"
+    update.effective_message.caption = None
+    update.effective_message.photo = None
+    update.effective_message.message_thread_id = 100
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+    ctx.args = None
+
+    handler = make_slash_command_handler(state, GROUP_CHAT_ID, state.config)
+    await handler(update, ctx)
+
+    usage_summary.assert_not_called()
+    adapter.resume_thread.assert_not_awaited()
+    adapter.send_user_message.assert_not_awaited()
+    ctx.bot.send_message.assert_awaited_once()
+    sent = ctx.bot.send_message.await_args.kwargs
+    assert sent["message_thread_id"] == 100
+    assert "/token_usage" in sent["text"]
+    assert "agent topic" in sent["text"].lower()
 
 
 @pytest.mark.asyncio

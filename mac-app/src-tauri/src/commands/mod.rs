@@ -1,3 +1,4 @@
+pub mod ai_config;
 pub mod attachment_cache;
 pub mod claude;
 pub mod codex;
@@ -7,6 +8,7 @@ pub mod config;
 pub mod config_provider;
 pub mod dashboard;
 pub mod logs;
+pub mod provider_bridge_common;
 pub mod provider_sessions;
 pub mod provider_usage;
 pub mod service;

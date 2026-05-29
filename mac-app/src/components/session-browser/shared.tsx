@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, type RefObject, useEffect, useState } from "react";
 import type { ComposerAttachment, SessionTurn } from "../../types";
 import {
   limitSessionTurns,
   mergeSessionTurns,
   SESSION_BROWSER_VISIBLE_TURNS,
 } from "../../utils/sessionTurnMerge.js";
+import { StatePanel } from "./presentation";
 import { SessionMarkdown } from "./SessionMarkdown";
 
 export { limitSessionTurns, mergeSessionTurns, SESSION_BROWSER_VISIBLE_TURNS };
@@ -299,3 +300,127 @@ export const BACKGROUND_REPLY_POLL = {
 };
 
 export type ReplyWatchState = "foreground" | "background" | "expired";
+
+export type ReplyWatchLabels = {
+  waitingForReply: string;
+  waitingInBackground: string;
+  waitingExpired: string;
+};
+
+export type SessionMessagesLabels = ReplyWatchLabels & {
+  loading: string;
+  noMessages: string;
+};
+
+export function getReplyWatchText(
+  replyWatchState: ReplyWatchState | null,
+  labels: ReplyWatchLabels,
+) {
+  if (replyWatchState === "foreground") {
+    return labels.waitingForReply;
+  }
+  if (replyWatchState === "background") {
+    return labels.waitingInBackground;
+  }
+  if (replyWatchState === "expired") {
+    return labels.waitingExpired;
+  }
+  return null;
+}
+
+export function SessionChatHeader({
+  title,
+  shortId,
+  loading,
+  reloadTitle,
+  badge,
+  children,
+  onReload,
+}: {
+  title: string;
+  shortId: string;
+  loading: boolean;
+  reloadTitle: string;
+  badge: ReactNode;
+  children?: ReactNode;
+  onReload: () => void;
+}) {
+  return (
+    <div className="border-b border-[var(--ow-line-soft)] bg-white/74 px-5 py-4 backdrop-blur-xl">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            {badge}
+            <span className="rounded-full border border-slate-200 bg-white/88 px-2.5 py-1 font-mono text-[10px] text-slate-500">
+              {shortId}
+            </span>
+          </div>
+          <h3 className="truncate text-base font-bold tracking-[-0.02em] text-gray-950">{title}</h3>
+          {children}
+        </div>
+
+        <button
+          onClick={onReload}
+          disabled={loading}
+          className="ow-btn inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-slate-600 transition-colors hover:text-gray-900 disabled:opacity-50"
+          title={reloadTitle}
+        >
+          <svg className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+          </svg>
+          Reload
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function SessionMessages({
+  loading,
+  error,
+  messages,
+  assistantLabel,
+  labels,
+  endRef,
+  replyWatchState,
+  minHeight = true,
+}: {
+  loading: boolean;
+  error: string | null;
+  messages: SessionTurn[];
+  assistantLabel: string;
+  labels: SessionMessagesLabels;
+  endRef: RefObject<HTMLDivElement>;
+  replyWatchState: ReplyWatchState | null;
+  minHeight?: boolean;
+}) {
+  const replyWatchText = getReplyWatchText(replyWatchState, labels);
+
+  return (
+    <div className={`chat-bg ${minHeight ? "min-h-0 " : ""}flex-1 overflow-y-auto px-5 py-5`}>
+      <div className="mx-auto flex max-w-4xl flex-col gap-6">
+        {loading ? (
+          <StatePanel message={labels.loading} />
+        ) : error ? (
+          <StatePanel message={error} tone="error" />
+        ) : messages.length === 0 ? (
+          <StatePanel message={labels.noMessages} />
+        ) : (
+          messages.map((turn, index) => (
+            <TurnBubble
+              key={`${turn.role}-${index}-${turn.content}`}
+              turn={turn}
+              assistantLabel={assistantLabel}
+            />
+          ))
+        )}
+        {replyWatchText && (
+          <p className={`px-3 pb-1 text-center text-xs ${replyWatchState === "expired" ? "text-amber-600" : "text-slate-400"}`}>
+            {replyWatchText}
+          </p>
+        )}
+        <div ref={endRef} />
+      </div>
+    </div>
+  );
+}

@@ -29,6 +29,7 @@ provider:
     questions: true
     photos: true
     files: true
+    usage: true
     commands: true
     command_wrappers: []
     control_modes:

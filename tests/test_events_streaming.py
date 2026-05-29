@@ -194,7 +194,7 @@ async def test_turn_completed_sends_task_notification():
     ws.threads["tid-123"] = ThreadInfo(
         thread_id="tid-123",
         topic_id=3794,
-        preview="Phase 6 通知机制",
+        preview="https://github.com/ryoppippi/ccusage",
         archived=False,
         streaming_msg_id=5001,
     )
@@ -211,7 +211,7 @@ async def test_turn_completed_sends_task_notification():
         workspace_id="codex:onlineWorker",
         thread_id="tid-123",
         turn_id="turn-123",
-        task_summary="把通知功能再完善一下",
+        task_summary="接入 Codex、Claude 和扩展 provider 的用量读取，并修复 /token_usage agent 命令",
     )
 
     bot = SimpleNamespace()
@@ -242,8 +242,8 @@ async def test_turn_completed_sends_task_notification():
     assert event.status == "completed"
     assert event.agent_name == "Codex"
     assert event.agent_id == "codex"
-    assert event.task_name == "Phase 6 通知机制"
-    assert event.task_summary == "把通知功能再完善一下"
+    assert event.task_name == "修复用量统计"
+    assert event.task_summary == "接入 Codex、Claude 和扩展 provider 的用量读取，并修复 /token_usage agent 命令"
     assert event.task_id == "turn-123"
     assert event.message == "任务已完成"
 
@@ -1238,8 +1238,9 @@ async def test_final_answer_item_completed_sends_task_notification_and_dedupes_l
     assert event.agent_name == "Codex"
     assert event.agent_id == "codex"
     assert event.task_name == "POPO 通知验收"
+    assert event.task_summary == "POPO 通知验收"
     assert event.task_id == "turn-new"
-    assert event.message == "任务已完成"
+    assert event.message == "完成摘要：最终回复已经发到 TG"
 
     await handler(
         "app-server-event",
@@ -1257,6 +1258,544 @@ async def test_final_answer_item_completed_sends_task_notification_and_dedupes_l
     )
 
     assert len(notifications.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_final_answer_notification_uses_result_summary_instead_of_url_preview():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-usage"] = ThreadInfo(
+        thread_id="tid-usage",
+        topic_id=3794,
+        preview="https://github.com/ryoppippi/ccusage",
+        archived=False,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    codex_state.start_run(
+        state,
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-usage",
+        turn_id="turn-usage",
+        task_summary="https://github.com/ryoppippi/ccusage 扩展 provider 基于兼容运行时实现，用量信息参考实现",
+    )
+    state.streaming_turns["tid-usage"] = StreamingTurn(
+        message_id=5003,
+        topic_id=3794,
+        turn_id="turn-usage",
+        buffer="💭 分析中",
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "item/completed",
+                "params": {
+                    "threadId": "tid-usage",
+                    "turnId": "turn-usage",
+                    "item": {
+                        "type": "agentMessage",
+                        "threadId": "tid-usage",
+                        "phase": "final_answer",
+                        "text": "已接入 Codex、Claude 和扩展 provider 的用量读取，并限制 /token_usage 只在 agent topic 使用。",
+                    },
+                },
+            },
+        },
+    )
+
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.task_name == "修复用量统计"
+    assert event.task_summary == "扩展 provider 基于兼容运行时实现，用量信息参考实现"
+    assert event.message == (
+        "完成摘要：已接入 Codex、Claude 和扩展 provider 的用量读取，"
+        "并限制 /token_usage 只在 agent topic 使用。"
+    )
+
+
+@pytest.mark.asyncio
+async def test_final_answer_notification_prefers_result_topic_over_stale_task_prompt():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-notify"] = ThreadInfo(
+        thread_id="tid-notify",
+        topic_id=3794,
+        preview="https://github.com/ryoppippi/ccusage",
+        archived=False,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    codex_state.start_run(
+        state,
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-notify",
+        turn_id="turn-notify",
+        task_summary="扩展 provider 基于兼容运行时实现，用量信息应由 provider 插件提供",
+    )
+    state.streaming_turns["tid-notify"] = StreamingTurn(
+        message_id=5004,
+        topic_id=3794,
+        turn_id="turn-notify",
+        buffer="💭 分析中",
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "item/completed",
+                "params": {
+                    "threadId": "tid-notify",
+                    "turnId": "turn-notify",
+                    "item": {
+                        "type": "agentMessage",
+                        "threadId": "tid-notify",
+                        "phase": "final_answer",
+                        "text": (
+                            "已继续聚焦通知文案，并把最新代码打进安装态 /Applications/OnlineWorker.app 了。\n\n"
+                            "核心变化：\n"
+                            "- 通知标题优先从本轮结果提炼短标题，URL preview 不再作为标题污染通知。\n"
+                            "- 完成通知会提取最终回复里的有效变更摘要，避开开场套话。\n\n"
+                            "验证结果：\n"
+                            "- 46 passed"
+                        ),
+                    },
+                },
+            },
+        },
+    )
+
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.task_name == "优化任务通知"
+    assert event.task_summary == "通知标题优先从本轮结果提炼短标题，URL preview 不再作为标题污染通知。"
+    assert event.message == "完成摘要：完成通知会提取最终回复里的有效变更摘要，避开开场套话。"
+
+
+@pytest.mark.asyncio
+async def test_final_answer_notification_ignores_markdown_example_blocks():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-notify-example"] = ThreadInfo(
+        thread_id="tid-notify-example",
+        topic_id=3794,
+        preview="https://github.com/ryoppippi/ccusage",
+        archived=False,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    codex_state.start_run(
+        state,
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-notify-example",
+        turn_id="turn-notify-example",
+        task_summary="扩展 provider 基于兼容运行时实现，用量信息应由 provider 插件提供",
+    )
+    state.streaming_turns["tid-notify-example"] = StreamingTurn(
+        message_id=5005,
+        topic_id=3794,
+        turn_id="turn-notify-example",
+        buffer="💭 分析中",
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "item/completed",
+                "params": {
+                    "threadId": "tid-notify-example",
+                    "turnId": "turn-notify-example",
+                    "item": {
+                        "type": "agentMessage",
+                        "threadId": "tid-notify-example",
+                        "phase": "final_answer",
+                        "text": (
+                            "已修掉这条通知问题，并完成代码级验证。\n\n"
+                            "本轮修复：\n"
+                            "- 通知摘要提取器会跳过 Markdown 示例代码块。\n"
+                            "- 完成摘要只使用真实变更点，不使用示例说明。\n\n"
+                            "现在这条场景生成的通知示例是：\n\n"
+                            "```text\n"
+                            "完成 · Codex · 优化任务通知\n"
+                            "通知标题优先从本轮结果提炼短标题，URL preview 不再作为标题污染通知。\n"
+                            "完成摘要：完成通知会提取最终回复里的有效变更摘要，避开开场套话。\n"
+                            "```\n\n"
+                            "已验证：\n"
+                            "```text\n"
+                            "python3 -m pytest OnlineWorker/tests/test_events_streaming.py -q\n"
+                            "48 passed\n"
+                            "```"
+                        ),
+                    },
+                },
+            },
+        },
+    )
+
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.task_name == "优化任务通知"
+    assert event.task_summary == "通知摘要提取器会跳过 Markdown 示例代码块。"
+    assert event.message == "完成摘要：完成摘要只使用真实变更点，不使用示例说明。"
+
+
+@pytest.mark.asyncio
+async def test_final_answer_notification_can_use_ai_summary_scenario(monkeypatch):
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-ai-summary"] = ThreadInfo(
+        thread_id="tid-ai-summary",
+        topic_id=3794,
+        preview="https://github.com/ryoppippi/ccusage",
+        archived=False,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    codex_state.start_run(
+        state,
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-ai-summary",
+        turn_id="turn-ai-summary",
+        task_summary="扩展 provider 基于兼容运行时实现，用量信息应由 provider 插件提供",
+    )
+    state.streaming_turns["tid-ai-summary"] = StreamingTurn(
+        message_id=5007,
+        topic_id=3794,
+        turn_id="turn-ai-summary",
+        buffer="💭 分析中",
+    )
+
+    async def fake_run_ai_scenario(scenario_id, variables):
+        assert scenario_id == "notification_summary"
+        assert variables["task_summary"] == "扩展 provider 基于兼容运行时实现，用量信息应由 provider 插件提供"
+        assert variables["provider_id"] == "codex"
+        return SimpleNamespace(
+            ok=True,
+            data={
+                "preview_title": "用量读取接入",
+                "summary": "完成 Codex、Claude 和扩展 provider 用量读取并限制命令作用域。",
+            },
+        )
+
+    monkeypatch.setattr("bot.events.run_ai_scenario", fake_run_ai_scenario)
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "item/completed",
+                "params": {
+                    "threadId": "tid-ai-summary",
+                    "turnId": "turn-ai-summary",
+                    "item": {
+                        "type": "agentMessage",
+                        "threadId": "tid-ai-summary",
+                        "phase": "final_answer",
+                        "text": "已接入 provider 用量读取。",
+                    },
+                },
+            },
+        },
+    )
+
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.task_name == "用量读取接入"
+    assert event.task_summary == ""
+    assert event.message == "完成摘要：完成 Codex、Claude 和扩展 provider 用量读取并限制命令作用域。"
+
+
+@pytest.mark.asyncio
+async def test_final_answer_notification_does_not_relimit_ai_summary_for_display(monkeypatch):
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-ai-long-summary"] = ThreadInfo(
+        thread_id="tid-ai-long-summary",
+        topic_id=3794,
+        preview="优化任务通知",
+        archived=False,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    long_summary = (
+        "已定位 AI 摘要场景的正文在通知组装阶段被本地兜底规则再次截断，"
+        "现在改为只清理空白和链接，完整保留 AI 场景已经生成好的摘要内容。"
+    )
+
+    async def fake_run_ai_scenario(scenario_id, variables):
+        assert scenario_id == "notification_summary"
+        return SimpleNamespace(
+            ok=True,
+            data={
+                "preview_title": "优化任务通知",
+                "summary": long_summary,
+            },
+        )
+
+    monkeypatch.setattr("bot.events.run_ai_scenario", fake_run_ai_scenario)
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "item/completed",
+                "params": {
+                    "threadId": "tid-ai-long-summary",
+                    "turnId": "turn-ai-long-summary",
+                    "item": {
+                        "type": "agentMessage",
+                        "threadId": "tid-ai-long-summary",
+                        "phase": "final_answer",
+                        "text": "已修复通知摘要截断。",
+                    },
+                },
+            },
+        },
+    )
+
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.task_name == "优化任务通知"
+    assert event.task_summary == ""
+    assert event.message == f"完成摘要：{long_summary}"
+
+
+@pytest.mark.asyncio
+async def test_final_answer_notification_does_not_relimit_ai_preview_title(monkeypatch):
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-ai-title"] = ThreadInfo(
+        thread_id="tid-ai-title",
+        topic_id=3794,
+        preview="Session 归档菜单",
+        archived=False,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+
+    async def fake_run_ai_scenario(scenario_id, variables):
+        assert scenario_id == "notification_summary"
+        return SimpleNamespace(
+            ok=True,
+            data={
+                "preview_title": "修复会话归档菜单与后台映射",
+                "summary": "已修复 Session 卡片归档菜单和 workspace 映射。",
+            },
+        )
+
+    monkeypatch.setattr("bot.events.run_ai_scenario", fake_run_ai_scenario)
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "item/completed",
+                "params": {
+                    "threadId": "tid-ai-title",
+                    "turnId": "turn-ai-title",
+                    "item": {
+                        "type": "agentMessage",
+                        "threadId": "tid-ai-title",
+                        "phase": "final_answer",
+                        "text": "已修复会话归档菜单。",
+                    },
+                },
+            },
+        },
+    )
+
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.task_name == "修复会话归档菜单与后台映射"
+    assert event.task_summary == ""
+    assert event.message == "完成摘要：已修复 Session 卡片归档菜单和 workspace 映射。"
+
+
+@pytest.mark.asyncio
+async def test_final_answer_notification_uses_external_summary_rules(monkeypatch, tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "notification_summary_rules.yaml").write_text(
+        """
+limits:
+  title: 12
+  summary: 80
+sections:
+  result:
+    - 本轮修复
+  stop:
+    - 验证结果
+noise:
+  prefixes: []
+  contains: []
+  suffixes: []
+  regexes: []
+title:
+  rules:
+    - pattern: "无明确许可不允许打包"
+      title: "外置规则标题"
+  strip_prefixes: []
+  remove_patterns: []
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("config.get_data_dir", lambda: str(data_dir))
+
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-packaging-guard"] = ThreadInfo(
+        thread_id="tid-packaging-guard",
+        topic_id=3794,
+        preview="https://github.com/ryoppippi/ccusage",
+        archived=False,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    codex_state.start_run(
+        state,
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-packaging-guard",
+        turn_id="turn-packaging-guard",
+        task_summary="扩展 provider 基于兼容运行时实现，用量信息应由 provider 插件提供",
+    )
+    state.streaming_turns["tid-packaging-guard"] = StreamingTurn(
+        message_id=5006,
+        topic_id=3794,
+        turn_id="turn-packaging-guard",
+        buffer="💭 分析中",
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "item/completed",
+                "params": {
+                    "threadId": "tid-packaging-guard",
+                    "turnId": "turn-packaging-guard",
+                    "item": {
+                        "type": "agentMessage",
+                        "threadId": "tid-packaging-guard",
+                        "phase": "final_answer",
+                        "text": (
+                            "本轮修复：\n"
+                            "- 已把无明确许可不允许打包写入 AGENTS.md 和 OnlineWorker/AGENTS.md。\n"
+                            "- 通知摘要提取器已跳过示例说明、代码块和泛化开场句。\n\n"
+                            "验证结果：\n"
+                            "- 相关回归测试通过。"
+                        ),
+                    },
+                },
+            },
+        },
+    )
+
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.task_name == "外置规则标题"
+    assert event.task_summary == "已把无明确许可不允许打包写入 AGENTS.md 和 OnlineWorker/AGENTS.md。"
+    assert event.message == "完成摘要：通知摘要提取器已跳过示例说明、代码块和泛化开场句。"
 
 
 @pytest.mark.asyncio

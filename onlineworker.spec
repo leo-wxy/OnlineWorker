@@ -12,6 +12,7 @@ a = Analysis(
     pathex=['.'],
     binaries=[],
     datas=[
+        ('core/notifications/notification_summary_rules.yaml', 'core/notifications'),
         ('plugins/providers/builtin/claude/plugin.yaml', 'plugins/providers/builtin/claude'),
         ('plugins/providers/builtin/codex/plugin.yaml', 'plugins/providers/builtin/codex'),
     ],

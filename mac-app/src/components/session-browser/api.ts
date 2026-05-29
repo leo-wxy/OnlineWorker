@@ -115,6 +115,20 @@ export async function sendProviderSessionMessage(
   });
 }
 
+export async function archiveProviderSession(
+  providerId: string,
+  sessionId: string,
+  workspaceDir?: string | null,
+  sessionTitle?: string | null,
+): Promise<unknown> {
+  return invoke("archive_provider_session", {
+    providerId,
+    sessionId,
+    workspaceDir: workspaceDir ?? null,
+    sessionTitle: sessionTitle ?? null,
+  });
+}
+
 export async function fetchCodexThreadState(rolloutPath: string): Promise<CodexThreadReadResult> {
   const result = await invoke<CodexThreadReadResult>("read_codex_thread_state", { rolloutPath });
   return {

@@ -319,8 +319,12 @@ class ProviderOwnerBridge:
                 response = await self._handle_list_sessions(request)
             elif request_type == "read_session":
                 response = await self._handle_read_session(request)
+            elif request_type == "archive_session":
+                response = await self._handle_archive_session(request)
             elif request_type == "runtime_status":
                 response = await self._handle_runtime_status(request)
+            elif request_type == "usage_summary":
+                response = await self._handle_usage_summary(request)
             elif request_type == "mirror_approval":
                 response = await self._handle_mirror_approval(request)
             else:
@@ -439,6 +443,98 @@ class ProviderOwnerBridge:
             )
         )
         return {"ok": True, "sessions": sessions}
+
+    async def _handle_archive_session(self, request: dict) -> dict:
+        provider_id = str(request.get("provider_id") or "").strip()
+        thread_id = str(request.get("session_id") or request.get("thread_id") or "").strip()
+        workspace_dir = str(request.get("workspace_dir") or "").strip()
+
+        if not provider_id:
+            return {"ok": False, "error": "缺少 provider_id"}
+        if not thread_id:
+            return {"ok": False, "error": "缺少 session_id"}
+
+        provider = get_provider(provider_id, getattr(self.state, "config", None))
+        if provider is None:
+            return {"ok": False, "error": f"Provider '{provider_id}' 未启用"}
+
+        adapter = self.state.get_adapter(provider_id)
+        if adapter is None or not getattr(adapter, "connected", False):
+            return {"ok": False, "error": f"{provider_id} adapter 未连接"}
+
+        ws_info, thread_info = _resolve_workspace_and_thread(
+            self.state,
+            provider_id,
+            thread_id,
+            workspace_dir,
+        )
+        if ws_info is None or thread_info is None:
+            return {"ok": False, "error": "缺少 workspace_dir，无法定位 provider 会话"}
+
+        workspace_id = getattr(ws_info, "daemon_workspace_id", None) or _workspace_key(provider_id, ws_info.path)
+        ws_info.daemon_workspace_id = workspace_id
+        if hasattr(adapter, "register_workspace_cwd"):
+            try:
+                adapter.register_workspace_cwd(workspace_id, ws_info.path)
+            except Exception:
+                logger.debug("[provider-owner-bridge] register_workspace_cwd 失败", exc_info=True)
+
+        thread_hooks = getattr(provider, "thread_hooks", None)
+        archive_thread = getattr(thread_hooks, "archive_thread", None) if thread_hooks is not None else None
+        try:
+            if callable(archive_thread):
+                await archive_thread(self.state, ws_info, thread_id, adapter)
+            elif callable(getattr(adapter, "archive_thread", None)):
+                await adapter.archive_thread(workspace_id, thread_id)
+            else:
+                return {"ok": False, "error": f"Provider '{provider_id}' 不支持真实归档"}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        thread_info.archived = True
+        thread_info.is_active = False
+        if getattr(self.state, "storage", None) is not None:
+            try:
+                save_storage(self.state.storage)
+            except Exception as exc:
+                thread_info.archived = False
+                thread_info.is_active = True
+                return {"ok": False, "error": f"真实归档成功，但保存本地归档状态失败: {exc}"}
+        return {
+            "ok": True,
+            "provider_id": provider_id,
+            "thread_id": thread_id,
+            "workspace_id": workspace_id,
+            "workspace_dir": ws_info.path,
+        }
+
+    async def _handle_usage_summary(self, request: dict) -> dict:
+        from core.provider_session_bridge import _normalize_usage_summary
+
+        provider_id = str(request.get("provider_id") or "").strip()
+        start_date = str(request.get("start_date") or "").strip()
+        end_date = str(request.get("end_date") or "").strip()
+        if not provider_id:
+            return {"ok": False, "error": "缺少 provider_id"}
+
+        provider = get_provider(provider_id, getattr(self.state, "config", None))
+        if provider is None:
+            return {"ok": False, "error": f"Provider '{provider_id}' 未启用"}
+
+        usage_hooks = getattr(provider, "usage_hooks", None)
+        get_summary = getattr(usage_hooks, "get_summary", None)
+        if not callable(get_summary):
+            return {"ok": False, "error": f"Provider '{provider_id}' 不支持用量读取"}
+
+        try:
+            raw_summary = get_summary(start_date, end_date)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return {
+            "ok": True,
+            "summary": _normalize_usage_summary(provider_id, raw_summary),
+        }
 
     async def _handle_read_session(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()

@@ -29,6 +29,7 @@ provider:
     questions: false
     photos: true
     files: true
+    usage: true
     commands: true
     command_wrappers:
       - model

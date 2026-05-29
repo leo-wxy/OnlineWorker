@@ -1,16 +1,22 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
+use std::net::Shutdown;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::AppHandle;
+use tauri_plugin_shell::ShellExt;
 
 use super::claude::default_claude_projects_dir;
-use super::config::read_provider_metadata_from_disk;
-use super::config_provider::ProviderMetadata;
+use super::config::ensure_data_dir;
+use super::provider_bridge_common::{
+    provider_bridge_env, provider_owner_bridge_socket_path, require_runtime_provider,
+};
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderUsageDay {
     pub date: String,
@@ -22,7 +28,7 @@ pub struct ProviderUsageDay {
     pub total_cost_usd: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderUsageSummary {
     pub provider_id: String,
@@ -55,10 +61,6 @@ fn unix_time_seconds() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
-}
-
-fn provider_not_enabled_message(provider_id: &str) -> String {
-    format!("Provider '{}' is not enabled", provider_id.trim())
 }
 
 fn summary_with_reason(provider_id: &str, reason: impl Into<String>) -> ProviderUsageSummary {
@@ -97,18 +99,6 @@ fn build_summary(
         updated_at_epoch: unix_time_seconds(),
         unsupported_reason: None,
     }
-}
-
-fn require_runtime_provider(provider_id: &str) -> Result<ProviderMetadata, String> {
-    let normalized = provider_id.trim();
-    if normalized.is_empty() {
-        return Err(provider_not_enabled_message("unknown"));
-    }
-
-    read_provider_metadata_from_disk()?
-        .into_iter()
-        .find(|provider| provider.id == normalized)
-        .ok_or_else(|| provider_not_enabled_message(normalized))
 }
 
 fn collect_jsonl_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -412,8 +402,116 @@ fn summarize_claude_usage_from_paths(
     Ok(build_summary("claude", buckets).days)
 }
 
+fn provider_usage_summary_via_owner_bridge(
+    data_dir: &Path,
+    provider_id: &str,
+    start_date: &str,
+    end_date: &str,
+) -> Result<ProviderUsageSummary, String> {
+    let socket_path = provider_owner_bridge_socket_path(data_dir);
+    if !socket_path.exists() {
+        return Err(format!(
+            "provider owner bridge not ready: {}",
+            socket_path.display()
+        ));
+    }
+
+    let mut socket = UnixStream::connect(&socket_path)
+        .map_err(|e| format!("connect provider owner bridge failed: {e}"))?;
+    let payload = serde_json::json!({
+        "type": "usage_summary",
+        "provider_id": provider_id,
+        "start_date": start_date,
+        "end_date": end_date,
+    });
+    let raw_request = format!("{}\n", payload);
+    socket
+        .write_all(raw_request.as_bytes())
+        .map_err(|e| format!("write provider owner bridge request failed: {e}"))?;
+    socket
+        .shutdown(Shutdown::Write)
+        .map_err(|e| format!("shutdown provider owner bridge write failed: {e}"))?;
+
+    let mut response_line = String::new();
+    let mut reader = BufReader::new(socket);
+    reader
+        .read_line(&mut response_line)
+        .map_err(|e| format!("read provider owner bridge response failed: {e}"))?;
+
+    let response = serde_json::from_str::<Value>(response_line.trim())
+        .map_err(|e| format!("parse provider owner bridge response failed: {e}"))?;
+    if response.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err(response
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("provider owner bridge request failed")
+            .to_string());
+    }
+
+    serde_json::from_value(
+        response
+            .get("summary")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({ "providerId": provider_id, "days": [] })),
+    )
+    .map_err(|e| format!("parse provider owner bridge summary failed: {e}"))
+}
+
+async fn run_provider_usage_bridge(
+    app: &AppHandle,
+    provider_id: &str,
+    start_date: &str,
+    end_date: &str,
+) -> Result<ProviderUsageSummary, String> {
+    let data_dir = ensure_data_dir()?;
+    let sidecar = app
+        .shell()
+        .sidecar("onlineworker-bot")
+        .map_err(|error| format!("Sidecar not found: {}", error))?;
+
+    let args = vec![
+        "--data-dir".to_string(),
+        data_dir.to_string_lossy().to_string(),
+        "--provider-session-bridge".to_string(),
+        "--provider-id".to_string(),
+        provider_id.to_string(),
+        "--provider-session-op".to_string(),
+        "usage".to_string(),
+        "--provider-start-date".to_string(),
+        start_date.to_string(),
+        "--provider-end-date".to_string(),
+        end_date.to_string(),
+    ];
+
+    let mut sidecar = sidecar.args(args);
+    for (key, value) in provider_bridge_env(&data_dir) {
+        sidecar = sidecar.env(&key, value);
+    }
+
+    let output = sidecar
+        .output()
+        .await
+        .map_err(|error| format!("provider usage bridge failed: {}", error))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("exit status {:?}", output.status.code())
+        };
+        return Err(detail);
+    }
+
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("provider usage bridge returned invalid JSON: {}", error))
+}
+
 #[tauri::command]
-pub fn get_provider_usage_summary(
+pub async fn get_provider_usage_summary(
+    app: AppHandle,
     provider_id: String,
     start_date: String,
     end_date: String,
@@ -445,10 +543,31 @@ pub fn get_provider_usage_summary(
             summarize_claude_usage_from_paths(&[path], &start_date, &end_date)?
         }
         other => {
-            return Ok(summary_with_reason(
-                &provider.id,
-                format!("Provider runtime '{other}' has no usage implementation"),
-            ));
+            if provider.capabilities.usage {
+                let data_dir = ensure_data_dir()?;
+                match provider_usage_summary_via_owner_bridge(
+                    &data_dir,
+                    &provider.id,
+                    &start_date,
+                    &end_date,
+                ) {
+                    Ok(summary) => return Ok(summary),
+                    Err(_) => {
+                        return run_provider_usage_bridge(
+                            &app,
+                            &provider.id,
+                            &start_date,
+                            &end_date,
+                        )
+                        .await;
+                    }
+                }
+            } else {
+                return Ok(summary_with_reason(
+                    &provider.id,
+                    format!("Provider runtime '{other}' has no usage implementation"),
+                ));
+            }
         }
     };
 

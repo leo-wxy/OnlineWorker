@@ -78,8 +78,12 @@ def _run_provider_session_bridge(
     limit: int = 50,
     text: str | None = None,
     attachments: list[dict] | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> int:
     from core.provider_session_bridge import (
+        archive_provider_session,
+        get_provider_usage_summary,
         list_provider_session_rows,
         read_provider_session_rows,
         send_provider_session_message,
@@ -127,6 +131,30 @@ def _run_provider_session_bridge(
             )
         )
         _print_provider_session_bridge_result({"ok": True})
+        return 0
+
+    if normalized_operation == "archive":
+        normalized_session_id = str(session_id or "").strip()
+        if not normalized_session_id:
+            raise ValueError("session_id is required for archive operation")
+        asyncio.run(
+            archive_provider_session(
+                normalized_provider,
+                normalized_session_id,
+                workspace_dir=workspace_dir,
+            )
+        )
+        _print_provider_session_bridge_result({"ok": True})
+        return 0
+
+    if normalized_operation == "usage":
+        _print_provider_session_bridge_result(
+            get_provider_usage_summary(
+                normalized_provider,
+                str(start_date or "").strip(),
+                str(end_date or "").strip(),
+            )
+        )
         return 0
 
     raise ValueError(f"unsupported provider session bridge operation: {operation}")
@@ -222,6 +250,8 @@ def main() -> None:
     parser.add_argument("--provider-session-op", default=None)
     parser.add_argument("--provider-session-id", default=None)
     parser.add_argument("--provider-workspace-dir", default=None)
+    parser.add_argument("--provider-start-date", default=None)
+    parser.add_argument("--provider-end-date", default=None)
     parser.add_argument("--provider-limit", type=int, default=50)
     args, unknown_args = parser.parse_known_args()
 
@@ -288,6 +318,8 @@ def main() -> None:
                 session_id=args.provider_session_id,
                 workspace_dir=args.provider_workspace_dir,
                 limit=args.provider_limit,
+                start_date=args.provider_start_date,
+                end_date=args.provider_end_date,
             )
         )
 

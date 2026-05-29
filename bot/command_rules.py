@@ -99,6 +99,12 @@ COMMAND_RULES: dict[str, CommandRule] = {
         scope="thread",
         scope_policy="strict",
     ),
+    "token_usage": CommandRule(
+        name="token_usage",
+        executor="bot",
+        scope="global",
+        scope_policy="strict",
+    ),
     "restart": CommandRule(
         name="restart",
         executor="bot",

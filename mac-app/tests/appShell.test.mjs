@@ -40,19 +40,72 @@ test("sidebar collapse labels exist in both locales", () => {
   }
 });
 
-test("app shell exposes first-class usage and notification tabs in navigation and routing", () => {
+test("app shell exposes first-class usage, ai, and notification tabs in navigation and routing", () => {
   const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
   const tabs = readFileSync(join(root, "src", "utils", "appTabs.js"), "utf8");
   const types = readFileSync(join(root, "src", "utils", "appTabs.d.ts"), "utf8");
   const pages = readFileSync(join(root, "src", "pages", "index.ts"), "utf8");
+  const components = readFileSync(join(root, "src", "components", "index.ts"), "utf8");
 
-  assert.match(tabs, /PRIMARY_APP_TABS = \["dashboard", "sessions", "usage", "commands", "notifications", "setup"\]/);
-  assert.match(types, /"dashboard" \| "sessions" \| "usage" \| "commands" \| "notifications" \| "config" \| "setup"/);
+  assert.match(tabs, /PRIMARY_APP_TABS = \["dashboard", "sessions", "usage", "ai", "commands", "notifications", "setup"\]/);
+  assert.match(types, /"dashboard" \| "sessions" \| "usage" \| "ai" \| "commands" \| "notifications" \| "config" \| "setup"/);
   assert.match(app, /activeTab === "usage"/);
+  assert.match(app, /activeTab === "ai"/);
   assert.match(app, /activeTab === "notifications"/);
   assert.match(app, /<UsageBrowser \/>/);
+  assert.match(app, /<AiSettingsPanel \/>/);
   assert.match(app, /<NotificationSettingsPanel \/>/);
+  assert.match(components, /export \{ AiSettingsPanel \}/);
   assert.match(pages, /export \{ UsageBrowser \} from "\.\/UsageBrowser";/);
+});
+
+test("ai settings uses fixed service cards and scenario service selection", () => {
+  const panel = readFileSync(join(root, "src", "components", "AiSettingsPanel.tsx"), "utf8");
+  const utils = readFileSync(join(root, "src", "components", "ai-settings", "utils.ts"), "utf8");
+  const serviceEditor = readFileSync(join(root, "src", "components", "ai-settings", "AiServiceEditor.tsx"), "utf8");
+  const scenarioEditor = readFileSync(join(root, "src", "components", "ai-settings", "AiScenarioEditor.tsx"), "utf8");
+  const sidebar = readFileSync(join(root, "src", "components", "ai-settings", "AiSettingsSidebar.tsx"), "utf8");
+  const types = readFileSync(join(root, "src", "types.ts"), "utf8");
+  const i18nTypes = readFileSync(join(root, "src", "i18n", "types.ts"), "utf8");
+  const zh = readFileSync(join(root, "src", "i18n", "locales", "zh.ts"), "utf8");
+  const en = readFileSync(join(root, "src", "i18n", "locales", "en.ts"), "utf8");
+
+  assert.match(panel, /<AiSettingsSidebar/);
+  assert.match(panel, /<AiServiceEditor/);
+  assert.match(panel, /<AiScenarioEditor/);
+  assert.match(panel, /get_ai_config/);
+  assert.match(panel, /set_ai_config/);
+  assert.match(panel, /test_ai_service_connection/);
+  assert.match(utils, /BUILTIN_SERVICE_IDS = \["openai_default", "claude_default"\]/);
+  assert.match(utils, /function serviceTitle/);
+  assert.match(utils, /labels\.openaiService/);
+  assert.match(utils, /labels\.claudeService/);
+  assert.match(serviceEditor, /labels\.enableService/);
+  assert.match(scenarioEditor, /labels\.enableScenario/);
+  assert.match(panel, /const setServiceEnabled = /);
+  assert.match(panel, /const setScenarioEnabled = /);
+  assert.match(serviceEditor, /onChange=\{\(checked\) => onSetEnabled\(service\.id, checked\)\}/);
+  assert.match(scenarioEditor, /onChange=\{\(checked\) => onSetEnabled\(scenario\.id, checked\)\}/);
+  assert.match(scenarioEditor, /<select[\s\S]*services\.map/);
+  assert.match(scenarioEditor, /model:\s*""/);
+  assert.match(scenarioEditor, /selectedService\?\.defaultModel/);
+  assert.match(scenarioEditor, /scenarioLimitEntries/);
+  assert.match(panel, /updateScenarioLimit/);
+  assert.match(utils, /labels\.limitLabels/);
+  assert.match(sidebar, /serviceBadge/);
+  assert.match(sidebar, /scenarioBadge/);
+  assert.equal(`${panel}${utils}${serviceEditor}${scenarioEditor}${sidebar}`.includes("addService"), false);
+  assert.equal(`${panel}${utils}${serviceEditor}${scenarioEditor}${sidebar}`.includes("labels.protocol"), false);
+  assert.equal(`${panel}${utils}${serviceEditor}${scenarioEditor}${sidebar}`.includes("labels.apiKeyEnv"), false);
+  assert.equal(`${panel}${utils}${serviceEditor}${scenarioEditor}${sidebar}`.includes("apiKeySource"), false);
+  assert.equal(`${panel}${utils}${serviceEditor}${scenarioEditor}${sidebar}`.includes("selectedScenario.model"), false);
+  assert.match(types, /apiKey\?: string \| null;/);
+  assert.match(i18nTypes, /openaiService:\s*string/);
+  assert.match(i18nTypes, /effectiveModel:\s*string/);
+  assert.match(zh, /固定维护 OpenAI 和 Claude 两个服务。/);
+  assert.match(zh, /场景只选择一个已配置服务/);
+  assert.match(en, /Manage the built-in OpenAI and Claude services./);
+  assert.match(en, /A scenario selects one configured service/);
 });
 
 test("settings exposes attachment cache controls under a maintenance section", () => {
@@ -139,19 +192,23 @@ test("provider settings exposes external CLI rewrite configuration in the app", 
   assert.match(types, /export interface ProviderExternalCliConfig/);
   assert.match(types, /externalCli:\s*ProviderExternalCliConfig;/);
   assert.match(panel, /set_provider_cli_config/);
-  assert.match(panel, /externalCliUpstreamBaseUrl/);
+  assert.equal(panel.includes("externalCliUpstreamBaseUrl"), false);
+  assert.equal(panel.includes("draft.upstreamBaseUrl"), false);
   assert.match(panel, /externalCliLauncherWrapsClaude/);
   assert.match(panel, /supportsClaudeLauncher/);
   assert.match(panel, /providerId === "claude"/);
   assert.match(panel, /supportsClaudeLauncher\(setting\.id\)/);
   assert.match(panel, /provider\?\.capabilities\.messageRewrite\?\.externalCli/);
   assert.match(i18nTypes, /externalCliTitle:\s*string/);
+  assert.equal(i18nTypes.includes("externalCliUpstreamBaseUrl"), false);
   assert.match(zh, /外部 CLI/);
+  assert.equal(zh.includes("上游 Base URL"), false);
   assert.equal(zh.includes("外挂 CLI"), false);
   assert.equal(zh.includes("启动器会再调用 claude"), false);
   assert.match(zh, /发送前将不文明表达改写为普通表达。/);
   assert.match(zh, /启动后进入 Claude CLI/);
   assert.match(en, /External CLI/);
+  assert.equal(en.includes("Upstream Base URL"), false);
   assert.match(en, /Rewrite abusive language into neutral wording before sending./);
   assert.match(en, /Open Claude CLI after launcher starts/);
   assert.match(rustConfig, /pub async fn set_provider_cli_config/);

@@ -8,8 +8,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
 
 test("codex send flow merges snapshot back into optimistic turns", () => {
-  const sessionBrowser = readFileSync(join(root, "src", "pages", "SessionBrowser.tsx"), "utf8");
+  const codexChat = readFileSync(join(root, "src", "components", "session-browser", "CodexChat.tsx"), "utf8");
 
-  assert.match(sessionBrowser, /mergeSessionTurns\(previousTurns, snapshot\)/);
-  assert.match(sessionBrowser, /mergeSessionTurns\(previousTurns, nextTurns\)/);
+  assert.match(codexChat, /mergeSessionTurns\(previousTurns, snapshot\)/);
+  assert.match(codexChat, /mergeSessionTurns\(previousTurns, nextTurns\)/);
 });

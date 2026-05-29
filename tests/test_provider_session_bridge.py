@@ -1,6 +1,39 @@
 from core import provider_session_bridge as bridge
 
 
+def _overlay_descriptor(*, facts=None, thread_hooks=None, message_hooks=None, usage_hooks=None):
+    class RuntimeHooks:
+        @staticmethod
+        async def start(manager, bot, tool_cfg):
+            manager.state.set_adapter(tool_cfg.name, {"provider_id": tool_cfg.name})
+
+    class Descriptor:
+        metadata = type(
+            "Metadata",
+            (),
+            {
+                "bin": "overlay-tool",
+                "transport": type(
+                    "Transport",
+                    (),
+                    {
+                        "app_server_port": 0,
+                        "type": "http",
+                    },
+                )(),
+                "owner_transport": "http",
+                "live_transport": "http",
+            },
+        )()
+        runtime_hooks = RuntimeHooks
+
+    Descriptor.facts = facts
+    Descriptor.thread_hooks = thread_hooks
+    Descriptor.message_hooks = message_hooks
+    Descriptor.usage_hooks = usage_hooks
+    return Descriptor()
+
+
 def test_load_provider_descriptor_prefers_registry_for_bundled_provider(monkeypatch):
     descriptor = object()
 
@@ -193,6 +226,158 @@ def test_read_provider_session_rows_defaults_to_latest_twenty_turns(monkeypatch)
     assert len(result) == 20
     assert result[0] == {"role": "assistant", "content": "turn-0"}
     assert result[-1] == {"role": "assistant", "content": "turn-19"}
+
+
+def test_provider_usage_summary_invokes_descriptor_usage_hook(monkeypatch):
+    called = {}
+
+    class UsageHooks:
+        @staticmethod
+        def get_summary(start_date, end_date):
+            called["range"] = (start_date, end_date)
+            return {
+                "days": [
+                    {
+                        "date": "2026-05-21",
+                        "inputTokens": 12,
+                        "outputTokens": 3,
+                        "cacheCreationTokens": 4,
+                        "cacheReadTokens": 5,
+                        "totalTokens": 24,
+                        "totalCostUsd": 0.42,
+                    }
+                ]
+            }
+
+    class Descriptor:
+        usage_hooks = UsageHooks
+
+    monkeypatch.setattr(bridge, "_load_provider_descriptor", lambda provider_id: Descriptor())
+    monkeypatch.setattr(bridge, "_unix_time_seconds", lambda: 1770000000)
+
+    result = bridge.get_provider_usage_summary(
+        "overlay-tool",
+        "2026-05-20",
+        "2026-05-21",
+    )
+
+    assert called["range"] == ("2026-05-20", "2026-05-21")
+    assert result == {
+        "providerId": "overlay-tool",
+        "days": [
+            {
+                "date": "2026-05-21",
+                "inputTokens": 12,
+                "outputTokens": 3,
+                "cacheCreationTokens": 4,
+                "cacheReadTokens": 5,
+                "totalTokens": 24,
+                "totalCostUsd": 0.42,
+            }
+        ],
+        "updatedAtEpoch": 1770000000,
+        "unsupportedReason": None,
+    }
+
+
+def test_provider_usage_summary_rejects_provider_without_usage_hook(monkeypatch):
+    class Descriptor:
+        usage_hooks = None
+
+    monkeypatch.setattr(bridge, "_load_provider_descriptor", lambda provider_id: Descriptor())
+
+    try:
+        bridge.get_provider_usage_summary(
+            "overlay-tool",
+            "2026-05-20",
+            "2026-05-21",
+        )
+    except ValueError as exc:
+        assert str(exc) == "Provider 'overlay-tool' does not expose usage hooks"
+    else:
+        raise AssertionError("expected missing usage hook error")
+
+
+def test_codex_provider_usage_summary_reads_session_token_counts(monkeypatch, tmp_path):
+    from plugins.providers.builtin.codex.python import storage_runtime
+
+    sessions_dir = tmp_path / "codex-sessions"
+    day_dir = sessions_dir / "2026" / "05" / "11"
+    day_dir.mkdir(parents=True)
+    (day_dir / "rollout.jsonl").write_text(
+        "\n".join(
+            [
+                '{"type":"session_meta","payload":{"id":"t1"}}',
+                '{"timestamp":"2026-05-11T01:00:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":10,"output_tokens":50,"total_tokens":150},"total_token_usage":{"input_tokens":100,"cached_input_tokens":10,"output_tokens":50,"total_tokens":150}}}}',
+                '{"timestamp":"2026-05-11T03:00:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"cached_input_tokens":20,"output_tokens":70,"total_tokens":230}}}}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(storage_runtime, "CODEX_SESSIONS_DIR", str(sessions_dir))
+    monkeypatch.setattr(bridge, "_unix_time_seconds", lambda: 1770000000)
+
+    result = bridge.get_provider_usage_summary("codex", "2026-05-11", "2026-05-11")
+
+    assert result == {
+        "providerId": "codex",
+        "days": [
+            {
+                "date": "2026-05-11",
+                "inputTokens": 160,
+                "outputTokens": 70,
+                "cacheCreationTokens": 0,
+                "cacheReadTokens": 20,
+                "totalTokens": 230,
+                "totalCostUsd": None,
+            }
+        ],
+        "updatedAtEpoch": 1770000000,
+        "unsupportedReason": None,
+    }
+
+
+def test_claude_provider_usage_summary_reads_project_usage(monkeypatch, tmp_path):
+    from plugins.providers.builtin.claude.python import storage_runtime
+
+    projects_dir = tmp_path / "claude-projects"
+    project_dir = projects_dir / "project-a"
+    project_dir.mkdir(parents=True)
+    (project_dir / "session.jsonl").write_text(
+        "\n".join(
+            [
+                '{"timestamp":"2026-05-11T10:00:00.000Z","requestId":"req-1","message":{"id":"msg-1","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":20,"cache_read_input_tokens":10}},"costUSD":0.12}',
+                '{"timestamp":"2026-05-11T10:00:01.000Z","requestId":"req-1","message":{"id":"msg-1","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":20,"cache_read_input_tokens":10}},"costUSD":0.12}',
+                '{"timestamp":"2026-05-11T11:00:00.000Z","requestId":"req-2","message":{"id":"msg-2","usage":{"input_tokens":40,"output_tokens":10}},"costUSD":0.08}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(storage_runtime, "CLAUDE_PROJECTS_DIR", str(projects_dir))
+    monkeypatch.setattr(bridge, "_unix_time_seconds", lambda: 1770000000)
+
+    result = bridge.get_provider_usage_summary("claude", "2026-05-11", "2026-05-11")
+
+    assert result == {
+        "providerId": "claude",
+        "days": [
+            {
+                "date": "2026-05-11",
+                "inputTokens": 140,
+                "outputTokens": 60,
+                "cacheCreationTokens": 20,
+                "cacheReadTokens": 10,
+                "totalTokens": 230,
+                "totalCostUsd": 0.2,
+            }
+        ],
+        "updatedAtEpoch": 1770000000,
+        "unsupportedReason": None,
+    }
 
 
 def test_send_provider_session_message_uses_generic_runtime_start_hook(monkeypatch):
@@ -435,3 +620,98 @@ def test_send_provider_session_message_respects_message_hook_config(monkeypatch)
     asyncio.run(fake_send())
 
     assert called["text"] == "这什么傻逼问题"
+
+
+def test_archive_provider_session_invokes_real_thread_hook(monkeypatch):
+    called = {}
+
+    class ThreadHooks:
+        @staticmethod
+        async def archive_thread(state, ws_info, thread_id, adapter):
+            called["adapter"] = adapter
+            called["workspace_id"] = ws_info.daemon_workspace_id
+            called["workspace_path"] = ws_info.path
+            called["thread_id"] = thread_id
+            called["state_adapter"] = state.get_adapter("overlay-tool")
+
+    descriptor = _overlay_descriptor(thread_hooks=ThreadHooks)
+    monkeypatch.setattr(bridge, "_load_provider_descriptor", lambda provider_id: descriptor)
+
+    import asyncio
+
+    asyncio.run(
+        bridge.archive_provider_session(
+            "overlay-tool",
+            "tid-archive",
+            workspace_dir="/tmp/project-a",
+        )
+    )
+
+    assert called == {
+        "adapter": {"provider_id": "overlay-tool"},
+        "workspace_id": "overlay-tool:/tmp/project-a",
+        "workspace_path": "/tmp/project-a",
+        "thread_id": "tid-archive",
+        "state_adapter": {"provider_id": "overlay-tool"},
+    }
+
+
+def test_archive_provider_session_rejects_missing_real_archive_support(monkeypatch):
+    descriptor = _overlay_descriptor(thread_hooks=None)
+    monkeypatch.setattr(bridge, "_load_provider_descriptor", lambda provider_id: descriptor)
+
+    import asyncio
+
+    try:
+        asyncio.run(
+            bridge.archive_provider_session(
+                "overlay-tool",
+                "tid-archive",
+                workspace_dir="/tmp/project-a",
+            )
+        )
+    except ValueError as exc:
+        assert str(exc) == "Provider 'overlay-tool' does not expose real archive support"
+    else:
+        raise AssertionError("expected missing archive support error")
+
+
+def test_archive_provider_session_uses_descriptor_real_archive_hook(monkeypatch):
+    called = {}
+
+    class Adapter:
+        async def archive_thread(self, workspace_id, thread_id):
+            called["workspace_id"] = workspace_id
+            called["thread_id"] = thread_id
+            return {"ok": True}
+
+    class ThreadHooks:
+        @staticmethod
+        async def archive_thread(state, ws_info, thread_id, adapter):
+            assert state.get_adapter("overlay-tool") is adapter
+            await adapter.archive_thread(ws_info.daemon_workspace_id, thread_id)
+
+    descriptor = _overlay_descriptor(thread_hooks=ThreadHooks)
+
+    async def fake_provider_session_adapter(active_descriptor, provider_id):
+        assert active_descriptor is descriptor
+        assert provider_id == "overlay-tool"
+        return Adapter()
+
+    monkeypatch.setattr(bridge, "_load_provider_descriptor", lambda provider_id: descriptor)
+    monkeypatch.setattr(bridge, "_provider_session_adapter", fake_provider_session_adapter)
+
+    import asyncio
+
+    asyncio.run(
+        bridge.archive_provider_session(
+            "overlay-tool",
+            "ses_123",
+            workspace_dir="/tmp/project-a",
+        )
+    )
+
+    assert called == {
+        "workspace_id": "overlay-tool:/tmp/project-a",
+        "thread_id": "ses_123",
+    }

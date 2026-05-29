@@ -23,6 +23,7 @@ def _capability_dict(capabilities) -> dict:
         "questions": capabilities.questions,
         "photos": capabilities.photos,
         "files": capabilities.files,
+        "usage": capabilities.usage,
         "commands": capabilities.commands,
         "command_wrappers": list(capabilities.command_wrappers),
         "control_modes": list(capabilities.control_modes),
@@ -59,6 +60,7 @@ def test_core_provider_manifest_parser_normalizes_all_capability_fields():
                     "questions": True,
                     "photos": True,
                     "files": True,
+                    "usage": True,
                     "commands": True,
                     "command_wrappers": ["model", "review"],
                     "control_modes": ["app", "tui"],
@@ -99,6 +101,7 @@ def test_core_provider_manifest_parser_normalizes_all_capability_fields():
         "questions": True,
         "photos": True,
         "files": True,
+        "usage": True,
         "commands": True,
         "command_wrappers": ["model", "review"],
         "control_modes": ["app", "tui"],
@@ -130,6 +133,7 @@ def test_builtin_provider_descriptor_capabilities_match_plugin_manifests():
             "questions": bool(expected.get("questions", False)),
             "photos": bool(expected.get("photos", False)),
             "files": bool(expected.get("files", False)),
+            "usage": bool(expected.get("usage", False)),
             "commands": bool(expected.get("commands", False)),
             "command_wrappers": list(expected.get("command_wrappers") or []),
             "control_modes": list(expected.get("control_modes") or ["app"]),
@@ -144,6 +148,9 @@ def test_builtin_provider_descriptor_capabilities_match_plugin_manifests():
         if descriptor.message_hooks is not None:
             assert descriptor.message_hooks.supports_photo is bool(expected.get("photos", False))
             assert descriptor.message_hooks.supports_files is bool(expected.get("files", False))
+        if bool(expected.get("usage", False)):
+            assert descriptor.usage_hooks is not None
+            assert callable(descriptor.usage_hooks.get_summary)
         if descriptor.interactions is not None:
             assert bool(descriptor.interactions.build_approval_reply) is bool(
                 expected.get("approvals", False)
@@ -183,6 +190,7 @@ def test_builtin_provider_config_blueprint_capabilities_match_plugin_manifests()
             "questions": bool(expected.get("questions", False)),
             "photos": bool(expected.get("photos", False)),
             "files": bool(expected.get("files", False)),
+            "usage": bool(expected.get("usage", False)),
             "commands": bool(expected.get("commands", False)),
             "command_wrappers": list(expected.get("command_wrappers") or []),
             "control_modes": list(expected.get("control_modes") or ["app"]),
