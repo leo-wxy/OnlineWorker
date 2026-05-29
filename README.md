@@ -17,23 +17,44 @@ See also:
 - [Security Policy](SECURITY.md)
 - [Support](SUPPORT.md)
 
-## Screenshots
+## Product Tour
 
 These screenshots are generated from the real app UI with sanitized demo data.
 They do not contain live tokens, user IDs, filesystem paths, session content, or
 private extension configuration.
 
+### Dashboard
+
 <p align="center">
   <img src="./docs/screenshots/dashboard.png" alt="OnlineWorker dashboard" width="88%" />
 </p>
+
+The Dashboard is the daily control surface. It shows service state, provider
+health, recent activity, and the quickest path back into setup, sessions, logs,
+commands, and usage.
+
+### Sessions
 
 <p align="center">
   <img src="./docs/screenshots/sessions-overview.png" alt="OnlineWorker sessions" width="88%" />
 </p>
 
+Sessions are the primary work surface. You can browse provider sessions, filter
+active and archived rows, open a conversation, send text with image/file
+attachments, and archive rows through provider-backed actions.
+
+### Usage
+
 <p align="center">
   <img src="./docs/screenshots/usage.png" alt="OnlineWorker usage" width="88%" />
 </p>
+
+The Usage page reads consumption through provider metadata and usage hooks. It
+supports provider switching, a default 7-day window, date filtering, summary
+cards, and daily charts without hard-coding provider-specific parsing into the
+React page.
+
+### AI Services and Scenarios
 
 <p align="center">
   <img src="./docs/screenshots/ai-services.png" alt="OnlineWorker AI services" width="88%" />
@@ -43,58 +64,43 @@ private extension configuration.
   <img src="./docs/screenshots/ai-scenarios.png" alt="OnlineWorker AI scenarios" width="88%" />
 </p>
 
+The AI page separates reusable service credentials from scenario prompts.
+OpenAI-compatible chat completions and Claude-compatible messages are available
+as built-in service types. Notification completion summary is the first built-in
+scenario and falls back to local deterministic summary rules when AI is disabled
+or unavailable.
+
+### Setup
+
 <p align="center">
   <img src="./docs/screenshots/setup.png" alt="OnlineWorker setup" width="88%" />
 </p>
 
-## Overview
+Setup handles the practical first-run checks: required CLI visibility, Telegram
+connectivity, service lifecycle, and configuration needed before the app becomes
+the main control surface.
+
+## Core Capabilities
 
 - macOS desktop workspace for running and supervising local AI coding CLIs.
-- Built around an installed app, not a browser-hosted service.
-- App for setup and ongoing control, Telegram for remote input and final delivery.
-- Builtin providers in this repository: `codex` and `claude`.
-- Builtin notification channel in this repository: `telegram`, with external notification channels mountable through plugins.
-- A first-class `Usage` page for recent provider consumption, with `Codex / Claude` switching inside the app.
-- A first-class `AI` page for shared AI service configuration and scenario-specific prompts.
-
-## Features
-
-- Mac app control for setup, dashboard, sessions, commands, and logs.
-- Telegram entry point for remote task submission and final updates.
-- Telegram mirrors provider approvals and questions. For Codex, approval
-  requests can be handled either from the local Codex TUI host or from the
-  Telegram buttons when the current thread is bound to the host.
-- Plugin-based notification channels, configurable from the first-class `Notifications` page.
+- Installed app first; Telegram is a lightweight remote entry point for task
+  submission, context, approvals, status, and final replies.
+- Builtin providers in this repository: `codex` and `claude`; external provider
+  packages can be mounted through the public plugin contracts.
+- Builtin notification channel in this repository: `telegram`; external
+  notification packages can be mounted through the notification plugin contract.
 - Provider-driven configuration for supported CLI backends.
-- Session browsing and message sending from the app.
-- Session rows can be archived from the Sessions page. Archive actions call the provider's real archive operation first; local archived state is updated only after that operation succeeds.
-- Session Browser supports text plus image/file attachment sends from the desktop app, with one user message shown per send.
-- A dedicated `Usage` page for recent provider usage, with a default 7-day window, date filtering, summary cards, and daily charts.
-- Usage aggregation stays behind provider/plugin adapters instead of pushing provider-specific parsing into shared React surfaces.
-- `/token_usage` is a local bot command for agent topics. It reports provider usage where supported and rejects concrete conversation topics instead of forwarding into an agent session.
-- Shared AI services can be configured once and reused by scenarios. Notification completion summary is the first built-in scenario and falls back to deterministic local summary rules when AI is disabled or unavailable.
+- Telegram mirrors provider approvals and questions. For Codex, approval
+  requests can be handled either from the local Codex TUI host or from Telegram
+  buttons when the current thread is bound to the host.
+- Plugin-based notification channels, configurable from the first-class
+  `Notifications` page.
 - Markdown rendering for final replies.
 - Installer-friendly macOS packaging through Tauri and PyInstaller.
 
-## Provider Scope
+## Install and Setup
 
-This repository ships builtin support for:
-
-- `codex`
-- `claude`
-
-The app also supports external provider packages through the public plugin
-contracts, but this repository only bundles the builtin providers listed above.
-
-## Notification Channels
-
-This repository ships builtin notification support for:
-
-- `telegram`
-
-Additional notification packages can be mounted through the public notification plugin contract. The shared notification router sends concise task status events to enabled channels; each plugin owns the actual app-specific send logic.
-
-## Requirements
+### Requirements
 
 - macOS
 - Node.js 20
@@ -103,7 +109,7 @@ Additional notification packages can be mounted through the public notification 
 - `codex` CLI for Codex-backed workflows
 - `claude` CLI for Claude-backed workflows
 
-## Quick Start
+### Quick Start
 
 1. Build the DMG locally or download a packaged DMG.
 2. Open the DMG and drag `OnlineWorker.app` into `/Applications`.
@@ -115,7 +121,7 @@ xattr -cr /Applications/OnlineWorker.app
 
 4. Launch `OnlineWorker.app`.
 
-## Initial Setup
+### Initial Setup
 
 1. Open the app and go to `Setup`.
 2. Make sure the supported CLI tools you want to use are installed and visible in `PATH`.
@@ -127,7 +133,7 @@ xattr -cr /Applications/OnlineWorker.app
 5. Use the in-app connectivity checks on the `Setup` page to confirm Telegram access.
 6. Go back to `Dashboard` and start the service.
 
-## Configuration
+### Configuration
 
 The installed app reads and writes user data under:
 
@@ -136,13 +142,11 @@ The installed app reads and writes user data under:
 ~/Library/Application Support/OnlineWorker/.env
 ```
 
-When running from source, the repo root may also use local `config.yaml`, `.env`, and `onlineworker_state.json` files.
+When running from source, the repo root may also use local `config.yaml`, `.env`,
+and `onlineworker_state.json` files. In normal workflows, edit configuration
+through the app settings UI.
 
-Additional provider packages can be mounted by setting `ONLINEWORKER_PROVIDER_OVERLAY` to a file or directory path. When the path points to a directory, OnlineWorker scans any `plugin.yaml` files under that tree and loads the provider descriptors it finds there. The installed app also reads the same key from `~/Library/Application Support/OnlineWorker/.env`, with process env taking priority when both are present.
-
-Additional notification packages can be mounted by setting `ONLINEWORKER_NOTIFICATION_OVERLAY` in the process environment to a file or directory path. Directory paths are scanned for `plugin.yaml` files with `kind: notification`. This key is not read from the app `.env`.
-
-### `.env`
+`.env` keeps Telegram bootstrap values:
 
 ```bash
 TELEGRAM_TOKEN=your_bot_token_here
@@ -153,40 +157,21 @@ GROUP_CHAT_ID=-1001234567890
 Claude uses the local Claude CLI's own authentication and runtime configuration.
 OnlineWorker does not read or write `ANTHROPIC_*` proxy, model, or key settings.
 
-### `config.yaml`
+`config.yaml` stores provider, Telegram, notification channel, and AI
+service/scenario settings. Provider overlays can be mounted with
+`ONLINEWORKER_PROVIDER_OVERLAY`; notification overlays can be mounted with
+`ONLINEWORKER_NOTIFICATION_OVERLAY`.
 
-`config.yaml` is the app configuration file for provider, Telegram, and notification plugin settings. Use the in-app settings UI to edit it in normal workflows.
+## Runtime Workflows
 
-Notification channels are exposed as a first-class `Notifications` tab. Channel switches are stored under `notifications.channels.<channel>.enabled`; plugin field values are stored under `notifications.channels.<channel>.config`.
+### Provider Interactions
 
-AI services and scenarios are configured from the first-class `AI` tab. Service
-settings such as API key, endpoint, model list, selected model, timeout, and
-enablement are separate from scenario prompt settings. Scenario settings choose
-one configured service and define the prompt, output schema, limits, enablement,
-and fallback behavior for a specific use case.
+OnlineWorker presents provider approvals and questions through a shared
+App/Telegram flow. For Codex, the packaged app can bind the active session to a
+managed Codex TUI host; when that host is online, approval prompts can be handled
+from either Telegram buttons or the local Codex TUI.
 
-The current built-in AI service choices are OpenAI-compatible chat completions
-and Claude-compatible messages. Users choose and test those fixed service
-cards; they do not need to type protocol names or environment variable names for
-this feature.
-
-## Provider Interactions
-
-OnlineWorker routes provider-specific approval and question prompts through a
-shared interaction contract:
-
-- `core` owns the common `ProviderApprovalRequest` and `ProviderQuestionRequest`
-  structures.
-- Provider plugins parse their native events, decide whether a prompt is
-  actionable, and handle the provider-specific reply path.
-- Telegram renders the shared interaction shape and records pending callbacks.
-
-For Codex, the packaged app can bind the active session to a managed Codex TUI
-host. When that host is online, approval prompts are mirrored to Telegram with
-action buttons, and Telegram actions are written back to the same TUI host. The
-local Codex TUI remains usable for the same approval flow.
-
-## Codex Text Sending
+### Codex Text Sending
 
 Civility mode is temporarily disabled. App and Telegram send user input
 unchanged, and the related settings entry is hidden from the app.
@@ -195,20 +180,14 @@ The managed remote-proxy wrapper code remains in the repository for a future
 restore, but it is not documented as a public entry point while the feature is
 paused.
 
-## Session Operations
+### Session Operations
 
 Sessions can be browsed, messaged, filtered by active/archived state, and
-archived from the Sessions page. A row-level action menu and the context menu
-both expose archive when the selected provider supports a real archive path.
+archived from the Sessions page. Archive is provider-backed: OnlineWorker calls
+the provider's real archive path first, updates local state only after success,
+and leaves the session unchanged if the provider reports failure.
 
-Archive is provider-backed. OnlineWorker calls the provider source first, then
-persists a local archived overlay only after success. If the provider reports
-failure or does not support real archive, the UI shows the error and leaves the
-session unchanged locally. Archived overlays are merged back into provider
-session lists so the Archived filter can still show rows when a provider source
-omits archived sessions.
-
-## Usage
+### Usage
 
 Usage data is exposed through provider metadata and usage hooks. The app shows
 usage-capable providers dynamically on the Usage page, so new providers can
@@ -219,17 +198,11 @@ command is handled by OnlineWorker and is not forwarded into the active
 conversation. Concrete session topics reject it with guidance because usage is
 meaningful at the agent/provider topic level.
 
-## AI Scenarios
+### AI Scenarios
 
-The AI layer is a shared app capability, not a provider session. AI scenario
-calls are direct API requests and do not create Codex sessions, Claude sessions,
-provider conversations, or Telegram topics.
-
-Notification completion summary uses the `notification_summary` scenario when
-enabled and correctly configured. If the scenario is disabled, invalid, or the
-service call fails, OnlineWorker falls back to local summary rules. Preview
-titles remain length-limited, while AI-generated summary bodies are kept intact
-apart from lightweight cleanup.
+The AI layer is a shared app capability, not a provider session. Notification
+completion summary uses the `notification_summary` scenario when enabled and
+correctly configured; otherwise OnlineWorker falls back to local summary rules.
 
 ## Development
 
@@ -296,14 +269,7 @@ bash scripts/restart-installed-app.sh
 
 ### Intel DMG
 
-```bash
-cd /path/to/onlineWorker
-arch -x86_64 /usr/local/bin/python3.13 -m PyInstaller onlineworker-x86_64.spec --clean --noconfirm --distpath dist-x86_64
-cp dist-x86_64/onlineworker-bot mac-app/src-tauri/binaries/onlineworker-bot-x86_64-apple-darwin
-
-cd mac-app
-pnpm tauri build --target x86_64-apple-darwin
-```
+Intel packaging is documented in [deploy/BUILD.md](deploy/BUILD.md).
 
 ## Repository Layout
 
@@ -324,7 +290,6 @@ onlineWorker/
 
 - Source mode is for development and troubleshooting.
 - App installation and verification should always be done against the packaged app.
-- Local generated files such as `__pycache__`, `.pytest_cache`, build outputs, and `onlineworker_state.json` should remain untracked.
 
 ## License
 

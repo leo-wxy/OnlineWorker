@@ -17,22 +17,36 @@ English version: [README.md](README.md)
 - [Security Policy](SECURITY.md)
 - [Support](SUPPORT.md)
 
-## 截图
+## 产品导览
 
 以下截图基于真实 App UI 和脱敏 demo 数据生成，不包含真实 token、用户 ID、
 本机路径、会话内容或私有扩展配置。
+
+### Dashboard
 
 <p align="center">
   <img src="./docs/screenshots/dashboard.png" alt="OnlineWorker 总览页" width="88%" />
 </p>
 
+Dashboard 是日常控制面。这里可以查看服务状态、provider 健康状态、最近活动，并快速进入 Setup、Sessions、日志、命令和用量页面。
+
+### Sessions
+
 <p align="center">
   <img src="./docs/screenshots/sessions-overview.png" alt="OnlineWorker 会话页" width="88%" />
 </p>
 
+Sessions 是主要工作面。你可以浏览 provider 会话，按 Active / Archived 过滤，打开会话，发送文本和图片/文件附件，并通过 provider-backed 动作归档会话。
+
+### Usage
+
 <p align="center">
   <img src="./docs/screenshots/usage.png" alt="OnlineWorker 用量页" width="88%" />
 </p>
+
+Usage 页面通过 provider metadata 和 usage hooks 读取用量。它支持 provider 切换、默认近 7 天窗口、日期筛选、汇总卡和每日图表，同时避免把 provider-specific 解析逻辑硬编码到 React 页面里。
+
+### AI 服务与场景
 
 <p align="center">
   <img src="./docs/screenshots/ai-services.png" alt="OnlineWorker AI 服务配置" width="88%" />
@@ -42,57 +56,33 @@ English version: [README.md](README.md)
   <img src="./docs/screenshots/ai-scenarios.png" alt="OnlineWorker AI 场景配置" width="88%" />
 </p>
 
+AI 页面把可复用的服务凭据和具体场景 prompt 分开。内置服务类型包括 OpenAI-compatible chat completions 和 Claude-compatible messages。通知完成摘要是第一个内置场景；当 AI 未启用、配置无效或调用失败时，会回退到确定性的本地摘要规则。
+
+### Setup
+
 <p align="center">
   <img src="./docs/screenshots/setup.png" alt="OnlineWorker 设置页" width="88%" />
 </p>
 
-## 概览
+Setup 处理首次运行时最实际的检查：必要 CLI 是否可见、Telegram 是否连通、服务生命周期是否正常，以及 App 成为主控制面前需要写入的配置。
+
+## 核心能力
 
 - 一个运行和监管本地 AI 编码 CLI 的 macOS 桌面工作区。
-- 核心形态是已安装的 App，不是托管在浏览器里的服务。
-- App 负责配置和日常控制，Telegram 负责远程输入和最终回传。
-- 当前仓库内置的 provider 只有 `codex` 和 `claude`。
-- 当前仓库内置的通知渠道是 `telegram`，额外通知渠道可通过插件挂载。
-- App 内提供一级 `Usage / 用量` 页面，可在 `Codex / Claude` 之间切换查看最近用量。
-- App 内提供一级 `AI` 页面，用于配置通用 AI 服务和按场景配置 prompt。
-
-## 功能
-
-- Mac App 负责 Setup、Dashboard、Sessions、Commands 和日志控制。
-- Telegram 作为远程任务入口和最终状态回传通道。
+- 核心形态是已安装的 App；Telegram 是轻量远程入口，负责任务提交、补充上下文、审批、状态和最终回复。
+- 当前仓库内置 provider 为 `codex` 和 `claude`；外部 provider 可通过公开插件契约挂载。
+- 当前仓库内置通知渠道为 `telegram`；外部通知渠道可通过通知插件契约挂载。
+- 基于 provider 的配置方式，支持已接入的 CLI 后端。
 - Telegram 会镜像 provider 的审批和问题交互。对 Codex 来说，当前
   thread 绑定到本地 Codex TUI host 后，审批既可以在本地 TUI 里处理，
   也可以通过 Telegram 按钮处理。
 - 基于插件的通知渠道，可在一级 `Notifications / 通知` 页面中配置。
-- 基于 provider 的配置方式，支持已接入的 CLI 后端。
-- 可在 App 内浏览会话并发送消息。
-- Sessions 页面支持归档会话。归档动作会先调用 provider 的真实归档能力，成功后才更新本地 archived 状态。
-- Session Browser 支持从桌面端发送文本 + 图片/文件附件，并且每次发送只显示为一条用户消息。
-- 提供独立的 `Usage / 用量` 页面，默认查看近 7 天数据，并支持日期筛选、汇总卡和每日图表。
-- 用量统计仍然收口在 provider/plugin 适配层之后，不把 provider-specific 解析逻辑扩散到共享 React 页面。
-- `/token_usage` 是 agent topic 下的本地 bot 命令，用于返回支持用量读取的 provider 用量；在具体会话 topic 中会被拒绝，不会转发给 agent。
-- 通用 AI 服务可配置一次并被不同场景复用。当前首个内置场景是通知完成摘要；当 AI 未启用、配置无效或调用失败时，会回退到确定性的本地摘要规则。
 - 最终回复支持 Markdown 渲染。
 - 通过 Tauri + PyInstaller 提供适合安装的 macOS 打包能力。
 
-## Provider 范围
+## 安装与设置
 
-当前仓库内置支持的 provider 只有：
-
-- `codex`
-- `claude`
-
-应用仍然支持通过公开插件契约挂载外部 provider 扩展包，但这个仓库只分发上面列出的 builtin providers。
-
-## 通知渠道
-
-当前仓库内置支持的通知渠道是：
-
-- `telegram`
-
-应用也支持通过公开通知插件契约挂载额外通知渠道。共享通知 router 只负责把简短任务状态事件分发给已启用渠道；每个插件自己负责具体 App 的发送逻辑。
-
-## 运行要求
+### 运行要求
 
 - macOS
 - Node.js 20
@@ -101,7 +91,7 @@ English version: [README.md](README.md)
 - Codex 工作流所需的 `codex` CLI
 - Claude 工作流所需的 `claude` CLI
 
-## 快速开始
+### 快速开始
 
 1. 本地构建 DMG，或直接下载打包好的 DMG。
 2. 打开 DMG，并将 `OnlineWorker.app` 拖到 `/Applications`。
@@ -113,7 +103,7 @@ xattr -cr /Applications/OnlineWorker.app
 
 4. 启动 `OnlineWorker.app`。
 
-## 初始设置
+### 初始设置
 
 1. 打开应用，进入 `Setup`。
 2. 确认你要使用的 CLI 工具已经安装，并且在 `PATH` 中可见。
@@ -125,7 +115,7 @@ xattr -cr /Applications/OnlineWorker.app
 5. 在 `Setup` 页用内置连通性检查确认 Telegram 访问正常。
 6. 回到 `Dashboard`，启动服务。
 
-## 配置
+### 配置
 
 已安装的应用会在以下位置读写用户数据：
 
@@ -134,13 +124,10 @@ xattr -cr /Applications/OnlineWorker.app
 ~/Library/Application Support/OnlineWorker/.env
 ```
 
-从源码运行时，仓库根目录下也可能使用本地的 `config.yaml`、`.env` 和 `onlineworker_state.json`。
+从源码运行时，仓库根目录下也可能使用本地的 `config.yaml`、`.env` 和
+`onlineworker_state.json`。正常使用时，建议通过 App 内设置界面修改配置。
 
-额外 provider 扩展包可以通过 `ONLINEWORKER_PROVIDER_OVERLAY` 外置挂载。这个环境变量可以指向单个文件，也可以指向一个目录；当它指向目录时，OnlineWorker 会扫描目录下的 `plugin.yaml`，并加载其中声明的 provider descriptor。已安装的 App 也会从 `~/Library/Application Support/OnlineWorker/.env` 读取同名 key；如果进程环境变量和 `.env` 同时存在，进程环境变量优先。
-
-额外通知渠道扩展包可以通过进程环境变量 `ONLINEWORKER_NOTIFICATION_OVERLAY` 外置挂载。这个环境变量可以指向单个文件，也可以指向一个目录；目录会扫描其中 `kind: notification` 的 `plugin.yaml`。这个 key 不会从 App 的 `.env` 中读取。
-
-### `.env`
+`.env` 保存 Telegram 启动所需的基础值：
 
 ```bash
 TELEGRAM_TOKEN=your_bot_token_here
@@ -151,32 +138,20 @@ GROUP_CHAT_ID=-1001234567890
 Claude 使用本机 Claude CLI 自己的鉴权和运行时配置。
 OnlineWorker 不再读取或写入 `ANTHROPIC_*` 代理、模型或密钥设置。
 
-### `config.yaml`
+`config.yaml` 保存 provider、Telegram、通知渠道和 AI 服务/场景配置。
+provider overlay 可通过 `ONLINEWORKER_PROVIDER_OVERLAY` 挂载；notification
+overlay 可通过 `ONLINEWORKER_NOTIFICATION_OVERLAY` 挂载。
 
-`config.yaml` 是应用的 provider、Telegram 与通知插件配置文件。正常使用时，建议通过 App 内的设置界面修改。
+## 运行模型
 
-通知渠道会作为一级 `Notifications` 页面展示。渠道开关保存在 `notifications.channels.<channel>.enabled`；插件字段值保存在 `notifications.channels.<channel>.config`。
+### Provider 交互
 
-AI 服务和 AI 场景在一级 `AI` 页面中配置。API Key、请求地址、模型列表、当前模型、超时时间和启用状态属于服务连接配置；prompt 模板、选择的服务、输出结构、长度限制、启用状态和 fallback 策略属于具体场景配置。
+OnlineWorker 会把 provider 审批和问题提示统一呈现在 App / Telegram
+链路中。对 Codex 来说，打包后的 App 可以把活跃 session 绑定到受管理的
+Codex TUI host；host 在线时，审批既可以通过 Telegram 按钮处理，也可以在
+本地 Codex TUI 里处理。
 
-当前内置的 AI 服务选项是 OpenAI-compatible chat completions 和 Claude-compatible messages。用户只需要选择和测试固定服务卡片，不需要手动填写协议名、服务 id 或环境变量名。
-
-## Provider 交互
-
-OnlineWorker 通过共享交互契约承接不同 provider 的审批和问题提示：
-
-- `core` 只定义通用的 `ProviderApprovalRequest` 与 `ProviderQuestionRequest`
-  结构。
-- provider 插件负责解析各自原生事件、判断提示是否可交互，并处理
-  provider-specific 的回写路径。
-- Telegram 只负责渲染统一结构，并记录待处理 callback。
-
-对 Codex 来说，打包后的 App 可以把活跃 session 绑定到一个受管理的
-Codex TUI host。host 在线时，审批会以带按钮的形式镜像到 Telegram；
-Telegram 操作会写回同一个 TUI host。本地 Codex TUI 也仍然可以处理同一
-个审批流程。
-
-## Codex 文本发送
+### Codex 文本发送
 
 文明模式已暂时关闭，App 和 Telegram 都会原样发送用户输入。相关设置入口
 不会在 App 中展示。
@@ -184,23 +159,19 @@ Telegram 操作会写回同一个 TUI host。本地 Codex TUI 也仍然可以处
 内部仍保留受管理 remote proxy 的包装代码，方便后续重新启用时复用；当前
 不作为公开使用入口。
 
-## 会话操作
+### 会话操作
 
-Sessions 页面支持浏览、发送消息、按 Active/Archived 过滤，以及归档具体会话。会话行上的可见操作菜单和右键菜单都会暴露 Archive 操作，前提是 provider 提供真实归档能力。
+Sessions 页面支持浏览、发送消息、按 Active/Archived 过滤，以及归档具体会话。归档是 provider-backed 操作：OnlineWorker 会先调用 provider 的真实归档路径，成功后才更新本地状态；如果 provider 返回失败，本地会话状态保持不变。
 
-归档是 provider-backed 操作。OnlineWorker 会先调用 provider source 的真实归档路径，成功后才写入本地 archived overlay。如果 provider 返回失败，或 provider 本身不支持真实归档，UI 会直接展示错误，并保持本地会话状态不变。对于归档后 source 不再返回的会话，本地 overlay 会合并回会话列表，让 Archived 过滤仍然能看到这类记录。
-
-## 用量
+### 用量
 
 用量数据通过 provider metadata 和 usage hooks 暴露。App 的 Usage 页面会动态展示支持用量读取的 provider，新 provider 不需要把解析逻辑硬编码到 React 页面里。
 
 Telegram 侧也提供 `/token_usage` 本地命令。这个命令只在 agent topic 中由 OnlineWorker 自己处理，不会发送给当前会话。具体 session topic 中使用时会收到拒绝提示，因为用量信息在 agent/provider topic 维度更有意义。
 
-## AI 场景
+### AI 场景
 
-AI 层是 OnlineWorker 的通用能力，不是 provider session。AI 场景调用是直接 API 请求，不会创建 Codex session、Claude session、provider 会话或 Telegram topic。
-
-通知完成摘要会在启用且配置正确时使用 `notification_summary` 场景。如果场景关闭、配置无效或服务调用失败，OnlineWorker 会回退到本地摘要规则。Preview title 仍保持长度限制；AI 生成的摘要正文只做轻量清理，不再套用旧的正文截断限制。
+AI 层是 OnlineWorker 的通用能力，不是 provider session。通知完成摘要会在启用且配置正确时使用 `notification_summary` 场景；否则 OnlineWorker 会回退到本地摘要规则。
 
 ## 开发
 
@@ -266,14 +237,7 @@ bash scripts/restart-installed-app.sh
 
 ### Intel DMG
 
-```bash
-cd /path/to/onlineWorker
-arch -x86_64 /usr/local/bin/python3.13 -m PyInstaller onlineworker-x86_64.spec --clean --noconfirm --distpath dist-x86_64
-cp dist-x86_64/onlineworker-bot mac-app/src-tauri/binaries/onlineworker-bot-x86_64-apple-darwin
-
-cd mac-app
-pnpm tauri build --target x86_64-apple-darwin
-```
+Intel 打包流程见 [deploy/BUILD.md](deploy/BUILD.md)。
 
 ## 仓库结构
 
@@ -294,7 +258,6 @@ onlineWorker/
 
 - 源码模式主要用于开发和排障。
 - 安装后的应用验证，始终应以打包后的 App 为准。
-- `__pycache__`、`.pytest_cache`、构建产物、`onlineworker_state.json` 等本地生成文件应保持未跟踪状态。
 
 ## 许可证
 
