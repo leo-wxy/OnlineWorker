@@ -1,8 +1,8 @@
 # Project State
 
-**Updated:** 2026-05-29
+**Updated:** 2026-05-30
 **Current milestone:** General AI Capability and Session Operations
-**Current phase:** 9. Session Archive Actions
+**Current phase:** 10. Codebase Structure Refinement
 **Last archived milestone:** v1.2.1
 
 ## Current Status
@@ -12,6 +12,7 @@
 - Phase 7, OnlineWorker User Message Gateway, is closed.
 - Phase 8, General AI Capability Layer, is complete and packaged-app verified.
 - Phase 9, Session Archive Actions, is complete and packaged-app verified.
+- Phase 10, Codebase Structure Refinement, is added and not planned yet.
 - Active requirements `NOTIFY-01` and `NOTIFY-02` are implemented.
 - Phase 6 notification mechanism, Telegram builtin channel, plugin guide assets, and UI channel configuration have been implemented and installed-app verified.
 - Phase 7 adds an OnlineWorker-level provider-bound user message gateway and Codex remote app-server proxy boundary. Civility rewrite is currently paused, user text is sent unchanged, and related App entry points are hidden; installed-app verification has passed.
@@ -32,6 +33,7 @@
 | 7. OnlineWorker User Message Gateway | Closed | None |
 | 8. General AI Capability Layer | Completed and packaged-app verified | None |
 | 9. Session Archive Actions | Completed and packaged-app verified | None |
+| 10. Codebase Structure Refinement | Not planned | Run `$gsd-plan-phase 10` |
 
 ## Key Preserved Decisions
 
@@ -77,3 +79,4 @@
 - Phase 9 added: Session Archive Actions, covering Session tab right-click Archive, provider-backed real archive execution, failure visibility, and local archived state persistence only after source archive success.
 - Phase 9 plan added: 09-01 add provider-backed Session tab archive action.
 - Phase 9 09-01 completed: Session tab right-click and visible action Archive UI, `archive_provider_session` Tauri command, owner bridge and sidecar real archive paths, post-success local state persistence, archived overlay list merging, provider usage capability discovery, `/token_usage` agent-topic command handling, and failure-visible no-local-fallback behavior. Sidecar archive is used only when owner bridge transport is unavailable; provider-reported archive failures return directly to the UI. Focused Python/Rust/Node/TypeScript verification and installed-app verification passed.
+- Phase 10 added: Codebase Structure Refinement, covering oversized class/module audit, responsibility boundary cleanup, and staged behavior-preserving refactors across Python bot/runtime, Tauri, provider/plugin, AI/session, and frontend app shell code.

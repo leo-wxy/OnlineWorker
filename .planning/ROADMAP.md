@@ -16,6 +16,7 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 7: OnlineWorker User Message Gateway** - Route provider-bound user text through an OnlineWorker-level gateway before provider-specific send hooks. Gateway/proxy boundaries are complete; civility rewrite is paused, related App entry points are hidden, and packaged-app verification is complete.
 - [x] **Phase 8: General AI Capability Layer** - Add a top-level AI sidebar tab plus a provider-neutral AI capability layer. Service API settings and scenario prompt settings are separate; notification summary is the first scenario, current local summary rules remain the fallback, and packaged-app verification is complete.
 - [x] **Phase 9: Session Archive Actions** - Add Session tab archive actions and adjacent provider usage operations. Archive executes the provider's real source operation, archived rows remain visible through post-success local overlay, `/token_usage` is scoped to agent topics, and packaged-app verification is complete.
+- [ ] **Phase 10: Codebase Structure Refinement** - Audit and restructure oversized classes/modules and misplaced responsibilities without changing product behavior. Focus on clearer ownership boundaries, smaller cohesive units, and safer extension points for provider, notification, AI, session, and UI runtime code.
 
 ## Phase Details
 
@@ -195,3 +196,32 @@ Latest verification:
 
 Remaining Phase 9 verification:
 - None for provider-backed session archive action. Providers without real archive support intentionally continue to fail clearly.
+
+### Phase 10: Codebase Structure Refinement
+
+**Goal:** Reduce structural debt across the app by splitting oversized classes/modules, moving misplaced responsibilities behind existing boundaries, and making future provider/plugin/UI changes easier to reason about without changing user-facing behavior.
+**Requirements**: TBD
+**Depends on:** Phase 9
+**Plans:** 0 plans
+
+Initial focus areas:
+- Identify oversized or high-churn classes/modules in Python bot/runtime code, Tauri command/state code, and frontend app shell/components.
+- Separate orchestration, persistence, provider-specific behavior, plugin contracts, UI state, and presentation logic where they are currently coupled.
+- Preserve existing public provider/plugin boundaries and avoid reintroducing hardcoded provider wiring into shared app surfaces.
+- Keep behavior stable through characterization tests before large splits, especially for session send/archive, notification delivery, AI scenario runtime, and packaged-app startup.
+- Prefer staged, reviewable refactors over broad rewrites so each step can be verified independently.
+
+Success Criteria (what must be TRUE):
+  1. The largest and most coupled classes/modules are inventoried with concrete ownership problems and proposed target boundaries.
+  2. Each refactor plan includes behavior-preserving verification before implementation.
+  3. Shared provider, notification, AI, and session contracts remain stable or receive explicit migration notes.
+  4. UI state/presentation splits reduce duplicated or cross-feature state mutations without changing visible workflows.
+  5. Packaged-app validation remains available for any refactor touching startup, sidecar, provider bridge, or Tauri command boundaries.
+
+Fast verification path:
+- Start with codebase mapping and characterization tests before moving code.
+- Use focused Python/Node/Rust/TypeScript checks for each structural slice.
+- Run packaged-app verification only for slices touching app startup, sidecar packaging, bridge IPC, or installed-app behavior.
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 10 to break down)
