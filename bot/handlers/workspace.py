@@ -15,9 +15,6 @@
   点击未打开的 workspace → 注册 daemon + 创建 workspace Topic + 同步最新 10 个 thread
 """
 import logging
-import hashlib
-import os
-from datetime import datetime
 from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
@@ -42,6 +39,17 @@ from bot.handlers.common import (
 )
 from bot.thread_controls import send_thread_control_panel
 from bot.utils import TopicNotFoundError
+from bot.handlers.workspace_helpers import (
+    THREAD_OPEN_V2_PREFIX as _THREAD_OPEN_V2_PREFIX,
+    build_history_sync_batches as _build_history_sync_batches,
+    format_history_turn_message as _format_history_turn_message,
+    get_workspace_callback_identity as _get_workspace_callback_identity,
+    history_turn_signature as _history_turn_signature,
+    make_thread_open_token as _make_thread_open_token,
+    make_thread_topic_name as _make_thread_topic_name,
+    normalize_history_turn_timestamp as _normalize_history_turn_timestamp,
+    normalize_workspace_topic_label as _normalize_workspace_topic_label,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +72,6 @@ _THREAD_HISTORY_SYNC_LOOKBACK = 50
 
 # 正在创建 topic 的 thread_id 集合，防止并发重复创建
 _creating_topics: set[str] = set()
-_THREAD_OPEN_V2_PREFIX = "thread_open_v2"
 
 
 def _get_workspace_hooks(tool_name: str):
@@ -96,95 +103,6 @@ def _list_provider_local_threads(tool_name: str, workspace_path: str, *, limit: 
     if callable(list_local_threads):
         return list_local_threads(workspace_path, limit=limit)
     return []
-
-
-def _make_thread_topic_name(tool_name: str, ws_name: str, preview: Optional[str], thread_id: str) -> str:
-    """生成 thread Topic 名称：[tool/ws_name] preview（最长 128 字符）。"""
-    workspace_label = _normalize_workspace_topic_label(ws_name)
-    prefix = f"[{tool_name}/{workspace_label}] "
-    if preview:
-        body = " ".join(str(preview).strip().split())
-    else:
-        body = "New session"
-    return (prefix + body)[:128]
-
-
-def _normalize_workspace_topic_label(ws_name: str) -> str:
-    normalized = str(ws_name or "").strip()
-    if not normalized:
-        return "workspace"
-    if normalized == "/":
-        return "root"
-    if "/" in normalized or "\\" in normalized:
-        basename = os.path.basename(normalized.rstrip("/\\"))
-        return basename or "workspace"
-    return normalized
-
-
-def _make_thread_open_token(value: str) -> str:
-    """生成稳定短 token，供 thread_open callback 唯一定位使用。"""
-    return hashlib.blake2s(value.encode("utf-8"), digest_size=8).hexdigest()
-
-
-def _history_turn_signature(turn: dict) -> str:
-    role = str(turn.get("role") or "").strip()
-    timestamp = _normalize_history_turn_timestamp(turn.get("timestamp"))
-    text = str(turn.get("text") or "").strip()
-    payload = f"{role}\n{timestamp}\n{text}".encode("utf-8")
-    return hashlib.blake2s(payload, digest_size=16).hexdigest()
-
-
-def _normalize_history_turn_timestamp(value) -> int | str:
-    if isinstance(value, (int, float)):
-        return int(value)
-
-    text = str(value or "").strip()
-    if not text:
-        return 0
-
-    try:
-        return int(text)
-    except (TypeError, ValueError):
-        pass
-
-    try:
-        return int(datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp() * 1000)
-    except (TypeError, ValueError):
-        return text
-
-
-def _format_history_turn_message(turn: dict) -> Optional[str]:
-    role = str(turn.get("role") or "").strip()
-    text = str(turn.get("text") or "").strip()
-    if not text:
-        return None
-    if role == "user":
-        return f"👤 {text[:3000]}"
-    if role == "assistant":
-        truncated = text[:3000]
-        if len(text) > 3000:
-            truncated += "\n…（截断）"
-        return f"🤖 {truncated}"
-    return None
-
-
-def _build_history_sync_batches(header: str, turn_messages: list[str], *, max_chars: int = 3500) -> list[str]:
-    batches: list[str] = []
-    current = header.strip()
-
-    for msg in turn_messages:
-        if not msg:
-            continue
-        addition = f"\n\n{msg}" if current else msg
-        if current and len(current) + len(addition) > max_chars:
-            batches.append(current)
-            current = msg
-            continue
-        current += addition
-
-    if current:
-        batches.append(current)
-    return batches
 
 
 async def _sync_existing_claude_thread_history(
@@ -277,10 +195,6 @@ async def _sync_existing_claude_thread_history(
         len(turns_to_send),
     )
     return True
-
-
-def _get_workspace_callback_identity(storage_key: str, ws: WorkspaceInfo) -> str:
-    return ws.daemon_workspace_id or storage_key or f"{ws.tool}:{ws.name}"
 
 
 def make_thread_open_callback_data(ws_id: str, thread_id: str) -> str:

@@ -202,7 +202,7 @@ Remaining Phase 9 verification:
 **Goal:** Reduce structural debt across the app by splitting oversized classes/modules, moving misplaced responsibilities behind existing boundaries, and making future provider/plugin/UI changes easier to reason about without changing user-facing behavior.
 **Requirements**: TBD
 **Depends on:** Phase 9
-**Plans:** 1 plan
+**Plans:** 3 plans
 
 Initial focus areas:
 - Identify oversized or high-churn classes/modules in Python bot/runtime code, Tauri command/state code, and frontend app shell/components.
@@ -234,6 +234,11 @@ Plans:
   - [x] Split dashboard provider status helpers behind the existing command surface.
   - [x] Split dashboard recent activity helpers behind the existing command surface.
   - [x] Preserve public Tauri command names and response shapes.
+- [x] 10-03: Extract Python workspace pure helpers
+  - [x] Split workspace topic/callback/history pure helpers into `workspace_helpers.py`.
+  - [x] Preserve existing Telegram callback data and private helper import compatibility.
+  - [x] Add focused helper characterization tests.
+  - [x] Preserve provider lookup, topic creation, and storage persistence behavior.
 
 Latest verification:
 - Planning/static verification passed: `git diff --check`.
@@ -243,7 +248,10 @@ Latest verification:
   - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml config_provider --quiet` -> `32 passed`.
   - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml dashboard --quiet` -> `21 passed`.
   - `git diff --check` -> passed.
+- 10-03 focused Python verification passed:
+  - `/Users/wxy/.pyenv/shims/python3.13 -m pytest -q tests/test_workspace_helpers.py tests/test_workspace_thread_open.py tests/test_thread_controls.py` -> `48 passed`.
+  - `git diff --check` -> passed.
 - GSD consistency passed: `node ~/.codex/get-shit-done/bin/gsd-tools.cjs validate consistency` -> `passed: true` with existing warnings for older phase artifacts.
 
 Remaining Phase 10 verification:
-- Next production-code refactor slice is pending 10-03 planning/execution: Python workspace pure-helper extraction.
+- Next production-code refactor slice is pending 10-04 planning/execution.
