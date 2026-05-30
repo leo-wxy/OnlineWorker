@@ -12,12 +12,12 @@
 - Phase 7, OnlineWorker User Message Gateway, is closed.
 - Phase 8, General AI Capability Layer, is complete and packaged-app verified.
 - Phase 9, Session Archive Actions, is complete and packaged-app verified.
-- Phase 10, Codebase Structure Refinement, is added and not planned yet.
 - Active requirements `NOTIFY-01` and `NOTIFY-02` are implemented.
 - Phase 6 notification mechanism, Telegram builtin channel, plugin guide assets, and UI channel configuration have been implemented and installed-app verified.
 - Phase 7 adds an OnlineWorker-level provider-bound user message gateway and Codex remote app-server proxy boundary. Civility rewrite is currently paused, user text is sent unchanged, and related App entry points are hidden; installed-app verification has passed.
 - Phase 8 adds a top-level AI sidebar tab and a shared AI capability layer. OpenAI and Claude are fixed built-in service choices; scenarios select exactly one configured service; service API settings and prompt/scenario settings are intentionally separate; notification summary is the first implemented consumer and local summary rules remain the fallback.
 - Phase 9 adds Session tab archive actions and adjacent provider usage operations. Archive executes against the real provider source first, then persists local archived state; failures are visible, do not mark sessions archived locally, and post-success overlays keep archived rows visible when provider sources omit them. Provider usage is exposed through provider metadata/hooks, and `/token_usage` runs only in agent topics.
+- Phase 10 has completed the full static codebase structure audit, staged refactor planning pass, and 10-02 Tauri config/dashboard helper extraction.
 
 ## Archived Milestone
 
@@ -33,7 +33,7 @@
 | 7. OnlineWorker User Message Gateway | Closed | None |
 | 8. General AI Capability Layer | Completed and packaged-app verified | None |
 | 9. Session Archive Actions | Completed and packaged-app verified | None |
-| 10. Codebase Structure Refinement | Not planned | Run `$gsd-plan-phase 10` |
+| 10. Codebase Structure Refinement | In progress | Plan or execute 10-03 |
 
 ## Key Preserved Decisions
 
@@ -80,3 +80,7 @@
 - Phase 9 plan added: 09-01 add provider-backed Session tab archive action.
 - Phase 9 09-01 completed: Session tab right-click and visible action Archive UI, `archive_provider_session` Tauri command, owner bridge and sidecar real archive paths, post-success local state persistence, archived overlay list merging, provider usage capability discovery, `/token_usage` agent-topic command handling, and failure-visible no-local-fallback behavior. Sidecar archive is used only when owner bridge transport is unavailable; provider-reported archive failures return directly to the UI. Focused Python/Rust/Node/TypeScript verification and installed-app verification passed.
 - Phase 10 added: Codebase Structure Refinement, covering oversized class/module audit, responsibility boundary cleanup, and staged behavior-preserving refactors across Python bot/runtime, Tauri, provider/plugin, AI/session, and frontend app shell code.
+- Phase 10 plan added: 10-01 audit structure debt and establish staged refactor rails.
+- Phase 10 10-01 completed: created `10-CODEBASE-AUDIT.md` and `10-STRUCTURE-DEBT.md`, updated codebase structure/concerns docs, locked the verification matrix, and selected the first follow-up implementation slices: Tauri config/dashboard helpers, Python workspace helpers, and frontend Dashboard state/presentation.
+- Phase 10 plan added: 10-02 extract Tauri config and dashboard helper modules.
+- Phase 10 10-02 completed: extracted config provider asset helpers, notification metadata helpers, dashboard provider status helpers, and dashboard recent activity helpers while preserving Tauri command surfaces. Focused Rust verification passed for `config_provider` and `dashboard`.

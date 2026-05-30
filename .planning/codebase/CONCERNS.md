@@ -4,6 +4,12 @@
 
 ## Tech Debt
 
+**Oversized command/runtime modules blur ownership boundaries:**
+- Issue: Phase 10 inventory found several files carrying many responsibilities at once, including `config_provider.rs` (2800 lines), `dashboard.rs` (2136), `bot/events.py` (1785), `bot/handlers/workspace.py` (1240), and `Dashboard.tsx` (696)
+- Why: features accumulated at existing entrypoints as provider, notification, AI, session, and dashboard surfaces expanded
+- Impact: changes are harder to review, focused tests are harder to select, and unrelated behavior can be affected by local edits
+- Fix approach: perform staged behavior-preserving refactors behind characterization tests; start with pure helper extraction before moving startup, IPC, or streaming behavior
+
 **Cross-language runtime boundary (`Python + Rust + React + external CLIs`):**
 - Issue: product behavior spans Python sidecar, Rust host, React UI, Telegram API, and provider CLIs
 - Why: the product is intentionally a local AI workbench rather than a single-runtime app
@@ -68,6 +74,12 @@
 - Why fragile: small schema/contract changes can cascade into builtin providers and app surfaces
 - Common failures: descriptor mismatch, missing capability assumptions, provider visibility/managed state drift
 - Safe modification: avoid casual contract expansion; update tests around `core/providers/*` and provider-specific adapters together
+
+**`bot/events.py` streaming and notification hub:**
+- Why fragile: streamed provider events, Telegram edits, approval/question UI, notification routing, AI summary fallback, topic materialization, and Codex final-reply sync share one module
+- Common failures: duplicate/missing final replies, broken approval buttons, noisy or missing notifications, wrong topic materialization
+- Safe modification: add characterization tests first; extract only pure formatting/routing helpers before changing async Telegram behavior
+- Test coverage: meaningful but broad; still high blast radius
 
 ## Scaling Limits
 

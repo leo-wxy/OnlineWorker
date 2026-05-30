@@ -30,7 +30,7 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
   2. Telegram remains the default builtin notification plugin with behavior preserved for current users.
   3. The architecture can register additional notification plugins without adding app-specific branches throughout shared runtime code.
   4. Notification failure handling is explicit enough that one channel failure does not silently break all user-facing delivery.
-**Plans:** 1 plan
+**Plans:** 2 plans
 
 Plans:
 - [x] 06-01: Add minimal notification channel abstraction
@@ -95,7 +95,7 @@ Remaining Phase 7 verification:
 **Goal:** Add shared AI configuration and runtime support that can power multiple OnlineWorker scenarios through prompt-driven configuration, starting with notification completion summary.
 **Requirements**: TBD
 **Depends on:** Phase 6
-**Plans:** 1 plan
+**Plans:** 2 plans
 
 Plans:
 - [x] 08-01: Add general AI capability layer and first-class AI configuration tab
@@ -202,7 +202,7 @@ Remaining Phase 9 verification:
 **Goal:** Reduce structural debt across the app by splitting oversized classes/modules, moving misplaced responsibilities behind existing boundaries, and making future provider/plugin/UI changes easier to reason about without changing user-facing behavior.
 **Requirements**: TBD
 **Depends on:** Phase 9
-**Plans:** 0 plans
+**Plans:** 1 plan
 
 Initial focus areas:
 - Identify oversized or high-churn classes/modules in Python bot/runtime code, Tauri command/state code, and frontend app shell/components.
@@ -224,4 +224,26 @@ Fast verification path:
 - Run packaged-app verification only for slices touching app startup, sidecar packaging, bridge IPC, or installed-app behavior.
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 10 to break down)
+- [x] 10-01: Audit structure debt and establish staged refactor rails
+  - [x] Create a ranked structure-debt inventory from real code metrics.
+  - [x] Add a full-repository static structure audit with language, size, boundary, long-unit, and test-map evidence.
+  - [x] Lock a behavior-preserving verification matrix.
+  - [x] Select the first safe implementation slices for later refactor plans.
+- [x] 10-02: Extract Tauri config and dashboard helper modules
+  - [x] Split config provider assets/metadata helpers behind the existing command surface.
+  - [x] Split dashboard provider status helpers behind the existing command surface.
+  - [x] Split dashboard recent activity helpers behind the existing command surface.
+  - [x] Preserve public Tauri command names and response shapes.
+
+Latest verification:
+- Planning/static verification passed: `git diff --check`.
+- Structure audit anchors present: `rg -n "config_provider.rs|dashboard.rs|bot/events.py|Dashboard.tsx|Verification Matrix|Selected Slices" .planning/phases/10-codebase-structure-refinement/10-RESEARCH.md .planning/phases/10-codebase-structure-refinement/10-01-PLAN.md`.
+- Full audit evidence captured in `10-CODEBASE-AUDIT.md`: source/test counts, longest files, Python/Rust/TS long units, dependency-boundary findings, provider-specific branch findings, and test coverage map.
+- 10-02 focused Rust verification passed:
+  - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml config_provider --quiet` -> `32 passed`.
+  - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml dashboard --quiet` -> `21 passed`.
+  - `git diff --check` -> passed.
+- GSD consistency passed: `node ~/.codex/get-shit-done/bin/gsd-tools.cjs validate consistency` -> `passed: true` with existing warnings for older phase artifacts.
+
+Remaining Phase 10 verification:
+- Next production-code refactor slice is pending 10-03 planning/execution: Python workspace pure-helper extraction.
