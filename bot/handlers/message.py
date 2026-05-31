@@ -400,6 +400,24 @@ def _build_provider_approval_reply(approval, action: str) -> tuple[str, dict]:
     return "✅ 已允许", {"decision": "accept"}
 
 
+def _escape_approval_markdown(value: str) -> str:
+    return (value or "").replace("*", "\\*").replace("_", "\\_").replace("`", "\\`")
+
+
+def _approval_completion_text(label: str, approval) -> str:
+    cmd = _escape_approval_markdown((getattr(approval, "cmd", "") or "")[:200])
+    reason = _escape_approval_markdown((getattr(approval, "justification", "") or "")[:300])
+    tool = _escape_approval_markdown(
+        getattr(approval, "tool_type", "") or getattr(approval, "tool_name", "") or "provider"
+    )
+    lines = [label, ""]
+    lines.append(f"命令：`{cmd}`" if cmd else "命令：（未知命令）")
+    if reason:
+        lines.extend(["", f"理由：{reason}"])
+    lines.extend(["", f"已通过 Telegram 回写到 {tool} app-server。"])
+    return "\n".join(lines)
+
+
 async def _safe_answer_callback(
     query,
     *,
@@ -777,7 +795,7 @@ def make_callback_handler(state: AppState, group_chat_id: int) -> Callable:
                     )
                 state.pending_approvals.pop(msg_id, None)
                 await query.edit_message_text(  # type: ignore[union-attr]
-                    f"{label}\n\n命令：`{approval.cmd[:200]}`",
+                    _approval_completion_text(label, approval),
                     parse_mode="Markdown",
                 )
                 logger.info(f"[approval] request_id={approval.request_id} tool={approval.tool_type} reply={reply_body}")

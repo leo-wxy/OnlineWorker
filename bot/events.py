@@ -241,7 +241,14 @@ async def send_approval_to_telegram(
             message_id=msg_id,
             reply_markup=keyboard,
         )
-        logger.info(f"[approval_request] 已推送 tool={info.tool_type} msg_id={msg_id}")
+        logger.info(
+            "[approval_request] 已推送 tool=%s topic=%s msg_id=%s thread=%s request_id=%s",
+            info.tool_type,
+            topic_id,
+            msg_id,
+            info.thread_id,
+            info.request_id,
+        )
     except Exception as e:
         logger.error(f"推送授权请求到 Telegram 失败：{e}")
 

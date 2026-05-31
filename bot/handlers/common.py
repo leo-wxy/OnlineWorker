@@ -214,14 +214,18 @@ def tg_empty_turn_completed_text() -> str:
 
 def tg_approval_request_text(command: str, reason: str, tool_type: str) -> str:
     """审批请求的最小文案契约。"""
-    cmd_display = f"`{command[:200]}`" if command else "（未知命令）"
+    cmd_raw = (command or "")[:200].replace("`", "\\`")
+    cmd_display = f"`{cmd_raw}`" if cmd_raw else "（未知命令）"
     reason_raw = reason[:300] if reason else "（无说明）"
     reason_display = reason_raw.replace("*", "\\*").replace("_", "\\_").replace("`", "\\`")
+    source_display = (tool_type or "provider").replace("*", "\\*").replace("_", "\\_").replace("`", "\\`")
 
     text = (
         f"⚠️ **沙盒权限请求**\n\n"
+        f"来源：OnlineWorker 托管的 {source_display} app-server\n\n"
         f"命令：{cmd_display}\n\n"
-        f"理由：{reason_display}"
+        f"理由：{reason_display}\n\n"
+        f"操作：点击下方按钮审批"
     )
 
     return text

@@ -202,6 +202,13 @@ def make_thread_open_callback_data(ws_id: str, thread_id: str) -> str:
     return f"{_THREAD_OPEN_V2_PREFIX}:{_make_thread_open_token(ws_id)}:{_make_thread_open_token(thread_id)}"
 
 
+def _thread_control_intro(tool_name: str, thread_id: str, state_text: str) -> str:
+    intro = f"thread `{thread_id[-8:]}` {state_text}，继续对话或使用下方按钮。"
+    if tool_name == "codex":
+        intro += "\n此 Topic 由 OnlineWorker 托管；Codex app-server 权限请求会在这里显示 TG 审批按钮。"
+    return intro
+
+
 def _resolve_thread_open_workspace(storage, data: str) -> tuple[Optional[WorkspaceInfo], Optional[str], Optional[str]]:
     """解析 callback 所属 workspace 与 thread 定位 key。
 
@@ -660,7 +667,7 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                         group_chat_id,
                         ws_info,
                         thread_info,
-                        intro=f"thread `{full_tid[-8:]}` 已就绪，继续对话或使用下方按钮。",
+                        intro=_thread_control_intro(ws_info.tool, full_tid, "已就绪"),
                         topic_id=thread_info.topic_id,
                     )
                     await query.answer(f"已有 Topic {old_topic_id}", show_alert=False)
@@ -729,7 +736,7 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                     group_chat_id,
                     ws_info,
                     thread_info,
-                    intro=f"thread `{full_tid[-8:]}` 已打开，继续对话或使用下方按钮。",
+                    intro=_thread_control_intro(ws_info.tool, full_tid, "已打开"),
                     topic_id=thread_info.topic_id,
                 )
             except Exception as e:
