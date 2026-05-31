@@ -1,8 +1,5 @@
 import pytest
-from unittest.mock import patch
-
 from plugins.providers.builtin.codex.python.tui_host_runtime import (
-    approval_action_input,
     build_codex_resume_command,
     build_codex_tui_child_env,
     CodexTuiHost,
@@ -117,39 +114,6 @@ def test_encode_terminal_input_wraps_message_and_enter():
     assert payload.startswith(b"\x1b[200~")
     assert payload.endswith(b"\x1b[201~\r")
     assert "你好，继续".encode("utf-8") in payload
-
-
-def test_approval_action_input_uses_codex_default_approval_keys():
-    assert approval_action_input("exec_allow") == b"y"
-    assert approval_action_input("exec_allow_always") == b"a"
-    assert approval_action_input("exec_deny") == b"d"
-
-
-def test_approval_action_input_rejects_unknown_action():
-    with pytest.raises(ValueError, match="unsupported approval action"):
-        approval_action_input("exec_unknown")
-
-
-@pytest.mark.asyncio
-async def test_codex_tui_host_approval_action_writes_default_key_to_pty(tmp_path):
-    host = CodexTuiHost(
-        data_dir=str(tmp_path),
-        thread_id="tid-1",
-        cwd="/Users/example/Projects/onlineWorker",
-    )
-    host._master_fd = 123
-    host._child_pid = 456
-
-    with patch(
-        "plugins.providers.builtin.codex.python.tui_host_runtime.os.write",
-        return_value=1,
-    ) as write_mock:
-        response = await host._handle_approval_action(
-            {"type": "approval_action", "thread_id": "tid-1", "action": "exec_deny"}
-        )
-
-    assert response == {"ok": True, "accepted": True, "active_thread_id": "tid-1"}
-    write_mock.assert_called_once_with(123, b"d")
 
 
 def test_validate_thread_binding_rejects_other_thread():

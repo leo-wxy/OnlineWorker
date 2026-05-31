@@ -18,6 +18,7 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 from config import load_config, default_data_dir, set_data_dir
+from core.im_routes import ImRouteStore
 from core.state import AppState
 from core.storage import load_storage
 from core.lifecycle import LifecycleManager
@@ -367,6 +368,11 @@ def main() -> None:
 
             whitelist = WhitelistFilter(allowed_user_id=cfg.allowed_user_id)
             gid = cfg.group_chat_id
+
+            im_route_store = ImRouteStore()
+            im_route_store.migrate_telegram_json_topics(storage, gid)
+            im_route_store.restore_telegram_topic_mirrors(storage, gid)
+            state.set_im_route_store(im_route_store, gid)
 
             app = (
                 Application.builder()

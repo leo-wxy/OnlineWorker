@@ -79,7 +79,6 @@ def create_provider_descriptor() -> ProviderDescriptor:
         ),
         interactions=ProviderInteractionHooks(
             build_approval_reply=runtime.build_approval_reply,
-            mirror_approval_policy=runtime.mirror_approval_policy,
             parse_approval_request=interactions.parse_approval_request,
             parse_question_request=interactions.parse_question_request,
             server_request_methods=interactions.SERVER_REQUEST_METHODS,

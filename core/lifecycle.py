@@ -368,7 +368,13 @@ class LifecycleManager:
                     thread_id,
                 )
                 topic = await bot.create_forum_topic(chat_id=self.gid, name=topic_name)
-                thread_info.topic_id = topic.message_thread_id
+                self.state.bind_telegram_session_topic(
+                    ws_name,
+                    ws_info,
+                    thread_info,
+                    topic.message_thread_id,
+                    display_name=thread_info.preview,
+                )
                 logger.info(
                     f"为 thread {thread_id[:12]}… 创建了 Topic {thread_info.topic_id}"
                 )

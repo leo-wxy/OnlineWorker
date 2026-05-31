@@ -17,6 +17,7 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 8: General AI Capability Layer** - Add a top-level AI sidebar tab plus a provider-neutral AI capability layer. Service API settings and scenario prompt settings are separate; notification summary is the first scenario, current local summary rules remain the fallback, and packaged-app verification is complete.
 - [x] **Phase 9: Session Archive Actions** - Add Session tab archive actions and adjacent provider usage operations. Archive executes the provider's real source operation, archived rows remain visible through post-success local overlay, `/token_usage` is scoped to agent topics, and packaged-app verification is complete.
 - [ ] **Phase 10: Codebase Structure Refinement** - Audit and restructure oversized classes/modules and misplaced responsibilities without changing product behavior. Focus on clearer ownership boundaries, smaller cohesive units, and safer extension points for provider, notification, AI, session, and UI runtime code.
+- [ ] **Phase 11: Telegram Topic SQLite Storage Migration** - Make Telegram topics independent durable records in a single SQLite table, migrate existing JSON topic ids once, and route all topic lookups through SQLite so runtime JSON saves cannot erase topic bindings.
 
 ## Phase Details
 
@@ -255,3 +256,21 @@ Latest verification:
 
 Remaining Phase 10 verification:
 - Next production-code refactor slice is pending 10-04 planning/execution.
+
+### Phase 11: Telegram Topic SQLite Storage Migration
+
+**Goal:** Move Telegram topic identity and binding state out of `onlineworker_state.json` into one durable SQLite table. After migration, every topic is an independent record keyed by `(chat_id, topic_id)` with a type such as `global`, `workspace`, `thread`, or `unknown`.
+**Requirements**: TBD
+**Depends on:** Phase 10
+**Plans:** 1 plan
+
+Success Criteria (what must be TRUE):
+  1. Existing JSON topic ids from `global_topic_ids`, workspace `topic_id`, and thread `topic_id` migrate into SQLite exactly once.
+  2. Topic lookup and routing use SQLite as the only topic truth source after migration.
+  3. JSON storage saves no longer create, delete, clear, or overwrite Telegram topic bindings.
+  4. Every newly created, observed, closed, deleted, or manually rebound topic updates SQLite without physically deleting topic history.
+  5. Unknown topics are recorded as `unknown` and do not fallback to active workspace or thread routing.
+  6. Tests prove migration, routing, topic creation, unknown-topic handling, and cleanup/archive paths cannot lose topic bindings.
+
+Plans:
+- [ ] 11-01: Migrate Telegram topic storage to one SQLite table

@@ -4,13 +4,9 @@ import json
 import os
 from pathlib import Path
 import shlex
-import socket
 import sys
 import tempfile
 from typing import Any
-import hashlib
-
-from core.provider_owner_bridge import provider_owner_bridge_socket_path
 
 
 CODEX_PERMISSION_HOOK_NAME = "PermissionRequest"
@@ -83,6 +79,7 @@ def install_codex_permission_mirror_hook(
     *,
     hooks_path: str | os.PathLike[str] | None = None,
 ) -> bool:
+    del data_dir
     path = _codex_hooks_settings_path(hooks_path)
     try:
         raw = path.read_text(encoding="utf-8")
@@ -100,26 +97,12 @@ def install_codex_permission_mirror_hook(
         hooks = {}
         settings["hooks"] = hooks
 
-    permission_entries = hooks.setdefault(CODEX_PERMISSION_HOOK_NAME, [])
+    permission_entries = hooks.get(CODEX_PERMISSION_HOOK_NAME, [])
     if not isinstance(permission_entries, list):
         permission_entries = []
-        hooks[CODEX_PERMISSION_HOOK_NAME] = permission_entries
-
-    command = build_codex_hook_command(data_dir)
-    desired_entry = {
-        "matcher": "",
-        "hooks": [
-            {
-                "type": "command",
-                "command": command,
-                "timeout": CODEX_HOOK_TIMEOUT_SECONDS,
-            }
-        ],
-    }
 
     cleaned_permission_entries: list[Any] = []
     found_existing = False
-    existing_needs_update = False
     for entry in permission_entries:
         if not isinstance(entry, dict):
             cleaned_permission_entries.append(entry)
@@ -135,22 +118,19 @@ def install_codex_permission_mirror_hook(
                 cleaned_hooks.append(hook)
                 continue
             found_existing = True
-            if (
-                hook.get("command") != command
-                or hook.get("timeout") != CODEX_HOOK_TIMEOUT_SECONDS
-                or hook.get("type") != "command"
-            ):
-                existing_needs_update = True
 
         if cleaned_hooks:
             cleaned_entry = dict(entry)
             cleaned_entry["hooks"] = cleaned_hooks
             cleaned_permission_entries.append(cleaned_entry)
 
-    if found_existing and not existing_needs_update and permission_entries[:1] == [desired_entry]:
+    if not found_existing:
         return False
 
-    hooks[CODEX_PERMISSION_HOOK_NAME] = [desired_entry, *cleaned_permission_entries]
+    if cleaned_permission_entries:
+        hooks[CODEX_PERMISSION_HOOK_NAME] = cleaned_permission_entries
+    else:
+        hooks.pop(CODEX_PERMISSION_HOOK_NAME, None)
     _write_json_atomic(path, settings)
     return True
 
@@ -182,63 +162,14 @@ def _infer_workspace_dir(payload: dict[str, Any]) -> str:
     return str(os.environ.get("PWD") or "").strip()
 
 
-def _stable_hook_request_id(payload: dict[str, Any]) -> str:
-    explicit = str(payload.get("request_id") or payload.get("requestId") or "").strip()
-    if explicit:
-        return explicit
-    thread_id = _infer_thread_id(payload)
-    digest_payload = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-    digest = hashlib.sha1(digest_payload.encode("utf-8")).hexdigest()[:20]
-    return f"codex-cli-hook:{thread_id or 'unknown'}:{digest}"
-
-
-def _is_owned_tui_host_invocation(payload: dict[str, Any]) -> bool:
-    value = str(payload.get("onlineworker_codex_tui_host") or "").strip().lower()
-    if value in {"1", "true", "yes"}:
-        return True
-    return str(os.environ.get("ONLINEWORKER_CODEX_TUI_HOST") or "").strip() == "1"
-
-
 def mirror_codex_permission_request(data_dir: str | None, payload: dict[str, Any]) -> dict[str, Any]:
-    if str(payload.get("hook_event_name") or "").strip() != CODEX_PERMISSION_HOOK_NAME:
-        return {}
-    socket_path = provider_owner_bridge_socket_path(data_dir)
-    if not socket_path:
-        return {}
-    request_id = _stable_hook_request_id(payload)
-    payload_with_request_id = dict(payload)
-    payload_with_request_id["request_id"] = request_id
-
-    request = {
-        "type": "mirror_approval",
-        "provider_id": "codex",
-        "thread_id": _infer_thread_id(payload_with_request_id),
-        "workspace_dir": _infer_workspace_dir(payload_with_request_id),
-        "owned_tui_host": _is_owned_tui_host_invocation(payload),
-        "blocking": True,
-        "payload": payload_with_request_id,
-        "source": "codex_cli_hook",
-        "notice_suffix": "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。",
-    }
-
-    try:
-        with socket.socket(socket.AF_UNIX) as client:
-            client.settimeout(CODEX_HOOK_TIMEOUT_SECONDS)
-            client.connect(socket_path)
-            client.sendall((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
-            raw = client.recv(4096)
-    except OSError:
-        return {}
-    try:
-        response = json.loads(raw.decode("utf-8").strip() or "{}")
-    except Exception:
-        return {}
-    return response if isinstance(response, dict) else {}
+    del data_dir, payload
+    return {}
 
 
 def _codex_permission_hook_output(decision_response: dict[str, Any]) -> dict[str, Any]:
     decision = str(decision_response.get("decision") or "").strip().lower()
-    if decision == "allow":
+    if decision in {"allow", "allow_always"}:
         return {
             "hookSpecificOutput": {
                 "hookEventName": CODEX_PERMISSION_HOOK_NAME,

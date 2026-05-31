@@ -42,7 +42,6 @@ class ProviderUsageHooks:
 class ProviderInteractionHooks:
     build_approval_reply: Optional[Callable] = None
     reply_question: Optional[Callable] = None
-    mirror_approval_policy: Optional[Callable] = None
     parse_approval_request: Optional[Callable] = None
     parse_question_request: Optional[Callable] = None
     server_request_methods: tuple[str, ...] = ()

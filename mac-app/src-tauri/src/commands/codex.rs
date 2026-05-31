@@ -30,6 +30,8 @@ pub struct CodexThread {
     pub rollout_path: String,
     pub model_provider: Option<String>,
     pub source: Option<String>,
+    pub sandbox_policy: Option<Value>,
+    pub approval_mode: Option<String>,
     pub is_smoke: bool,
 }
 
@@ -319,6 +321,8 @@ fn codex_jsonl_candidate_from_path(
         rollout_path: path.to_string_lossy().to_string(),
         model_provider,
         source,
+        sandbox_policy: None,
+        approval_mode: None,
         is_smoke: false,
     };
     thread.is_smoke = is_codex_smoke_preview(&thread.title);
@@ -354,7 +358,7 @@ fn list_codex_threads_from_paths(
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, title, cwd, archived, rollout_path, source, model_provider, created_at, updated_at
+            "SELECT id, title, cwd, archived, rollout_path, source, model_provider, created_at, updated_at, sandbox_policy, approval_mode
              FROM threads
              ORDER BY updated_at DESC
              LIMIT 600",
@@ -373,6 +377,8 @@ fn list_codex_threads_from_paths(
                 row.get::<_, Option<String>>(6)?,
                 row.get::<_, i64>(7)?,
                 row.get::<_, i64>(8)?,
+                row.get::<_, Option<String>>(9)?,
+                row.get::<_, Option<String>>(10)?,
             ))
         })
         .map_err(|e| e.to_string())?;
@@ -390,6 +396,8 @@ fn list_codex_threads_from_paths(
             model_provider,
             created_at,
             updated_at,
+            sandbox_policy_raw,
+            approval_mode_raw,
         ) = r.map_err(|e| e.to_string())?;
         if is_codex_subagent_source(&source) {
             continue;
@@ -404,6 +412,12 @@ fn list_codex_threads_from_paths(
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
             source: Some(source.clone()).filter(|value| !value.trim().is_empty()),
+            sandbox_policy: sandbox_policy_raw
+                .as_deref()
+                .and_then(|value| serde_json::from_str::<Value>(value).ok()),
+            approval_mode: approval_mode_raw
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
             is_smoke: false,
         };
         thread.is_smoke = is_codex_smoke_preview(&thread.title);
@@ -490,6 +504,8 @@ fn send_codex_thread_message_via_owner_bridge(
     text: &str,
     attachments: &[ComposerAttachment],
     cwd: Option<&str>,
+    approval_mode: Option<&str>,
+    sandbox_policy: Option<&Value>,
 ) -> Result<CodexOwnerBridgeSendAttempt, String> {
     let socket_path = codex_owner_bridge_socket_path(data_dir);
     if !socket_path.exists() {
@@ -514,6 +530,15 @@ fn send_codex_thread_message_via_owner_bridge(
     }
     if let Some(cwd) = cwd.map(str::trim).filter(|cwd| !cwd.is_empty()) {
         payload["cwd"] = Value::String(cwd.to_string());
+    }
+    if let Some(approval_mode) = approval_mode
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        payload["approval_policy"] = Value::String(approval_mode.to_string());
+    }
+    if let Some(sandbox_policy) = sandbox_policy {
+        payload["sandbox_policy"] = sandbox_policy.clone();
     }
 
     let raw_request = format!("{}\n", payload);
@@ -577,6 +602,8 @@ fn send_codex_thread_message_via_owner_bridge_with_retry(
     text: &str,
     attachments: &[ComposerAttachment],
     cwd: Option<&str>,
+    approval_mode: Option<&str>,
+    sandbox_policy: Option<&Value>,
     timeout: Duration,
 ) -> Result<CodexSendResult, String> {
     let started_at = Instant::now();
@@ -591,6 +618,8 @@ fn send_codex_thread_message_via_owner_bridge_with_retry(
             text,
             attachments,
             cwd,
+            approval_mode,
+            sandbox_policy,
         ) {
             Ok(CodexOwnerBridgeSendAttempt::Accepted(result)) => return Ok(result),
             Ok(CodexOwnerBridgeSendAttempt::NotReady) => {
@@ -624,6 +653,8 @@ fn send_codex_thread_message_blocking(
     text: &str,
     attachments: &[ComposerAttachment],
     cwd: Option<&str>,
+    approval_mode: Option<&str>,
+    sandbox_policy: Option<&Value>,
 ) -> Result<CodexSendResult, String> {
     let trimmed = text.trim();
     if trimmed.is_empty() && attachments.is_empty() {
@@ -637,6 +668,8 @@ fn send_codex_thread_message_blocking(
         trimmed,
         attachments,
         cwd,
+        approval_mode,
+        sandbox_policy,
         Duration::from_secs(8),
     )
 }
@@ -1252,9 +1285,18 @@ pub async fn send_codex_thread_message(
     text: String,
     attachments: Vec<ComposerAttachment>,
     cwd: Option<String>,
+    approval_mode: Option<String>,
+    sandbox_policy: Option<Value>,
 ) -> Result<CodexSendResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        send_codex_thread_message_blocking(&thread_id, &text, &attachments, cwd.as_deref())
+        send_codex_thread_message_blocking(
+            &thread_id,
+            &text,
+            &attachments,
+            cwd.as_deref(),
+            approval_mode.as_deref(),
+            sandbox_policy.as_ref(),
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1335,7 +1377,7 @@ mod tests {
         CodexThreadCursor,
     };
     use rusqlite::{params, Connection};
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     #[test]
     fn build_codex_rpc_request_wraps_method_and_params() {
@@ -1373,6 +1415,9 @@ mod tests {
             assert_eq!(request["thread_id"], "tid-1");
             assert_eq!(request["text"], "hello owner");
             assert_eq!(request["cwd"], "/tmp/onlineWorker");
+            assert_eq!(request["approval_policy"], "on-request");
+            assert_eq!(request["sandbox_policy"]["type"], "workspace-write");
+            assert_eq!(request["sandbox_policy"]["network_access"], false);
 
             stream
                 .write_all(b"{\"ok\":true,\"accepted\":true}\n")
@@ -1385,6 +1430,11 @@ mod tests {
             "hello owner",
             &[],
             Some("/tmp/onlineWorker"),
+            Some("on-request"),
+            Some(&json!({
+                "type": "workspace-write",
+                "network_access": false,
+            })),
         )
         .expect("send via owner bridge");
 
@@ -1429,7 +1479,15 @@ mod tests {
         });
 
         let error =
-            send_codex_thread_message_via_owner_bridge(&temp_dir, "tid-1", "hello", &[], None)
+            send_codex_thread_message_via_owner_bridge(
+                &temp_dir,
+                "tid-1",
+                "hello",
+                &[],
+                None,
+                None,
+                None,
+            )
                 .expect_err("owner bridge should return error");
 
         assert!(error.contains("owner adapter unavailable"));
@@ -1478,6 +1536,8 @@ mod tests {
             "hello after wait",
             &[],
             None,
+            None,
+            None,
             Duration::from_secs(1),
         )
         .expect("owner bridge should become ready within timeout");
@@ -1508,6 +1568,8 @@ mod tests {
             "tid-timeout",
             "hello timeout",
             &[],
+            None,
+            None,
             None,
             Duration::from_millis(250),
         )
@@ -1555,6 +1617,8 @@ mod tests {
             "tid-hard",
             "hello",
             &[],
+            None,
+            None,
             None,
             Duration::from_secs(1),
         )
@@ -1662,8 +1726,8 @@ mod tests {
                 "openai",
                 "/tmp/workspace",
                 "Main thread",
-                "workspace-write",
-                "default",
+                r#"{"type":"workspace-write","network_access":false}"#,
+                "on-request",
                 0_i64,
                 1_i64,
                 0_i64,
@@ -1735,6 +1799,23 @@ mod tests {
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "main-thread");
         assert_eq!(threads[0].title, "Main thread");
+        assert_eq!(threads[0].approval_mode.as_deref(), Some("on-request"));
+        assert_eq!(
+            threads[0]
+                .sandbox_policy
+                .as_ref()
+                .and_then(|value| value.get("type"))
+                .and_then(Value::as_str),
+            Some("workspace-write"),
+        );
+        assert_eq!(
+            threads[0]
+                .sandbox_policy
+                .as_ref()
+                .and_then(|value| value.get("network_access"))
+                .and_then(Value::as_bool),
+            Some(false),
+        );
 
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_dir(&temp_dir);

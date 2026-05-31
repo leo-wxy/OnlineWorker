@@ -698,7 +698,8 @@ pub async fn send_provider_session_message(
     let attachments = attachments.unwrap_or_default();
     match provider.runtime_id.as_str() {
         "codex" => {
-            send_codex_thread_message(session_id, text, attachments, workspace_dir).await?;
+            send_codex_thread_message(session_id, text, attachments, workspace_dir, None, None)
+                .await?;
             Ok(Value::Null)
         }
         runtime_id if provider_session_send_uses_owner_bridge(runtime_id) => {

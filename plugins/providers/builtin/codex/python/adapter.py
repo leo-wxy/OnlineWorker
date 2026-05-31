@@ -12,6 +12,8 @@ import asyncio
 from contextlib import suppress
 import json
 import logging
+import os
+import sqlite3
 from collections import deque
 from typing import Any, Callable, Awaitable, Optional
 
@@ -56,6 +58,7 @@ class CodexAdapter:
         self._workspace_cwd_map: dict[str, str] = {}
         # thread_id → workspace_id 映射（用于事件路由）
         self._thread_workspace_map: dict[str, str] = {}
+        self._thread_policy_lookup_enabled = False
         # 最近协议收发摘要，用于 1006 / EOF 断线诊断
         self._recent_inbound_messages: deque[str] = deque(maxlen=6)
         self._recent_outbound_messages: deque[str] = deque(maxlen=6)
@@ -320,12 +323,26 @@ class CodexAdapter:
         cwd = self._workspace_cwd_map.get(workspace_id)
         if cwd:
             params["cwd"] = cwd
+        if approval_policy is None or sandbox_policy is None:
+            stored_approval_policy, stored_sandbox_policy = self._load_thread_runtime_policy(thread_id)
+            if approval_policy is None:
+                approval_policy = stored_approval_policy
+            if sandbox_policy is None:
+                sandbox_policy = stored_sandbox_policy
         if approval_policy is not None:
             params["approvalPolicy"] = approval_policy
         if approvals_reviewer is not None:
             params["approvalsReviewer"] = approvals_reviewer
         if sandbox_policy is not None:
+            sandbox_policy = self._normalize_sandbox_policy_for_app_server(sandbox_policy)
             params["sandboxPolicy"] = sandbox_policy
+        if params.get("approvalPolicy") or params.get("sandboxPolicy"):
+            logger.info(
+                "[thread_policy] turn/start thread=%s approval=%s sandbox=%s",
+                thread_id[:12],
+                params.get("approvalPolicy") or "-",
+                params.get("sandboxPolicy") or "-",
+            )
         return await self._call("turn/start", params)
 
     async def list_models(self, *, include_hidden: bool = False, limit: int = 20) -> list[dict]:
@@ -427,6 +444,87 @@ class CodexAdapter:
         """注册 workspace_id → cwd 路径映射。"""
         self._workspace_cwd_map[workspace_id] = cwd
         logger.debug(f"注册 workspace cwd 映射：{workspace_id} → {cwd}")
+
+    def enable_thread_policy_lookup(self, enabled: bool = True) -> None:
+        """允许从 Codex 线程状态库补齐 turn/start 运行策略。"""
+        self._thread_policy_lookup_enabled = enabled
+
+    @staticmethod
+    def _normalize_sandbox_policy_for_app_server(policy: Any) -> Any:
+        if isinstance(policy, str):
+            value = policy.strip()
+            type_map = {
+                "danger-full-access": "dangerFullAccess",
+                "danger_full_access": "dangerFullAccess",
+                "dangerFullAccess": "dangerFullAccess",
+                "read-only": "readOnly",
+                "read_only": "readOnly",
+                "readOnly": "readOnly",
+                "workspace-write": "workspaceWrite",
+                "workspace_write": "workspaceWrite",
+                "workspaceWrite": "workspaceWrite",
+                "external-sandbox": "externalSandbox",
+                "external_sandbox": "externalSandbox",
+                "externalSandbox": "externalSandbox",
+            }
+            return {"type": type_map.get(value, value)} if value else None
+
+        if not isinstance(policy, dict):
+            return policy
+
+        type_value = str(policy.get("type") or "").strip()
+        normalized = dict(policy)
+        normalized_type = CodexAdapter._normalize_sandbox_policy_for_app_server(type_value)
+        if isinstance(normalized_type, dict) and normalized_type.get("type"):
+            normalized["type"] = normalized_type["type"]
+
+        key_map = {
+            "network_access": "networkAccess",
+            "exclude_tmpdir_env_var": "excludeTmpdirEnvVar",
+            "exclude_slash_tmp": "excludeSlashTmp",
+        }
+        for old_key, new_key in key_map.items():
+            if old_key in normalized and new_key not in normalized:
+                normalized[new_key] = normalized.pop(old_key)
+            elif old_key in normalized:
+                normalized.pop(old_key)
+        return normalized
+
+    def _load_thread_runtime_policy(self, thread_id: str) -> tuple[Any | None, Any | None]:
+        if not self._thread_policy_lookup_enabled or not thread_id:
+            return None, None
+
+        db_path = os.path.expanduser(
+            os.environ.get("ONLINEWORKER_CODEX_STATE_DB", "~/.codex/state_5.sqlite")
+        )
+        if not os.path.exists(db_path):
+            return None, None
+
+        try:
+            with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+                row = conn.execute(
+                    "SELECT approval_mode, sandbox_policy FROM threads WHERE id = ? LIMIT 1",
+                    (thread_id,),
+                ).fetchone()
+        except Exception as exc:
+            logger.debug("[thread_policy] 读取 Codex 线程策略失败 thread=%s err=%s", thread_id[:12], exc)
+            return None, None
+
+        if not row:
+            return None, None
+
+        approval_mode, sandbox_policy_raw = row
+        approval_policy = str(approval_mode).strip() if approval_mode else None
+        sandbox_policy: Any | None = None
+        if sandbox_policy_raw:
+            try:
+                sandbox_policy = json.loads(str(sandbox_policy_raw))
+            except Exception:
+                raw = str(sandbox_policy_raw).strip()
+                if raw:
+                    sandbox_policy = raw
+        sandbox_policy = self._normalize_sandbox_policy_for_app_server(sandbox_policy)
+        return approval_policy or None, sandbox_policy
 
     def _resolve_workspace_id_from_params(self, params: dict) -> str:
         """从事件参数中提取 workspace_id，用于事件信封包装。

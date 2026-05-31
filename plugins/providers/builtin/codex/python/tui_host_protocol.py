@@ -38,14 +38,6 @@ def build_send_message_request(*, thread_id: str, text: str, topic_id: Optional[
     return payload
 
 
-def build_approval_action_request(*, thread_id: str, action: str) -> dict:
-    return {
-        "type": "approval_action",
-        "thread_id": thread_id,
-        "action": action,
-    }
-
-
 def encode_host_request(payload: dict) -> bytes:
     return (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
 

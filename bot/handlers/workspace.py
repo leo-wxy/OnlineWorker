@@ -376,7 +376,16 @@ def make_ws_open_callback_handler(state: AppState, group_chat_id: int) -> Callba
                 try:
                     ws_topic_name = f"[{tool_name}] {name}"[:128]
                     new_topic = await bot.create_forum_topic(chat_id=group_chat_id, name=ws_topic_name)
-                    existing_ws.topic_id = new_topic.message_thread_id
+                    existing_ws_key = state.get_workspace_storage_key(existing_ws)
+                    if existing_ws_key is not None:
+                        state.bind_telegram_workspace_topic(
+                            existing_ws_key,
+                            existing_ws,
+                            new_topic.message_thread_id,
+                            display_name=name,
+                        )
+                    else:
+                        existing_ws.topic_id = new_topic.message_thread_id
                     if storage:
                         save_storage(storage)
                     logger.info(f"workspace {name} topic 重建成功：{existing_ws.topic_id}")
@@ -679,7 +688,17 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
 
             try:
                 topic = await bot.create_forum_topic(chat_id=group_chat_id, name=topic_name)
-                thread_info.topic_id = topic.message_thread_id
+                workspace_key = state.get_workspace_storage_key(ws_info)
+                if workspace_key is not None:
+                    state.bind_telegram_session_topic(
+                        workspace_key,
+                        ws_info,
+                        thread_info,
+                        topic.message_thread_id,
+                        display_name=thread_info.preview,
+                    )
+                else:
+                    thread_info.topic_id = topic.message_thread_id
                 if storage:
                     save_storage(storage)
                 logger.info(f"[on-demand] thread {full_tid[:8]}… → Topic {thread_info.topic_id}")
@@ -757,7 +776,12 @@ async def _open_workspace(
     storage_key = f"{tool_name}:{name}"
     if storage and storage_key in storage.workspaces:
         ws_info = storage.workspaces[storage_key]
-        ws_info.topic_id = topic_id
+        state.bind_telegram_workspace_topic(
+            storage_key,
+            ws_info,
+            topic_id,
+            display_name=name,
+        )
         ws_info.daemon_workspace_id = ws_id
         # 不清 threads，保留已有的 topic_id 映射
     else:
@@ -765,8 +789,14 @@ async def _open_workspace(
             name=name,
             path=path,
             tool=tool_name,
-            topic_id=topic_id,
+            topic_id=None,
             daemon_workspace_id=ws_id,
+        )
+        state.bind_telegram_workspace_topic(
+            storage_key,
+            ws_info,
+            topic_id,
+            display_name=name,
         )
     if storage:
         storage.workspaces[storage_key] = ws_info
@@ -1128,7 +1158,7 @@ def make_cli_callback_handler(state: AppState, group_chat_id: int, cfg: Config) 
             new_topic_id = topic.message_thread_id
             
             # 更新 storage (global_topic_ids 是 tool_name -> topic_id)
-            storage.global_topic_ids[tool_name] = new_topic_id
+            state.set_global_topic_id(tool_name, new_topic_id)
             save_storage(storage)
             
             action_text = "重建" if action == "cli_recreate:" else "创建"

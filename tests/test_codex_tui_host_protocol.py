@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 from plugins.providers.builtin.codex.python.tui_host_protocol import (
-    build_approval_action_request,
     build_send_message_request,
     decode_host_response,
     encode_host_request,
@@ -48,16 +47,6 @@ def test_encode_and_decode_host_messages():
     }
     decoded = decode_host_response(json.dumps(response).encode("utf-8") + b"\n")
     assert decoded == response
-
-
-def test_build_approval_action_request():
-    request = build_approval_action_request(thread_id="tid-1", action="exec_allow")
-
-    assert request == {
-        "type": "approval_action",
-        "thread_id": "tid-1",
-        "action": "exec_allow",
-    }
 
 
 def test_read_host_status_returns_none_when_missing(tmp_path):

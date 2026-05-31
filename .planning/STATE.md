@@ -18,6 +18,7 @@
 - Phase 8 adds a top-level AI sidebar tab and a shared AI capability layer. OpenAI and Claude are fixed built-in service choices; scenarios select exactly one configured service; service API settings and prompt/scenario settings are intentionally separate; notification summary is the first implemented consumer and local summary rules remain the fallback.
 - Phase 9 adds Session tab archive actions and adjacent provider usage operations. Archive executes against the real provider source first, then persists local archived state; failures are visible, do not mark sessions archived locally, and post-success overlays keep archived rows visible when provider sources omit them. Provider usage is exposed through provider metadata/hooks, and `/token_usage` runs only in agent topics.
 - Phase 10 has completed the full static codebase structure audit, staged refactor planning pass, 10-02 Tauri config/dashboard helper extraction, and 10-03 Python workspace helper extraction.
+- Phase 11 has been added to migrate Telegram topic storage to a single SQLite table so topic bindings are independent durable records rather than JSON runtime fields.
 
 ## Archived Milestone
 
@@ -34,6 +35,7 @@
 | 8. General AI Capability Layer | Completed and packaged-app verified | None |
 | 9. Session Archive Actions | Completed and packaged-app verified | None |
 | 10. Codebase Structure Refinement | In progress | Plan or execute 10-04 |
+| 11. Telegram Topic SQLite Storage Migration | Not started | Execute 11-01 |
 
 ## Key Preserved Decisions
 
@@ -86,3 +88,5 @@
 - Phase 10 10-02 completed: extracted config provider asset helpers, notification metadata helpers, dashboard provider status helpers, and dashboard recent activity helpers while preserving Tauri command surfaces. Focused Rust verification passed for `config_provider` and `dashboard`.
 - Phase 10 plan added: 10-03 extract Python workspace pure helpers.
 - Phase 10 10-03 completed: extracted workspace topic, callback token, callback identity, and history formatting/signature/batching helpers into `bot/handlers/workspace_helpers.py` while preserving Telegram callback/provider/topic behavior. Focused Python verification passed for workspace helper, thread open, and thread control tests.
+- Phase 11 added: Telegram Topic SQLite Storage Migration, requiring a one-table SQLite topic registry to become the only truth source for Telegram topic routing after migrating existing JSON topic ids.
+- Phase 11 plan added: 11-01 migrate Telegram topic storage to one SQLite table.

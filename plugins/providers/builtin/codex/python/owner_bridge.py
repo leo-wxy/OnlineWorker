@@ -100,7 +100,17 @@ def _persist_storage(state, data_dir: Optional[str]) -> None:
         save_storage(storage)
 
 
-async def _send_on_thread(adapter, workspace_id: str, thread_id: str, text: str, attachments):
+async def _send_on_thread(
+    adapter,
+    workspace_id: str,
+    thread_id: str,
+    text: str,
+    attachments,
+    *,
+    approval_policy=None,
+    approvals_reviewer=None,
+    sandbox_policy=None,
+):
     from bot.handlers.common import is_codex_unmaterialized_error
 
     try:
@@ -108,7 +118,20 @@ async def _send_on_thread(adapter, workspace_id: str, thread_id: str, text: str,
     except Exception as exc:
         if not is_codex_unmaterialized_error(exc):
             raise
-    await adapter.send_user_message(workspace_id, thread_id, text, attachments=attachments)
+    send_kwargs = {}
+    if approval_policy is not None:
+        send_kwargs["approval_policy"] = approval_policy
+    if approvals_reviewer is not None:
+        send_kwargs["approvals_reviewer"] = approvals_reviewer
+    if sandbox_policy is not None:
+        send_kwargs["sandbox_policy"] = sandbox_policy
+    await adapter.send_user_message(
+        workspace_id,
+        thread_id,
+        text,
+        attachments=attachments,
+        **send_kwargs,
+    )
 
 
 async def _remap_unmaterialized_thread_for_app_send(
@@ -220,6 +243,9 @@ class CodexOwnerBridge:
         text = str(request.get("text") or "").strip()
         cwd = str(request.get("cwd") or "").strip()
         attachments = request.get("attachments") or []
+        approval_policy = request.get("approval_policy")
+        approvals_reviewer = request.get("approvals_reviewer")
+        sandbox_policy = request.get("sandbox_policy")
 
         if not thread_id:
             return {"ok": False, "error": "缺少 thread_id"}
@@ -261,7 +287,16 @@ class CodexOwnerBridge:
             self.state.mark_provider_task_summary("codex", effective_thread_id, text)
             if workspace_id:
                 try:
-                    await _send_on_thread(adapter, workspace_id, effective_thread_id, text, attachments)
+                    await _send_on_thread(
+                        adapter,
+                        workspace_id,
+                        effective_thread_id,
+                        text,
+                        attachments,
+                        approval_policy=approval_policy,
+                        approvals_reviewer=approvals_reviewer,
+                        sandbox_policy=sandbox_policy,
+                    )
                 except Exception as exc:
                     if not (can_remap and is_codex_unmaterialized_error(exc)):
                         raise
@@ -283,6 +318,9 @@ class CodexOwnerBridge:
                         effective_thread_id,
                         text,
                         attachments,
+                        approval_policy=approval_policy,
+                        approvals_reviewer=approvals_reviewer,
+                        sandbox_policy=sandbox_policy,
                     )
             else:
                 try:
@@ -306,14 +344,23 @@ class CodexOwnerBridge:
                         if path:
                             summary = f"{summary}\nPath: {path}"
                         input_items.append({"type": "text", "text": summary})
-                await adapter._call(
-                    "turn/start",
-                    {
-                        "threadId": thread_id,
-                        "input": input_items,
-                        "approvalsReviewer": DEFAULT_APPROVALS_REVIEWER,
-                    },
-                )
+                turn_params = {
+                    "threadId": thread_id,
+                    "input": input_items,
+                    "approvalsReviewer": approvals_reviewer or DEFAULT_APPROVALS_REVIEWER,
+                }
+                if approval_policy is not None:
+                    turn_params["approvalPolicy"] = approval_policy
+                if sandbox_policy is not None:
+                    normalize_sandbox_policy = getattr(
+                        adapter,
+                        "_normalize_sandbox_policy_for_app_server",
+                        None,
+                    )
+                    if callable(normalize_sandbox_policy):
+                        sandbox_policy = normalize_sandbox_policy(sandbox_policy)
+                    turn_params["sandboxPolicy"] = sandbox_policy
+                await adapter._call("turn/start", turn_params)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

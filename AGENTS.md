@@ -36,6 +36,23 @@ rules needed to work safely in this codebase.
    explicitly asks for that exact write. A general request like "clean up smoke"
    is not permission to delete or move external files.
 
+## Provider Approval Control
+
+- 权限审批只允许走 provider app-server request/response。OnlineWorker 接到
+  app-server `requestApproval` 后，可以把审批消息发送到当前 thread 绑定的
+  Telegram topic，并在 TG 点击后通过对应 adapter 的 `reply_server_request(...)`
+  回写 app-server。
+- `PendingApproval` 只代表 app-server server request。不要用 hook、日志扫描、
+  owner bridge decision、PTY/TUI 按键模拟、pending decision channel 或其他兜底
+  方式创建可审批按钮。
+- `approval_source` 只用于选择 provider reply payload 格式，不是路由字段。
+  不要恢复旧的路由字段、镜像-only 分支、决策来源字段或 owner bridge 决策通道。
+- 没有 app-server request 就不要创造审批；历史 hook/log mirror 请求只能忽略或
+  清理，不能输出 `allow`/`deny` 给 Agent。
+- 权限审批消息只能发送到当前 thread 绑定的 Telegram topic。没有
+  `thread_info.topic_id` 时必须丢弃审批消息；不要 fallback 到 workspace topic、
+  global topic 或其他 topic。
+
 ## Packaging
 
 - Do not build, package, install, restart, or run packaged-app verification
@@ -61,10 +78,20 @@ rules needed to work safely in this codebase.
 - Installed app data lives under:
   - `~/Library/Application Support/OnlineWorker/config.yaml`
   - `~/Library/Application Support/OnlineWorker/.env`
+  - `~/Library/Application Support/OnlineWorker/im_routes.sqlite3`
 - Source-mode bot state may also use repo-local files such as:
   - `config.yaml`
   - `.env`
   - `onlineworker_state.json`
+- IM entry routing is stored in `im_routes.sqlite3`. `onlineworker_state.json`
+  `topic_id` fields are compatibility mirrors only and must not be the sole
+  routing truth after the IM route store is configured.
+- Route storage models fixed OnlineWorker targets (`agent`, `workspace`,
+  `session`) and external IM entries (`im_provider`, `im_space_id`,
+  `im_entry_id`). Do not reintroduce Telegram-only topic storage as the primary
+  model.
+- Tests for route storage must use a temporary database path such as
+  `tmp_path / "im-routes.sqlite3"` and must not read or write installed app data.
 
 ## Validation
 

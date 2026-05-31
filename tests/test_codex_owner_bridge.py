@@ -23,11 +23,18 @@ class _FakeAdapter:
         self.calls.append(("start", workspace_id))
         return self.start_thread_result
 
-    async def send_user_message(self, workspace_id: str, thread_id: str, text: str, attachments=None):
+    async def send_user_message(
+        self,
+        workspace_id: str,
+        thread_id: str,
+        text: str,
+        attachments=None,
+        **kwargs,
+    ):
         maybe_error = self.fail_send_for.get(thread_id)
         if maybe_error is not None:
             raise maybe_error
-        self.calls.append(("send", workspace_id, thread_id, text, attachments))
+        self.calls.append(("send", workspace_id, thread_id, text, attachments, kwargs))
         return {}
 
     def register_workspace_cwd(self, workspace_id: str, cwd: str) -> None:
@@ -60,7 +67,7 @@ async def test_codex_owner_bridge_uses_workspace_mapping_when_cwd_matches(tmp_pa
     assert response["ok"] is True
     assert state.get_adapter("codex").calls == [
         ("resume", "ws-1", "tid-1"),
-        ("send", "ws-1", "tid-1", "hello", []),
+        ("send", "ws-1", "tid-1", "hello", [], {}),
     ]
     assert codex_state.get_runtime(state).thread_pending_send_started_at["tid-1"] > 0
 
@@ -90,6 +97,44 @@ async def test_codex_owner_bridge_falls_back_to_owner_rpc_without_workspace(tmp_
         ),
     ]
     assert codex_state.get_runtime(state).thread_pending_send_started_at["tid-2"] > 0
+
+
+@pytest.mark.asyncio
+async def test_codex_owner_bridge_forwards_approval_and_sandbox_overrides(tmp_path):
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="ws-1",
+        threads={"tid-1": ThreadInfo(thread_id="tid-1")},
+    )
+    state = AppState(storage=AppStorage(workspaces={"codex:onlineWorker": ws}))
+    state.set_adapter("codex", _FakeAdapter())
+    bridge = CodexOwnerBridge(state, data_dir=str(tmp_path))
+
+    response = await bridge._handle_send_message({
+        "thread_id": "tid-1",
+        "text": "hello",
+        "cwd": "/Users/example/Projects/onlineWorker",
+        "approval_policy": "on-request",
+        "sandbox_policy": {"type": "workspace-write", "network_access": False},
+    })
+
+    assert response["ok"] is True
+    assert state.get_adapter("codex").calls == [
+        ("resume", "ws-1", "tid-1"),
+        (
+            "send",
+            "ws-1",
+            "tid-1",
+            "hello",
+            [],
+            {
+                "approval_policy": "on-request",
+                "sandbox_policy": {"type": "workspace-write", "network_access": False},
+            },
+        ),
+    ]
 
 
 @pytest.mark.asyncio
@@ -130,6 +175,7 @@ async def test_codex_owner_bridge_forwards_attachments_to_adapter(tmp_path):
                     "name": "image.png",
                 }
             ],
+            {},
         ),
     ]
 
@@ -174,6 +220,7 @@ async def test_codex_owner_bridge_synthesizes_workspace_binding_from_external_cw
                     "name": "screenshot.png",
                 }
             ],
+            {},
         ),
     ]
 
@@ -256,6 +303,7 @@ async def test_codex_owner_bridge_remaps_external_thread_when_send_hits_unmateri
                     "name": "demo.png",
                 }
             ],
+            {},
         ),
     ]
     assert ws.threads["tid-cli"].source == "cli"

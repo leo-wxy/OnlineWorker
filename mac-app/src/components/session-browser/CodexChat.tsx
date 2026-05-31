@@ -116,6 +116,8 @@ export function CodexChat({ session }: { session: UnifiedSession }) {
     rawSession.archived,
     rawSession.modelProvider,
     rawSession.source,
+    rawSession.sandboxPolicy,
+    rawSession.approvalMode,
     rawSession.isSmoke,
   ]);
 
@@ -188,7 +190,14 @@ export function CodexChat({ session }: { session: UnifiedSession }) {
     setTurns(optimisticTurns);
 
     try {
-      const sendResult = await sendCodexMessage(threadId, trimmedText, nextAttachments, activeSession.cwd);
+      const sendResult = await sendCodexMessage(
+        threadId,
+        trimmedText,
+        nextAttachments,
+        activeSession.cwd,
+        activeSession.approvalMode,
+        activeSession.sandboxPolicy,
+      );
       let effectiveThreadId = threadId;
       let effectiveWorkspaceCwd = activeSession.cwd;
       if (sendResult.threadId && sendResult.threadId !== threadId) {

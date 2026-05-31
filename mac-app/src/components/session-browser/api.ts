@@ -29,10 +29,17 @@ interface CodexThreadRaw {
   title: string;
   cwd: string;
   archived: boolean;
-  rollout_path: string;
+  rollout_path?: string;
+  rolloutPath?: string;
   model_provider?: string | null;
+  modelProvider?: string | null;
   source?: string | null;
+  sandbox_policy?: unknown | null;
+  sandboxPolicy?: unknown | null;
+  approval_mode?: string | null;
+  approvalMode?: string | null;
   is_smoke?: boolean;
+  isSmoke?: boolean;
 }
 
 interface ClaudeSessionRaw {
@@ -59,11 +66,13 @@ export async function fetchCodexSessions(): Promise<CodexSession[]> {
       threadId: thread.id,
       cwd: thread.cwd,
       title: thread.title || thread.cwd.split("/").pop() || thread.id.slice(0, 8),
-      rolloutPath: thread.rollout_path,
+      rolloutPath: thread.rolloutPath ?? thread.rollout_path,
       archived: thread.archived,
-      modelProvider: thread.model_provider ?? null,
+      modelProvider: thread.modelProvider ?? thread.model_provider ?? null,
       source: thread.source ?? null,
-      isSmoke: Boolean(thread.is_smoke),
+      sandboxPolicy: thread.sandboxPolicy ?? thread.sandbox_policy ?? null,
+      approvalMode: thread.approvalMode ?? thread.approval_mode ?? null,
+      isSmoke: Boolean(thread.isSmoke ?? thread.is_smoke),
     }));
 }
 
@@ -153,12 +162,16 @@ export async function sendCodexMessage(
   text: string,
   attachments: ComposerAttachment[] = [],
   cwd?: string | null,
+  approvalMode?: string | null,
+  sandboxPolicy?: unknown | null,
 ): Promise<CodexSendResult> {
   return invoke<CodexSendResult>("send_codex_thread_message", {
     threadId,
     text,
     attachments,
     cwd: cwd ?? null,
+    approvalMode: approvalMode ?? null,
+    sandboxPolicy: sandboxPolicy ?? null,
   });
 }
 
