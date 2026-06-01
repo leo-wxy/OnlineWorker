@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 
 import main
+from core.state import AppState
+from core.storage import AppStorage
 
 
 class _DummyFilter:
@@ -65,8 +67,8 @@ def test_main_retry_path_keeps_event_loop_open(monkeypatch):
 
     monkeypatch.setattr(main, "_acquire_flock", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main, "load_config", lambda data_dir=None: cfg)
-    monkeypatch.setattr(main, "load_storage", lambda: object())
-    monkeypatch.setattr(main, "AppState", lambda storage, config: SimpleNamespace())
+    monkeypatch.setattr(main, "load_storage", AppStorage)
+    monkeypatch.setattr(main, "AppState", AppState)
     monkeypatch.setattr(main, "HTTPXRequest", lambda **kwargs: object())
     monkeypatch.setattr(main, "Application", SimpleNamespace(builder=lambda: _FakeApplicationBuilder(run_polling_calls)))
     monkeypatch.setattr(main, "WhitelistFilter", lambda allowed_user_id: dummy_filter)
@@ -152,8 +154,8 @@ def test_main_uses_stable_default_data_dir_when_flag_missing(monkeypatch, tmp_pa
     )
     monkeypatch.setattr(main, "_acquire_flock", lambda path: observed["flock"].append(path))
     monkeypatch.setattr(main, "load_config", lambda data_dir=None: observed["load_config"].append(data_dir) or cfg)
-    monkeypatch.setattr(main, "load_storage", lambda: object())
-    monkeypatch.setattr(main, "AppState", lambda storage, config: SimpleNamespace())
+    monkeypatch.setattr(main, "load_storage", AppStorage)
+    monkeypatch.setattr(main, "AppState", AppState)
     monkeypatch.setattr(main, "HTTPXRequest", lambda **kwargs: object())
     monkeypatch.setattr(main, "Application", SimpleNamespace(builder=lambda: _FakeApplicationBuilder(run_polling_calls)))
     monkeypatch.setattr(main, "WhitelistFilter", lambda allowed_user_id: dummy_filter)

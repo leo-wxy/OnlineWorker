@@ -18,9 +18,9 @@ test("codex session metadata badges are wired through the session browser", () =
   assert.match(types, /source\?: string \| null;/);
   assert.match(types, /isSmoke\?: boolean;/);
 
-  assert.match(api, /modelProvider:\s*thread\.model_provider \?\? null/);
+  assert.match(api, /modelProvider:\s*thread\.modelProvider \?\? thread\.model_provider \?\? null/);
   assert.match(api, /source:\s*thread\.source \?\? null/);
-  assert.match(api, /isSmoke:\s*Boolean\(thread\.is_smoke\)/);
+  assert.match(api, /isSmoke:\s*Boolean\(thread\.isSmoke \?\? thread\.is_smoke\)/);
 
   assert.match(badges, /export function CodexSessionBadges/);
   assert.match(badges, /providerBadge\(session\.modelProvider\)/);

@@ -16,7 +16,7 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 7: OnlineWorker User Message Gateway** - Route provider-bound user text through an OnlineWorker-level gateway before provider-specific send hooks. Gateway/proxy boundaries are complete; civility rewrite is paused, related App entry points are hidden, and packaged-app verification is complete.
 - [x] **Phase 8: General AI Capability Layer** - Add a top-level AI sidebar tab plus a provider-neutral AI capability layer. Service API settings and scenario prompt settings are separate; notification summary is the first scenario, current local summary rules remain the fallback, and packaged-app verification is complete.
 - [x] **Phase 9: Session Archive Actions** - Add Session tab archive actions and adjacent provider usage operations. Archive executes the provider's real source operation, archived rows remain visible through post-success local overlay, `/token_usage` is scoped to agent topics, and packaged-app verification is complete.
-- [ ] **Phase 10: Codebase Structure Refinement** - Audit and restructure oversized classes/modules and misplaced responsibilities without changing product behavior. Focus on clearer ownership boundaries, smaller cohesive units, and safer extension points for provider, notification, AI, session, and UI runtime code.
+- [x] **Phase 10: Codebase Structure Refinement** - Audit and restructure oversized classes/modules and misplaced responsibilities without changing product behavior. Completed staged refactor slices for Tauri config/dashboard helpers, Python workspace helpers, and frontend Dashboard state/presentation.
 - [ ] **Phase 11: Telegram Topic SQLite Storage Migration** - Make Telegram topics independent durable records in a single SQLite table, migrate existing JSON topic ids once, and route all topic lookups through SQLite so runtime JSON saves cannot erase topic bindings.
 
 ## Phase Details
@@ -203,7 +203,7 @@ Remaining Phase 9 verification:
 **Goal:** Reduce structural debt across the app by splitting oversized classes/modules, moving misplaced responsibilities behind existing boundaries, and making future provider/plugin/UI changes easier to reason about without changing user-facing behavior.
 **Requirements**: TBD
 **Depends on:** Phase 9
-**Plans:** 3 plans
+**Plans:** 4 plans
 
 Initial focus areas:
 - Identify oversized or high-churn classes/modules in Python bot/runtime code, Tauri command/state code, and frontend app shell/components.
@@ -240,6 +240,11 @@ Plans:
   - [x] Preserve existing Telegram callback data and private helper import compatibility.
   - [x] Add focused helper characterization tests.
   - [x] Preserve provider lookup, topic creation, and storage persistence behavior.
+- [x] 10-04: Extract frontend Dashboard state and presentation
+  - [x] Split Dashboard view-model helpers into a dashboard model module.
+  - [x] Split Dashboard hero, sidebar, alerts, error state, and provider status list into component-local files.
+  - [x] Extend `useDashboardState` with derived provider/control/open-host state.
+  - [x] Preserve Dashboard Tauri commands, visible layout, and localized text.
 
 Latest verification:
 - Planning/static verification passed: `git diff --check`.
@@ -252,10 +257,19 @@ Latest verification:
 - 10-03 focused Python verification passed:
   - `/Users/wxy/.pyenv/shims/python3.13 -m pytest -q tests/test_workspace_helpers.py tests/test_workspace_thread_open.py tests/test_thread_controls.py` -> `48 passed`.
   - `git diff --check` -> passed.
+- 10-04 focused frontend verification passed:
+  - `node --test mac-app/tests/appShell.test.mjs mac-app/tests/dashboardProviderStatus.test.mjs` -> passed.
+  - `cd mac-app && ./node_modules/.bin/tsc --noEmit` -> passed.
+  - `git diff --check` -> passed.
+- Phase 10 full source verification passed:
+  - `node --test mac-app/tests/*.test.mjs` -> `90 passed`.
+  - `cd mac-app && npm run build` -> passed.
+  - `/Users/wxy/.pyenv/shims/python3.13 -m pytest -q` -> `760 passed`.
+  - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml --quiet` -> `197 passed`.
 - GSD consistency passed: `node ~/.codex/get-shit-done/bin/gsd-tools.cjs validate consistency` -> `passed: true` with existing warnings for older phase artifacts.
 
 Remaining Phase 10 verification:
-- Next production-code refactor slice is pending 10-04 planning/execution.
+- None for the selected Phase 10 structure refactor slices. Higher-risk event/runtime/startup splits remain future phases.
 
 ### Phase 11: Telegram Topic SQLite Storage Migration
 

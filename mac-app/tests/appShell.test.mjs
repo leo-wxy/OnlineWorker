@@ -263,11 +263,19 @@ test("notification tab exposes split app list and plugin-defined configuration",
 
 test("dashboard renders provider icons from provider metadata", () => {
   const dashboard = readFileSync(join(root, "src", "pages", "Dashboard.tsx"), "utf8");
+  const providerList = readFileSync(
+    join(root, "src", "components", "dashboard", "ProviderStatusList.tsx"),
+    "utf8"
+  );
+  const providerIcon = readFileSync(
+    join(root, "src", "components", "dashboard", "ProviderIcon.tsx"),
+    "utf8"
+  );
   const types = readFileSync(join(root, "src", "types.ts"), "utf8");
 
   assert.match(types, /export interface ProviderIconMetadata/);
   assert.match(types, /icon\?: ProviderIconMetadata \| null;/);
-  assert.match(dashboard, /provider\.icon\?\.url\?\.trim\(\)/);
-  assert.match(dashboard, /<ProviderIcon provider=\{provider\} \/>/);
+  assert.match(providerIcon, /provider\.icon\?\.url\?\.trim\(\)/);
+  assert.match(providerList, /<ProviderIcon provider=\{provider\} \/>/);
   assert.equal(dashboard.includes("function ProviderIcon()"), false);
 });

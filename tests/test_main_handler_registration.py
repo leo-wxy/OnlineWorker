@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 
 import main
+from core.state import AppState
+from core.storage import AppStorage
 
 
 class _DummyFilter:
@@ -60,8 +62,8 @@ def test_main_registers_unified_slash_handler_before_plain_text(monkeypatch):
 
     monkeypatch.setattr(main, "_acquire_flock", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main, "load_config", lambda data_dir=None: cfg)
-    monkeypatch.setattr(main, "load_storage", lambda: object())
-    monkeypatch.setattr(main, "AppState", lambda storage, config: SimpleNamespace())
+    monkeypatch.setattr(main, "load_storage", AppStorage)
+    monkeypatch.setattr(main, "AppState", AppState)
     monkeypatch.setattr(main, "HTTPXRequest", lambda **kwargs: object())
     monkeypatch.setattr(main, "Application", SimpleNamespace(builder=lambda: _FakeApplicationBuilder(handlers)))
     monkeypatch.setattr(main, "WhitelistFilter", lambda allowed_user_id: dummy_filter)
@@ -126,8 +128,8 @@ def test_main_registers_long_running_message_handlers_as_non_blocking(monkeypatc
 
     monkeypatch.setattr(main, "_acquire_flock", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main, "load_config", lambda data_dir=None: cfg)
-    monkeypatch.setattr(main, "load_storage", lambda: object())
-    monkeypatch.setattr(main, "AppState", lambda storage, config: SimpleNamespace())
+    monkeypatch.setattr(main, "load_storage", AppStorage)
+    monkeypatch.setattr(main, "AppState", AppState)
     monkeypatch.setattr(main, "HTTPXRequest", lambda **kwargs: object())
     monkeypatch.setattr(main, "Application", SimpleNamespace(builder=lambda: _FakeApplicationBuilder(handlers)))
     monkeypatch.setattr(main, "WhitelistFilter", lambda allowed_user_id: dummy_filter)

@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { DashboardState } from "../types";
+import {
+  buildServiceControlStatus,
+  canOpenCodexTuiHost,
+  resolveProviders,
+} from "../components/dashboard/model";
 
 interface UseDashboardStateReturn {
   dashboardState: DashboardState | null;
   loading: boolean;
   error: string | null;
   refresh: () => void;
+  providers: ReturnType<typeof resolveProviders>;
+  serviceControlStatus: ReturnType<typeof buildServiceControlStatus>;
+  canOpenCodexTuiHost: boolean;
 }
 
 export function useDashboardState(): UseDashboardStateReturn {
@@ -34,5 +42,13 @@ export function useDashboardState(): UseDashboardStateReturn {
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  return { dashboardState, loading, error, refresh };
+  return {
+    dashboardState,
+    loading,
+    error,
+    refresh,
+    providers: resolveProviders(dashboardState),
+    serviceControlStatus: buildServiceControlStatus(dashboardState),
+    canOpenCodexTuiHost: canOpenCodexTuiHost(dashboardState),
+  };
 }

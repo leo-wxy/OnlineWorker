@@ -325,6 +325,7 @@ class LifecycleManager:
         inline button in the workspace overview.
         """
         tool_name = ws_info.tool
+        workspace_id = ws_info.daemon_workspace_id or f"{tool_name}:{ws_info.name}"
 
         # Refresh active status from source DB
         active_ids = query_provider_active_thread_ids(tool_name, ws_info.path)
@@ -369,7 +370,7 @@ class LifecycleManager:
                 )
                 topic = await bot.create_forum_topic(chat_id=self.gid, name=topic_name)
                 self.state.bind_telegram_session_topic(
-                    ws_name,
+                    workspace_id,
                     ws_info,
                     thread_info,
                     topic.message_thread_id,
