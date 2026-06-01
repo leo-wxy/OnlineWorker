@@ -97,6 +97,8 @@ def _resolve_command_context(
         if found is not None:
             return "thread", found
 
+        state.observe_unknown_telegram_topic(topic_id)
+
     return "unknown", None
 
 

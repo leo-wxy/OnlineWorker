@@ -642,7 +642,17 @@ def make_new_thread_handler(state: AppState, group_chat_id: int) -> Callable:
             topic_id = topic.message_thread_id
 
             # 3. 更新 topic_id，先不持久化；只有源端 thread 就绪后才写入 storage
-            thread_info.topic_id = topic_id
+            workspace_key = state.get_workspace_storage_key(ws)
+            if workspace_key is not None:
+                state.bind_telegram_session_topic(
+                    workspace_key,
+                    ws,
+                    thread_info,
+                    topic_id,
+                    display_name=thread_info.preview,
+                )
+            else:
+                thread_info.topic_id = topic_id
 
             await _activate_new_thread_in_source(
                 state,

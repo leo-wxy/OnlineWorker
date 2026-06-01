@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import sqlite3
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -330,6 +331,69 @@ async def test_send_user_message_passes_registered_workspace_cwd():
 
 
 @pytest.mark.asyncio
+async def test_send_user_message_loads_thread_policy_when_enabled(monkeypatch, tmp_path):
+    db_path = tmp_path / "state_5.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, approval_mode TEXT, sandbox_policy TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO threads (id, approval_mode, sandbox_policy) VALUES (?, ?, ?)",
+            (
+                "tid-live",
+                "on-request",
+                json.dumps(
+                    {
+                        "type": "workspace-write",
+                        "network_access": False,
+                        "exclude_tmpdir_env_var": False,
+                        "exclude_slash_tmp": False,
+                    }
+                ),
+            ),
+        )
+    monkeypatch.setenv("ONLINEWORKER_CODEX_STATE_DB", str(db_path))
+
+    adapter = CodexAdapter()
+    adapter.enable_thread_policy_lookup(True)
+    adapter._call = AsyncMock(return_value={"ok": True})
+
+    await adapter.send_user_message("codex:onlineWorker", "tid-live", "hello")
+
+    adapter._call.assert_awaited_once_with(
+        "turn/start",
+        {
+            "threadId": "tid-live",
+            "input": [{"type": "text", "text": "hello"}],
+            "approvalsReviewer": "user",
+            "approvalPolicy": "on-request",
+            "sandboxPolicy": {
+                "type": "workspaceWrite",
+                "networkAccess": False,
+                "excludeTmpdirEnvVar": False,
+                "excludeSlashTmp": False,
+            },
+        },
+    )
+
+
+def test_normalize_sandbox_policy_for_app_server():
+    assert CodexAdapter._normalize_sandbox_policy_for_app_server(
+        {
+            "type": "workspace-write",
+            "network_access": False,
+            "exclude_tmpdir_env_var": False,
+            "exclude_slash_tmp": False,
+        }
+    ) == {
+        "type": "workspaceWrite",
+        "networkAccess": False,
+        "excludeTmpdirEnvVar": False,
+        "excludeSlashTmp": False,
+    }
+
+
+@pytest.mark.asyncio
 async def test_send_user_message_can_override_approval_policy():
     adapter = CodexAdapter()
     adapter._call = AsyncMock(return_value={"ok": True})
@@ -361,7 +425,12 @@ async def test_send_user_message_can_override_sandbox_policy():
         "codex:onlineWorker",
         "tid-live",
         "hello",
-        sandbox_policy={"type": "readOnly"},
+        sandbox_policy={
+            "type": "workspace-write",
+            "network_access": False,
+            "exclude_tmpdir_env_var": False,
+            "exclude_slash_tmp": False,
+        },
     )
 
     adapter._call.assert_awaited_once_with(
@@ -370,7 +439,12 @@ async def test_send_user_message_can_override_sandbox_policy():
             "threadId": "tid-live",
             "input": [{"type": "text", "text": "hello"}],
             "approvalsReviewer": "user",
-            "sandboxPolicy": {"type": "readOnly"},
+            "sandboxPolicy": {
+                "type": "workspaceWrite",
+                "networkAccess": False,
+                "excludeTmpdirEnvVar": False,
+                "excludeSlashTmp": False,
+            },
         },
     )
 

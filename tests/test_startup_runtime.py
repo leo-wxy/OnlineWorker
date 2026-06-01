@@ -942,53 +942,6 @@ async def test_post_init_passes_codex_stdio_protocol_to_app_server_process():
 
 
 @pytest.mark.asyncio
-async def test_post_init_uses_blocking_codex_hook_instead_of_current_session_approval_mirror(tmp_path):
-    storage = AppStorage()
-    state = AppState(storage=storage)
-    cfg = Config(
-        telegram_token="token",
-        allowed_user_id=1,
-        group_chat_id=2,
-        log_level="INFO",
-        tools=[
-            ToolConfig(
-                name="codex",
-                enabled=True,
-                codex_bin="codex",
-                protocol="stdio",
-            )
-        ],
-        data_dir=str(tmp_path),
-        delete_archived_topics=True,
-    )
-    manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
-
-    bot = MagicMock()
-    bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=3169))
-    bot.send_message = AsyncMock()
-
-    proc = MagicMock()
-    proc.start = AsyncMock(return_value="stdio://")
-    with patch("plugins.providers.builtin.codex.python.runtime.AppServerProcess", return_value=proc), patch(
-        "core.lifecycle.save_storage"
-    ), patch("plugins.providers.builtin.codex.python.runtime.connect_adapter_with_retry", new=AsyncMock()), patch.object(
-        LifecycleManager,
-        "_cleanup_archived_threads",
-        new=AsyncMock(),
-    ), patch(
-        "plugins.providers.builtin.codex.python.tui_realtime_mirror.start_codex_tui_realtime_mirror_loop",
-        return_value=MagicMock(),
-    ), patch(
-        "plugins.providers.builtin.codex.python.current_session_approval_mirror.start_current_session_approval_mirror_loop",
-        return_value=MagicMock(),
-    ) as approval_mirror_mock:
-        await manager.post_init(SimpleNamespace(bot=bot))
-
-    approval_mirror_mock.assert_not_called()
-    assert codex_state.get_runtime(state).approval_mirror_task is None
-
-
-@pytest.mark.asyncio
 async def test_shutdown_runtime_stops_codex_remote_proxy():
     storage = AppStorage()
     state = AppState(storage=storage)
@@ -1013,53 +966,6 @@ async def test_shutdown_runtime_stops_codex_remote_proxy():
 
     proxy.stop.assert_awaited_once()
     assert codex_state.get_runtime(state).remote_proxy is None
-
-
-@pytest.mark.asyncio
-async def test_post_init_skips_codex_current_session_approval_mirror_without_data_dir():
-    storage = AppStorage()
-    state = AppState(storage=storage)
-    cfg = Config(
-        telegram_token="token",
-        allowed_user_id=1,
-        group_chat_id=2,
-        log_level="INFO",
-        tools=[
-            ToolConfig(
-                name="codex",
-                enabled=True,
-                codex_bin="codex",
-                protocol="stdio",
-            )
-        ],
-        data_dir=None,
-        delete_archived_topics=True,
-    )
-    manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
-
-    bot = MagicMock()
-    bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=3169))
-    bot.send_message = AsyncMock()
-
-    proc = MagicMock()
-    proc.start = AsyncMock(return_value="stdio://")
-
-    with patch("plugins.providers.builtin.codex.python.runtime.AppServerProcess", return_value=proc), patch(
-        "core.lifecycle.save_storage"
-    ), patch("plugins.providers.builtin.codex.python.runtime.connect_adapter_with_retry", new=AsyncMock()), patch.object(
-        LifecycleManager,
-        "_cleanup_archived_threads",
-        new=AsyncMock(),
-    ), patch(
-        "plugins.providers.builtin.codex.python.tui_realtime_mirror.start_codex_tui_realtime_mirror_loop",
-        return_value=MagicMock(),
-    ), patch(
-        "plugins.providers.builtin.codex.python.current_session_approval_mirror.start_current_session_approval_mirror_loop",
-    ) as approval_mirror_mock:
-        await manager.post_init(SimpleNamespace(bot=bot))
-
-    approval_mirror_mock.assert_not_called()
-    assert codex_state.get_runtime(state).approval_mirror_task is None
 
 
 @pytest.mark.asyncio

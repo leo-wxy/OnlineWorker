@@ -90,9 +90,9 @@ the main control surface.
 - Builtin notification channel in this repository: `telegram`; external
   notification packages can be mounted through the notification plugin contract.
 - Provider-driven configuration for supported CLI backends.
-- Telegram mirrors provider approvals and questions. For Codex, approval
-  requests can be handled either from the local Codex TUI host or from Telegram
-  buttons when the current thread is bound to the host.
+- Telegram mirrors provider approvals and questions. Codex approvals are handled
+  only through the app-server request/response path; Telegram buttons reply to
+  that server request.
 - Plugin-based notification channels, configurable from the first-class
   `Notifications` page.
 - Markdown rendering for final replies.
@@ -140,6 +140,7 @@ The installed app reads and writes user data under:
 ```text
 ~/Library/Application Support/OnlineWorker/config.yaml
 ~/Library/Application Support/OnlineWorker/.env
+~/Library/Application Support/OnlineWorker/im_routes.sqlite3
 ```
 
 When running from source, the repo root may also use local `config.yaml`, `.env`,
@@ -162,14 +163,22 @@ service/scenario settings. Provider overlays can be mounted with
 `ONLINEWORKER_PROVIDER_OVERLAY`; notification overlays can be mounted with
 `ONLINEWORKER_NOTIFICATION_OVERLAY`.
 
+`im_routes.sqlite3` stores route bindings from external IM entries to fixed
+OnlineWorker targets. Internal targets are only `agent`, `workspace`, and
+`session`; Telegram topics, Slack threads, Feishu chats, or other IM entries are
+external entries. `topic_id` values in `onlineworker_state.json` are
+compatibility mirrors, while runtime routing is backed by `im_routes.sqlite3`.
+Unknown IM entries are recorded as `unknown` and do not fall back to the active
+workspace/session.
+
 ## Runtime Workflows
 
 ### Provider Interactions
 
 OnlineWorker presents provider approvals and questions through a shared
-App/Telegram flow. For Codex, the packaged app can bind the active session to a
-managed Codex TUI host; when that host is online, approval prompts can be handled
-from either Telegram buttons or the local Codex TUI.
+App/Telegram flow. Codex approval prompts are accepted only when they arrive as
+app-server server requests, and Telegram button clicks respond through
+`reply_server_request(...)`.
 
 ### Codex Text Sending
 

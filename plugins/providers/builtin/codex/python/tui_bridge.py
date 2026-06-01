@@ -319,12 +319,12 @@ async def ensure_codex_tui_host_bound(
     thread_id: str,
     *,
     allow_owner_bridge: bool = False,
-) -> None:
+) -> bool:
     if not (
         should_route_codex_messages_to_tui_host(state, ws)
         or (allow_owner_bridge and should_auto_manage_codex_host(state, ws))
     ):
-        return
+        return False
 
     live_status = _read_live_host_status(state)
     current_pid = os.getpid()
@@ -336,10 +336,10 @@ async def ensure_codex_tui_host_bound(
             if host is not None:
                 await host.stop()
                 codex_state.set_tui_host(state, None)
-        return
+        return str(live_status.get("active_thread_id") or "").strip() == thread_id
 
     if not should_auto_manage_codex_host(state, ws):
-        return
+        return False
 
     tool_cfg = state.config.get_tool("codex") if state.config else None
     if tool_cfg is None:
@@ -351,7 +351,7 @@ async def ensure_codex_tui_host_bound(
     async with codex_state.get_tui_host_lock(state):
         host = codex_state.get_tui_host(state)
         if host is not None and host.thread_id == thread_id and host.cwd == ws.path and host.is_running:
-            return
+            return True
 
         if host is not None:
             await host.stop()
@@ -369,6 +369,7 @@ async def ensure_codex_tui_host_bound(
         await host.start()
         codex_state.set_tui_host(state, host)
         logger.info(f"[tui-host] 已启动本地 codex host thread={thread_id[:12]}… cwd={ws.path}")
+        return True
 
 
 async def _resolve_codex_ws_url(
@@ -457,7 +458,9 @@ async def send_message_via_tui_host(
     thread_id: str,
     text: str,
 ) -> dict:
-    await ensure_codex_tui_host_bound(state, ws, thread_id)
+    bound = await ensure_codex_tui_host_bound(state, ws, thread_id)
+    if not bound:
+        raise RuntimeError(f"codex_tui_host 未就绪，无法接管当前 TG 会话 thread={thread_id}")
     topic_id = None
     thread = ws.threads.get(thread_id)
     if thread is not None:

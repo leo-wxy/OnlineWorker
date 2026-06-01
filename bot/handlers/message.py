@@ -22,9 +22,6 @@ from plugins.providers.builtin.codex.python.tui_bridge import (
     is_codex_local_owner_mode,
     should_route_codex_messages_to_tui_host,
 )
-from plugins.providers.builtin.codex.python.tui_host_client import (
-    send_approval_action_to_codex_tui_host,
-)
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
 from core.providers.registry import classify_provider, get_provider, provider_not_enabled_message
 from telegram import Update
@@ -403,6 +400,24 @@ def _build_provider_approval_reply(approval, action: str) -> tuple[str, dict]:
     return "✅ 已允许", {"decision": "accept"}
 
 
+def _escape_approval_markdown(value: str) -> str:
+    return (value or "").replace("*", "\\*").replace("_", "\\_").replace("`", "\\`")
+
+
+def _approval_completion_text(label: str, approval) -> str:
+    cmd = _escape_approval_markdown((getattr(approval, "cmd", "") or "")[:200])
+    reason = _escape_approval_markdown((getattr(approval, "justification", "") or "")[:300])
+    tool = _escape_approval_markdown(
+        getattr(approval, "tool_type", "") or getattr(approval, "tool_name", "") or "provider"
+    )
+    lines = [label, ""]
+    lines.append(f"命令：`{cmd}`" if cmd else "命令：（未知命令）")
+    if reason:
+        lines.extend(["", f"理由：{reason}"])
+    lines.extend(["", f"已通过 Telegram 回写到 {tool} app-server。"])
+    return "\n".join(lines)
+
+
 async def _safe_answer_callback(
     query,
     *,
@@ -634,7 +649,8 @@ def make_message_handler(state: AppState, group_chat_id: int) -> Callable:
                 )
             return
 
-        # 未知 Topic，忽略
+        if src_topic_id is not None:
+            state.observe_unknown_telegram_topic(src_topic_id)
         logger.debug(f"未知 topic_id={src_topic_id}，忽略消息")
 
     return handle_message
@@ -750,62 +766,6 @@ def make_callback_handler(state: AppState, group_chat_id: int) -> Callable:
             label, reply_body = _build_provider_approval_reply(approval, action)
 
             try:
-                if approval.tool_type == "codex" and approval.approval_source == "codex_tui_host":
-                    await send_approval_action_to_codex_tui_host(
-                        state,
-                        approval.thread_id,
-                        action,
-                    )
-                    if codex_state.has_interruption(state, approval.request_id):
-                        codex_state.resolve_interruption(
-                            state,
-                            approval.request_id,
-                            status="resolved",
-                            tg_message_id=msg_id,
-                        )
-                    state.pending_approvals.pop(msg_id, None)
-                    await query.edit_message_text(  # type: ignore[union-attr]
-                        f"{label}\n\n命令：`{approval.cmd[:200]}`",
-                        parse_mode="Markdown",
-                    )
-                    logger.info(
-                        f"[approval] codex_tui_host thread={approval.thread_id[:12]} "
-                        f"action={action} msg_id={msg_id}"
-                    )
-                    return
-
-                if approval.tool_type == "codex" and approval.approval_source in {
-                    "codex_cli_hook",
-                    "codex_current_session_log",
-                }:
-                    decision = "deny" if action == "exec_deny" else "allow"
-                    resolved = state.resolve_pending_approval_decision(
-                        "codex",
-                        str(approval.request_id),
-                        decision,
-                        message="TG 已拒绝" if decision == "deny" else "",
-                    )
-                    if not resolved:
-                        state.pending_approvals.pop(msg_id, None)
-                        await query.edit_message_text(  # type: ignore[union-attr]
-                            "❌ 回复授权失败：源 CLI 已不再等待该审批。",
-                        )
-                        logger.warning(
-                            f"[approval] codex_cli_hook pending decision missing "
-                            f"request_id={approval.request_id} action={action} msg_id={msg_id}"
-                        )
-                        return
-                    state.pending_approvals.pop(msg_id, None)
-                    await query.edit_message_text(  # type: ignore[union-attr]
-                        f"{label}\n\n命令：`{approval.cmd[:200]}`",
-                        parse_mode="Markdown",
-                    )
-                    logger.info(
-                        f"[approval] codex_cli_hook request_id={approval.request_id} "
-                        f"action={action} msg_id={msg_id}"
-                    )
-                    return
-
                 tool_name = approval.tool_type or state.get_tool_for_workspace(approval.workspace_id) or ""
                 unavailable = _provider_unavailable_message(state, tool_name) if tool_name else None
                 if unavailable:
@@ -835,7 +795,7 @@ def make_callback_handler(state: AppState, group_chat_id: int) -> Callable:
                     )
                 state.pending_approvals.pop(msg_id, None)
                 await query.edit_message_text(  # type: ignore[union-attr]
-                    f"{label}\n\n命令：`{approval.cmd[:200]}`",
+                    _approval_completion_text(label, approval),
                     parse_mode="Markdown",
                 )
                 logger.info(f"[approval] request_id={approval.request_id} tool={approval.tool_type} reply={reply_body}")

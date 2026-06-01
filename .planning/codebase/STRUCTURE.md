@@ -36,6 +36,7 @@ onlineWorker/
   - `bot/handlers/message.py`
   - `bot/events.py`
 - Subdirectories: `handlers/`
+- Structure note: Phase 10 identified `bot/events.py` and `bot/handlers/workspace.py` as oversized orchestration modules. New code should prefer focused helpers under `bot/handlers/` or small shared modules instead of adding more responsibilities to those files.
 
 **`core/`:**
 - Purpose: shared runtime and provider-neutral backend code
@@ -58,6 +59,7 @@ onlineWorker/
   - `mac-app/src/App.tsx`
   - `mac-app/src-tauri/src/lib.rs`
   - `mac-app/src-tauri/tauri.conf.json`
+- Structure note: Phase 10 identified `mac-app/src-tauri/src/commands/config_provider.rs`, `dashboard.rs`, `codex.rs`, and `claude.rs` as oversized command modules. Prefer sibling submodules for pure helpers while keeping public Tauri command names stable.
 
 **`plugins/`:**
 - Purpose: provider plugin catalog and builtin provider implementations
@@ -149,6 +151,7 @@ onlineWorker/
 - UI implementation: `mac-app/src/pages/` or `mac-app/src/components/`
 - Native bridge: `mac-app/src-tauri/src/commands/`
 - Frontend tests: `mac-app/tests/`
+- For page-level additions, prefer extracting data loading and derived state into `mac-app/src/hooks/` and reusable presentation into `mac-app/src/components/` rather than expanding large page files such as `Dashboard.tsx`.
 
 **New packaging/runtime helper:**
 - Script: `scripts/`

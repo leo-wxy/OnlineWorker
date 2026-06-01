@@ -15,9 +15,6 @@
   点击未打开的 workspace → 注册 daemon + 创建 workspace Topic + 同步最新 10 个 thread
 """
 import logging
-import hashlib
-import os
-from datetime import datetime
 from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
@@ -42,6 +39,17 @@ from bot.handlers.common import (
 )
 from bot.thread_controls import send_thread_control_panel
 from bot.utils import TopicNotFoundError
+from bot.handlers.workspace_helpers import (
+    THREAD_OPEN_V2_PREFIX as _THREAD_OPEN_V2_PREFIX,
+    build_history_sync_batches as _build_history_sync_batches,
+    format_history_turn_message as _format_history_turn_message,
+    get_workspace_callback_identity as _get_workspace_callback_identity,
+    history_turn_signature as _history_turn_signature,
+    make_thread_open_token as _make_thread_open_token,
+    make_thread_topic_name as _make_thread_topic_name,
+    normalize_history_turn_timestamp as _normalize_history_turn_timestamp,
+    normalize_workspace_topic_label as _normalize_workspace_topic_label,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +72,6 @@ _THREAD_HISTORY_SYNC_LOOKBACK = 50
 
 # 正在创建 topic 的 thread_id 集合，防止并发重复创建
 _creating_topics: set[str] = set()
-_THREAD_OPEN_V2_PREFIX = "thread_open_v2"
 
 
 def _get_workspace_hooks(tool_name: str):
@@ -96,95 +103,6 @@ def _list_provider_local_threads(tool_name: str, workspace_path: str, *, limit: 
     if callable(list_local_threads):
         return list_local_threads(workspace_path, limit=limit)
     return []
-
-
-def _make_thread_topic_name(tool_name: str, ws_name: str, preview: Optional[str], thread_id: str) -> str:
-    """生成 thread Topic 名称：[tool/ws_name] preview（最长 128 字符）。"""
-    workspace_label = _normalize_workspace_topic_label(ws_name)
-    prefix = f"[{tool_name}/{workspace_label}] "
-    if preview:
-        body = " ".join(str(preview).strip().split())
-    else:
-        body = "New session"
-    return (prefix + body)[:128]
-
-
-def _normalize_workspace_topic_label(ws_name: str) -> str:
-    normalized = str(ws_name or "").strip()
-    if not normalized:
-        return "workspace"
-    if normalized == "/":
-        return "root"
-    if "/" in normalized or "\\" in normalized:
-        basename = os.path.basename(normalized.rstrip("/\\"))
-        return basename or "workspace"
-    return normalized
-
-
-def _make_thread_open_token(value: str) -> str:
-    """生成稳定短 token，供 thread_open callback 唯一定位使用。"""
-    return hashlib.blake2s(value.encode("utf-8"), digest_size=8).hexdigest()
-
-
-def _history_turn_signature(turn: dict) -> str:
-    role = str(turn.get("role") or "").strip()
-    timestamp = _normalize_history_turn_timestamp(turn.get("timestamp"))
-    text = str(turn.get("text") or "").strip()
-    payload = f"{role}\n{timestamp}\n{text}".encode("utf-8")
-    return hashlib.blake2s(payload, digest_size=16).hexdigest()
-
-
-def _normalize_history_turn_timestamp(value) -> int | str:
-    if isinstance(value, (int, float)):
-        return int(value)
-
-    text = str(value or "").strip()
-    if not text:
-        return 0
-
-    try:
-        return int(text)
-    except (TypeError, ValueError):
-        pass
-
-    try:
-        return int(datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp() * 1000)
-    except (TypeError, ValueError):
-        return text
-
-
-def _format_history_turn_message(turn: dict) -> Optional[str]:
-    role = str(turn.get("role") or "").strip()
-    text = str(turn.get("text") or "").strip()
-    if not text:
-        return None
-    if role == "user":
-        return f"👤 {text[:3000]}"
-    if role == "assistant":
-        truncated = text[:3000]
-        if len(text) > 3000:
-            truncated += "\n…（截断）"
-        return f"🤖 {truncated}"
-    return None
-
-
-def _build_history_sync_batches(header: str, turn_messages: list[str], *, max_chars: int = 3500) -> list[str]:
-    batches: list[str] = []
-    current = header.strip()
-
-    for msg in turn_messages:
-        if not msg:
-            continue
-        addition = f"\n\n{msg}" if current else msg
-        if current and len(current) + len(addition) > max_chars:
-            batches.append(current)
-            current = msg
-            continue
-        current += addition
-
-    if current:
-        batches.append(current)
-    return batches
 
 
 async def _sync_existing_claude_thread_history(
@@ -279,13 +197,16 @@ async def _sync_existing_claude_thread_history(
     return True
 
 
-def _get_workspace_callback_identity(storage_key: str, ws: WorkspaceInfo) -> str:
-    return ws.daemon_workspace_id or storage_key or f"{ws.tool}:{ws.name}"
-
-
 def make_thread_open_callback_data(ws_id: str, thread_id: str) -> str:
     """构造 thread_open 唯一 callback_data，避免 thread id 前缀冲突。"""
     return f"{_THREAD_OPEN_V2_PREFIX}:{_make_thread_open_token(ws_id)}:{_make_thread_open_token(thread_id)}"
+
+
+def _thread_control_intro(tool_name: str, thread_id: str, state_text: str) -> str:
+    intro = f"thread `{thread_id[-8:]}` {state_text}，继续对话或使用下方按钮。"
+    if tool_name == "codex":
+        intro += "\n此 Topic 由 OnlineWorker 托管；Codex app-server 权限请求会在这里显示 TG 审批按钮。"
+    return intro
 
 
 def _resolve_thread_open_workspace(storage, data: str) -> tuple[Optional[WorkspaceInfo], Optional[str], Optional[str]]:
@@ -462,7 +383,16 @@ def make_ws_open_callback_handler(state: AppState, group_chat_id: int) -> Callba
                 try:
                     ws_topic_name = f"[{tool_name}] {name}"[:128]
                     new_topic = await bot.create_forum_topic(chat_id=group_chat_id, name=ws_topic_name)
-                    existing_ws.topic_id = new_topic.message_thread_id
+                    existing_ws_key = state.get_workspace_storage_key(existing_ws)
+                    if existing_ws_key is not None:
+                        state.bind_telegram_workspace_topic(
+                            existing_ws_key,
+                            existing_ws,
+                            new_topic.message_thread_id,
+                            display_name=name,
+                        )
+                    else:
+                        existing_ws.topic_id = new_topic.message_thread_id
                     if storage:
                         save_storage(storage)
                     logger.info(f"workspace {name} topic 重建成功：{existing_ws.topic_id}")
@@ -737,7 +667,7 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                         group_chat_id,
                         ws_info,
                         thread_info,
-                        intro=f"thread `{full_tid[-8:]}` 已就绪，继续对话或使用下方按钮。",
+                        intro=_thread_control_intro(ws_info.tool, full_tid, "已就绪"),
                         topic_id=thread_info.topic_id,
                     )
                     await query.answer(f"已有 Topic {old_topic_id}", show_alert=False)
@@ -765,7 +695,17 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
 
             try:
                 topic = await bot.create_forum_topic(chat_id=group_chat_id, name=topic_name)
-                thread_info.topic_id = topic.message_thread_id
+                workspace_key = state.get_workspace_storage_key(ws_info)
+                if workspace_key is not None:
+                    state.bind_telegram_session_topic(
+                        workspace_key,
+                        ws_info,
+                        thread_info,
+                        topic.message_thread_id,
+                        display_name=thread_info.preview,
+                    )
+                else:
+                    thread_info.topic_id = topic.message_thread_id
                 if storage:
                     save_storage(storage)
                 logger.info(f"[on-demand] thread {full_tid[:8]}… → Topic {thread_info.topic_id}")
@@ -796,7 +736,7 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                     group_chat_id,
                     ws_info,
                     thread_info,
-                    intro=f"thread `{full_tid[-8:]}` 已打开，继续对话或使用下方按钮。",
+                    intro=_thread_control_intro(ws_info.tool, full_tid, "已打开"),
                     topic_id=thread_info.topic_id,
                 )
             except Exception as e:
@@ -843,7 +783,12 @@ async def _open_workspace(
     storage_key = f"{tool_name}:{name}"
     if storage and storage_key in storage.workspaces:
         ws_info = storage.workspaces[storage_key]
-        ws_info.topic_id = topic_id
+        state.bind_telegram_workspace_topic(
+            storage_key,
+            ws_info,
+            topic_id,
+            display_name=name,
+        )
         ws_info.daemon_workspace_id = ws_id
         # 不清 threads，保留已有的 topic_id 映射
     else:
@@ -851,8 +796,14 @@ async def _open_workspace(
             name=name,
             path=path,
             tool=tool_name,
-            topic_id=topic_id,
+            topic_id=None,
             daemon_workspace_id=ws_id,
+        )
+        state.bind_telegram_workspace_topic(
+            storage_key,
+            ws_info,
+            topic_id,
+            display_name=name,
         )
     if storage:
         storage.workspaces[storage_key] = ws_info
@@ -1214,7 +1165,7 @@ def make_cli_callback_handler(state: AppState, group_chat_id: int, cfg: Config) 
             new_topic_id = topic.message_thread_id
             
             # 更新 storage (global_topic_ids 是 tool_name -> topic_id)
-            storage.global_topic_ids[tool_name] = new_topic_id
+            state.set_global_topic_id(tool_name, new_topic_id)
             save_storage(storage)
             
             action_text = "重建" if action == "cli_recreate:" else "创建"

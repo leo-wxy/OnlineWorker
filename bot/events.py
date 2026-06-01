@@ -135,7 +135,17 @@ async def _materialize_thread_topic_if_needed(
             thread_id,
         )
         topic = await bot.create_forum_topic(chat_id=group_chat_id, name=topic_name)
-        thread_info.topic_id = topic.message_thread_id
+        workspace_key = state.get_workspace_storage_key(ws_info)
+        if workspace_key is not None:
+            state.bind_telegram_session_topic(
+                workspace_key,
+                ws_info,
+                thread_info,
+                topic.message_thread_id,
+                display_name=thread_info.preview,
+            )
+        else:
+            thread_info.topic_id = topic.message_thread_id
         if state.storage is not None:
             save_storage(state.storage)
 
@@ -194,18 +204,13 @@ async def send_approval_to_telegram(
     topic_id: Optional[int],
     workspace_id: str,
     info: ApprovalInfo,
-    *,
-    interactive: bool = True,
-    notice_suffix: str = "",
 ) -> None:
-    """Shared approval UI: format text, send message, record PendingApproval, attach keyboard."""
+    """Send app-server approval UI, record PendingApproval, and attach buttons."""
     text = tg_approval_request_text(
         command=info.command,
         reason=info.reason,
         tool_type=info.tool_type,
     )
-    if notice_suffix:
-        text = f"{text}\n\n{notice_suffix}"
 
     try:
         sent = await _send_to_group(
@@ -218,10 +223,6 @@ async def send_approval_to_telegram(
             return
 
         msg_id = sent.message_id
-        if not interactive:
-            logger.info(f"[approval_request] 已推送非交互镜像 tool={info.tool_type} msg_id={msg_id}")
-            return
-
         state.pending_approvals[msg_id] = PendingApproval(
             request_id=info.request_id,
             workspace_id=workspace_id,
@@ -240,7 +241,14 @@ async def send_approval_to_telegram(
             message_id=msg_id,
             reply_markup=keyboard,
         )
-        logger.info(f"[approval_request] 已推送 tool={info.tool_type} msg_id={msg_id}")
+        logger.info(
+            "[approval_request] 已推送 tool=%s topic=%s msg_id=%s thread=%s request_id=%s",
+            info.tool_type,
+            topic_id,
+            msg_id,
+            info.thread_id,
+            info.request_id,
+        )
     except Exception as e:
         logger.error(f"推送授权请求到 Telegram 失败：{e}")
 
@@ -519,7 +527,7 @@ async def _notify_owner_about_unroutable_approval(
     owner_chat_id = state.config.allowed_user_id if state.config else None
     if owner_chat_id is None:
         logger.error(
-            "[approval_route] 无法通知 owner：allowed_user_id 缺失 error=%s thread=%s ws=%s",
+            "[approval_target] 无法通知 owner：allowed_user_id 缺失 error=%s thread=%s ws=%s",
             route_error,
             info.thread_id or "N/A",
             ws_daemon_id or "N/A",
@@ -543,7 +551,7 @@ async def _notify_owner_about_unroutable_approval(
     try:
         await bot.send_message(chat_id=owner_chat_id, text="\n".join(lines))
         logger.info(
-            "[approval_route] 已通知 owner chat=%s error=%s thread=%s ws=%s",
+            "[approval_target] 已通知 owner chat=%s error=%s thread=%s ws=%s",
             owner_chat_id,
             route_error,
             info.thread_id or "N/A",
@@ -551,7 +559,7 @@ async def _notify_owner_about_unroutable_approval(
         )
     except Exception as e:
         logger.error(
-            "[approval_route] 通知 owner 失败 chat=%s error=%s thread=%s ws=%s send_error=%s",
+            "[approval_target] 通知 owner 失败 chat=%s error=%s thread=%s ws=%s send_error=%s",
             owner_chat_id,
             route_error,
             info.thread_id or "N/A",
@@ -1061,7 +1069,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         )
         if route_error is not None:
             logger.error(
-                "[approval_route] %s tool=%s thread=%s ws=%s",
+                "[approval_target] %s tool=%s thread=%s ws=%s",
                 route_error,
                 info.tool_type,
                 thread_id or "N/A",
@@ -1759,7 +1767,7 @@ def make_server_request_handler(state: AppState, bot: Bot, group_chat_id: int):
         )
         if route_error is not None:
             logger.error(
-                "[approval_route] %s tool=%s thread=%s ws=%s",
+                "[approval_target] %s tool=%s thread=%s ws=%s",
                 route_error,
                 provider_id,
                 thread_id or "N/A",

@@ -599,7 +599,7 @@ async def handle_local_owner(
     has_photo: bool,
     attachments=None,
 ) -> bool:
-    from bot.handlers.common import _send_to_group, tg_processing_ack_text, tg_send_failed_text
+    from bot.handlers.common import _send_to_group, tg_send_failed_text
     from bot.handlers import message as message_handler
 
     should_route_to_tui = message_handler.should_route_codex_messages_to_tui_host(state, ws_info)
@@ -615,12 +615,6 @@ async def handle_local_owner(
             src_topic_id or thread_info.topic_id or 0,
             thread_info.thread_id,
             text,
-        )
-        await _send_to_group(
-            context.bot,
-            group_chat_id,
-            tg_processing_ack_text(),
-            topic_id=src_topic_id,
         )
 
         if not thread_info.preview:
@@ -663,28 +657,6 @@ def can_route_cli_approval_to_tui_host(state, thread_id: str) -> bool:
     return str(status.get("active_thread_id") or "").strip() == thread_id
 
 
-async def mirror_approval_policy(state, request: dict, ws_info, thread_info) -> dict:
-    thread_id = str(request.get("thread_id") or "").strip()
-    if request.get("blocking"):
-        return {
-            "interactive": True,
-            "approval_source": str(request.get("source") or "codex_cli_hook"),
-            "notice_suffix": "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。",
-        }
-    if can_route_cli_approval_to_tui_host(state, thread_id):
-        return {
-            "interactive": True,
-            "request_id": f"codex-tui-host:{thread_id}",
-            "approval_source": "codex_tui_host",
-            "notice_suffix": "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。",
-        }
-    return {
-        "interactive": True,
-        "approval_source": str(request.get("source") or "provider_hook_mirror"),
-        "notice_suffix": "此请求已在 Codex CLI 中弹出，可在 CLI 或 TG 中处理。",
-    }
-
-
 async def try_route_owner_bridge_send(state, ws_info, thread_info, *, text: str):
     if not text:
         return False
@@ -693,9 +665,9 @@ async def try_route_owner_bridge_send(state, ws_info, thread_info, *, text: str)
         ensure_codex_tui_host_bound,
     )
 
-    await ensure_codex_tui_host_bound(state, ws_info, thread_id, allow_owner_bridge=True)
-    if not can_route_cli_approval_to_tui_host(state, thread_id):
-        return False
+    bound = await ensure_codex_tui_host_bound(state, ws_info, thread_id, allow_owner_bridge=True)
+    if not bound or not can_route_cli_approval_to_tui_host(state, thread_id):
+        raise RuntimeError(f"codex_tui_host 未就绪，无法接管当前 TG 会话 thread={thread_id}")
     from plugins.providers.builtin.codex.python.tui_host_client import (
         send_message_to_codex_tui_host,
     )
@@ -1134,6 +1106,8 @@ async def setup_connection(manager, bot, adapter, **kwargs) -> None:
     from core.storage import ThreadInfo
 
     manager.state.set_adapter("codex", adapter)
+    if hasattr(adapter, "enable_thread_policy_lookup"):
+        adapter.enable_thread_policy_lookup(True)
     event_handler = make_event_handler(manager.state, bot, manager.gid)
     adapter.on_event(event_handler)
     adapter.on_server_request(make_server_request_handler(manager.state, bot, manager.gid))
@@ -1427,7 +1401,6 @@ async def monitor_process_health(
 
 
 async def start_runtime(manager, bot, tool_cfg) -> None:
-    from plugins.providers.builtin.codex.python.hook_bridge import install_codex_permission_mirror_hook
     from plugins.providers.builtin.codex.python.tui_bridge import (
         is_codex_local_owner_mode,
         start_codex_tui_sync_loop,
@@ -1439,18 +1412,6 @@ async def start_runtime(manager, bot, tool_cfg) -> None:
     )
 
     data_dir = manager.state.config.data_dir if manager.state.config is not None else None
-    if data_dir:
-        try:
-            if install_codex_permission_mirror_hook(data_dir):
-                logger.info("[codex] 已安装 PermissionRequest 镜像 hook，CLI 审批保持原生显示并同步通知 TG")
-        except Exception as e:
-            logger.warning("[codex] 安装 PermissionRequest 镜像 hook 失败：%s", e)
-
-    runtime = codex_state.get_runtime(manager.state)
-    approval_mirror_task = getattr(runtime, "approval_mirror_task", None)
-    if approval_mirror_task is not None and not approval_mirror_task.done():
-        approval_mirror_task.cancel()
-    runtime.approval_mirror_task = None
 
     control_mode = getattr(tool_cfg, "control_mode", "app")
     if is_codex_local_owner_mode(manager.state):
@@ -1513,10 +1474,6 @@ async def start_runtime(manager, bot, tool_cfg) -> None:
 
 async def shutdown_runtime(manager) -> None:
     from plugins.providers.builtin.codex.python.owner_bridge import stop_codex_owner_bridge
-    approval_mirror_task = codex_state.get_runtime(manager.state).approval_mirror_task
-    if approval_mirror_task and not approval_mirror_task.done():
-        approval_mirror_task.cancel()
-    codex_state.get_runtime(manager.state).approval_mirror_task = None
     sync_task = manager.get_tui_sync_task("codex")
     if sync_task and not sync_task.done():
         sync_task.cancel()

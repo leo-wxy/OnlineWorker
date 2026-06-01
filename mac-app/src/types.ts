@@ -271,6 +271,8 @@ export interface CodexSession {
   archived?: boolean;
   modelProvider?: string | null;
   source?: string | null;
+  sandboxPolicy?: unknown | null;
+  approvalMode?: string | null;
   isSmoke?: boolean;
 }
 

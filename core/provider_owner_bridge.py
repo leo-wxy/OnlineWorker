@@ -4,11 +4,9 @@ import asyncio
 import json
 import logging
 import os
-import time
 from types import SimpleNamespace
 from typing import Optional
 
-from core.providers.interactions import ProviderApprovalRequest
 from config import get_data_dir
 from core.providers.registry import get_provider
 from core.storage import ThreadInfo, WorkspaceInfo, save_storage
@@ -18,9 +16,6 @@ from core.user_messages.gateway import prepare_user_message_text
 
 OWNER_BRIDGE_SOCKET_FILENAME = "provider_owner_bridge.sock"
 logger = logging.getLogger(__name__)
-APPROVAL_MIRROR_DEDUPE_SECONDS = 10.0
-APPROVAL_DECISION_TIMEOUT_SECONDS = 86400.0
-APPROVAL_MIRROR_NOTICE_SUFFIX = "此请求已在源工具中弹出，可在源工具或 TG 中处理。"
 
 
 def provider_owner_bridge_socket_path(data_dir: Optional[str] = None) -> Optional[str]:
@@ -601,156 +596,21 @@ class ProviderOwnerBridge:
         }
 
     async def _handle_mirror_approval(self, request: dict) -> dict:
-        from bot.events import send_approval_to_telegram
-
         provider_id = str(request.get("provider_id") or "").strip()
         thread_id = str(request.get("thread_id") or "").strip()
         workspace_dir = str(request.get("workspace_dir") or "").strip()
-        payload = request.get("payload")
-        if not isinstance(payload, dict):
-            payload = {}
         if not provider_id:
             return {"ok": False, "error": "缺少 provider_id"}
 
-        ws_info, thread_info = _resolve_workspace_and_thread_for_mirror(
-            self.state,
-            provider_id,
-            thread_id,
-            workspace_dir,
-        )
-        if ws_info is None or thread_info is None:
-            return {"ok": False, "error": "缺少 workspace_dir，无法定位 provider 会话"}
-
-        topic_id = (
-            getattr(thread_info, "topic_id", None)
-            or getattr(ws_info, "topic_id", None)
-        )
-        if topic_id is None:
-            logger.info(
-                "[provider-hook-mirror] 丢弃未绑定 topic 的 CLI PermissionRequest "
-                "provider=%s thread=%s workspace=%s",
-                provider_id,
-                thread_id[:12] if thread_id else "?",
-                workspace_dir or "?",
-            )
-            return {
-                "ok": True,
-                "discarded": True,
-                "reason": "会话未绑定 TG topic，已跳过 TG 审批镜像",
-            }
-
-        workspace_id = getattr(ws_info, "daemon_workspace_id", None) or _workspace_key(provider_id, ws_info.path)
-        command = _approval_mirror_command(payload)
-        provider = get_provider(provider_id, getattr(self.state, "config", None))
-        interactions = getattr(provider, "interactions", None) if provider is not None else None
-        mirror_policy = (
-            getattr(interactions, "mirror_approval_policy", None)
-            if interactions is not None
-            else None
-        )
-        approval_policy = {}
-        if callable(mirror_policy):
-            approval_policy = await mirror_policy(
-                self.state,
-                request,
-                ws_info,
-                thread_info,
-            )
-        if not isinstance(approval_policy, dict):
-            approval_policy = {}
-
-        hook_is_interactive = bool(approval_policy.get("interactive"))
-        runtime_state = self.state.get_provider_runtime(provider_id)
-        dedupe_key = _approval_mirror_dedupe_key(provider_id, thread_id, workspace_dir, payload)
-        now = time.time()
-        for key, (seen_at, _was_interactive) in list(runtime_state.approval_mirror_seen_at.items()):
-            if now - seen_at > APPROVAL_MIRROR_DEDUPE_SECONDS:
-                runtime_state.approval_mirror_seen_at.pop(key, None)
-
-        previous = runtime_state.approval_mirror_seen_at.get(dedupe_key)
-        if previous is not None:
-            _previous_seen_at, previous_interactive = previous
-            if previous_interactive or not hook_is_interactive:
-                logger.info(
-                    "[provider-hook-mirror] 跳过重复 CLI PermissionRequest provider=%s thread=%s interactive=%s",
-                    provider_id,
-                    thread_id[:12] if thread_id else "?",
-                    hook_is_interactive,
-                )
-                return {"ok": True, "deduped": True}
-
-        fallback_request_id = str(approval_policy.get("request_id") or "provider-cli-hook")
-        request_id = str(
-            payload.get("request_id")
-            or payload.get("requestId")
-            or fallback_request_id
-        )
-        approval_source = str(
-            approval_policy.get("approval_source")
-            or request.get("source")
-            or "provider_hook_mirror"
-        )
-        info = ProviderApprovalRequest(
-            request_id=request_id,
-            thread_id=thread_id or None,
-            command=command or str(payload.get("tool_name") or ""),
-            reason=str(payload.get("reason") or payload.get("justification") or "源 CLI 正在请求本地权限审批。"),
-            tool_name=str(payload.get("tool_name") or ""),
-            tool_type=provider_id,
-            approval_source=approval_source,
-        )
-
-        bot = getattr(self.state, "telegram_bot", None)
-        group_chat_id = int(getattr(self.state, "group_chat_id", 0) or 0)
-        if bot is None or not group_chat_id:
-            return {"ok": False, "error": "OnlineWorker bot context unavailable"}
-
-        blocking = bool(request.get("blocking"))
-        pending_decision = None
-        if blocking and hook_is_interactive:
-            pending_decision = self.state.ensure_pending_approval_decision(provider_id, request_id)
-
-        await send_approval_to_telegram(
-            self.state,
-            bot,
-            group_chat_id,
-            topic_id,
-            workspace_id,
-            info,
-            interactive=hook_is_interactive,
-            notice_suffix=str(
-                approval_policy.get("notice_suffix")
-                or APPROVAL_MIRROR_NOTICE_SUFFIX
-            ),
-        )
-        runtime_state.approval_mirror_seen_at[dedupe_key] = (now, hook_is_interactive)
         logger.info(
-            "[provider-hook-mirror] 已镜像 CLI PermissionRequest provider=%s thread=%s topic=%s",
+            "[provider-hook-mirror] 忽略 legacy mirror_approval；审批只走 app-server request/response "
+            "provider=%s thread=%s workspace=%s source=%s",
             provider_id,
             thread_id[:12] if thread_id else "?",
-            topic_id,
+            workspace_dir or "?",
+            str(request.get("source") or ""),
         )
-        if pending_decision is not None:
-            try:
-                await asyncio.wait_for(
-                    pending_decision.event.wait(),
-                    timeout=APPROVAL_DECISION_TIMEOUT_SECONDS,
-                )
-            except asyncio.TimeoutError:
-                self.state.discard_pending_approval_decision(provider_id, request_id)
-                return {
-                    "ok": False,
-                    "decision": "deny",
-                    "message": "TG 审批超时。",
-                }
-            decision = pending_decision.decision or "deny"
-            message = pending_decision.message
-            self.state.discard_pending_approval_decision(provider_id, request_id)
-            response = {"ok": True, "decision": decision}
-            if message:
-                response["message"] = message
-            return response
-        return {"ok": True}
+        return {"ok": True, "ignored": True, "reason": "approval_via_app_server_only"}
 
     async def _handle_send_message(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
