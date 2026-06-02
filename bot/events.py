@@ -830,6 +830,73 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             return "failed", f"任务失败：{error_text}" if error_text else "任务失败"
         return "completed", "任务已完成"
 
+    def _is_codex_tui_mirror_completion(ctx: "EventContext", run_status: str, turn: Any) -> bool:
+        if ctx.event.provider != "codex":
+            return False
+        if str(run_status or "completed").strip().lower() != "completed":
+            return False
+        if isinstance(turn, dict) and str(turn.get("source") or "").strip() == "tui-mirror":
+            return True
+        return str(ctx.event_params.get("source") or "").strip() == "tui-mirror"
+
+    def _completed_reply_text_from_stream(st: StreamingTurn | None) -> str:
+        if st is None:
+            return ""
+        raw_text = (st.buffer or "").strip()
+        if raw_text.startswith("💭 "):
+            return ""
+        text = _normalize_streamed_reply_for_sync(st.buffer)
+        processing_placeholders = {
+            "⏳ 思考中...",
+            tg_empty_turn_completed_text(),
+            "已收到",
+            "已收到，处理中。",
+            "分析中",
+            "处理中",
+            "还在整理中",
+        }
+        if not text or text in processing_placeholders:
+            return ""
+        return text
+
+    async def _notification_for_completed_reply_text(
+        ctx: "EventContext",
+        thread_id: str,
+        text: str,
+    ) -> tuple[str, str, str, str | None]:
+        notification_status, notification_message = _notification_for_turn_status(
+            "completed",
+            {"status": "completed"},
+            ctx,
+        )
+        (
+            snapshot_agent_id,
+            snapshot_agent_name,
+            task_name_snapshot,
+        ) = _notification_context(ctx, thread_id)
+        task_summary_snapshot = _notification_task_summary(snapshot_agent_id, thread_id)
+        (
+            task_name_override,
+            result_task_summary,
+            notification_message,
+        ) = await _notification_result_task_override_with_ai(
+            final_message=text,
+            current_title=task_name_snapshot,
+            current_task_summary=task_summary_snapshot,
+            agent_name=snapshot_agent_name,
+            status="completed",
+            provider_id=snapshot_agent_id,
+        )
+        task_summary_override: str | None = None
+        if result_task_summary or task_name_override:
+            task_summary_override = result_task_summary
+        return (
+            notification_status,
+            notification_message,
+            task_name_override or task_name_snapshot,
+            task_summary_override if task_summary_override is not None else task_summary_snapshot,
+        )
+
     async def _do_edit(thread_id: str, st: StreamingTurn, text: str) -> bool:
         """实际执行 telegram 消息编辑，更新 last_edit_time。网络错误时最多重试 2 次。"""
         truncated = _truncate_text(text)
@@ -1361,25 +1428,11 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 )
             if phase == "final_answer" and notification_status == "completed":
                 (
-                    _snapshot_agent_id,
-                    _snapshot_agent_name,
-                    notification_task_name_snapshot,
-                ) = _notification_context(ctx, thread_id)
-                notification_task_summary_snapshot = _notification_task_summary(_snapshot_agent_id, thread_id)
-                (
-                    notification_task_name_override,
-                    result_task_summary,
+                    notification_status,
                     notification_message,
-                ) = await _notification_result_task_override_with_ai(
-                    final_message=text,
-                    current_title=notification_task_name_snapshot,
-                    current_task_summary=notification_task_summary_snapshot,
-                    agent_name=_snapshot_agent_name,
-                    status="completed",
-                    provider_id=_snapshot_agent_id,
-                )
-                if result_task_summary or notification_task_name_override:
-                    notification_task_summary_override = result_task_summary
+                    notification_task_name_override,
+                    notification_task_summary_override,
+                ) = await _notification_for_completed_reply_text(ctx, thread_id, text)
 
             st = state.streaming_turns.get(thread_id)
             ws = _resolve_workspace_info(state, ctx.ws_daemon_id, thread_id)
@@ -1491,9 +1544,11 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         st = state.streaming_turns.get(thread_id)
         event_turn_id = _extract_turn_id(ctx.event_params)
         run_status = status or "completed"
+        is_tui_mirror_completion = _is_codex_tui_mirror_completion(ctx, run_status, turn)
         if st is not None:
             if st.completed:
                 logger.debug(f"[streaming] turn/completed 已由 final item 收口 thread={thread_id[:8]}")
+                completed_reply_text = _completed_reply_text_from_stream(st)
                 ws = _resolve_workspace_info(state, ctx.ws_daemon_id, thread_id)
                 _storage = state.storage
                 if ws and _storage:
@@ -1510,13 +1565,29 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                         status=run_status,
                     )
                 if not st.notification_emitted:
-                    notification_status, notification_message = _notification_for_turn_status(run_status, turn, ctx)
-                    await _emit_notification(
-                        ctx,
-                        thread_id=thread_id,
-                        status=notification_status,
-                        message=notification_message,
-                    )
+                    if is_tui_mirror_completion and completed_reply_text and run_status == "completed":
+                        (
+                            notification_status,
+                            notification_message,
+                            task_name_override,
+                            task_summary_override,
+                        ) = await _notification_for_completed_reply_text(ctx, thread_id, completed_reply_text)
+                        await _emit_notification(
+                            ctx,
+                            thread_id=thread_id,
+                            status=notification_status,
+                            message=notification_message,
+                            task_name_override=task_name_override,
+                            task_summary_override=task_summary_override,
+                        )
+                    elif not is_tui_mirror_completion:
+                        notification_status, notification_message = _notification_for_turn_status(run_status, turn, ctx)
+                        await _emit_notification(
+                            ctx,
+                            thread_id=thread_id,
+                            status=notification_status,
+                            message=notification_message,
+                        )
                     st.notification_emitted = True
                 return
             if _is_stale_turn_event(st, event_turn_id):
@@ -1609,7 +1680,9 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 thread_id=thread_id,
                 status=run_status,
             )
-        if st is None or not st.notification_emitted:
+        if st is None:
+            if is_tui_mirror_completion:
+                return
             notification_status, notification_message = _notification_for_turn_status(run_status, turn, ctx)
             await _emit_notification(
                 ctx,
@@ -1617,8 +1690,21 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 status=notification_status,
                 message=notification_message,
             )
-            if st is not None:
+            return
+
+        if not st.notification_emitted:
+            if is_tui_mirror_completion:
                 st.notification_emitted = True
+                return
+            if not is_tui_mirror_completion:
+                notification_status, notification_message = _notification_for_turn_status(run_status, turn, ctx)
+                await _emit_notification(
+                    ctx,
+                    thread_id=thread_id,
+                    status=notification_status,
+                    message=notification_message,
+                )
+            st.notification_emitted = True
 
     async def _handle_session_created(ctx: EventContext) -> None:
         """session.created"""

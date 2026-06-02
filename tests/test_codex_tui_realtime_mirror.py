@@ -347,6 +347,62 @@ async def test_sync_codex_tui_realtime_once_bootstraps_active_bound_thread_from_
 
 
 @pytest.mark.asyncio
+async def test_sync_codex_tui_realtime_once_does_not_replay_active_thread_bootstrap_final_answer(tmp_path):
+    from plugins.providers.builtin.codex.python.tui_realtime_mirror import sync_codex_tui_realtime_once
+
+    state, ws, session_file, sessions_dir = _make_state(tmp_path)
+    state.config = _make_app_mode_config()
+    ws.threads["tid-1"].is_active = True
+    handler = AsyncMock()
+    final_text = "# 命令结果\n\n```bash\n/Users/wxy/Projects/onlineWorker\nWed May  6 16:42:05 CST 2026\n```"
+
+    _append_response_item(
+        session_file,
+        role="assistant",
+        phase="commentary",
+        text="旧过程不应重放",
+        timestamp="2026-05-06T08:41:55Z",
+    )
+    _append_response_item(
+        session_file,
+        role="assistant",
+        phase="final_answer",
+        text=final_text,
+        timestamp="2026-05-06T08:42:05Z",
+    )
+
+    await sync_codex_tui_realtime_once(
+        state,
+        handler,
+        sessions_dir=str(sessions_dir),
+    )
+
+    watch = codex_state.get_runtime(state).watched_threads["tid-1"]
+    assert watch.last_offset == session_file.stat().st_size
+    assert watch.last_final_text == final_text
+    assert codex_state.get_runtime(state).last_synced_assistant["tid-1"] == f"2026-05-06T08:42:05Z\n{final_text}"
+    handler.assert_not_awaited()
+
+    _append_response_item(
+        session_file,
+        role="assistant",
+        phase="commentary",
+        text="新过程",
+        timestamp="2026-05-06T08:43:00Z",
+    )
+    watch.next_poll_at = 0.0
+
+    await sync_codex_tui_realtime_once(
+        state,
+        handler,
+        sessions_dir=str(sessions_dir),
+    )
+
+    methods = [call.args[1]["message"]["method"] for call in handler.await_args_list]
+    assert methods == ["turn/started", "item/agentMessage/delta"]
+
+
+@pytest.mark.asyncio
 async def test_sync_watched_thread_once_skips_commentary_when_live_streaming_turn_already_exists(tmp_path):
     from plugins.providers.builtin.codex.python.tui_realtime_mirror import sync_watched_thread_once, watch_codex_thread
 

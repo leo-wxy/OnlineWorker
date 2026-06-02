@@ -410,6 +410,55 @@ async def test_send_user_message_loads_thread_policy_when_enabled(monkeypatch, t
     )
 
 
+@pytest.mark.asyncio
+async def test_send_user_message_maps_managed_thread_policy_when_enabled(monkeypatch, tmp_path):
+    db_path = tmp_path / "state_5.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, approval_mode TEXT, sandbox_policy TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO threads (id, approval_mode, sandbox_policy) VALUES (?, ?, ?)",
+            (
+                "tid-live",
+                "on-request",
+                json.dumps(
+                    {
+                        "type": "managed",
+                        "file_system": {
+                            "entries": [
+                                {"access": "read", "special": ":root"},
+                                {"access": "write", "path": "/Users/example/Projects/onlineWorker"},
+                            ]
+                        },
+                        "network": "enabled",
+                    }
+                ),
+            ),
+        )
+    monkeypatch.setenv("ONLINEWORKER_CODEX_STATE_DB", str(db_path))
+
+    adapter = CodexAdapter()
+    adapter.enable_thread_policy_lookup(True)
+    adapter._call = AsyncMock(return_value={"ok": True})
+
+    await adapter.send_user_message("codex:onlineWorker", "tid-live", "hello")
+
+    adapter._call.assert_awaited_once_with(
+        "turn/start",
+        {
+            "threadId": "tid-live",
+            "input": [{"type": "text", "text": "hello"}],
+            "approvalsReviewer": "user",
+            "approvalPolicy": "on-request",
+            "sandboxPolicy": {
+                "type": "workspaceWrite",
+                "networkAccess": True,
+            },
+        },
+    )
+
+
 def test_normalize_sandbox_policy_for_app_server():
     assert CodexAdapter._normalize_sandbox_policy_for_app_server(
         {
@@ -424,6 +473,33 @@ def test_normalize_sandbox_policy_for_app_server():
         "excludeTmpdirEnvVar": False,
         "excludeSlashTmp": False,
     }
+    assert CodexAdapter._normalize_sandbox_policy_for_app_server(
+        {
+            "type": "managed",
+            "file_system": {
+                "entries": [
+                    {"access": "read", "special": ":root"},
+                    {"access": "write", "path": "/Users/example/Projects/onlineWorker"},
+                ]
+            },
+            "network": "enabled",
+        }
+    ) == {
+        "type": "workspaceWrite",
+        "networkAccess": True,
+    }
+    assert CodexAdapter._normalize_sandbox_policy_for_app_server(
+        {
+            "type": "managed",
+            "file_system": {"entries": [{"access": "read", "special": ":root"}]},
+            "network": "restricted",
+        }
+    ) == {
+        "type": "readOnly",
+        "networkAccess": False,
+    }
+    assert CodexAdapter._normalize_sandbox_policy_for_app_server("managed") is None
+    assert CodexAdapter._normalize_sandbox_policy_for_app_server({"type": "managed-but-unknown"}) is None
 
 
 @pytest.mark.asyncio

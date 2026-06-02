@@ -1261,6 +1261,264 @@ async def test_final_answer_item_completed_sends_task_notification_and_dedupes_l
 
 
 @pytest.mark.asyncio
+async def test_tui_mirror_completed_with_final_buffer_uses_summary_notification(monkeypatch):
+    async def fake_run_ai_scenario(scenario_id, variables):
+        return SimpleNamespace(ok=False, data={})
+
+    monkeypatch.setattr("bot.events.run_ai_scenario", fake_run_ai_scenario)
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-mirror"] = ThreadInfo(
+        thread_id="tid-mirror",
+        topic_id=3794,
+        preview="继续会话",
+        archived=False,
+        streaming_msg_id=5004,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    codex_state.start_run(
+        state,
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-mirror",
+        turn_id="turn-mirror",
+    )
+    state.streaming_turns["tid-mirror"] = StreamingTurn(
+        message_id=5004,
+        topic_id=3794,
+        turn_id="turn-mirror",
+        buffer="已确认日志根因，tui-mirror 的空 completed 不再发送兜底通知。",
+        completed=True,
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "tid-mirror",
+                    "turnId": "turn-mirror",
+                    "turn": {"id": "turn-mirror", "status": "completed", "source": "tui-mirror"},
+                },
+            },
+        },
+    )
+
+    assert "tid-mirror" not in state.streaming_turns
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.status == "completed"
+    assert event.task_name == "继续会话"
+    assert event.message == "完成摘要：已确认日志根因，tui-mirror 的空 completed 不再发送兜底通知。"
+
+
+@pytest.mark.asyncio
+async def test_tui_mirror_final_item_sends_summary_and_turn_completed_dedupes(monkeypatch):
+    async def fake_run_ai_scenario(scenario_id, variables):
+        return SimpleNamespace(ok=False, data={})
+
+    monkeypatch.setattr("bot.events.run_ai_scenario", fake_run_ai_scenario)
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-real-mirror"] = ThreadInfo(
+        thread_id="tid-real-mirror",
+        topic_id=3794,
+        preview="走完整打包流程",
+        archived=False,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=5010))
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/started",
+                "params": {
+                    "threadId": "tid-real-mirror",
+                    "turn": {"source": "tui-mirror"},
+                },
+            },
+        },
+    )
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "item/completed",
+                "params": {
+                    "threadId": "tid-real-mirror",
+                    "item": {
+                        "type": "agentMessage",
+                        "threadId": "tid-real-mirror",
+                        "phase": "final_answer",
+                        "text": "已跑完整打包流程，确认 DMG 安装态可以启动并通过 smoke。",
+                    },
+                },
+            },
+        },
+    )
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "tid-real-mirror",
+                    "turn": {"status": "completed", "source": "tui-mirror"},
+                },
+            },
+        },
+    )
+
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.status == "completed"
+    assert event.task_name == "走完整打包流程"
+    assert event.message == "完成摘要：已跑完整打包流程，确认 DMG 安装态可以启动并通过 smoke。"
+
+
+@pytest.mark.asyncio
+async def test_tui_mirror_commentary_idle_completed_does_not_send_fallback_notification():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-commentary-mirror"] = ThreadInfo(
+        thread_id="tid-commentary-mirror",
+        topic_id=3794,
+        preview="继续会话",
+        archived=False,
+        streaming_msg_id=5011,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    state.streaming_turns["tid-commentary-mirror"] = StreamingTurn(
+        message_id=5011,
+        topic_id=3794,
+        buffer="💭 已收到，处理中。",
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "tid-commentary-mirror",
+                    "turn": {"status": "completed", "source": "tui-mirror"},
+                },
+            },
+        },
+    )
+
+    assert "tid-commentary-mirror" not in state.streaming_turns
+    assert notifications.events == []
+
+
+@pytest.mark.asyncio
+async def test_tui_mirror_empty_completed_does_not_send_fallback_notification():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-empty-mirror"] = ThreadInfo(
+        thread_id="tid-empty-mirror",
+        topic_id=3794,
+        preview="继续会话",
+        archived=False,
+        streaming_msg_id=5005,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    codex_state.start_run(
+        state,
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-empty-mirror",
+        turn_id="turn-empty-mirror",
+    )
+    state.streaming_turns["tid-empty-mirror"] = StreamingTurn(
+        message_id=5005,
+        topic_id=3794,
+        turn_id="turn-empty-mirror",
+        buffer="⏳ 思考中...",
+        completed=True,
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "tid-empty-mirror",
+                    "turnId": "turn-empty-mirror",
+                    "turn": {"id": "turn-empty-mirror", "status": "completed", "source": "tui-mirror"},
+                },
+            },
+        },
+    )
+
+    assert "tid-empty-mirror" not in state.streaming_turns
+    assert notifications.events == []
+
+
+@pytest.mark.asyncio
 async def test_final_answer_notification_uses_result_summary_instead_of_url_preview():
     ws = WorkspaceInfo(
         name="onlineWorker",

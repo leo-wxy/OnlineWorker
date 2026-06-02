@@ -110,8 +110,8 @@ def _synced_final_text_signature(state: AppState, thread_id: str) -> str:
     return ""
 
 
-def _latest_assistant_response_item_offset(path: str) -> int | None:
-    """Return the byte offset for the latest assistant text item near EOF."""
+def _latest_assistant_response_item_snapshot(path: str) -> dict | None:
+    """Return the latest assistant text item near EOF with byte offsets."""
     try:
         file_size = os.path.getsize(path)
     except OSError:
@@ -131,7 +131,7 @@ def _latest_assistant_response_item_offset(path: str) -> int | None:
         return None
 
     offset = start
-    latest_offset: int | None = None
+    latest: dict | None = None
     for raw_line in data.splitlines(keepends=True):
         line_offset = offset
         offset += len(raw_line)
@@ -143,8 +143,26 @@ def _latest_assistant_response_item_offset(path: str) -> int | None:
         if item is None:
             continue
         if item["role"] == "assistant" and item["text"]:
-            latest_offset = line_offset
-    return latest_offset
+            latest = dict(item)
+            latest["offset"] = line_offset
+            latest["end_offset"] = offset
+            latest["file_size"] = file_size
+    return latest
+
+
+def _remember_bootstrap_final(
+    state: AppState,
+    thread_id: str,
+    watch: ProviderWatchState,
+    item: dict,
+) -> None:
+    text = str(item.get("text") or "").strip()
+    if not text:
+        return
+    timestamp = str(item.get("timestamp") or "").strip()
+    watch.last_final_text = text
+    signature = f"{timestamp}\n{text}" if timestamp else f"__text__\n{text}"
+    codex_state.get_runtime(state).last_synced_assistant[thread_id] = signature
 
 
 def _ensure_bound_codex_thread_watches(
@@ -186,12 +204,13 @@ def _ensure_bound_codex_thread_watches(
                     try:
                         is_active_thread = bool(getattr(thread, "is_active", False))
                         if is_active_thread:
-                            bootstrap_offset = _latest_assistant_response_item_offset(session_file)
-                            watch.last_offset = (
-                                bootstrap_offset
-                                if bootstrap_offset is not None
-                                else os.path.getsize(session_file)
-                            )
+                            bootstrap_item = _latest_assistant_response_item_snapshot(session_file)
+                            if bootstrap_item is not None and bootstrap_item.get("phase") == "commentary":
+                                watch.last_offset = int(bootstrap_item.get("offset") or 0)
+                            else:
+                                watch.last_offset = os.path.getsize(session_file)
+                                if bootstrap_item is not None:
+                                    _remember_bootstrap_final(state, thread_id, watch, bootstrap_item)
                         else:
                             watch.last_offset = os.path.getsize(session_file)
                     except OSError:

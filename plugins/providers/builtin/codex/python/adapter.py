@@ -349,8 +349,9 @@ class CodexAdapter:
         if approvals_reviewer is not None:
             params["approvalsReviewer"] = approvals_reviewer
         if sandbox_policy is not None:
-            sandbox_policy = self._normalize_sandbox_policy_for_app_server(sandbox_policy)
-            params["sandboxPolicy"] = sandbox_policy
+            normalized_sandbox_policy = self._normalize_sandbox_policy_for_app_server(sandbox_policy)
+            if normalized_sandbox_policy is not None:
+                params["sandboxPolicy"] = normalized_sandbox_policy
         if params.get("approvalPolicy") or params.get("sandboxPolicy"):
             logger.info(
                 "[thread_policy] turn/start thread=%s approval=%s sandbox=%s",
@@ -466,32 +467,50 @@ class CodexAdapter:
 
     @staticmethod
     def _normalize_sandbox_policy_for_app_server(policy: Any) -> Any:
+        type_map = {
+            "danger-full-access": "dangerFullAccess",
+            "danger_full_access": "dangerFullAccess",
+            "dangerFullAccess": "dangerFullAccess",
+            "read-only": "readOnly",
+            "read_only": "readOnly",
+            "readOnly": "readOnly",
+            "workspace-write": "workspaceWrite",
+            "workspace_write": "workspaceWrite",
+            "workspaceWrite": "workspaceWrite",
+            "external-sandbox": "externalSandbox",
+            "external_sandbox": "externalSandbox",
+            "externalSandbox": "externalSandbox",
+        }
         if isinstance(policy, str):
             value = policy.strip()
-            type_map = {
-                "danger-full-access": "dangerFullAccess",
-                "danger_full_access": "dangerFullAccess",
-                "dangerFullAccess": "dangerFullAccess",
-                "read-only": "readOnly",
-                "read_only": "readOnly",
-                "readOnly": "readOnly",
-                "workspace-write": "workspaceWrite",
-                "workspace_write": "workspaceWrite",
-                "workspaceWrite": "workspaceWrite",
-                "external-sandbox": "externalSandbox",
-                "external_sandbox": "externalSandbox",
-                "externalSandbox": "externalSandbox",
-            }
-            return {"type": type_map.get(value, value)} if value else None
+            if not value:
+                return None
+            normalized = type_map.get(value)
+            return {"type": normalized} if normalized else None
 
         if not isinstance(policy, dict):
-            return policy
+            return None
 
         type_value = str(policy.get("type") or "").strip()
+        if type_value == "managed":
+            file_system = policy.get("file_system")
+            entries = file_system.get("entries") if isinstance(file_system, dict) else []
+            has_write_entry = any(
+                isinstance(entry, dict) and str(entry.get("access") or "").strip().lower() == "write"
+                for entry in (entries if isinstance(entries, list) else [])
+            )
+            normalized: dict[str, Any] = {"type": "workspaceWrite" if has_write_entry else "readOnly"}
+            network_value = str(policy.get("network") or "").strip().lower()
+            if network_value:
+                normalized["networkAccess"] = network_value == "enabled"
+            return normalized
+
         normalized = dict(policy)
         normalized_type = CodexAdapter._normalize_sandbox_policy_for_app_server(type_value)
         if isinstance(normalized_type, dict) and normalized_type.get("type"):
             normalized["type"] = normalized_type["type"]
+        else:
+            return None
 
         key_map = {
             "network_access": "networkAccess",
