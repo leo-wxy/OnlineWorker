@@ -310,6 +310,37 @@ async def test_codex_approval_callback_resolves_run_interruption(state, mock_cod
 
 
 @pytest.mark.asyncio
+async def test_codex_remote_proxy_approval_callback_resolves_pending_action(state, mock_codex_adapter):
+    """Codex remote proxy 审批回调应保留 exec_* action，供 proxy 构造 app-server 响应。"""
+    from bot.handlers import make_callback_handler
+
+    state.set_adapter("codex", mock_codex_adapter)
+    pending = state.ensure_pending_approval_decision("codex", "codex_remote_proxy:client-1:7")
+    state.pending_approvals[56] = PendingApproval(
+        request_id="codex_remote_proxy:client-1:7",
+        workspace_id="codex:test",
+        thread_id="tid-1",
+        cmd="ps -axo pid,command",
+        justification="源 CLI 正在请求本地权限审批。",
+        tool_name="shell",
+        tool_type="codex",
+        approval_source="codex_remote_proxy",
+    )
+
+    ts = int(time.time())
+    update, query = _make_update_with_query(f"exec_allow_always:56:{ts}")
+    ctx = MagicMock()
+    handler = make_callback_handler(state, GROUP_CHAT_ID)
+    await handler(update, ctx)
+
+    assert pending.event.is_set()
+    assert pending.decision == "exec_allow_always"
+    mock_codex_adapter.reply_server_request.assert_not_awaited()
+    assert 56 not in state.pending_approvals
+    query.edit_message_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_q_ans_single_select(state, mock_cm_adapter):
     """单选回调：点击立即提交"""
     from bot.handlers import make_callback_handler

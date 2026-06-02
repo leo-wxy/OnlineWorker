@@ -362,6 +362,8 @@ export interface AppTexts {
     civilityModeDescription: string;
     externalCliTitle: string;
     externalCliBin: string;
+    externalCliCodexAliasTitle: string;
+    externalCliCodexAliasDescription: string;
     externalCliLauncherWrapsClaude: string;
     externalCliSave: string;
   };

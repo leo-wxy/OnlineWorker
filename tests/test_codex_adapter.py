@@ -70,6 +70,39 @@ async def test_connect_uses_stdio_process_when_url_is_stdio():
 
 
 @pytest.mark.asyncio
+async def test_connect_uses_unix_socket_for_unix_endpoint(tmp_path):
+    ws = AsyncMock()
+    ws.recv = AsyncMock(
+        return_value='{"id": 1, "result": {"userAgent": "test", "codexHome": "/tmp", "platformFamily": "unix", "platformOs": "macos"}}'
+    )
+    socket_path = tmp_path / "codex.sock"
+    adapter = CodexAdapter()
+
+    with patch(
+        "plugins.providers.builtin.codex.python.adapter.websockets.unix_connect",
+        new=AsyncMock(return_value=ws),
+    ) as connect_mock, patch(
+        "plugins.providers.builtin.codex.python.adapter.websockets.connect",
+        new=AsyncMock(),
+    ) as ws_connect_mock, patch(
+        "plugins.providers.builtin.codex.python.adapter.asyncio.create_task",
+        side_effect=_fake_create_task,
+    ):
+        await adapter.connect(f"unix://{socket_path}")
+
+    ws_connect_mock.assert_not_awaited()
+    connect_mock.assert_awaited_once_with(
+        path=str(socket_path),
+        uri="ws://localhost/",
+        max_size=None,
+        ping_interval=None,
+        ping_timeout=None,
+        compression=None,
+    )
+    assert adapter._transport == "unix"
+
+
+@pytest.mark.asyncio
 async def test_recv_raw_stdio_handles_large_single_line_messages():
     large_json = ('{"id":2,"result":{"thread":"' + ('x' * 70000) + '"}}\n').encode()
     stdout = MagicMock()

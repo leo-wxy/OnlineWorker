@@ -227,9 +227,11 @@ def should_route_codex_messages_to_tui_host(state: AppState, ws: Optional[Worksp
     if tool_cfg.control_mode == "tui":
         return True
     live_transport = str(getattr(tool_cfg, "live_transport", "") or "").strip().lower()
+    if live_transport == "shared_unix":
+        return False
     return bool(
         tool_cfg.control_mode == "app"
-        and (tool_cfg.protocol == "ws" or live_transport == "shared_ws")
+        and tool_cfg.protocol in {"ws", "unix"}
     )
 
 
@@ -242,7 +244,7 @@ def should_auto_manage_codex_host(state: AppState, ws: Optional[WorkspaceInfo] =
     if not tool_cfg or tool_cfg.name != "codex" or tool_cfg.control_mode != "app":
         return False
     live_transport = str(getattr(tool_cfg, "live_transport", "") or "").strip().lower()
-    return bool(tool_cfg.protocol == "ws" or live_transport == "owner_bridge")
+    return bool(tool_cfg.protocol in {"ws", "unix"} or live_transport == "owner_bridge")
 
 
 def uses_codex_shared_live_transport(state: AppState, ws: Optional[WorkspaceInfo] = None) -> bool:
@@ -255,8 +257,8 @@ def uses_codex_shared_live_transport(state: AppState, ws: Optional[WorkspaceInfo
         return False
     live_transport = str(getattr(tool_cfg, "live_transport", "") or "").strip().lower()
     if live_transport:
-        return live_transport == "shared_ws"
-    return tool_cfg.protocol == "ws"
+        return live_transport in {"shared_ws", "shared_unix"}
+    return tool_cfg.protocol in {"ws", "unix"}
 
 
 def _pid_alive(pid: object) -> bool:
@@ -286,13 +288,15 @@ def _read_live_host_status(state: AppState) -> Optional[dict]:
 def _resolve_codex_remote_upstream_url(state: AppState, tool_cfg: ToolConfig) -> str:
     proc = getattr(state, "app_server_proc", None)
     proc_ws_url = str(getattr(proc, "ws_url", "") or "").strip()
-    if proc_ws_url.startswith("ws://"):
+    if proc_ws_url.startswith(("ws://", "unix://")):
         return proc_ws_url
 
     app_server_url = str(getattr(tool_cfg, "app_server_url", "") or "").strip()
-    if app_server_url.startswith("ws://"):
+    if app_server_url.startswith(("ws://", "unix://")):
         return app_server_url
 
+    if tool_cfg.protocol == "unix":
+        return "unix://"
     if tool_cfg.protocol == "ws" and tool_cfg.app_server_port:
         return f"ws://127.0.0.1:{tool_cfg.app_server_port}"
     return ""

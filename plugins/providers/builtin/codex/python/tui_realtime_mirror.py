@@ -19,6 +19,8 @@ IDLE_POLL_INTERVAL_SECONDS = 5.0
 FINAL_GRACE_TTL_SECONDS = 30.0
 DEFAULT_WATCH_TTL_SECONDS = 900.0
 WATCH_STATE_TOUCH_INTERVAL_SECONDS = 1.0
+ACTIVE_BOOTSTRAP_TAIL_BYTES = 128 * 1024
+COMMENTARY_IDLE_COMPLETION_POLLS = 6
 
 
 def watch_codex_thread(
@@ -108,6 +110,43 @@ def _synced_final_text_signature(state: AppState, thread_id: str) -> str:
     return ""
 
 
+def _latest_assistant_response_item_offset(path: str) -> int | None:
+    """Return the byte offset for the latest assistant text item near EOF."""
+    try:
+        file_size = os.path.getsize(path)
+    except OSError:
+        return None
+    if file_size <= 0:
+        return None
+
+    start = max(0, file_size - ACTIVE_BOOTSTRAP_TAIL_BYTES)
+    try:
+        with open(path, "rb") as f:
+            f.seek(start)
+            if start > 0:
+                partial = f.readline()
+                start += len(partial)
+            data = f.read()
+    except OSError:
+        return None
+
+    offset = start
+    latest_offset: int | None = None
+    for raw_line in data.splitlines(keepends=True):
+        line_offset = offset
+        offset += len(raw_line)
+        try:
+            line = raw_line.decode("utf-8", errors="ignore")
+        except Exception:
+            continue
+        item = _parse_response_item(line)
+        if item is None:
+            continue
+        if item["role"] == "assistant" and item["text"]:
+            latest_offset = line_offset
+    return latest_offset
+
+
 def _ensure_bound_codex_thread_watches(
     state: AppState,
     *,
@@ -145,14 +184,25 @@ def _ensure_bound_codex_thread_watches(
                 if session_file is not None:
                     watch.session_file = session_file
                     try:
-                        watch.last_offset = os.path.getsize(session_file)
+                        is_active_thread = bool(getattr(thread, "is_active", False))
+                        if is_active_thread:
+                            bootstrap_offset = _latest_assistant_response_item_offset(session_file)
+                            watch.last_offset = (
+                                bootstrap_offset
+                                if bootstrap_offset is not None
+                                else os.path.getsize(session_file)
+                            )
+                        else:
+                            watch.last_offset = os.path.getsize(session_file)
                     except OSError:
                         pass
                 synced_text = _synced_final_text_signature(state, thread_id)
                 if synced_text:
                     watch.last_final_text = synced_text
                 changed = True
-                continue
+                if not getattr(thread, "is_active", False):
+                    continue
+                watch.next_poll_at = 0.0
 
             watch.workspace_id = ws.daemon_workspace_id or watch.workspace_id
             watch.topic_id = topic_id or ws.topic_id or watch.topic_id
@@ -185,6 +235,16 @@ def _mark_watch_idle(watch: ProviderWatchState, now: float) -> None:
     else:
         interval = ACTIVE_POLL_INTERVAL_SECONDS
     _set_watch_poll_interval(watch, interval, now)
+
+
+async def _mark_watch_idle_or_complete(handler, watch: ProviderWatchState, thread_id: str, now: float) -> None:
+    _mark_watch_idle(watch, now)
+    if not watch.turn_started_sent or watch.idle_polls < COMMENTARY_IDLE_COMPLETION_POLLS:
+        return
+    await _emit_turn_completed(handler, watch.workspace_id, thread_id)
+    watch.turn_started_sent = False
+    watch.active_until = now + FINAL_GRACE_TTL_SECONDS
+    logger.info("[tui-mirror] commentary idle completed thread=%s", thread_id)
 
 
 def start_codex_tui_realtime_mirror_loop(
@@ -277,26 +337,26 @@ async def sync_watched_thread_once(
     if watch.session_file is None:
         watch.session_file = find_session_file(thread_id, sessions_dir)
         if watch.session_file is None:
-            _mark_watch_idle(watch, now)
+            await _mark_watch_idle_or_complete(handler, watch, thread_id, now)
             return
         if watch.last_offset == 0:
             try:
                 watch.last_offset = os.path.getsize(watch.session_file)
             except OSError:
-                _mark_watch_idle(watch, now)
+                await _mark_watch_idle_or_complete(handler, watch, thread_id, now)
                 return
 
     try:
         stat = os.stat(watch.session_file)
     except OSError:
-        _mark_watch_idle(watch, now)
+        await _mark_watch_idle_or_complete(handler, watch, thread_id, now)
         return
 
     if stat.st_size < watch.last_offset:
         watch.last_offset = 0
 
     if stat.st_size <= watch.last_offset:
-        _mark_watch_idle(watch, now)
+        await _mark_watch_idle_or_complete(handler, watch, thread_id, now)
         return
 
     try:
@@ -305,7 +365,7 @@ async def sync_watched_thread_once(
             new_data = f.read()
             watch.last_offset = f.tell()
     except OSError:
-        _mark_watch_idle(watch, now)
+        await _mark_watch_idle_or_complete(handler, watch, thread_id, now)
         return
 
     saw_activity = False
@@ -344,7 +404,7 @@ async def sync_watched_thread_once(
     if saw_activity:
         _promote_watch_activity(watch, now)
     else:
-        _mark_watch_idle(watch, now)
+        await _mark_watch_idle_or_complete(handler, watch, thread_id, now)
 
 
 def _parse_response_item(line: str) -> Optional[dict]:

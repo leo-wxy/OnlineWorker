@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from config import Config, ToolConfig
-from core.state import AppState
+from core.state import AppState, PendingApproval
 from core.storage import AppStorage, ThreadInfo, WorkspaceInfo
 from plugins.providers.builtin.codex.python import runtime as codex_runtime
 
@@ -50,6 +50,10 @@ async def test_setup_connection_does_not_start_codex_hook_bridge(tmp_path, monke
     adapter._thread_workspace_map = {}
 
     monkeypatch.setattr(codex_runtime, "prime_thread_mappings", AsyncMock())
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.owner_bridge.ensure_codex_owner_bridge_started",
+        AsyncMock(),
+    )
 
     await codex_runtime.setup_connection(manager, MagicMock(), adapter)
 
@@ -58,6 +62,209 @@ async def test_setup_connection_does_not_start_codex_hook_bridge(tmp_path, monke
     adapter.register_workspace_cwd.assert_called_once_with(
         "codex:onlineWorker",
         "/Users/example/Projects/onlineWorker",
+    )
+
+
+@pytest.mark.asyncio
+async def test_codex_setup_connection_wraps_handlers_for_approval_sync(tmp_path, monkeypatch):
+    storage = AppStorage()
+    storage.workspaces["codex:onlineWorker"] = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=2,
+        log_level="INFO",
+        tools=[ToolConfig(name="codex", enabled=True, codex_bin="codex")],
+        data_dir=str(tmp_path),
+    )
+    state = AppState(config=cfg, storage=storage)
+    manager = MagicMock()
+    manager.state = state
+    manager.storage = storage
+    manager.gid = 2
+
+    adapter = MagicMock()
+    adapter.on_event = MagicMock()
+    adapter.on_server_request = MagicMock()
+    adapter.register_workspace_cwd = MagicMock()
+    adapter._thread_workspace_map = {}
+
+    monkeypatch.setattr(codex_runtime, "prime_thread_mappings", AsyncMock())
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.owner_bridge.ensure_codex_owner_bridge_started",
+        AsyncMock(),
+    )
+
+    await codex_runtime.setup_connection(manager, MagicMock(), adapter)
+
+    assert adapter.on_event.call_count == 1
+    assert adapter.on_server_request.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_codex_app_server_resolved_clears_tg_pending_approval():
+    state = AppState()
+    state.pending_approvals[88] = PendingApproval(
+        request_id="approval-1",
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-123",
+        cmd="touch /tmp/demo",
+        justification="need permission",
+        tool_type="codex",
+        approval_source="item/commandExecution/requestApproval",
+    )
+    bot = MagicMock()
+    bot.edit_message_text = AsyncMock()
+
+    cleared = await codex_runtime.handle_codex_app_server_resolution_event(
+        state,
+        bot,
+        123,
+        "app-server-event",
+        {
+            "message": {
+                "method": "serverRequest/resolved",
+                "params": {
+                    "threadId": "tid-123",
+                    "requestId": "approval-1",
+                },
+            },
+        },
+    )
+
+    assert cleared == 1
+    assert state.pending_approvals == {}
+    bot.edit_message_text.assert_awaited_once()
+    assert bot.edit_message_text.await_args.kwargs["chat_id"] == 123
+    assert bot.edit_message_text.await_args.kwargs["message_id"] == 88
+    assert "已由 Codex 端处理或清理" in bot.edit_message_text.await_args.kwargs["text"]
+
+
+@pytest.mark.asyncio
+async def test_codex_app_server_resolved_ignores_non_codex_pending_approval():
+    state = AppState()
+    state.pending_approvals[88] = PendingApproval(
+        request_id="approval-1",
+        workspace_id="claude:proj",
+        thread_id="ses-123",
+        cmd="touch /tmp/demo",
+        justification="need permission",
+        tool_type="claude",
+        approval_source="item/commandExecution/requestApproval",
+    )
+    bot = MagicMock()
+    bot.edit_message_text = AsyncMock()
+
+    cleared = await codex_runtime.mark_codex_app_server_approval_resolved(
+        state,
+        bot,
+        123,
+        request_id="approval-1",
+        thread_id="tid-123",
+    )
+
+    assert cleared == 0
+    assert 88 in state.pending_approvals
+    bot.edit_message_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_codex_server_request_handler_skips_duplicate_tg_approval():
+    state = AppState()
+    state.pending_approvals[88] = PendingApproval(
+        request_id="approval-1",
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-123",
+        cmd="touch /tmp/demo",
+        justification="need permission",
+        tool_type="codex",
+        approval_source="item/commandExecution/requestApproval",
+    )
+    fallback = AsyncMock()
+    handler = codex_runtime.make_codex_server_request_handler(state, fallback)
+
+    await handler(
+        "item/commandExecution/requestApproval",
+        {"threadId": "tid-123", "command": "touch /tmp/demo"},
+        "approval-1",
+    )
+
+    fallback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_codex_server_request_handler_skips_remote_proxy_duplicate_approval():
+    state = AppState()
+    state.pending_approvals[88] = PendingApproval(
+        request_id="codex_remote_proxy:client-1:7",
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-123",
+        cmd="touch /tmp/demo",
+        justification="need permission",
+        tool_type="codex",
+        approval_source="codex_remote_proxy",
+    )
+    fallback = AsyncMock()
+    handler = codex_runtime.make_codex_server_request_handler(state, fallback)
+
+    await handler(
+        "item/commandExecution/requestApproval",
+        {"threadId": "tid-123", "command": "touch /tmp/demo"},
+        7,
+    )
+
+    fallback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_codex_server_request_handler_allows_remote_proxy_suffix_collision():
+    state = AppState()
+    state.pending_approvals[88] = PendingApproval(
+        request_id="codex_remote_proxy:client-1:7",
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-123",
+        cmd="touch /tmp/demo",
+        justification="need permission",
+        tool_type="codex",
+        approval_source="codex_remote_proxy",
+    )
+    fallback = AsyncMock()
+    handler = codex_runtime.make_codex_server_request_handler(state, fallback)
+
+    await handler(
+        "item/commandExecution/requestApproval",
+        {"threadId": "tid-other", "command": "touch /tmp/demo"},
+        7,
+    )
+
+    fallback.assert_awaited_once_with(
+        "item/commandExecution/requestApproval",
+        {"threadId": "tid-other", "command": "touch /tmp/demo"},
+        7,
+    )
+
+
+@pytest.mark.asyncio
+async def test_codex_server_request_handler_allows_new_request():
+    state = AppState()
+    fallback = AsyncMock()
+    handler = codex_runtime.make_codex_server_request_handler(state, fallback)
+
+    await handler(
+        "item/commandExecution/requestApproval",
+        {"threadId": "tid-123", "command": "touch /tmp/demo"},
+        "approval-1",
+    )
+
+    fallback.assert_awaited_once_with(
+        "item/commandExecution/requestApproval",
+        {"threadId": "tid-123", "command": "touch /tmp/demo"},
+        "approval-1",
     )
 
 

@@ -4,6 +4,7 @@ codex app-server 子进程生命周期管理。
 
 支持两种传输：
 - `ws://127.0.0.1:<port>`：解析启动输出获取 listening URL 和 readyz URL
+- `unix://` / `unix://PATH`：通过 Unix domain socket 走 WebSocket app-server 协议
 - `stdio://`：通过 stdin/stdout 走 JSON-RPC，不再占用本地端口
 """
 import asyncio
@@ -12,6 +13,12 @@ import os
 import urllib.request
 from collections import deque
 from typing import Optional
+
+from plugins.providers.builtin.codex.python.transport import (
+    is_unix_endpoint,
+    prepare_unix_socket_path,
+    unix_socket_accepting,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,30 +72,49 @@ async def _read_process_failure(
 class AppServerProcess:
     """管理 codex app-server 子进程的生命周期。"""
 
-    def __init__(self, codex_bin: str = "codex", port: int = 0, protocol: str = "ws"):
+    def __init__(
+        self,
+        codex_bin: str = "codex",
+        port: int = 0,
+        protocol: str = "ws",
+        listen_url: str = "",
+    ):
         """
         Args:
             codex_bin: codex 可执行文件路径
             port: 监听端口，0 = 动态分配（OS 选择）
-            protocol: "ws" 或 "stdio"
+            protocol: "ws"、"unix" 或 "stdio"
+            listen_url: 显式监听 URL，主要用于 `unix://PATH`
         """
         self.codex_bin = codex_bin
         self.port = port
         self.protocol = protocol
+        self.listen_url = listen_url
         self._proc: Optional[asyncio.subprocess.Process] = None
         self._stderr_task: Optional[asyncio.Task] = None
         self._stdout_task: Optional[asyncio.Task] = None
         self.ws_url: Optional[str] = None
         self.readyz_url: Optional[str] = None
         self._recent_output_lines: deque[str] = deque(maxlen=40)
+        self._attached_existing = False
 
     async def start(self) -> str:
-        """启动 app-server，返回连接端点字符串（`ws://...` 或 `stdio://`）。"""
+        """启动 app-server，返回连接端点字符串（`ws://...`、`unix://...` 或 `stdio://`）。"""
         if self._proc and self._proc.returncode is None:
             logger.info("app-server 已在运行，跳过启动")
-            return self.ws_url if self.protocol == "ws" else "stdio://"
+            if self.protocol in {"ws", "unix"}:
+                return self.ws_url or self._build_listen_url()
+            return "stdio://"
 
-        listen_url = "stdio://" if self.protocol == "stdio" else f"ws://127.0.0.1:{self.port}"
+        listen_url = self._build_listen_url()
+        if is_unix_endpoint(listen_url):
+            prepare_unix_socket_path(listen_url)
+            if unix_socket_accepting(listen_url):
+                self.ws_url = listen_url
+                self.readyz_url = None
+                self._attached_existing = True
+                logger.info("app-server 已存在，附着到 unix socket：%s", listen_url)
+                return listen_url
         # OnlineWorker owns this app-server instance and forwards approvals from
         # app-server events. User-level Codex hooks can consume PermissionRequest
         # before those events exist, so disable hooks only for this managed child.
@@ -106,7 +132,18 @@ class AppServerProcess:
 
         if self.protocol == "stdio":
             return await self._start_stdio()
+        if self.protocol == "unix":
+            return await self._start_unix()
         return await self._start_ws()
+
+    def _build_listen_url(self) -> str:
+        if self.listen_url:
+            return self.listen_url
+        if self.protocol == "stdio":
+            return "stdio://"
+        if self.protocol == "unix":
+            return "unix://"
+        return f"ws://127.0.0.1:{self.port}"
 
     async def _start_stdio(self) -> str:
         """启动 stdio 模式 app-server。"""
@@ -117,6 +154,7 @@ class AppServerProcess:
 
         self.ws_url = None
         self.readyz_url = None
+        self._attached_existing = False
 
         if self._proc.stderr is not None:
             self._stderr_task = asyncio.create_task(
@@ -192,6 +230,25 @@ class AppServerProcess:
             name="app-server-stdout",
         )
         logger.info(f"app-server 已就绪：{self.ws_url}")
+        self._attached_existing = False
+        return self.ws_url
+
+    async def _start_unix(self) -> str:
+        """启动 Unix socket WebSocket 模式 app-server。"""
+        if self._proc is None:
+            raise RuntimeError("app-server 进程未创建")
+        if self._proc.stdout is None:
+            raise RuntimeError("app-server 进程 stdout 为 None，无法读取启动输出")
+
+        self.ws_url = self._build_listen_url()
+        self.readyz_url = None
+        self._stdout_task = asyncio.create_task(
+            self._drain_stream(self._proc.stdout),
+            name="app-server-stdout",
+        )
+        await self._poll_unix_socket(self.ws_url)
+        logger.info(f"app-server 已就绪：{self.ws_url}")
+        self._attached_existing = False
         return self.ws_url
 
     async def _drain_stream(self, stream: asyncio.StreamReader) -> None:
@@ -227,6 +284,7 @@ class AppServerProcess:
         return (
             f"pid={pid if pid is not None else '-'} "
             f"running={self.running} "
+            f"attached_existing={self._attached_existing} "
             f"returncode={returncode if returncode is not None else '-'} "
             f"protocol={self.protocol} "
             f"ws_url={self.ws_url or '-'} "
@@ -256,6 +314,33 @@ class AppServerProcess:
 
         raise RuntimeError(f"app-server /readyz 未在 {timeout}s 内就绪")
 
+    async def _poll_unix_socket(
+        self,
+        url: str,
+        timeout: float = 10.0,
+        interval: float = 0.1,
+    ) -> None:
+        """轮询 Unix socket 直到可连接或超时。"""
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout
+
+        while loop.time() < deadline:
+            if self._proc is not None and self._proc.returncode is not None:
+                recent_output = " | ".join(self._recent_output_lines) or "无启动输出"
+                raise RuntimeError(
+                    f"app-server 启动失败：进程退出 "
+                    f"(code={self._proc.returncode}): {recent_output}"
+                )
+            if unix_socket_accepting(url):
+                return
+            await asyncio.sleep(interval)
+
+        recent_output = " | ".join(self._recent_output_lines) or "无启动输出"
+        raise RuntimeError(
+            f"app-server Unix socket 未在 {timeout}s 内就绪：{url}。"
+            f"输出：{recent_output}"
+        )
+
     async def stop(self) -> None:
         """停止 app-server 子进程。"""
         if self._stdout_task and not self._stdout_task.done():
@@ -272,7 +357,12 @@ class AppServerProcess:
         self._proc = None
         self.ws_url = None
         self.readyz_url = None
+        self._attached_existing = False
 
     @property
     def running(self) -> bool:
-        return self._proc is not None and self._proc.returncode is None
+        if self._proc is not None:
+            return self._proc.returncode is None
+        if self._attached_existing and self.ws_url and is_unix_endpoint(self.ws_url):
+            return unix_socket_accepting(self.ws_url)
+        return False

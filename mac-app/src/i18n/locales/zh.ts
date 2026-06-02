@@ -456,6 +456,8 @@ export const zhTexts: AppTexts = {
       civilityModeDescription: "发送前将不文明表达改写为普通表达。",
       externalCliTitle: "外部 CLI",
       externalCliBin: "启动命令",
+      externalCliCodexAliasTitle: "固定 Unix proxy alias",
+      externalCliCodexAliasDescription: "用于连接 OnlineWorker 管理的 remote proxy，保留 CLI 原生授权弹窗并同步到 TG。",
       externalCliLauncherWrapsClaude: "启动后进入 Claude CLI",
       externalCliSave: "保存 CLI 配置",
     },

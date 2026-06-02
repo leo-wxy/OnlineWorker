@@ -1306,6 +1306,145 @@ async def test_message_handler_in_hybrid_mode_prefers_connected_codex_adapter():
     save_storage_mock.assert_called_once()
 
 
+def test_codex_shared_live_transport_accepts_shared_unix():
+    from plugins.providers.builtin.codex.python.tui_bridge import (
+        should_route_codex_messages_to_tui_host,
+        uses_codex_shared_live_transport,
+    )
+
+    storage = AppStorage()
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="unix",
+                app_server_url="unix:///tmp/onlineworker-codex.sock",
+                live_transport="shared_unix",
+                control_mode="app",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    state = AppState(storage=storage, config=cfg)
+
+    assert uses_codex_shared_live_transport(state) is True
+    assert should_route_codex_messages_to_tui_host(state) is False
+
+
+@pytest.mark.asyncio
+async def test_message_handler_in_app_shared_unix_mode_uses_app_adapter_for_tg_messages():
+    from bot.handlers.message import make_message_handler
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=50,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
+    storage.workspaces["codex:onlineWorker"] = ws
+
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="unix",
+                app_server_url="unix:///tmp/onlineworker-codex.sock",
+                live_transport="shared_unix",
+                control_mode="app",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    adapter = MagicMock()
+    adapter.connected = True
+    adapter.inspect_thread_activity = AsyncMock(return_value={"busy": False})
+    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.turn_interrupt = AsyncMock(return_value={})
+    adapter.send_user_message = AsyncMock(return_value={})
+    state = AppState(storage=storage, config=cfg)
+    state.set_adapter("codex", adapter)
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.text = "你好"
+    update.effective_message.caption = None
+    update.effective_message.photo = None
+    update.effective_message.document = None
+    update.effective_message.message_thread_id = 100
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+
+    with patch(
+        "bot.handlers.message.enqueue_codex_tui_message",
+        new=AsyncMock(return_value=0),
+    ) as enqueue_mock, patch(
+        "bot.handlers.message.save_storage",
+    ) as save_storage_mock:
+        handler = make_message_handler(state, GROUP_CHAT_ID)
+        await handler(update, ctx)
+
+    enqueue_mock.assert_not_awaited()
+    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
+    adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "你好")
+    assert ws.threads["tid-1"].preview == "你好"
+    save_storage_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_codex_tui_host_remote_url_uses_unix_endpoint_through_remote_proxy():
+    from plugins.providers.builtin.codex.python import tui_bridge
+
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="unix",
+                app_server_url="unix:///tmp/onlineworker-codex.sock",
+                live_transport="shared_unix",
+                control_mode="app",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    state = AppState(storage=AppStorage(), config=cfg)
+
+    with patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.ensure_codex_remote_message_proxy",
+        new=AsyncMock(return_value="unix:///tmp/onlineworker-proxy.sock"),
+    ) as proxy_mock:
+        remote_url = await tui_bridge._resolve_codex_tui_host_remote_url(
+            state,
+            cfg.get_tool("codex"),
+        )
+
+    assert remote_url == "unix:///tmp/onlineworker-proxy.sock"
+    proxy_mock.assert_awaited_once_with(state, "unix:///tmp/onlineworker-codex.sock")
+
+
 @pytest.mark.asyncio
 async def test_new_thread_handler_rejects_tui_mode_thread_creation():
     from bot.handlers.thread import make_new_thread_handler

@@ -461,6 +461,8 @@ export const enTexts: AppTexts = {
       civilityModeDescription: "Rewrite abusive language into neutral wording before sending.",
       externalCliTitle: "External CLI",
       externalCliBin: "Launch command",
+      externalCliCodexAliasTitle: "Fixed Unix proxy alias",
+      externalCliCodexAliasDescription: "Connect through OnlineWorker's managed remote proxy while keeping native CLI approval prompts mirrored to TG.",
       externalCliLauncherWrapsClaude: "Open Claude CLI after launcher starts",
       externalCliSave: "Save CLI config",
     },

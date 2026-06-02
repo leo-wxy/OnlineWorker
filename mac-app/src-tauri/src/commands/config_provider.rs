@@ -394,7 +394,7 @@ fn normalize_transport_kind(raw: Option<&str>) -> Option<String> {
     raw.and_then(|value| {
         let trimmed = value.trim().to_lowercase();
         match trimmed.as_str() {
-            "stdio" | "ws" | "http" => Some(trimmed),
+            "stdio" | "ws" | "unix" | "http" => Some(trimmed),
             _ => None,
         }
     })
@@ -404,7 +404,9 @@ fn normalize_live_transport_kind(raw: Option<&str>) -> Option<String> {
     raw.and_then(|value| {
         let trimmed = value.trim().to_lowercase();
         match trimmed.as_str() {
-            "owner_bridge" | "shared_ws" | "stdio" | "ws" | "http" => Some(trimmed),
+            "owner_bridge" | "shared_ws" | "shared_unix" | "stdio" | "ws" | "unix" | "http" => {
+                Some(trimmed)
+            }
             _ => None,
         }
     })
@@ -419,8 +421,16 @@ fn default_owner_transport(provider_id: &str) -> String {
 fn default_live_transport(
     provider_id: &str,
     owner_transport: &str,
-    _control_mode: Option<&str>,
+    control_mode: Option<&str>,
 ) -> String {
+    if provider_id == "codex" {
+        if owner_transport == "ws" && matches!(control_mode, Some("app" | "hybrid")) {
+            return "shared_ws".to_string();
+        }
+        if owner_transport == "unix" && matches!(control_mode, Some("app" | "hybrid")) {
+            return "shared_unix".to_string();
+        }
+    }
     let defaults = default_provider_config(provider_id);
     if defaults.owner_transport.as_deref() == Some(owner_transport) {
         if let Some(live_transport) = defaults.live_transport {
@@ -896,6 +906,9 @@ fn infer_legacy_transport(
         return protocol.trim().to_string();
     }
     if let Some(url) = app_server_url {
+        if url.starts_with("unix://") {
+            return "unix".to_string();
+        }
         if url.starts_with("ws://") || url.starts_with("wss://") {
             return "ws".to_string();
         }
@@ -1579,6 +1592,34 @@ app_server_port: 4722
         let claude = providers.get("claude").expect("claude");
         assert_eq!(claude.managed, Some(false));
         assert_eq!(claude.autostart, Some(false));
+    }
+
+    #[test]
+    fn normalize_provider_document_preserves_codex_unix_shared_transport() {
+        let raw = r#"
+schema_version: 2
+providers:
+  codex:
+    managed: true
+    autostart: true
+    bin: "codex"
+    transport:
+      type: "unix"
+      app_server_url: "unix://"
+    owner_transport: "unix"
+    live_transport: "shared_unix"
+    control_mode: "app"
+"#;
+
+        let doc = normalize_provider_document(raw).expect("normalized config");
+        let providers = doc.providers.expect("providers");
+        let codex = providers.get("codex").expect("codex");
+        let transport = codex.transport.as_ref().expect("codex transport");
+
+        assert_eq!(transport.kind.as_deref(), Some("unix"));
+        assert_eq!(transport.app_server_url.as_deref(), Some("unix://"));
+        assert_eq!(codex.owner_transport.as_deref(), Some("unix"));
+        assert_eq!(codex.live_transport.as_deref(), Some("shared_unix"));
     }
 
     #[test]

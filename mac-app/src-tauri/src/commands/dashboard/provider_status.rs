@@ -154,6 +154,9 @@ fn infer_legacy_transport(
         return protocol.trim().to_string();
     }
     if let Some(url) = app_server_url {
+        if url.starts_with("unix://") {
+            return "unix".to_string();
+        }
         if url.starts_with("ws://") || url.starts_with("wss://") {
             return "ws".to_string();
         }
@@ -178,7 +181,7 @@ fn normalize_transport(value: Option<String>) -> Option<String> {
     value.and_then(|raw| {
         let trimmed = raw.trim().to_lowercase();
         match trimmed.as_str() {
-            "stdio" | "ws" | "http" => Some(trimmed),
+            "stdio" | "ws" | "unix" | "http" => Some(trimmed),
             _ => None,
         }
     })
@@ -188,7 +191,7 @@ fn normalize_live_transport(value: Option<String>) -> Option<String> {
     value.and_then(|raw| {
         let trimmed = raw.trim().to_lowercase();
         match trimmed.as_str() {
-            "owner_bridge" | "shared_ws" | "stdio" | "ws" | "http" => Some(trimmed),
+            "owner_bridge" | "shared_ws" | "shared_unix" | "stdio" | "ws" | "unix" | "http" => Some(trimmed),
             _ => None,
         }
     })
@@ -202,6 +205,9 @@ fn default_live_transport(
     if tool_name == "codex" {
         if owner_transport == "ws" && matches!(control_mode, Some("app" | "hybrid")) {
             return "shared_ws".to_string();
+        }
+        if owner_transport == "unix" && matches!(control_mode, Some("app" | "hybrid")) {
+            return "shared_unix".to_string();
         }
         return "owner_bridge".to_string();
     }

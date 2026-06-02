@@ -18,6 +18,7 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 9: Session Archive Actions** - Add Session tab archive actions and adjacent provider usage operations. Archive executes the provider's real source operation, archived rows remain visible through post-success local overlay, `/token_usage` is scoped to agent topics, and packaged-app verification is complete.
 - [x] **Phase 10: Codebase Structure Refinement** - Audit and restructure oversized classes/modules and misplaced responsibilities without changing product behavior. Completed staged refactor slices for Tauri config/dashboard helpers, Python workspace helpers, and frontend Dashboard state/presentation.
 - [ ] **Phase 11: Telegram Topic SQLite Storage Migration** - Make Telegram topics independent durable records in a single SQLite table, migrate existing JSON topic ids once, and route all topic lookups through SQLite so runtime JSON saves cannot erase topic bindings.
+- [ ] **Phase 12: Codex Managed App-Server Approval Host** - Follow the Paseo/Happy/Codex IDE host-client model: OnlineWorker-managed Codex sessions own the app-server request/response channel, Telegram is the remote approval UI for those sessions, and existing Desktop/VS Code/ordinary CLI sessions stay native and mirror-only. 12-02 implements `unix://` support and the installed fixed OnlineWorker Unix remote proxy; the final real shared CLI + TG validation should use `codex_remote_proxy.sock` with a fixed resumed session.
 
 ## Phase Details
 
@@ -288,3 +289,128 @@ Success Criteria (what must be TRUE):
 
 Plans:
 - [ ] 11-01: Migrate Telegram topic storage to one SQLite table
+
+### Phase 12: Codex Managed App-Server Approval Host
+
+**Goal:** Follow the host/client model used by reference projects such as Paseo, Happy, and the Codex IDE extension: OnlineWorker owns an OnlineWorker-managed Codex app-server session, receives Codex app-server approval requests, renders Telegram as the remote approval UI, and relays Telegram decisions back to the same app-server request. Existing Codex Desktop, VS Code, and ordinary CLI sessions keep their native approval behavior; OnlineWorker only mirrors them unless it owns the request/response channel. For the local shared visible CLI + TG case, 12-02 implements Codex's `unix://` app-server transport and current real validation should use shared Unix.
+**Requirements**: TBD
+**Depends on:** Phase 7 provider message gateway and Codex app-server integration boundaries
+**Scope Fence:** 12-01 code changes are limited to `plugins/providers/builtin/codex/`. 12-02 explicitly revises scope to include `config.py` because unix transport parsing is outside the Codex plugin. Shared core approval abstractions, non-Codex providers, Mac app UI, notification plugins, and packaging scripts remain out of scope unless the phase plan is explicitly revised.
+**Plans:** 2 plans
+
+Plans:
+- [ ] 12-01: Build OnlineWorker-managed Codex app-server approval host
+  - [x] Inventory current Codex approval entry points inside the Codex plugin
+  - [x] Compare reference projects: Paseo provider-owned app-server, Happy `happy codex`, and Codex IDE extension host/client behavior
+  - [x] Draft Codex plugin implementation that keeps app-server approval lifecycle as the source of truth
+  - [x] Add local automated tests for stale TG state cleanup and duplicate request suppression
+  - [x] Adjust implementation so hook/current-session mirror paths are notification-only by default
+  - [ ] Validate real OnlineWorker-managed app-server + Telegram approval flow
+- [ ] 12-02: Add unix-socket shared Codex app-server transport
+  - [x] Confirm local Codex CLI supports `--listen unix://` and `--remote unix://...`
+  - [x] Identify current OnlineWorker gaps: config accepts only `stdio/ws/http`, process starts only `stdio/ws`, adapter connects only stdio/ws
+  - [x] Add `unix` / `shared_unix` config normalization
+  - [x] Add app-server process startup and adapter connection for WebSocket over Unix socket
+  - [x] Add focused automated coverage for config, adapter, startup, and TUI shared transport behavior
+  - [x] Validate installed fixed Unix remote proxy startup and CLI entry command
+  - [ ] Validate fixed-session visible Codex CLI + Telegram approval convergence on the same app-server request id over the OnlineWorker Unix proxy
+  - [ ] Keep loopback WebSocket as fallback shared transport only
+
+Success Criteria (what must be TRUE):
+  1. OnlineWorker-managed Codex sessions follow the reference host/client pattern: OnlineWorker owns the app-server request/response channel.
+  2. Telegram receives an interactive approval prompt for app-server requests only when OnlineWorker owns the request id and has a reliable thread/topic mapping; non-app-server controls require an explicit controlled-host path or opt-in blocking hook.
+  3. App-server Telegram decisions are written back to the same app-server JSON-RPC request id through the active Codex adapter.
+  4. Codex app-server remains the approval lifecycle source of truth; OnlineWorker does not complete Codex items locally.
+  5. If app-server resolves the request first, Telegram state is cleared or marked stale/resolved instead of staying active.
+  6. Existing Codex Desktop, VS Code, and ordinary CLI approval behavior does not regress; OnlineWorker does not intercept or replace those clients.
+  7. Hook/current-session mirror paths are notification-only by default and do not create clickable approval controls unless an explicit controlled-host path or opt-in blocking hook exists.
+  8. Requests without a reliable thread/topic mapping do not fall back to a global topic with clickable approval controls.
+  9. Duplicate or stale app-server approval requests do not create multiple active approval buttons for the same Codex request.
+  10. 12-01 production implementation changes stay under `plugins/providers/builtin/codex/`.
+  11. 12-02 supports `unix://` as the preferred local shared app-server transport while preserving `ws://127.0.0.1:<port>` as fallback and `stdio://` as private owner transport.
+  12. Visible CLI tests use the OnlineWorker proxy socket, not bare `--remote unix://`, when the goal is Telegram approval mirroring and control.
+
+Reference projects and behavior:
+- `getpaseo/paseo`: Provider-owned Codex app-server client registers app-server approval request handlers, stores pending permissions, and replies through the same request id.
+- `slopus/happy`: `happy codex` wraps Codex by starting `codex app-server --listen stdio://`, routing approval requests to its own UI/mobile flow, then responding to app-server.
+- Codex IDE extension: Official host/client shape using Codex CLI and shared `~/.codex/config.toml`; useful as the product analogy for "OnlineWorker can be a Codex host", not as evidence for attaching to an already running Desktop session.
+
+Fast verification path:
+- Use focused Codex provider tests only:
+  - `PYENV_VERSION=3.13.1 pytest -q tests/test_codex_adapter.py tests/test_events_streaming.py tests/test_question_enhanced.py tests/test_codex_tui_mode.py tests/test_startup_runtime.py tests/test_codex_runtime.py`
+  - `PYENV_VERSION=3.13.1 pytest -q tests/test_config.py tests/test_codex_runtime.py tests/test_startup_runtime.py tests/test_codex_tui_mode.py tests/test_provider_owner_bridge.py`
+  - `git -C OnlineWorker diff --check`
+- Run packaging or installed-app verification only after explicit approval.
+
+Local automated checks:
+- Passed locally, not a substitute for real app-server/TG validation:
+  - `PYENV_VERSION=3.13.1 pytest -q tests/test_codex_adapter.py tests/test_events_streaming.py tests/test_question_enhanced.py tests/test_codex_tui_mode.py tests/test_startup_runtime.py tests/test_codex_runtime.py` -> `225 passed`.
+  - `PYENV_VERSION=3.13.1 pytest -q tests/test_codex_hook_bridge.py tests/test_codex_runtime.py tests/test_provider_owner_bridge.py tests/test_startup_runtime.py tests/test_codex_tui_mode.py` -> passed before the main merge; current merge verification uses the focused Codex/bridge suite listed in this handoff.
+  - `PYENV_VERSION=3.13.1 pytest -q tests/test_events.py tests/test_codex_interactions.py tests/test_session_events.py` -> `53 passed`.
+  - `PYENV_VERSION=3.13.1 pytest -q tests/test_config.py tests/test_codex_adapter.py tests/test_startup_runtime.py tests/test_codex_tui_mode.py` -> `182 passed`.
+  - `git -C OnlineWorker diff --check` -> passed.
+
+Real installed-app app-server/TG approval chain:
+- Verified on 2026-06-01 through the running installed app, without packaging or restart.
+- Existing installed runtime was active:
+  - `/Applications/OnlineWorker.app/Contents/MacOS/onlineworker-app`
+  - `/Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/wxy/Library/Application Support/OnlineWorker`
+  - OnlineWorker-managed `codex app-server --disable hooks --listen stdio://`
+- App-server approval request reached Telegram:
+  - `item/commandExecution/requestApproval` `id=1` for thread `019e832b-e486-77a2-8826-4f87b33591d6`.
+  - `[approval_request] id=1 ... topic=8634`.
+  - `[approval_request] 已推送 tool=codex msg_id=8673`.
+- Telegram callback resolved the same app-server request id:
+  - `[callback] 收到 callback data='exec_allow:8673:1780322294'`.
+  - `reply_server_request sent request_id=1 workspace_id=codex:onlineworker-combined decision=accept payload={"decision": "accept"}`.
+  - `[approval] request_id=1 tool=codex reply={'decision': 'accept'}`.
+
+Real transport smoke:
+- Official Codex docs and local CLI help confirm `codex app-server --listen unix://`, `--listen unix://PATH`, and `codex --remote unix://PATH` syntax.
+- Real arbitrary external custom unix listener startup on this machine failed before OnlineWorker connected:
+  - `/opt/homebrew/bin/codex app-server --disable hooks --listen unix:///private/tmp/ow-codex-unix-smoke.sock` -> `Error: Operation not permitted (os error 1)`.
+  - Same result with temporary `CODEX_HOME=/private/tmp/ow-codex-home-smoke`.
+- Real default unix listener startup with temporary `CODEX_HOME` succeeded:
+  - `codex app-server --disable hooks --listen unix://` -> created `app-server-control/app-server-control.sock`.
+- Real custom unix listener under `CODEX_HOME/app-server-control/` succeeded:
+  - `codex app-server --disable hooks --listen unix:///private/tmp/ow-codex-home-unix-custom/app-server-control/custom.sock` -> created `custom.sock`.
+- Real OnlineWorker `CodexAdapter` Unix smoke succeeded:
+  - `CodexAdapter.connect("unix://")` -> connected after passing `compression=None` to `websockets.unix_connect`.
+  - `model/list` -> returned 1 model.
+- Real OnlineWorker `AppServerProcess(protocol="unix")` + `CodexAdapter` smoke succeeded:
+  - started `unix://` in 0.11s using socket-readiness polling.
+  - adapter connected and `model/list` returned 1 model.
+- Real loopback WebSocket startup with temporary `CODEX_HOME` succeeded:
+  - `/opt/homebrew/bin/codex app-server --listen ws://127.0.0.1:47999` -> `codex app-server (WebSockets), listening on ws://127.0.0.1:47999`.
+- Real OnlineWorker `AppServerProcess` + `CodexAdapter` loopback WebSocket smoke with temporary `CODEX_HOME` succeeded:
+  - started `ws://127.0.0.1:50076`, adapter connected, `model/list` returned 1 model.
+
+Remaining Phase 12 verification:
+- Real OnlineWorker-managed app-server/TG authorization chain is verified for the installed app's current stdio-owned app-server path: TG button maps to the same app-server request id and TG decision relays to app-server.
+- App-server-first resolution disabling TG controls still needs a targeted real check.
+- Installed fixed OnlineWorker Unix remote proxy validation completed on 2026-06-02:
+  - alias/command target: `unix:///Users/wxy/Library/Application Support/OnlineWorker/codex_remote_proxy.sock`.
+  - bare `--remote unix://` is documented as direct Codex default-socket access and must not be used to validate OnlineWorker approval mirroring.
+  - `/resume` filtering is scoped through the proxy by injecting the client cwd for `thread/list`.
+  - `serverRequest/resolved` is forwarded to the CLI and also clears TG mirror pending state.
+  - expected relay close/reset exceptions are consumed so normal restart/disconnect does not leave `Task exception was never retrieved`.
+  - target tests passed: `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest OnlineWorker/tests/test_codex_remote_proxy.py OnlineWorker/tests/test_codex_runtime.py -q` -> `25 passed`.
+  - packaged build/install/restart completed with DMG `OnlineWorker_1.4.0_aarch64.dmg`.
+  - installed hashes:
+    - `onlineworker-bot`: `50c8d9a63ce61f340193ab0887aae322ae4ace41ffb296366fde33013811945e`
+    - `onlineworker-app`: `2a80c905228608eb268ed665ea751bb36e61d214c043b22f0c7b9cad9488cbd0`
+  - installed runtime logs confirmed `codex 使用托管默认 unix app-server：unix://`, `已启动 Codex remote Unix proxy：unix:///Users/wxy/Library/Application Support/OnlineWorker/codex_remote_proxy.sock`, `app-server 第 1 次重连成功`, `workspace cwd 已注册：codex:onlineworker-combined`, and `codex-owner-bridge` startup after app restart.
+- Merge-main verification completed on 2026-06-02 after rebasing this work onto upstream main commit `e333403` and renumbering the local Codex phase to Phase 12:
+  - `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest -q tests/test_config.py tests/test_codex_adapter.py tests/test_codex_runtime.py tests/test_codex_remote_proxy.py tests/test_codex_tui_mode.py tests/test_codex_tui_realtime_mirror.py tests/test_question_enhanced.py tests/test_startup_runtime.py tests/test_codex_hook_bridge.py tests/test_provider_owner_bridge.py` -> `291 passed`.
+  - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml dashboard --quiet` -> `21 passed`.
+  - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml config_provider --quiet` -> `33 passed`.
+  - `node --test mac-app/tests/dashboardProviderStatus.test.mjs mac-app/tests/appShell.test.mjs` -> `13 passed`.
+  - `cd mac-app && ./node_modules/.bin/tsc --noEmit` -> passed.
+  - `git -C OnlineWorker diff --check` -> passed.
+- Fixed-session visible CLI + Telegram convergence validation should be used next for real approval behavior:
+  - `codexR resume 019e6c5a-dafa-7153-ab14-c17f16b890c4`
+  - trigger an approval-producing command from the resumed CLI session.
+  - verify CLI native approval prompt and TG mirror appear for the same request.
+  - verify approving from either surface converges without duplicate active TG controls or CLI reset/hang.
+- Arbitrary external Unix socket paths still need path-limit investigation; default `unix://` and custom paths under `CODEX_HOME/app-server-control/` are verified.
+- Installed-app validation requires explicit approval.

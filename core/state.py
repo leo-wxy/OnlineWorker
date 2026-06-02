@@ -8,6 +8,7 @@ from typing import Any, Optional
 from core.providers.registry import get_provider
 from core.provider_runtime_state import (
     ProviderInterruptionState,
+    ProviderPendingApprovalDecision,
     ProviderRunState,
     ProviderRuntimeState,
     ProviderWatchState,
@@ -298,6 +299,42 @@ class AppState:
 
     def get_provider_runtime(self, tool_name: str) -> ProviderRuntimeState:
         return self.provider_runtime_state.setdefault(tool_name, ProviderRuntimeState())
+
+    def ensure_pending_approval_decision(
+        self,
+        tool_name: str,
+        request_id: str,
+    ) -> ProviderPendingApprovalDecision:
+        runtime = self.get_provider_runtime(tool_name)
+        key = str(request_id)
+        pending = runtime.pending_approval_decisions.get(key)
+        if pending is None:
+            pending = ProviderPendingApprovalDecision(request_id=key)
+            runtime.pending_approval_decisions[key] = pending
+        return pending
+
+    def resolve_pending_approval_decision(
+        self,
+        tool_name: str,
+        request_id: str,
+        decision: str,
+        *,
+        message: str = "",
+    ) -> bool:
+        runtime = self.get_provider_runtime(tool_name)
+        pending = runtime.pending_approval_decisions.pop(str(request_id), None)
+        if pending is None:
+            return False
+        pending.decision = decision
+        pending.message = message
+        pending.event.set()
+        return True
+
+    def discard_pending_approval_decision(self, tool_name: str, request_id: str) -> None:
+        runtime = self.get_provider_runtime(tool_name)
+        pending = runtime.pending_approval_decisions.pop(str(request_id), None)
+        if pending is not None:
+            pending.event.set()
 
     def get_tool_for_workspace(self, workspace_id: str) -> Optional[str]:
         """按 storage key 或 provider 前缀解析 workspace 所属工具。"""

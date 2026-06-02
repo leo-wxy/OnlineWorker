@@ -4,6 +4,7 @@ CodexAdapter — codex app-server JSON-RPC 客户端。
 
 支持两种底层传输：
   - WebSocket (`ws://...`)
+  - Unix socket WebSocket (`unix://...`)
   - stdio (`stdio://`)
 
 是 DaemonClient 的 drop-in replacement，保持相同的公开接口和回调签名。
@@ -19,6 +20,11 @@ from typing import Any, Callable, Awaitable, Optional
 
 import websockets
 import websockets.exceptions
+
+from plugins.providers.builtin.codex.python.transport import (
+    is_unix_endpoint,
+    resolve_unix_socket_path,
+)
 
 logger = logging.getLogger(__name__)
 DEFAULT_APPROVALS_REVIEWER = "user"
@@ -111,7 +117,7 @@ class CodexAdapter:
         process: Optional[asyncio.subprocess.Process] = None,
     ) -> None:
         """连接 app-server，发送 initialize 握手，启动接收和心跳循环。"""
-        self._transport = "stdio" if url == "stdio://" else "ws"
+        self._transport = "stdio" if url == "stdio://" else "unix" if is_unix_endpoint(url) else "ws"
         if self._transport == "ws":
             # 关闭 websockets 库自带的 ping/pong 定时器，统一使用我们自己的心跳策略。
             # 运行态里默认 20s keepalive 会在长 turn 期间误判，表现为 1006/无关闭握手断开。
@@ -120,6 +126,15 @@ class CodexAdapter:
                 max_size=None,
                 ping_interval=None,
                 ping_timeout=None,
+            )
+        elif self._transport == "unix":
+            self._ws = await websockets.unix_connect(
+                path=resolve_unix_socket_path(url),
+                uri="ws://localhost/",
+                max_size=None,
+                ping_interval=None,
+                ping_timeout=None,
+                compression=None,
             )
         else:
             if process is None:
@@ -643,7 +658,7 @@ class CodexAdapter:
     async def _send_raw(self, payload: str) -> None:
         """按当前 transport 发送原始 JSON-RPC 文本。"""
         self._record_protocol_message("outbound", payload)
-        if self._transport == "ws":
+        if self._transport in {"ws", "unix"}:
             if self._ws is None:
                 raise RuntimeError("WebSocket 未连接")
             try:
@@ -664,7 +679,7 @@ class CodexAdapter:
 
     async def _recv_raw(self) -> str:
         """按当前 transport 读取一条原始 JSON-RPC 文本。"""
-        if self._transport == "ws":
+        if self._transport in {"ws", "unix"}:
             if self._ws is None:
                 raise RuntimeError("WebSocket 未连接")
             raw = await self._ws.recv()
@@ -696,7 +711,7 @@ class CodexAdapter:
             if not self._connected:
                 break
             try:
-                if self._transport == "ws":
+                if self._transport in {"ws", "unix"}:
                     if self._ws is None:
                         raise RuntimeError("WebSocket 未连接")
                     pong_waiter = await self._ws.ping()

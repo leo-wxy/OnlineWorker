@@ -37,6 +37,15 @@ class ProviderInterruptionState:
 
 
 @dataclass
+class ProviderPendingApprovalDecision:
+    """Waiter used when Telegram can answer an approval owned by a local proxy."""
+    request_id: str
+    event: asyncio.Event = field(default_factory=asyncio.Event)
+    decision: str = ""
+    message: str = ""
+
+
+@dataclass
 class ProviderRunState:
     """一次 provider run 的运行时 ledger 条目。"""
     run_id: str
@@ -79,3 +88,4 @@ class ProviderRuntimeState:
     thread_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     active_threads: set[str] = field(default_factory=set)
     thread_idle_events: dict[str, asyncio.Event] = field(default_factory=dict)
+    pending_approval_decisions: dict[str, ProviderPendingApprovalDecision] = field(default_factory=dict)

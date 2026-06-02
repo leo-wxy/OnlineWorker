@@ -3,7 +3,7 @@ import logging
 import os
 import pytest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 from config import Config, ToolConfig
 from core.lifecycle import LifecycleManager
@@ -940,7 +940,6 @@ async def test_post_init_passes_codex_stdio_protocol_to_app_server_process():
     assert manager.get_tui_mirror_task("codex") is tui_mirror_task
     assert codex_state.get_runtime(state).mirror_task is tui_mirror_task
 
-
 @pytest.mark.asyncio
 async def test_shutdown_runtime_stops_codex_remote_proxy():
     storage = AppStorage()
@@ -994,7 +993,7 @@ async def test_post_init_prefers_external_codex_ws_server_without_spawning_proce
     bot = MagicMock()
     bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=3169))
     bot.send_message = AsyncMock()
-    tui_sync_task = MagicMock()
+    tui_mirror_task = MagicMock()
 
     with patch("plugins.providers.builtin.codex.python.runtime.AppServerProcess") as proc_cls, patch(
         "core.lifecycle.save_storage"
@@ -1004,19 +1003,19 @@ async def test_post_init_prefers_external_codex_ws_server_without_spawning_proce
         new=AsyncMock(),
     ), patch(
         "plugins.providers.builtin.codex.python.tui_bridge.start_codex_tui_sync_loop",
-        return_value=tui_sync_task,
     ) as sync_mock, patch(
         "plugins.providers.builtin.codex.python.tui_realtime_mirror.start_codex_tui_realtime_mirror_loop",
+        return_value=tui_mirror_task,
     ) as mirror_mock:
         await manager.post_init(SimpleNamespace(bot=bot))
 
     proc_cls.assert_not_called()
     connect_mock.assert_awaited_once_with(manager, bot, None, "ws://127.0.0.1:4722")
-    sync_mock.assert_called_once_with(state, bot, cfg.group_chat_id)
-    mirror_mock.assert_not_called()
-    assert manager.get_tui_sync_task("codex") is tui_sync_task
-    assert manager.get_tui_mirror_task("codex") is None
-    assert codex_state.get_runtime(state).mirror_task is None
+    sync_mock.assert_not_called()
+    mirror_mock.assert_called_once_with(state, bot, cfg.group_chat_id)
+    assert manager.get_tui_sync_task("codex") is None
+    assert manager.get_tui_mirror_task("codex") is tui_mirror_task
+    assert codex_state.get_runtime(state).mirror_task is tui_mirror_task
 
 
 @pytest.mark.asyncio
@@ -1097,7 +1096,7 @@ async def test_post_init_prefers_existing_codex_ws_service_without_spawning_proc
     bot = MagicMock()
     bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=3169))
     bot.send_message = AsyncMock()
-    tui_sync_task = MagicMock()
+    tui_mirror_task = MagicMock()
 
     with patch("plugins.providers.builtin.codex.python.runtime.AppServerProcess") as proc_cls, patch(
         "core.lifecycle.save_storage"
@@ -1107,19 +1106,82 @@ async def test_post_init_prefers_existing_codex_ws_service_without_spawning_proc
         new=AsyncMock(),
     ), patch(
         "plugins.providers.builtin.codex.python.tui_bridge.start_codex_tui_sync_loop",
-        return_value=tui_sync_task,
     ) as sync_mock, patch(
         "plugins.providers.builtin.codex.python.tui_realtime_mirror.start_codex_tui_realtime_mirror_loop",
+        return_value=tui_mirror_task,
     ) as mirror_mock:
         await manager.post_init(SimpleNamespace(bot=bot))
 
     proc_cls.assert_not_called()
     connect_mock.assert_awaited_once_with(manager, bot, None, "ws://127.0.0.1:4722")
-    sync_mock.assert_called_once_with(state, bot, cfg.group_chat_id)
-    mirror_mock.assert_not_called()
-    assert manager.get_tui_sync_task("codex") is tui_sync_task
-    assert manager.get_tui_mirror_task("codex") is None
-    assert codex_state.get_runtime(state).mirror_task is None
+    sync_mock.assert_not_called()
+    mirror_mock.assert_called_once_with(state, bot, cfg.group_chat_id)
+    assert manager.get_tui_sync_task("codex") is None
+    assert manager.get_tui_mirror_task("codex") is tui_mirror_task
+    assert codex_state.get_runtime(state).mirror_task is tui_mirror_task
+
+
+@pytest.mark.asyncio
+async def test_post_init_shared_unix_starts_realtime_mirror_without_legacy_final_sync():
+    storage = AppStorage()
+    state = AppState(storage=storage)
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=2,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="unix",
+                app_server_url="unix://",
+                owner_transport="unix",
+                live_transport="shared_unix",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
+
+    bot = MagicMock()
+    bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=3169))
+    bot.send_message = AsyncMock()
+    tui_mirror_task = MagicMock()
+    proc = MagicMock()
+    proc._proc = MagicMock()
+    proc.start = AsyncMock(return_value="unix://")
+
+    with patch("plugins.providers.builtin.codex.python.runtime.AppServerProcess", return_value=proc) as proc_cls, patch(
+        "core.lifecycle.save_storage"
+    ), patch("plugins.providers.builtin.codex.python.runtime.connect_adapter_with_retry", new=AsyncMock()) as connect_mock, patch(
+        "plugins.providers.builtin.codex.python.runtime.ensure_codex_remote_message_proxy",
+        new=AsyncMock(return_value="unix:///tmp/ow-codex-proxy.sock"),
+    ), patch.object(
+        LifecycleManager,
+        "_cleanup_archived_threads",
+        new=AsyncMock(),
+    ), patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.start_codex_tui_sync_loop",
+    ) as sync_mock, patch(
+        "plugins.providers.builtin.codex.python.tui_realtime_mirror.start_codex_tui_realtime_mirror_loop",
+        return_value=tui_mirror_task,
+    ) as mirror_mock:
+        await manager.post_init(SimpleNamespace(bot=bot))
+
+    proc_cls.assert_called_once_with(
+        codex_bin="codex",
+        port=0,
+        protocol="unix",
+        listen_url="unix://",
+    )
+    connect_mock.assert_awaited_once_with(manager, bot, proc, "unix://")
+    sync_mock.assert_not_called()
+    mirror_mock.assert_called_once_with(state, bot, cfg.group_chat_id)
+    assert manager.get_tui_sync_task("codex") is None
+    assert manager.get_tui_mirror_task("codex") is tui_mirror_task
+    assert codex_state.get_runtime(state).mirror_task is tui_mirror_task
 
 
 @pytest.mark.asyncio
@@ -1321,7 +1383,7 @@ async def test_post_init_in_hybrid_control_mode_reuses_existing_server_with_pers
     bot = MagicMock()
     bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=3169))
     bot.send_message = AsyncMock()
-    tui_sync_task = MagicMock()
+    tui_mirror_task = MagicMock()
 
     with patch("plugins.providers.builtin.codex.python.runtime.AppServerProcess") as proc_cls, patch(
         "core.lifecycle.save_storage"
@@ -1331,18 +1393,19 @@ async def test_post_init_in_hybrid_control_mode_reuses_existing_server_with_pers
         new=AsyncMock(),
     ), patch(
         "plugins.providers.builtin.codex.python.tui_bridge.start_codex_tui_sync_loop",
-        return_value=tui_sync_task,
     ) as sync_mock, patch(
         "plugins.providers.builtin.codex.python.tui_realtime_mirror.start_codex_tui_realtime_mirror_loop",
+        return_value=tui_mirror_task,
     ) as mirror_mock:
         await manager.post_init(SimpleNamespace(bot=bot))
 
     proc_cls.assert_not_called()
     connect_mock.assert_awaited_once_with(manager, bot, None, "ws://127.0.0.1:4722")
-    sync_mock.assert_called_once_with(state, bot, cfg.group_chat_id)
-    mirror_mock.assert_not_called()
-    assert manager.get_tui_sync_task("codex") is tui_sync_task
-    assert manager.get_tui_mirror_task("codex") is None
+    sync_mock.assert_not_called()
+    mirror_mock.assert_called_once_with(state, bot, cfg.group_chat_id)
+    assert manager.get_tui_sync_task("codex") is None
+    assert manager.get_tui_mirror_task("codex") is tui_mirror_task
+    assert codex_state.get_runtime(state).mirror_task is tui_mirror_task
 
 
 @pytest.mark.asyncio
@@ -1427,6 +1490,138 @@ async def test_app_server_start_uses_ws_listen_mode():
         "--listen",
         "ws://127.0.0.1:4722",
     )
+
+
+@pytest.mark.asyncio
+async def test_app_server_start_uses_unix_listen_mode(tmp_path):
+    socket_path = tmp_path / "codex.sock"
+    proc = MagicMock()
+    proc.returncode = None
+    proc.stdin = MagicMock()
+    proc.stdout = _FakeStream()
+    proc.stderr = None
+
+    create_subprocess = AsyncMock(return_value=proc)
+
+    with patch(
+        "plugins.providers.builtin.codex.python.process.asyncio.create_subprocess_exec",
+        new=create_subprocess,
+    ), patch(
+        "plugins.providers.builtin.codex.python.process.asyncio.create_task",
+        side_effect=_fake_create_task,
+    ), patch(
+        "plugins.providers.builtin.codex.python.process.unix_socket_accepting",
+        side_effect=[False, True],
+    ):
+        server = AppServerProcess(
+            codex_bin="codex",
+            protocol="unix",
+            listen_url=f"unix://{socket_path}",
+        )
+        assert await server.start() == f"unix://{socket_path}"
+
+    assert create_subprocess.await_args.args == (
+        "codex",
+        "app-server",
+        "--disable",
+        "hooks",
+        "--listen",
+        f"unix://{socket_path}",
+    )
+    assert socket_path.parent.exists()
+
+
+@pytest.mark.asyncio
+async def test_app_server_start_attaches_existing_unix_socket_without_spawning(tmp_path):
+    socket_url = f"unix://{tmp_path / 'codex.sock'}"
+    create_subprocess = AsyncMock()
+
+    with patch(
+        "plugins.providers.builtin.codex.python.process.asyncio.create_subprocess_exec",
+        new=create_subprocess,
+    ), patch(
+        "plugins.providers.builtin.codex.python.process.unix_socket_accepting",
+        return_value=True,
+    ):
+        server = AppServerProcess(
+            codex_bin="codex",
+            protocol="unix",
+            listen_url=socket_url,
+        )
+        assert await server.start() == socket_url
+        assert server.running is True
+        assert "attached_existing=True" in server.diagnostics_snapshot()
+
+    create_subprocess.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_post_init_passes_codex_unix_url_to_app_server_process(tmp_path):
+    storage = AppStorage()
+    state = AppState(storage=storage)
+    socket_url = f"unix://{tmp_path / 'codex.sock'}"
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=2,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="unix",
+                app_server_url=socket_url,
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
+    bot = MagicMock()
+    bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=3169))
+    bot.send_message = AsyncMock()
+
+    proc = MagicMock()
+    proc._proc = MagicMock()
+    proc.start = AsyncMock(return_value=socket_url)
+    mirror_task = MagicMock()
+
+    with patch(
+        "plugins.providers.builtin.codex.python.runtime.AppServerProcess",
+        return_value=proc,
+    ) as process_mock, patch(
+        "plugins.providers.builtin.codex.python.runtime.connect_adapter_with_retry",
+        new=AsyncMock(),
+    ) as connect_mock, patch(
+        "plugins.providers.builtin.codex.python.runtime.ensure_codex_remote_message_proxy",
+        new=AsyncMock(return_value=f"unix://{tmp_path / 'proxy.sock'}"),
+    ) as proxy_mock, patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.start_codex_tui_sync_loop",
+    ) as sync_mock, patch(
+        "plugins.providers.builtin.codex.python.tui_realtime_mirror.start_codex_tui_realtime_mirror_loop",
+        return_value=mirror_task,
+    ) as mirror_mock, patch(
+        "core.lifecycle.save_storage",
+    ), patch.object(
+        LifecycleManager,
+        "_cleanup_archived_threads",
+        new=AsyncMock(),
+    ):
+        await manager.post_init(SimpleNamespace(bot=bot))
+
+    process_mock.assert_called_once_with(
+        codex_bin="codex",
+        port=0,
+        protocol="unix",
+        listen_url=socket_url,
+    )
+    connect_mock.assert_awaited_once_with(manager, bot, proc, socket_url)
+    proxy_mock.assert_awaited_once_with(state, socket_url)
+    sync_mock.assert_not_called()
+    mirror_mock.assert_called_once_with(state, bot, cfg.group_chat_id)
+    assert manager.get_tui_sync_task("codex") is None
+    assert manager.get_tui_mirror_task("codex") is mirror_task
+    assert codex_state.get_runtime(state).mirror_task is mirror_task
 
 
 @pytest.mark.asyncio
@@ -1532,6 +1727,51 @@ async def test_connect_adapter_with_retry_logs_process_snapshot_on_disconnect(ca
     assert "app-server 连接断开，准备重连" in caplog.text
     assert "fatal reset" in caplog.text
     schedule_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_connect_adapter_with_retry_schedules_reconnect_after_initial_failure(caplog):
+    storage = AppStorage()
+    state = AppState(storage=storage)
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=2,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="unix",
+                app_server_url="unix://",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
+
+    adapter = MagicMock()
+    adapter.connect = AsyncMock(side_effect=TimeoutError("timed out during opening handshake"))
+    adapter.on_disconnect = MagicMock()
+
+    with patch(
+        "plugins.providers.builtin.codex.python.runtime.CodexAdapter",
+        return_value=adapter,
+    ), patch(
+        "plugins.providers.builtin.codex.python.runtime.schedule_reconnect",
+        return_value=True,
+    ) as schedule_mock:
+        with caplog.at_level(logging.ERROR):
+            await codex_runtime.connect_adapter_with_retry(
+                manager,
+                bot=MagicMock(),
+                proc=None,
+                ws_url="unix://",
+            )
+
+    assert "首次连接 app-server 失败，已切换到后台重连" in caplog.text
+    schedule_mock.assert_called_once_with(manager, ANY, None, "unix://")
 
 
 @pytest.mark.asyncio

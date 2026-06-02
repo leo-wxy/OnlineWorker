@@ -105,9 +105,9 @@ class ToolConfig:
     app_server_port: int = 0         # 0 = 动态端口（app-server 自选），>0 = 固定端口
     app_server_url: str = ""         # 若设置，优先连接外部 app-server
     codex_bin: str = "codex"         # codex 可执行文件路径（用于启动 app-server）
-    protocol: str = "ws"             # 协议类型："stdio" / "ws" / "http"
+    protocol: str = "ws"             # 协议类型："stdio" / "ws" / "unix" / "http"
     owner_transport: str = ""        # owner 主链实际使用的 transport
-    live_transport: str = ""         # live 辅助链路语义："owner_bridge" / "shared_ws" / 其他 provider 原生 transport
+    live_transport: str = ""         # live 辅助链路语义："owner_bridge" / "shared_ws" / "shared_unix" / 其他 provider 原生 transport
     control_mode: str = "app"        # 交互主控模式："app" / "tui" / "hybrid"
     capabilities: dict[str, Any] = field(default_factory=dict)
     process: dict[str, Any] = field(default_factory=dict)
@@ -589,6 +589,8 @@ def _resolve_protocol(
         return explicit_protocol
     if app_server_url.startswith("ws://") or app_server_url.startswith("wss://"):
         return "ws"
+    if app_server_url.startswith("unix://"):
+        return "unix"
     if app_server_url.startswith("http://") or app_server_url.startswith("https://"):
         return "http"
     if tool_name == "codex":
@@ -602,14 +604,14 @@ def _resolve_protocol(
 
 def _normalize_transport_name(value: Any) -> str:
     normalized = str(value or "").strip().lower()
-    if normalized in {"stdio", "ws", "http"}:
+    if normalized in {"stdio", "ws", "unix", "http"}:
         return normalized
     return ""
 
 
 def _normalize_live_transport_name(value: Any) -> str:
     normalized = str(value or "").strip().lower()
-    if normalized in {"owner_bridge", "shared_ws", "stdio", "ws", "http"}:
+    if normalized in {"owner_bridge", "shared_ws", "shared_unix", "stdio", "ws", "unix", "http"}:
         return normalized
     return ""
 
@@ -631,6 +633,8 @@ def _default_live_transport(
     if tool_name == "codex":
         if owner_transport == "ws" and control_mode in {"app", "hybrid"}:
             return "shared_ws"
+        if owner_transport == "unix" and control_mode in {"app", "hybrid"}:
+            return "shared_unix"
         return "owner_bridge"
     return owner_transport or _default_owner_transport(tool_name)
 
@@ -652,6 +656,7 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
 
     app_server_url = (
         transport.get("app_server_url")
+        or transport.get("url")
         or raw.get("app_server_url")
         or defaults["app_server_url"]
         or ""
@@ -659,11 +664,29 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
     raw_port = int(
         transport.get("app_server_port", raw.get("app_server_port", defaults["app_server_port"])) or 0
     )
-    explicit_protocol = str(
+    raw_explicit_protocol = (
         transport.get("type")
         or raw.get("protocol")
         or ""
-    ).strip()
+    )
+    explicit_protocol = str(raw_explicit_protocol or "").strip()
+    explicit_url_protocol = _resolve_protocol(
+        tool_name,
+        explicit_protocol="",
+        app_server_url=app_server_url,
+        raw_port=0,
+        default_protocol="",
+        legacy=False,
+    )
+    if (
+        tool_name == "codex"
+        and explicit_url_protocol
+        and not transport.get("type")
+        and not raw.get("owner_transport")
+        and "protocol" in defaults
+        and raw.get("protocol") == defaults.get("protocol")
+    ):
+        explicit_protocol = ""
     explicit_owner_transport = _normalize_transport_name(
         raw.get("owner_transport") or transport.get("owner")
     )
@@ -694,10 +717,12 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
     if tool_name == "codex" and protocol == "stdio":
         app_server_port = 0
         app_server_url = ""
+    elif tool_name == "codex" and protocol == "unix":
+        app_server_port = 0
 
     if explicit_control_mode in ("app", "tui", "hybrid"):
         control_mode = explicit_control_mode
-    elif tool_name == "codex" and protocol == "ws":
+    elif tool_name == "codex" and protocol in {"ws", "unix"}:
         control_mode = "app"
     else:
         control_mode = str(defaults["control_mode"])

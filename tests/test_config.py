@@ -752,6 +752,98 @@ tools:
     assert codex.control_mode == "app"
 
 
+def test_load_config_accepts_explicit_codex_unix_transport(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        """
+schema_version: 2
+providers:
+  codex:
+    managed: true
+    autostart: true
+    bin: "codex"
+    transport:
+      type: "unix"
+      app_server_url: "unix:///tmp/onlineworker-codex.sock"
+    control_mode: "app"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TELEGRAM_TOKEN", "123:abc")
+    monkeypatch.setenv("ALLOWED_USER_ID", "456789")
+    monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
+    from config import load_config
+
+    cfg = load_config(str(p))
+    codex = cfg.get_tool("codex")
+    assert codex is not None
+    assert codex.protocol == "unix"
+    assert codex.owner_transport == "unix"
+    assert codex.live_transport == "shared_unix"
+    assert codex.app_server_port == 0
+    assert codex.app_server_url == "unix:///tmp/onlineworker-codex.sock"
+    assert codex.control_mode == "app"
+
+
+def test_load_config_infers_codex_unix_transport_from_app_server_url(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        """
+schema_version: 2
+providers:
+  codex:
+    managed: true
+    autostart: true
+    bin: "codex"
+    transport:
+      app_server_url: "unix:///tmp/onlineworker-codex.sock"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TELEGRAM_TOKEN", "123:abc")
+    monkeypatch.setenv("ALLOWED_USER_ID", "456789")
+    monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
+    from config import load_config
+
+    cfg = load_config(str(p))
+    codex = cfg.get_tool("codex")
+    assert codex is not None
+    assert codex.protocol == "unix"
+    assert codex.owner_transport == "unix"
+    assert codex.live_transport == "shared_unix"
+    assert codex.app_server_url == "unix:///tmp/onlineworker-codex.sock"
+
+
+def test_load_config_accepts_codex_unix_transport_url_alias(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        """
+schema_version: 2
+providers:
+  codex:
+    managed: true
+    autostart: true
+    bin: "codex"
+    transport:
+      type: "unix"
+      url: "unix:///tmp/onlineworker-codex.sock"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TELEGRAM_TOKEN", "123:abc")
+    monkeypatch.setenv("ALLOWED_USER_ID", "456789")
+    monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
+    from config import load_config
+
+    cfg = load_config(str(p))
+    codex = cfg.get_tool("codex")
+    assert codex is not None
+    assert codex.protocol == "unix"
+    assert codex.owner_transport == "unix"
+    assert codex.live_transport == "shared_unix"
+    assert codex.app_server_url == "unix:///tmp/onlineworker-codex.sock"
+
+
 def test_load_config_keeps_legacy_codex_stdio_default(tmp_path, monkeypatch):
     p = tmp_path / "config.yaml"
     p.write_text(

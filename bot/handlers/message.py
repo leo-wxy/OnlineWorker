@@ -23,6 +23,7 @@ from plugins.providers.builtin.codex.python.tui_bridge import (
     should_route_codex_messages_to_tui_host,
 )
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
+from plugins.providers.builtin.codex.python.approval_policy import SOURCE_REMOTE_PROXY
 from core.providers.registry import classify_provider, get_provider, provider_not_enabled_message
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -766,6 +767,34 @@ def make_callback_handler(state: AppState, group_chat_id: int) -> Callable:
             label, reply_body = _build_provider_approval_reply(approval, action)
 
             try:
+                if approval.tool_type == "codex" and approval.approval_source == SOURCE_REMOTE_PROXY:
+                    resolved = state.resolve_pending_approval_decision(
+                        "codex",
+                        str(approval.request_id),
+                        action,
+                        message="TG 已拒绝" if action == "exec_deny" else "",
+                    )
+                    if not resolved:
+                        state.pending_approvals.pop(msg_id, None)
+                        await query.edit_message_text(  # type: ignore[union-attr]
+                            "❌ 回复授权失败：remote proxy 已不再等待该审批。",
+                        )
+                        logger.warning(
+                            f"[approval] codex_remote_proxy pending decision missing "
+                            f"request_id={approval.request_id} action={action} msg_id={msg_id}"
+                        )
+                        return
+                    state.pending_approvals.pop(msg_id, None)
+                    await query.edit_message_text(  # type: ignore[union-attr]
+                        _approval_completion_text(label, approval),
+                        parse_mode="Markdown",
+                    )
+                    logger.info(
+                        f"[approval] codex_remote_proxy request_id={approval.request_id} "
+                        f"action={action} msg_id={msg_id}"
+                    )
+                    return
+
                 tool_name = approval.tool_type or state.get_tool_for_workspace(approval.workspace_id) or ""
                 unavailable = _provider_unavailable_message(state, tool_name) if tool_name else None
                 if unavailable:

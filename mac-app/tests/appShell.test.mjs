@@ -169,7 +169,6 @@ test("provider settings keeps civility mode controls sealed while rewrite is par
   assert.match(panel, /abusive_language_normalization/);
   assert.match(panel, /texts\.civilityModeTitle/);
   assert.match(panel, /provider\?\.messageHooks\?\.abusiveLanguageNormalization\.enabled/);
-  assert.equal(panel.includes("navigator.clipboard.writeText"), false);
   assert.match(types, /civilityModeTitle:\s*string/);
   assert.match(types, /civilityModeDescription:\s*string/);
   assert.match(codexPlugin, /external_cli:\s*remote_proxy/);
@@ -192,6 +191,7 @@ test("provider settings exposes external CLI rewrite configuration in the app", 
   assert.match(types, /export interface ProviderExternalCliConfig/);
   assert.match(types, /externalCli:\s*ProviderExternalCliConfig;/);
   assert.match(panel, /set_provider_cli_config/);
+  assert.match(panel, /navigator\.clipboard\.writeText/);
   assert.equal(panel.includes("externalCliUpstreamBaseUrl"), false);
   assert.equal(panel.includes("draft.upstreamBaseUrl"), false);
   assert.match(panel, /externalCliLauncherWrapsClaude/);

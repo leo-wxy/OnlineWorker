@@ -14,9 +14,22 @@ from core.providers.lifecycle_runtime import _save_storage_via_lifecycle
 from core.providers.message_runtime import _interrupt_active_turn
 from core.providers.thread_runtime import interrupt_default_thread
 from plugins.providers.builtin.codex.python.adapter import CodexAdapter
+from plugins.providers.builtin.codex.python.approval_policy import (
+    SOURCE_REMOTE_PROXY,
+    SOURCE_TUI_HOST,
+    build_mirror_approval_policy,
+    is_app_server_approval_source,
+)
+from plugins.providers.builtin.codex.python.interactions import parse_approval_request
 from plugins.providers.builtin.codex.python.process import AppServerProcess
+from plugins.providers.builtin.codex.python.remote_proxy import ensure_codex_remote_message_proxy
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
 from plugins.providers.builtin.codex.python import storage_runtime
+from plugins.providers.builtin.codex.python.transport import (
+    is_default_unix_endpoint,
+    is_unix_endpoint,
+    unix_socket_accepting,
+)
 from plugins.providers.builtin.codex.python.tui_host_protocol import (
     clear_stale_host_artifacts,
     read_host_status,
@@ -31,6 +44,7 @@ logger = logging.getLogger(__name__)
 CODEX_RECONNECT_GRACE_SECONDS = 3.0
 CODEX_RECONNECT_POLL_SECONDS = 0.1
 DEFAULT_REASONING_OPTIONS = ["minimal", "low", "medium", "high", "xhigh"]
+CODEX_APP_SERVER_RESOLVED_METHOD = "serverRequest/resolved"
 
 
 def log_app_server_process_snapshot(
@@ -44,6 +58,179 @@ def log_app_server_process_snapshot(
         logger.warning("[app-server-process] %s %s", reason, proc.diagnostics_snapshot())
     except Exception as e:
         logger.debug("记录 app-server 进程诊断失败：%s", e)
+
+
+def _request_key(value) -> str:
+    return str(value or "").strip()
+
+
+def _is_remote_proxy_mirror_for_request(
+    approval,
+    request_id: str,
+    *,
+    thread_id: str = "",
+    command: str = "",
+) -> bool:
+    if str(getattr(approval, "approval_source", "") or "") != SOURCE_REMOTE_PROXY:
+        return False
+    proxy_request_id = _request_key(getattr(approval, "request_id", ""))
+    if not proxy_request_id.rsplit(":", 1)[-1] == request_id:
+        return False
+    if not thread_id and not command:
+        return False
+    approval_thread_id = str(getattr(approval, "thread_id", "") or "").strip()
+    if thread_id and approval_thread_id != thread_id:
+        return False
+    approval_command = str(getattr(approval, "cmd", "") or "").strip()
+    if command and approval_command != command:
+        return False
+    return True
+
+
+def _is_pending_codex_app_server_approval(
+    approval,
+    request_id: str,
+    *,
+    thread_id: str = "",
+    command: str = "",
+) -> bool:
+    if str(getattr(approval, "tool_type", "") or "") != "codex":
+        return False
+    source = str(getattr(approval, "approval_source", "") or "")
+    if _request_key(getattr(approval, "request_id", "")) == request_id:
+        return is_app_server_approval_source(source)
+    return _is_remote_proxy_mirror_for_request(
+        approval,
+        request_id,
+        thread_id=thread_id,
+        command=command,
+    )
+
+
+def _approval_identity(params: dict, request_id) -> tuple[str, str]:
+    if not isinstance(params, dict):
+        return "", ""
+    info = parse_approval_request(params, request_id=request_id, provider_id="codex")
+    return str(info.thread_id or "").strip(), str(info.command or "").strip()
+
+
+def has_pending_codex_app_server_approval(
+    state: "AppState",
+    request_id,
+    params: dict | None = None,
+) -> bool:
+    request_key = _request_key(request_id)
+    if not request_key:
+        return False
+    thread_id, command = _approval_identity(params or {}, request_id)
+    return any(
+        _is_pending_codex_app_server_approval(
+            approval,
+            request_key,
+            thread_id=thread_id,
+            command=command,
+        )
+        for approval in state.pending_approvals.values()
+    )
+
+
+async def mark_codex_app_server_approval_resolved(
+    state: "AppState",
+    bot,
+    group_chat_id: int,
+    *,
+    request_id,
+    thread_id: str = "",
+) -> int:
+    request_key = _request_key(request_id)
+    if not request_key:
+        return 0
+
+    resolved: list[tuple[int, object]] = []
+    for msg_id, approval in list(state.pending_approvals.items()):
+        if _is_pending_codex_app_server_approval(
+            approval,
+            request_key,
+            thread_id=thread_id,
+        ):
+            resolved.append((msg_id, approval))
+            state.pending_approvals.pop(msg_id, None)
+
+    for msg_id, approval in resolved:
+        command = str(getattr(approval, "cmd", "") or "").strip()
+        lines = ["⚠️ 此 Codex 授权请求已由 Codex 端处理或清理，TG 按钮已失效。"]
+        if command:
+            lines.append("")
+            lines.append(f"命令：{command[:200]}")
+        try:
+            await bot.edit_message_text(
+                chat_id=group_chat_id,
+                message_id=msg_id,
+                text="\n".join(lines),
+            )
+        except Exception as e:
+            logger.debug(
+                "[codex-approval-sync] 更新已失效 TG 授权消息失败 request=%s msg=%s thread=%s err=%s",
+                request_key,
+                msg_id,
+                thread_id or str(getattr(approval, "thread_id", "") or ""),
+                e,
+            )
+
+    if resolved:
+        logger.info(
+            "[codex-approval-sync] app-server resolved request=%s thread=%s cleared_tg=%s",
+            request_key,
+            thread_id or "-",
+            len(resolved),
+        )
+    return len(resolved)
+
+
+async def handle_codex_app_server_resolution_event(
+    state: "AppState",
+    bot,
+    group_chat_id: int,
+    method: str,
+    params: dict,
+) -> int:
+    if method != "app-server-event" or not isinstance(params, dict):
+        return 0
+    message = params.get("message")
+    if not isinstance(message, dict):
+        return 0
+    if str(message.get("method") or "") != CODEX_APP_SERVER_RESOLVED_METHOD:
+        return 0
+    payload = message.get("params")
+    if not isinstance(payload, dict):
+        payload = {}
+    request_id = (
+        payload.get("requestId")
+        or payload.get("request_id")
+        or message.get("id")
+    )
+    thread_id = str(payload.get("threadId") or payload.get("thread_id") or "")
+    return await mark_codex_app_server_approval_resolved(
+        state,
+        bot,
+        group_chat_id,
+        request_id=request_id,
+        thread_id=thread_id,
+    )
+
+
+def make_codex_server_request_handler(state: "AppState", fallback_handler):
+    async def on_server_request(method: str, params: dict, request_id: int) -> None:
+        if has_pending_codex_app_server_approval(state, request_id, params):
+            logger.info(
+                "[codex-approval-sync] skip duplicate app-server approval request method=%s request=%s",
+                method,
+                request_id,
+            )
+            return
+        await fallback_handler(method, params, request_id)
+
+    return on_server_request
 
 
 def build_incomplete_reply_text(partial_text: str, reason: str) -> str:
@@ -103,7 +290,7 @@ async def edit_final_reply_with_fallback(
 
 def build_approval_reply(approval, action: str) -> tuple[str, dict]:
     source = str(getattr(approval, "approval_source", "") or "")
-    if source == "codex_tui_host":
+    if source == SOURCE_TUI_HOST:
         if action == "exec_deny":
             return "❌ 已拒绝", {"host_action": "exec_deny"}
         if action == "exec_allow_always":
@@ -656,6 +843,14 @@ def can_route_cli_approval_to_tui_host(state, thread_id: str) -> bool:
         return False
     return str(status.get("active_thread_id") or "").strip() == thread_id
 
+async def mirror_approval_policy(state, request: dict, ws_info, thread_info) -> dict:
+    thread_id = str(request.get("thread_id") or "").strip()
+    return build_mirror_approval_policy(
+        request,
+        thread_id=thread_id,
+        can_route_to_tui_host=can_route_cli_approval_to_tui_host(state, thread_id),
+    )
+
 
 async def try_route_owner_bridge_send(state, ws_info, thread_info, *, text: str):
     if not text:
@@ -1109,8 +1304,24 @@ async def setup_connection(manager, bot, adapter, **kwargs) -> None:
     if hasattr(adapter, "enable_thread_policy_lookup"):
         adapter.enable_thread_policy_lookup(True)
     event_handler = make_event_handler(manager.state, bot, manager.gid)
-    adapter.on_event(event_handler)
-    adapter.on_server_request(make_server_request_handler(manager.state, bot, manager.gid))
+
+    async def codex_event_handler(method: str, params: dict) -> None:
+        await handle_codex_app_server_resolution_event(
+            manager.state,
+            bot,
+            manager.gid,
+            method,
+            params,
+        )
+        await event_handler(method, params)
+
+    adapter.on_event(codex_event_handler)
+    adapter.on_server_request(
+        make_codex_server_request_handler(
+            manager.state,
+            make_server_request_handler(manager.state, bot, manager.gid),
+        )
+    )
     await prime_thread_mappings(manager, adapter)
 
     if not manager.storage.workspaces:
@@ -1221,6 +1432,15 @@ async def probe_url(url: str, timeout: float = 1.5) -> bool:
 async def resolve_connection_target(tool_cfg) -> Optional[str]:
     app_server_url = getattr(tool_cfg, "app_server_url", "") or ""
     if app_server_url:
+        if is_default_unix_endpoint(app_server_url):
+            logger.info("codex 使用托管默认 unix app-server：%s", app_server_url)
+            return None
+        if is_unix_endpoint(app_server_url):
+            if unix_socket_accepting(app_server_url):
+                logger.info("codex 使用外部 unix app-server：%s", app_server_url)
+                return app_server_url
+            logger.info("codex 指定 unix app-server 未运行，将启动托管实例：%s", app_server_url)
+            return None
         logger.info("codex 使用外部 app-server：%s", app_server_url)
         return app_server_url
 
@@ -1261,7 +1481,8 @@ async def connect_adapter_with_retry(
             asyncio.create_task(monitor_process_health(manager, bot, proc, ws_url))
     except Exception as e:
         logger.error("app-server 连接失败：%s", e)
-        logger.error("首次连接 app-server 失败，以无连接模式运行")
+        logger.error("首次连接 app-server 失败，已切换到后台重连")
+        schedule_reconnect(manager, bot, proc, ws_url)
 
 
 async def reconnect_loop(
@@ -1445,6 +1666,7 @@ async def start_runtime(manager, bot, tool_cfg) -> None:
             codex_bin=tool_cfg.codex_bin,
             port=tool_cfg.app_server_port,
             protocol=tool_cfg.protocol,
+            **({"listen_url": tool_cfg.app_server_url} if tool_cfg.protocol == "unix" else {}),
         )
         ws_url = await proc.start()
         manager.state.app_server_proc = proc
@@ -1454,11 +1676,30 @@ async def start_runtime(manager, bot, tool_cfg) -> None:
     else:
         logger.info("codex 运行于 App 主控模式：App 持有常驻 owner adapter；TG 走实时链路，TUI 仅按需 attach")
     await connect_adapter_with_retry(manager, bot, proc, ws_url)
+    if is_unix_endpoint(ws_url):
+        try:
+            proxy_url = await ensure_codex_remote_message_proxy(manager.state, ws_url)
+            logger.info("[codex] 已启动 Codex remote Unix proxy：%s", proxy_url)
+        except Exception:
+            logger.warning(
+                "[codex] 启动 Codex remote Unix proxy 失败，外部 CLI 将只能直连 app-server：%s",
+                ws_url,
+                exc_info=True,
+            )
     if uses_codex_shared_live_transport(manager.state):
-        sync_task = manager.get_tui_sync_task("codex")
-        if sync_task is None or sync_task.done():
-            sync_task = start_codex_tui_sync_loop(manager.state, bot, manager.gid)
-            manager.set_tui_sync_task("codex", sync_task)
+        # app-server live events already stream final replies into Telegram.
+        # The legacy final-reply polling loop reads the same session file and
+        # can send a second copy, so keep only the realtime mirror fallback here.
+        mirror_task = manager.get_tui_mirror_task("codex")
+        if mirror_task is None or mirror_task.done():
+            mirror_task = start_codex_tui_realtime_mirror_loop(
+                manager.state,
+                bot,
+                manager.gid,
+            )
+            manager.set_tui_mirror_task("codex", mirror_task)
+            codex_state.get_runtime(manager.state).mirror_task = mirror_task
+            touch_codex_tui_watch_state(manager.state)
     elif control_mode == "app":
         mirror_task = manager.get_tui_mirror_task("codex")
         if mirror_task is None or mirror_task.done():

@@ -24,6 +24,8 @@ function supportsClaudeLauncher(providerId: string) {
 }
 
 const CIVILITY_MODE_SEALED = true;
+const CODEX_REMOTE_PROXY_ALIAS =
+  "alias codexR='/opt/homebrew/bin/codex --remote \"unix:///Users/wxy/Library/Application Support/OnlineWorker/codex_remote_proxy.sock\" --cd \"$(pwd)\"'";
 
 interface ProviderCliDraft {
   bin: string;
@@ -55,6 +57,28 @@ function Toggle({
           checked ? "translate-x-5" : "translate-x-1"
         }`}
       />
+    </button>
+  );
+}
+
+function CopyCommandButton({ text }: { text: string }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={() => void copy()}
+      className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 transition hover:border-blue-200 hover:text-blue-700"
+      title={copied ? t.common.copied : t.common.copy}
+    >
+      {copied ? t.common.copied : t.common.copy}
     </button>
   );
 }
@@ -250,6 +274,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
           const cliAvailable = cliAvailability[setting.id] !== false;
           const canEnable = setting.enabled || cliAvailable;
           const supportsExternalCliRewrite = Boolean(provider?.capabilities.messageRewrite?.externalCli);
+          const showCodexRemoteProxyAlias = provider?.id === "codex";
           const supportsClaudeCliLauncher = supportsClaudeLauncher(setting.id);
           const supportsMessageRewrite = !CIVILITY_MODE_SEALED && Boolean(
             provider?.capabilities.messageRewrite?.appSend ||
@@ -337,43 +362,61 @@ export function ProviderSettingsPanel({ mode }: Props) {
                 )}
               </div>
 
-              {provider && supportsExternalCliRewrite && (
+              {provider && (supportsExternalCliRewrite || showCodexRemoteProxyAlias) && (
                 <div className="mt-5 grid gap-3 rounded-xl border border-slate-200/80 bg-white/70 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <h4 className="text-sm font-bold text-gray-900">{texts.externalCliTitle}</h4>
                     {cliBusy && <span className="text-xs font-semibold text-blue-600">{texts.saving}</span>}
                   </div>
-                  <div className="grid gap-3">
-                    <label className="grid gap-1.5 text-xs font-bold text-slate-600">
-                      {texts.externalCliBin}
-                      <input
-                        value={draft.bin}
-                        disabled={cliBusy}
-                        onChange={(event) => updateCliDraft(setting.id, { bin: event.currentTarget.value })}
-                        className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-mono text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
-                      />
-                    </label>
-                  </div>
-                  <div className="flex flex-wrap items-center justify-end gap-3">
-                    {supportsClaudeCliLauncher && (
-                      <label className={`mr-auto flex items-center gap-3 ${cliBusy ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
-                        <Toggle
-                          checked={draft.launcherWrapsClaude}
-                          disabled={cliBusy}
-                          onChange={(checked) => updateCliDraft(setting.id, { launcherWrapsClaude: checked })}
-                        />
-                        <span className="text-sm font-semibold text-gray-700">{texts.externalCliLauncherWrapsClaude}</span>
-                      </label>
-                    )}
-                    <button
-                      type="button"
-                      disabled={cliBusy || !draft.bin.trim()}
-                      onClick={() => void saveProviderCliConfig(provider)}
-                      className="h-9 rounded-lg bg-slate-900 px-3 text-sm font-bold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                    >
-                      {texts.externalCliSave}
-                    </button>
-                  </div>
+                  {showCodexRemoteProxyAlias && (
+                    <div className="grid gap-2 border-l-2 border-blue-200 pl-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-blue-900">{texts.externalCliCodexAliasTitle}</div>
+                          <div className="mt-0.5 text-xs font-medium text-blue-700">{texts.externalCliCodexAliasDescription}</div>
+                        </div>
+                        <CopyCommandButton text={CODEX_REMOTE_PROXY_ALIAS} />
+                      </div>
+                      <code className="block break-all rounded-md bg-slate-950 px-2.5 py-2 text-xs font-semibold text-slate-100">
+                        {CODEX_REMOTE_PROXY_ALIAS}
+                      </code>
+                    </div>
+                  )}
+                  {supportsExternalCliRewrite && (
+                    <>
+                      <div className="grid gap-3">
+                        <label className="grid gap-1.5 text-xs font-bold text-slate-600">
+                          {texts.externalCliBin}
+                          <input
+                            value={draft.bin}
+                            disabled={cliBusy}
+                            onChange={(event) => updateCliDraft(setting.id, { bin: event.currentTarget.value })}
+                            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-mono text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                          />
+                        </label>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-end gap-3">
+                        {supportsClaudeCliLauncher && (
+                          <label className={`mr-auto flex items-center gap-3 ${cliBusy ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
+                            <Toggle
+                              checked={draft.launcherWrapsClaude}
+                              disabled={cliBusy}
+                              onChange={(checked) => updateCliDraft(setting.id, { launcherWrapsClaude: checked })}
+                            />
+                            <span className="text-sm font-semibold text-gray-700">{texts.externalCliLauncherWrapsClaude}</span>
+                          </label>
+                        )}
+                        <button
+                          type="button"
+                          disabled={cliBusy || !draft.bin.trim()}
+                          onClick={() => void saveProviderCliConfig(provider)}
+                          className="h-9 rounded-lg bg-slate-900 px-3 text-sm font-bold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                        >
+                          {texts.externalCliSave}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
