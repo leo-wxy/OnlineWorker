@@ -389,9 +389,6 @@ async def sync_watched_thread_once(
             )
         elif item["phase"] == "final_answer":
             saw_activity = True
-            if thread_id in state.streaming_turns and not watch.turn_started_sent:
-                watch.last_final_text = item["text"]
-                continue
             await _apply_final_update(
                 state,
                 handler,

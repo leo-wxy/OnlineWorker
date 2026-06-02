@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
@@ -3320,6 +3321,95 @@ async def test_schedule_codex_final_reply_skips_when_realtime_mirror_already_syn
         await task
 
     bot.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_realtime_mirror_final_answer_with_existing_streaming_turn_sends_summary(tmp_path):
+    from bot.events import make_event_handler
+    from plugins.providers.builtin.codex.python.tui_realtime_mirror import (
+        sync_watched_thread_once,
+    )
+    from core.provider_runtime_state import ProviderWatchState
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=50,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
+    storage.workspaces["codex:onlineWorker"] = ws
+    state = AppState(storage=storage)
+    state.streaming_turns["tid-1"] = StreamingTurn(
+        message_id=5001,
+        topic_id=100,
+        buffer="⏳ 思考中...",
+        placeholder_deleted=True,
+    )
+
+    session_file = tmp_path / "session.jsonl"
+    session_file.write_text(
+        json.dumps(
+            {
+                "type": "response_item",
+                "timestamp": "2026-04-04T05:00:10Z",
+                "payload": {
+                    "role": "assistant",
+                    "phase": "final_answer",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "已修复当前会话同步，完成通知会使用最终回复摘要。",
+                        }
+                    ],
+                },
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=5002))
+    bot.edit_message_text = AsyncMock(return_value=True)
+    bot.delete_message = AsyncMock()
+
+    class RecordingNotificationRouter:
+        def __init__(self):
+            self.events = []
+
+        async def notify(self, event):
+            self.events.append(event)
+            return SimpleNamespace(sent=True, channels=("recording",), reason="")
+
+    notifications = RecordingNotificationRouter()
+    handler = make_event_handler(
+        state,
+        bot,
+        GROUP_CHAT_ID,
+        notification_router=notifications,
+    )
+    watch = ProviderWatchState(
+        workspace_id="codex:onlineWorker",
+        topic_id=100,
+        session_file=str(session_file),
+        last_offset=0,
+        active_until=999999999.0,
+    )
+
+    await sync_watched_thread_once(state, handler, "tid-1", watch)
+
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.status == "completed"
+    assert event.message == "完成摘要：已修复当前会话同步，完成通知会使用最终回复摘要。"
+    assert state.streaming_turns.get("tid-1") is None
+    assert codex_state.get_runtime(state).last_synced_assistant["tid-1"] == (
+        "2026-04-04T05:00:10Z\n已修复当前会话同步，完成通知会使用最终回复摘要。"
+    )
 
 
 @pytest.mark.asyncio
