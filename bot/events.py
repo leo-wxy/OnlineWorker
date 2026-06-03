@@ -839,6 +839,19 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             return True
         return str(ctx.event_params.get("source") or "").strip() == "tui-mirror"
 
+    def _codex_final_reply_already_synced(
+        thread_id: Optional[str],
+        event_turn_id: Optional[str] = None,
+    ) -> bool:
+        if not thread_id:
+            return False
+        run = codex_state.get_current_run(state, thread_id)
+        if run is None or not run.final_reply_synced_to_tg:
+            return False
+        if event_turn_id and run.turn_id and str(run.turn_id) != str(event_turn_id):
+            return False
+        return True
+
     def _completed_reply_text_from_stream(st: StreamingTurn | None) -> str:
         if st is None:
             return ""
@@ -1420,6 +1433,26 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 phase = "final_answer"
             if not text or not thread_id:
                 return
+            st = state.streaming_turns.get(thread_id)
+            ws = _resolve_workspace_info(state, ctx.ws_daemon_id, thread_id)
+            topic_id = _resolve_topic_id(state, ctx.ws_daemon_id, thread_id, ctx.event_params)
+            prefix = "🤖" if phase == "final_answer" else "💭"
+            delivered_to_tg = False
+
+            if (
+                phase == "final_answer"
+                and ctx.event.provider == "codex"
+                and st is None
+                and _codex_final_reply_already_synced(thread_id, event_turn_id)
+            ):
+                codex_state.mark_run(state, thread_id=thread_id, status="completed")
+                logger.info(
+                    "[event→TG] 跳过已同步 codex final duplicate thread=%s turn=%s",
+                    thread_id[:8],
+                    (event_turn_id or "")[:12] or "?",
+                )
+                return
+
             if phase == "final_answer" and not notification_status:
                 notification_status, notification_message = _notification_for_turn_status(
                     "completed",
@@ -1433,12 +1466,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                     notification_task_name_override,
                     notification_task_summary_override,
                 ) = await _notification_for_completed_reply_text(ctx, thread_id, text)
-
-            st = state.streaming_turns.get(thread_id)
-            ws = _resolve_workspace_info(state, ctx.ws_daemon_id, thread_id)
-            topic_id = _resolve_topic_id(state, ctx.ws_daemon_id, thread_id, ctx.event_params)
-            prefix = "🤖" if phase == "final_answer" else "💭"
-            delivered_to_tg = False
 
             if st is not None and _is_stale_turn_event(st, event_turn_id):
                 logger.info(
@@ -1682,6 +1709,13 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             )
         if st is None:
             if is_tui_mirror_completion:
+                return
+            if ctx.event.provider == "codex" and _codex_final_reply_already_synced(thread_id, event_turn_id):
+                logger.info(
+                    "[notification] 跳过已同步 codex completion duplicate thread=%s turn=%s",
+                    thread_id[:8],
+                    (event_turn_id or "")[:12] or "?",
+                )
                 return
             notification_status, notification_message = _notification_for_turn_status(run_status, turn, ctx)
             await _emit_notification(

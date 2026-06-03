@@ -1261,6 +1261,94 @@ async def test_final_answer_item_completed_sends_task_notification_and_dedupes_l
 
 
 @pytest.mark.asyncio
+async def test_codex_delayed_final_events_skip_when_reply_already_synced(monkeypatch):
+    async def fail_if_notification_summary_runs(**kwargs):
+        raise AssertionError("duplicate final item should not generate notification summary")
+
+    monkeypatch.setattr(
+        "bot.events._notification_result_task_override_with_ai",
+        fail_if_notification_summary_runs,
+    )
+
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-123"] = ThreadInfo(
+        thread_id="tid-123",
+        topic_id=3794,
+        preview="重复 final 去重验证",
+        archived=False,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    run = codex_state.start_run(
+        state,
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-123",
+        turn_id="turn-new",
+    )
+    codex_state.mark_run(
+        state,
+        thread_id="tid-123",
+        final_reply_synced_to_tg=True,
+        status="completed",
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "item/completed",
+                "params": {
+                    "threadId": "tid-123",
+                    "turnId": "turn-new",
+                    "item": {
+                        "type": "agentMessage",
+                        "threadId": "tid-123",
+                        "phase": "final_answer",
+                        "text": "这个 delayed final 不应该再发送",
+                    },
+                },
+            },
+        },
+    )
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "tid-123",
+                    "turnId": "turn-new",
+                    "turn": {"id": "turn-new", "status": "completed"},
+                },
+            },
+        },
+    )
+
+    bot.send_message.assert_not_awaited()
+    bot.edit_message_text.assert_not_awaited()
+    assert len(notifications.events) == 0
+    assert run.final_reply_synced_to_tg is True
+    assert run.status == "completed"
+
+
+@pytest.mark.asyncio
 async def test_tui_mirror_completed_with_final_buffer_uses_summary_notification(monkeypatch):
     async def fake_run_ai_scenario(scenario_id, variables):
         return SimpleNamespace(ok=False, data={})
