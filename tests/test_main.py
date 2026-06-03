@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -57,7 +58,7 @@ class _FakeApplicationBuilder:
         return _FakeApp(self._run_polling_calls)
 
 
-def _stub_main_dependencies(monkeypatch, run_polling_calls, cfg, dummy_filter):
+def _stub_main_dependencies(monkeypatch, run_polling_calls, cfg, dummy_filter, *, lifecycle_factory=None):
     monkeypatch.setattr(main, "_acquire_flock", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main, "load_config", lambda data_dir=None: cfg)
     monkeypatch.setattr(main, "load_storage", AppStorage)
@@ -77,7 +78,13 @@ def _stub_main_dependencies(monkeypatch, run_polling_calls, cfg, dummy_filter):
     monkeypatch.setattr(main, "MessageHandler", lambda *args, **kwargs: object())
     monkeypatch.setattr(main, "CallbackQueryHandler", lambda *args, **kwargs: object())
     monkeypatch.setattr(main, "TypeHandler", lambda *args, **kwargs: object())
-    monkeypatch.setattr(main, "LifecycleManager", lambda *args, **kwargs: SimpleNamespace(post_init=None, post_shutdown=None))
+    if lifecycle_factory is None:
+        lifecycle_factory = lambda *args, **kwargs: SimpleNamespace(
+            pre_telegram_init=AsyncMock(),
+            post_init=None,
+            post_shutdown=None,
+        )
+    monkeypatch.setattr(main, "LifecycleManager", lifecycle_factory)
     monkeypatch.setattr(main.time, "sleep", lambda *_args, **_kwargs: None)
 
     for factory_name in (
@@ -126,16 +133,18 @@ def test_main_retry_path_keeps_event_loop_open(monkeypatch):
             "drop_pending_updates": True,
             "close_loop": False,
             "allowed_updates": ["message", "callback_query"],
+            "bootstrap_retries": -1,
         },
         {
             "drop_pending_updates": True,
             "close_loop": False,
             "allowed_updates": ["message", "callback_query"],
+            "bootstrap_retries": -1,
         },
     ]
 
 
-def test_main_disables_env_proxy_for_telegram_request(monkeypatch):
+def test_main_uses_telegram_proxy_settings_for_request(monkeypatch):
     run_polling_calls = []
     request_calls = []
     dummy_filter = _DummyFilter()
@@ -145,6 +154,8 @@ def test_main_disables_env_proxy_for_telegram_request(monkeypatch):
         allowed_user_id=123,
         group_chat_id=456,
         log_level="INFO",
+        telegram_proxy_url="socks5://127.0.0.1:7890",
+        telegram_trust_env=True,
     )
 
     def fake_request(**kwargs):
@@ -157,7 +168,115 @@ def test_main_disables_env_proxy_for_telegram_request(monkeypatch):
     main.main()
 
     assert len(request_calls) == 4
-    assert all(call["httpx_kwargs"] == {"trust_env": False} for call in request_calls)
+    assert all(
+        call["httpx_kwargs"] == {
+            "trust_env": True,
+            "proxy": "socks5://127.0.0.1:7890",
+        }
+        for call in request_calls
+    )
+
+
+def test_main_prestarts_provider_runtime_before_telegram_polling(monkeypatch):
+    run_polling_calls = []
+    lifecycle_events = []
+    dummy_filter = _DummyFilter()
+
+    cfg = SimpleNamespace(
+        telegram_token="token",
+        allowed_user_id=123,
+        group_chat_id=456,
+        log_level="INFO",
+    )
+
+    class ObservedLifecycle:
+        post_init = None
+        post_shutdown = None
+
+        async def pre_telegram_init(self, app):
+            lifecycle_events.append(("pre", app))
+
+    class ObservedApp(_FakeApp):
+        def run_polling(self, **kwargs):
+            lifecycle_events.append(("poll", kwargs))
+            super().run_polling(**kwargs)
+
+    class ObservedApplicationBuilder(_FakeApplicationBuilder):
+        def build(self):
+            return ObservedApp(self._run_polling_calls)
+
+    monkeypatch.setattr(main, "HTTPXRequest", lambda **kwargs: object())
+    _stub_main_dependencies(
+        monkeypatch,
+        run_polling_calls,
+        cfg,
+        dummy_filter,
+        lifecycle_factory=lambda *args, **kwargs: ObservedLifecycle(),
+    )
+    monkeypatch.setattr(
+        main,
+        "Application",
+        SimpleNamespace(builder=lambda: ObservedApplicationBuilder(run_polling_calls)),
+    )
+
+    main.main()
+
+    assert lifecycle_events[0][0] == "pre"
+    assert lifecycle_events[1] == (
+        "poll",
+        {
+            "drop_pending_updates": True,
+            "close_loop": False,
+            "allowed_updates": ["message", "callback_query"],
+            "bootstrap_retries": -1,
+        },
+    )
+
+
+def test_provider_session_bridge_read_keeps_workspace_dir_separate(monkeypatch):
+    from core import provider_session_bridge
+
+    observed = {}
+
+    def fake_read_provider_session_rows(
+        provider_id,
+        session_id,
+        *,
+        limit=20,
+        workspace_dir=None,
+        sessions_dir=None,
+    ):
+        observed["provider_id"] = provider_id
+        observed["session_id"] = session_id
+        observed["limit"] = limit
+        observed["workspace_dir"] = workspace_dir
+        observed["sessions_dir"] = sessions_dir
+        return [{"role": "assistant", "content": "history"}]
+
+    monkeypatch.setattr(
+        provider_session_bridge,
+        "read_provider_session_rows",
+        fake_read_provider_session_rows,
+    )
+    monkeypatch.setattr(main, "_print_provider_session_bridge_result", lambda payload: observed.setdefault("payload", payload))
+
+    result = main._run_provider_session_bridge(
+        "codex",
+        "read",
+        session_id="session-1",
+        workspace_dir="/tmp/project",
+        limit=50,
+    )
+
+    assert result == 0
+    assert observed == {
+        "provider_id": "codex",
+        "session_id": "session-1",
+        "limit": 50,
+        "workspace_dir": "/tmp/project",
+        "sessions_dir": None,
+        "payload": [{"role": "assistant", "content": "history"}],
+    }
 
 
 def test_main_uses_stable_default_data_dir_when_flag_missing(monkeypatch, tmp_path):
@@ -204,7 +323,15 @@ def test_main_uses_stable_default_data_dir_when_flag_missing(monkeypatch, tmp_pa
     monkeypatch.setattr(main, "MessageHandler", lambda *args, **kwargs: object())
     monkeypatch.setattr(main, "CallbackQueryHandler", lambda *args, **kwargs: object())
     monkeypatch.setattr(main, "TypeHandler", lambda *args, **kwargs: object())
-    monkeypatch.setattr(main, "LifecycleManager", lambda *args, **kwargs: SimpleNamespace(post_init=None, post_shutdown=None))
+    monkeypatch.setattr(
+        main,
+        "LifecycleManager",
+        lambda *args, **kwargs: SimpleNamespace(
+            pre_telegram_init=AsyncMock(),
+            post_init=None,
+            post_shutdown=None,
+        ),
+    )
     monkeypatch.setattr(main.time, "sleep", lambda *_args, **_kwargs: None)
 
     for factory_name in (

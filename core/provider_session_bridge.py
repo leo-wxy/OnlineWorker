@@ -444,8 +444,10 @@ def read_provider_session_rows(
     session_id: str,
     *,
     limit: int = 20,
+    workspace_dir: str | None = None,
     sessions_dir: str | None = None,
 ) -> list[dict[str, str]]:
+    _ = workspace_dir
     facts = _provider_facts(provider_id)
     turns = facts.read_thread_history(session_id, limit=limit, sessions_dir=sessions_dir)
 

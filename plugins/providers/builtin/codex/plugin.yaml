@@ -17,11 +17,11 @@ provider:
   autostart: true
   runtime_id: codex
   bin: codex
-  owner_transport: stdio
-  live_transport: owner_bridge
+  owner_transport: unix
+  live_transport: shared_unix
   control_mode: app
   transport:
-    type: stdio
+    type: unix
   capabilities:
     sessions: true
     send: true

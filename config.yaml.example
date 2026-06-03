@@ -10,11 +10,11 @@ providers:
     autostart: true
     runtime_id: codex
     bin: "codex"
-    owner_transport: "stdio"
-    live_transport: "owner_bridge"
+    owner_transport: "unix"
+    live_transport: "shared_unix"
     control_mode: "app"
     transport:
-      type: "stdio"
+      type: "unix"
     message_hooks:
       abusive_language_normalization:
         enabled: true
@@ -38,6 +38,10 @@ telegram:
   # true = delete archived thread topics.
   # false = close topics and keep history visible in Telegram.
   delete_archived_topics: true
+  # Keep true so Telegram requests can use HTTPS_PROXY/ALL_PROXY from the process environment.
+  trust_env: true
+  # Optional explicit proxy for Telegram, for example "socks5://127.0.0.1:7890".
+  proxy_url: ""
 
 logging:
   # DEBUG / INFO / WARNING / ERROR

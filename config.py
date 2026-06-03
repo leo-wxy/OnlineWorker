@@ -33,6 +33,8 @@ BUILTIN_PROVIDER_PLUGIN_DIR = Path(__file__).resolve().parent / "plugins" / "pro
 OWNED_ENV_KEYS = frozenset(
     {
         "TELEGRAM_TOKEN",
+        "TELEGRAM_PROXY_URL",
+        "TELEGRAM_TRUST_ENV",
         "ALLOWED_USER_ID",
         "GROUP_CHAT_ID",
     }
@@ -89,6 +91,19 @@ def is_provider_exposed(name: str) -> bool:
     """当前验收窗口内是否对用户暴露该 provider。"""
     normalized = str(name or "").strip()
     return bool(normalized) and normalized not in HIDDEN_PROVIDER_IDS
+
+
+def _bool_config_value(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 @dataclass
@@ -199,6 +214,8 @@ class Config:
     allowed_user_id: int
     group_chat_id: int
     log_level: str
+    telegram_proxy_url: str = ""
+    telegram_trust_env: bool = True
     tools: list = field(default_factory=list)  # list[ToolConfig]
     providers: dict[str, ToolConfig] = field(default_factory=dict)
     data_dir: str | None = None  # --data-dir path, or None for CWD defaults
@@ -379,7 +396,7 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
             "managed": True,
             "autostart": True,
             "codex_bin": "codex",
-            "protocol": "stdio",
+            "protocol": "unix",
             "app_server_port": 0,
             "app_server_url": "",
             "control_mode": "app",
@@ -618,7 +635,7 @@ def _normalize_live_transport_name(value: Any) -> str:
 
 def _default_owner_transport(tool_name: str) -> str:
     if tool_name == "codex":
-        return "stdio"
+        return "unix"
     if tool_name == "claude":
         return "stdio"
     return "ws"
@@ -714,6 +731,12 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
         protocol = "stdio"
         app_server_port = 0
 
+    codex_stdio_upgraded = False
+    if tool_name == "codex" and protocol == "stdio" and not app_server_url:
+        protocol = "unix"
+        app_server_port = 0
+        codex_stdio_upgraded = True
+
     if tool_name == "codex" and protocol == "stdio":
         app_server_port = 0
         app_server_url = ""
@@ -730,6 +753,8 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
     explicit_live_transport = _normalize_live_transport_name(
         raw.get("live_transport") or transport.get("live")
     )
+    if codex_stdio_upgraded and explicit_live_transport in {"stdio", "owner_bridge"}:
+        explicit_live_transport = ""
     live_transport = explicit_live_transport or _default_live_transport(
         tool_name,
         owner_transport=protocol,
@@ -768,6 +793,49 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
     )
 
 
+def _persist_provider_transport_migrations(
+    config_path: str,
+    data: dict[str, Any],
+    providers: dict[str, ToolConfig],
+) -> None:
+    raw_providers = data.get("providers")
+    if not isinstance(raw_providers, dict):
+        return
+    codex_raw = raw_providers.get("codex")
+    codex_cfg = providers.get("codex")
+    if not isinstance(codex_raw, dict) or codex_cfg is None:
+        return
+    if codex_cfg.protocol != "unix":
+        return
+
+    changed = False
+    transport = codex_raw.get("transport")
+    if not isinstance(transport, dict):
+        transport = {}
+        codex_raw["transport"] = transport
+        changed = True
+
+    if transport.get("type") != "unix":
+        transport["type"] = "unix"
+        changed = True
+    if "app_server_port" in transport:
+        transport.pop("app_server_port", None)
+        changed = True
+    if codex_raw.get("owner_transport") != "unix":
+        codex_raw["owner_transport"] = "unix"
+        changed = True
+    if codex_raw.get("live_transport") != "shared_unix":
+        codex_raw["live_transport"] = "shared_unix"
+        changed = True
+    if codex_raw.get("control_mode") != "app":
+        codex_raw["control_mode"] = "app"
+        changed = True
+
+    if changed:
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+
+
 def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None) -> Config:
     """加载配置。
 
@@ -804,6 +872,7 @@ def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None)
 
     log = data.get("logging", {})
     telegram_config = data.get("telegram", {})
+    telegram_config = telegram_config if isinstance(telegram_config, dict) else {}
     schema_version = int(data.get("schema_version") or (2 if "providers" in data else 1))
 
     # 敏感字段：只从环境变量读取
@@ -828,6 +897,22 @@ def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None)
         group_chat_id = int(group_chat_id_str)
     except ValueError:
         raise ValueError(f"GROUP_CHAT_ID 必须是整数，当前值：{group_chat_id_str!r}")
+
+    telegram_proxy_url = str(
+        os.environ.get("TELEGRAM_PROXY_URL")
+        or telegram_config.get("proxy_url")
+        or telegram_config.get("proxy")
+        or ""
+    ).strip()
+    telegram_trust_env_raw = (
+        os.environ.get("TELEGRAM_TRUST_ENV")
+        if "TELEGRAM_TRUST_ENV" in os.environ
+        else telegram_config.get("trust_env")
+    )
+    telegram_trust_env = _bool_config_value(
+        telegram_trust_env_raw,
+        default=True,
+    )
 
     providers: dict[str, ToolConfig] = {}
 
@@ -881,11 +966,15 @@ def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None)
         if name not in ordered_names:
             ordered_names.append(name)
     tools = [providers[name] for name in ordered_names]
+    if data_dir is not None:
+        _persist_provider_transport_migrations(config_path, data, providers)
 
     return Config(
         telegram_token=telegram_token,
         allowed_user_id=allowed_user_id,
         group_chat_id=group_chat_id,
+        telegram_proxy_url=telegram_proxy_url,
+        telegram_trust_env=telegram_trust_env,
         log_level=log.get("level", "INFO"),
         tools=tools,
         providers=providers,

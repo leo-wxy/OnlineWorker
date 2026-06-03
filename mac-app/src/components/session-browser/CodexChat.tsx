@@ -19,7 +19,6 @@ import {
   fetchCodexSessions,
   fetchCodexThreadState,
   fetchCodexThreadUpdates,
-  fetchProviderSession,
   sendCodexMessage,
 } from "./api";
 import { CodexSessionBadges } from "./badges";
@@ -89,13 +88,10 @@ export function CodexChat({ session }: { session: UnifiedSession }) {
     codexCursorRef.current = null;
     setCodexStreamCursor(null);
     try {
-      const [history, snapshot] = await Promise.all([
-        fetchProviderSession("codex", activeSession.threadId, activeSession.cwd),
-        fetchCodexThreadState(activeSession.rolloutPath ?? ""),
-      ]);
+      const snapshot = await fetchCodexThreadState(activeSession.rolloutPath ?? "");
       codexCursorRef.current = snapshot.cursor;
-      turnsRef.current = history;
-      setTurns(history);
+      turnsRef.current = snapshot.turns;
+      setTurns(snapshot.turns);
       setCodexStreamCursor(snapshot.cursor);
       setReplyWatchState((current) => (current === "expired" ? null : current));
     } catch (loadError) {
@@ -198,16 +194,10 @@ export function CodexChat({ session }: { session: UnifiedSession }) {
         activeSession.approvalMode,
         activeSession.sandboxPolicy,
       );
-      let effectiveThreadId = threadId;
-      let effectiveWorkspaceCwd = activeSession.cwd;
       if (sendResult.threadId && sendResult.threadId !== threadId) {
         const remappedSession = await resolveCodexSessionByThreadId(sendResult.threadId);
         setActiveSession(remappedSession);
         rolloutPath = remappedSession.rolloutPath ?? "";
-        effectiveThreadId = remappedSession.threadId;
-        effectiveWorkspaceCwd = remappedSession.cwd;
-      } else if (sendResult.threadId) {
-        effectiveThreadId = sendResult.threadId;
       }
       setAttachments([]);
 
@@ -220,8 +210,11 @@ export function CodexChat({ session }: { session: UnifiedSession }) {
         if (shouldContinue()) {
           codexCursorRef.current = cursorResult.cursor;
         }
-        const nextTurns = await fetchProviderSession("codex", effectiveThreadId, effectiveWorkspaceCwd);
-        const mergedTurns = mergeSessionTurns(previousTurns, nextTurns);
+        const snapshotBase = cursorResult.replace ? [] : turnsRef.current;
+        const snapshotTurns = cursorResult.replace
+          ? cursorResult.turns
+          : mergeSessionTurns(snapshotBase, cursorResult.turns);
+        const mergedTurns = mergeSessionTurns(previousTurns, snapshotTurns);
         if (shouldContinue()) {
           turnsRef.current = mergedTurns;
         }

@@ -73,9 +73,9 @@ def test_load_config_from_yaml(tmp_path, monkeypatch):
     assert codex is not None
     assert codex.codex_bin == "codex"
     assert codex.app_server_port == 0
-    assert codex.protocol == "stdio"
-    assert codex.owner_transport == "stdio"
-    assert codex.live_transport == "owner_bridge"
+    assert codex.protocol == "unix"
+    assert codex.owner_transport == "unix"
+    assert codex.live_transport == "shared_unix"
     assert codex.control_mode == "app"
 
 
@@ -328,6 +328,7 @@ def test_builtin_provider_defaults_expose_attachment_capabilities():
     codex = _default_provider_blueprint("codex")
     claude = _default_provider_blueprint("claude")
 
+    assert codex["protocol"] == "unix"
     assert codex["capabilities"]["photos"] is True
     assert claude["capabilities"]["photos"] is True
     assert "files" in codex["capabilities"]
@@ -344,6 +345,9 @@ def test_config_yaml_example_uses_public_provider_schema():
     assert data["schema_version"] == 2
     assert "tools" not in data
     assert list(data["providers"].keys()) == ["codex", "claude"]
+    assert data["providers"]["codex"]["owner_transport"] == "unix"
+    assert data["providers"]["codex"]["live_transport"] == "shared_unix"
+    assert data["providers"]["codex"]["transport"]["type"] == "unix"
     assert "customprovider" not in source.lower()
 
 
@@ -844,7 +848,7 @@ providers:
     assert codex.app_server_url == "unix:///tmp/onlineworker-codex.sock"
 
 
-def test_load_config_keeps_legacy_codex_stdio_default(tmp_path, monkeypatch):
+def test_load_config_migrates_legacy_codex_stdio_default_to_unix(tmp_path, monkeypatch):
     p = tmp_path / "config.yaml"
     p.write_text(
         """
@@ -865,15 +869,15 @@ tools:
     cfg = load_config(str(p))
     codex = cfg.get_tool("codex")
     assert codex is not None
-    assert codex.protocol == "stdio"
-    assert codex.owner_transport == "stdio"
-    assert codex.live_transport == "owner_bridge"
+    assert codex.protocol == "unix"
+    assert codex.owner_transport == "unix"
+    assert codex.live_transport == "shared_unix"
     assert codex.app_server_port == 0
     assert codex.app_server_url == ""
     assert codex.control_mode == "app"
 
 
-def test_load_config_migrates_legacy_codex_default_ws_without_control_mode_to_stdio(tmp_path, monkeypatch):
+def test_load_config_migrates_legacy_codex_default_ws_without_control_mode_to_unix(tmp_path, monkeypatch):
     p = tmp_path / "config.yaml"
     p.write_text(
         """
@@ -894,9 +898,9 @@ tools:
     cfg = load_config(str(p))
     codex = cfg.get_tool("codex")
     assert codex is not None
-    assert codex.protocol == "stdio"
-    assert codex.owner_transport == "stdio"
-    assert codex.live_transport == "owner_bridge"
+    assert codex.protocol == "unix"
+    assert codex.owner_transport == "unix"
+    assert codex.live_transport == "shared_unix"
     assert codex.app_server_port == 0
     assert codex.app_server_url == ""
     assert codex.control_mode == "app"
@@ -986,7 +990,7 @@ tools:
     assert codex.control_mode == "hybrid"
 
 
-def test_load_config_allows_explicit_codex_owner_and_live_transport_override(tmp_path, monkeypatch):
+def test_load_config_migrates_provider_codex_stdio_owner_override_to_unix(tmp_path, monkeypatch):
     p = tmp_path / "config.yaml"
     p.write_text(
         """
@@ -1013,11 +1017,55 @@ providers:
     cfg = load_config(str(p))
     codex = cfg.get_tool("codex")
     assert codex is not None
-    assert codex.protocol == "stdio"
-    assert codex.owner_transport == "stdio"
-    assert codex.live_transport == "owner_bridge"
+    assert codex.protocol == "unix"
+    assert codex.owner_transport == "unix"
+    assert codex.live_transport == "shared_unix"
     assert codex.app_server_port == 0
     assert codex.control_mode == "app"
+
+
+def test_load_config_persists_installed_codex_stdio_migration(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        """
+schema_version: 2
+providers:
+  codex:
+    managed: true
+    transport:
+      type: stdio
+    owner_transport: stdio
+    live_transport: owner_bridge
+    control_mode: app
+logging:
+  level: INFO
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / ".env").write_text(
+        "\n".join(
+            [
+                "TELEGRAM_TOKEN=123:abc",
+                "ALLOWED_USER_ID=456789",
+                "GROUP_CHAT_ID=-100987654321",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
+    monkeypatch.delenv("ALLOWED_USER_ID", raising=False)
+    monkeypatch.delenv("GROUP_CHAT_ID", raising=False)
+
+    from config import load_config
+
+    cfg = load_config(data_dir=str(tmp_path))
+
+    assert cfg.providers["codex"].protocol == "unix"
+    migrated = yaml.safe_load(p.read_text(encoding="utf-8"))
+    codex_raw = migrated["providers"]["codex"]
+    assert codex_raw["transport"]["type"] == "unix"
+    assert codex_raw["owner_transport"] == "unix"
+    assert codex_raw["live_transport"] == "shared_unix"
 
 
 def test_load_config_defaults_claude_to_stdio_and_app_control_mode(tmp_path, monkeypatch):
@@ -1054,6 +1102,60 @@ def test_env_overrides_telegram_token(tmp_path, monkeypatch):
     from config import load_config
     cfg = load_config(str(p))
     assert cfg.telegram_token == "override:xyz"
+
+
+def test_load_config_reads_telegram_proxy_settings(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        """
+telegram:
+  proxy_url: "socks5://127.0.0.1:7890"
+  trust_env: false
+
+logging:
+  level: "INFO"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TELEGRAM_TOKEN", "123:abc")
+    monkeypatch.setenv("ALLOWED_USER_ID", "456789")
+    monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
+
+    from config import load_config
+
+    cfg = load_config(str(p))
+
+    assert cfg.telegram_proxy_url == "socks5://127.0.0.1:7890"
+    assert cfg.telegram_trust_env is False
+
+
+def test_load_config_reads_telegram_proxy_from_data_dir_env(tmp_path, monkeypatch):
+    (tmp_path / "config.yaml").write_text("logging:\n  level: INFO\n", encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        "\n".join(
+            [
+                "TELEGRAM_TOKEN=123:abc",
+                "ALLOWED_USER_ID=456789",
+                "GROUP_CHAT_ID=-100987654321",
+                "TELEGRAM_PROXY_URL=socks5://127.0.0.1:7890",
+                "TELEGRAM_TRUST_ENV=false",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
+    monkeypatch.delenv("ALLOWED_USER_ID", raising=False)
+    monkeypatch.delenv("GROUP_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_PROXY_URL", raising=False)
+    monkeypatch.delenv("TELEGRAM_TRUST_ENV", raising=False)
+
+    from config import load_config
+
+    cfg = load_config(data_dir=str(tmp_path))
+
+    assert cfg.telegram_proxy_url == "socks5://127.0.0.1:7890"
+    assert cfg.telegram_trust_env is False
+
 
 def test_missing_telegram_token_raises(tmp_path, monkeypatch):
     p = tmp_path / "config.yaml"

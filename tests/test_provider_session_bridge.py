@@ -162,6 +162,34 @@ def test_read_provider_session_rows_normalizes_content_shape(monkeypatch):
     ]
 
 
+def test_read_provider_session_rows_does_not_treat_workspace_dir_as_sessions_dir(monkeypatch):
+    observed = {}
+
+    class Facts:
+        @staticmethod
+        def read_thread_history(session_id, limit=50, sessions_dir=None):
+            observed["session_id"] = session_id
+            observed["limit"] = limit
+            observed["sessions_dir"] = sessions_dir
+            return [{"role": "assistant", "text": "history"}]
+
+    monkeypatch.setattr(bridge, "_provider_facts", lambda provider_id: Facts)
+
+    result = bridge.read_provider_session_rows(
+        "codex",
+        "session-1",
+        limit=50,
+        workspace_dir="/tmp/project",
+    )
+
+    assert observed == {
+        "session_id": "session-1",
+        "limit": 50,
+        "sessions_dir": None,
+    }
+    assert result == [{"role": "assistant", "content": "history"}]
+
+
 def test_read_provider_session_rows_preserves_visible_error_metadata(monkeypatch):
     class Facts:
         @staticmethod

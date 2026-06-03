@@ -45,6 +45,7 @@ _DEFAULT_LOCK_FILE = "/tmp/onlineworker_bot.lock"
 
 # 持有文件锁的文件对象，进程退出时 OS 自动释放
 _lock_fh = None
+_main_event_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _acquire_flock(lock_file: str = _DEFAULT_LOCK_FILE) -> None:
@@ -59,6 +60,26 @@ def _acquire_flock(lock_file: str = _DEFAULT_LOCK_FILE) -> None:
     # 写入当前 PID，方便排查
     _lock_fh.write(str(os.getpid()))
     _lock_fh.flush()
+
+
+def _get_or_create_event_loop() -> asyncio.AbstractEventLoop:
+    global _main_event_loop
+    if _main_event_loop is not None and not _main_event_loop.is_closed():
+        return _main_event_loop
+    try:
+        _main_event_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _main_event_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_main_event_loop)
+    return _main_event_loop
+
+
+def _telegram_httpx_kwargs(cfg) -> dict:
+    kwargs = {"trust_env": bool(getattr(cfg, "telegram_trust_env", True))}
+    proxy_url = str(getattr(cfg, "telegram_proxy_url", "") or "").strip()
+    if proxy_url:
+        kwargs["proxy"] = proxy_url
+    return kwargs
 
 
 MAX_RAPID_CRASHES = 5       # 连续快速崩溃上限
@@ -110,7 +131,7 @@ def _run_provider_session_bridge(
                 normalized_provider,
                 normalized_session_id,
                 limit=limit,
-                sessions_dir=workspace_dir,
+                workspace_dir=workspace_dir,
             )
         )
         return 0
@@ -372,6 +393,7 @@ def main() -> None:
             im_route_store = ImRouteStore()
             im_route_store.migrate_telegram_json_topics(storage, gid)
             state.set_im_route_store(im_route_store, gid)
+            telegram_httpx_kwargs = _telegram_httpx_kwargs(cfg)
 
             app = (
                 Application.builder()
@@ -381,7 +403,7 @@ def main() -> None:
                         read_timeout=20,
                         write_timeout=20,
                         connect_timeout=10,
-                        httpx_kwargs={"trust_env": False},
+                        httpx_kwargs=telegram_httpx_kwargs,
                     )
                 )
                 .get_updates_request(
@@ -389,7 +411,7 @@ def main() -> None:
                         read_timeout=20,
                         write_timeout=20,
                         connect_timeout=10,
-                        httpx_kwargs={"trust_env": False},
+                        httpx_kwargs=telegram_httpx_kwargs,
                     )
                 )
                 .build()
@@ -426,6 +448,7 @@ def main() -> None:
             lifecycle = LifecycleManager(state, storage, gid, cfg)
             app.post_init = lifecycle.post_init
             app.post_shutdown = lifecycle.post_shutdown
+            _get_or_create_event_loop().run_until_complete(lifecycle.pre_telegram_init(app))
 
             logger.info(f"onlineWorker 启动，允许用户 ID：{cfg.allowed_user_id}，群组 ID：{gid}")
             # 外层有崩溃重试循环，不能让 PTB 在每次失败后关闭当前事件循环。
@@ -433,6 +456,7 @@ def main() -> None:
                 drop_pending_updates=True,
                 close_loop=False,
                 allowed_updates=["message", "callback_query"],
+                bootstrap_retries=-1,
             )
             # run_polling 正常退出（用户 Ctrl-C 或收到 SIGTERM）→ 退出循环
             logger.info("onlineWorker 正常退出")

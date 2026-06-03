@@ -676,6 +676,53 @@ async def test_post_init_starts_shared_provider_owner_bridge_before_provider_run
 
 
 @pytest.mark.asyncio
+async def test_pre_telegram_init_starts_shared_provider_owner_bridge_and_provider_runtime(monkeypatch):
+    storage = AppStorage()
+    state = AppState(storage=storage)
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=2,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="custom",
+                enabled=True,
+                codex_bin="custom",
+                protocol="stdio",
+            ),
+        ],
+        delete_archived_topics=True,
+    )
+    manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
+
+    bot = MagicMock()
+    bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=3169))
+    bot.send_message = AsyncMock()
+
+    events = []
+
+    async def runtime_start(manager_obj, bot_obj, tool_cfg):
+        events.append(f"startup:{tool_cfg.name}")
+
+    async def start_shared_bridge(state_obj):
+        events.append("shared-bridge")
+
+    monkeypatch.setattr(
+        "core.lifecycle.get_provider",
+        lambda name: SimpleNamespace(
+            runtime_hooks=SimpleNamespace(start=runtime_start),
+        ) if name == "custom" else None,
+    )
+    monkeypatch.setattr("core.lifecycle.ensure_provider_owner_bridge_started", start_shared_bridge)
+
+    await manager.pre_telegram_init(SimpleNamespace(bot=bot))
+    await manager.post_init(SimpleNamespace(bot=bot))
+
+    assert events == ["shared-bridge", "startup:custom"]
+
+
+@pytest.mark.asyncio
 async def test_post_shutdown_uses_registry_shutdown_hook_for_custom_provider(monkeypatch):
     storage = AppStorage()
     state = AppState(storage=storage)

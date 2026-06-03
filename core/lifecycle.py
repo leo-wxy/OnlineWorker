@@ -56,10 +56,25 @@ class LifecycleManager:
         self._tui_sync_tasks: dict[str, Optional[asyncio.Task]] = {}
         self._tui_mirror_tasks: dict[str, Optional[asyncio.Task]] = {}
         self._stale_recovery_tasks: dict[str, dict[str, asyncio.Task]] = {}
+        self._provider_owner_bridge_started = False
+        self._started_runtime_tools: set[str] = set()
 
     # ------------------------------------------------------------------
     # post_init / post_shutdown (assigned to Application callbacks)
     # ------------------------------------------------------------------
+
+    async def pre_telegram_init(self, application: Application) -> None:
+        """Start local provider surfaces before Telegram network bootstrap.
+
+        PTB calls bot.initialize/get_me before post_init. If Telegram is
+        unreachable, post_init never runs, so local app-server sockets would not
+        come up. The provider runtime only needs the bot object for later event
+        callbacks, so it can be started before Telegram has connected.
+        """
+        bot = application.bot
+        self.state.telegram_bot = bot
+        self.state.group_chat_id = self.gid
+        await self._ensure_provider_runtimes_started(bot)
 
     async def post_init(self, application: Application) -> None:
         bot = application.bot
@@ -97,12 +112,7 @@ class LifecycleManager:
             except Exception as e:
                 logger.error(f"[{tool.name}] 创建全局 Topic 失败：{e}")
 
-        await ensure_provider_owner_bridge_started(self.state)
-
-        # 2. Start enabled providers via registry
-        startup_tasks = self._build_startup_tasks(bot)
-        if startup_tasks:
-            await asyncio.gather(*startup_tasks)
+        await self._ensure_provider_runtimes_started(bot)
 
         # 5. Cleanup archived threads (delete/close topics for externally archived threads)
         await self._cleanup_archived_threads(bot)
@@ -113,6 +123,8 @@ class LifecycleManager:
         await self._cancel_reconnect_tasks()
         await self._shutdown_enabled_providers()
         await stop_provider_owner_bridge(self.state)
+        self._provider_owner_bridge_started = False
+        self._started_runtime_tools.clear()
         try:
             save_storage(self.storage)
         except Exception as e:
@@ -122,10 +134,20 @@ class LifecycleManager:
     # Provider connection setup (shared by first-connect and reconnect)
     # ------------------------------------------------------------------
 
+    async def _ensure_provider_runtimes_started(self, bot) -> None:
+        if not self._provider_owner_bridge_started:
+            await ensure_provider_owner_bridge_started(self.state)
+            self._provider_owner_bridge_started = True
+
+        startup_tasks = self._build_startup_tasks(bot)
+        if startup_tasks:
+            await asyncio.gather(*startup_tasks)
+
     async def _run_startup_task(self, tool_name: str, startup_coro) -> None:
         """Run one tool startup task without aborting other tools on failure."""
         try:
             await startup_coro
+            self._started_runtime_tools.add(tool_name)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -134,6 +156,9 @@ class LifecycleManager:
     def _build_startup_tasks(self, bot) -> list[asyncio.Task]:
         tasks: list[asyncio.Task] = []
         for tool_cfg in self.cfg.enabled_tools:
+            if tool_cfg.name in self._started_runtime_tools:
+                logger.debug("%s runtime 已启动，跳过重复启动", tool_cfg.name)
+                continue
             if not getattr(tool_cfg, "autostart", True):
                 logger.info("%s 已托管，但 autostart=false，跳过启动", tool_cfg.name)
                 continue
