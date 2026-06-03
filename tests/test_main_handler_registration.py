@@ -45,6 +45,9 @@ class _FakeApplicationBuilder:
     def request(self, request):
         return self
 
+    def get_updates_request(self, request):
+        return self
+
     def build(self):
         return _FakeApp(self.handlers)
 

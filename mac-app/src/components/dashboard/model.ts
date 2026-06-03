@@ -177,7 +177,7 @@ export function resolveAlertDetail(alert: DashboardAlert, texts: AppTexts): stri
     case "provider_degraded":
       return alert.detail;
     case "telegram_unavailable":
-      return texts.alerts.telegramUnavailable.detail;
+      return alert.detail || texts.alerts.telegramUnavailable.detail;
     default:
       return alert.detail;
   }

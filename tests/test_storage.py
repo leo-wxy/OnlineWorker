@@ -38,8 +38,10 @@ def test_save_and_load_roundtrip(tmp_path):
     loaded = load_storage(path)
     assert "proj-a" in loaded.workspaces
     assert loaded.workspaces["proj-a"].path == "/tmp/proj-a"
-    assert loaded.workspaces["proj-a"].topic_id == 9001
+    assert loaded.workspaces["proj-a"].topic_id is None
     assert loaded.active_workspace == "proj-a"
+    saved = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert "topic_id" not in saved["workspaces"]["proj-a"]
 
 
 def test_save_and_load_with_threads(tmp_path):
@@ -61,10 +63,13 @@ def test_save_and_load_with_threads(tmp_path):
     loaded_ws = loaded.workspaces["proj-b"]
     assert "tid-001" in loaded_ws.threads
     t2 = loaded_ws.threads["tid-001"]
-    assert t2.topic_id == 42
+    assert t2.topic_id is None
     assert t2.preview == "hello"
     assert t2.archived is False
     assert t2.last_tg_user_message_id == 7001
+    saved = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert "topic_id" not in saved["workspaces"]["proj-b"]
+    assert "topic_id" not in saved["workspaces"]["proj-b"]["threads"]["tid-001"]
 
 
 def test_save_atomic_via_tmp(tmp_path):

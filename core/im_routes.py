@@ -10,6 +10,71 @@ from core.storage import AppStorage
 
 
 IM_ROUTES_DB_NAME = "im_routes.sqlite3"
+IM_ROUTES_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS im_routes (
+  im_provider TEXT NOT NULL,
+  im_account_id TEXT NOT NULL DEFAULT 'default',
+  im_space_id TEXT NOT NULL,
+  im_entry_id TEXT NOT NULL,
+  im_entry_kind TEXT NOT NULL DEFAULT 'unknown',
+
+  route_scope TEXT NOT NULL,
+  agent_provider TEXT,
+  workspace_id TEXT,
+  workspace_path TEXT,
+  session_id TEXT,
+
+  display_name TEXT,
+
+  status TEXT NOT NULL DEFAULT 'active',
+  source TEXT NOT NULL DEFAULT 'observed',
+
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  last_seen_at INTEGER NOT NULL,
+
+  PRIMARY KEY (
+    im_provider,
+    im_account_id,
+    im_space_id,
+    im_entry_id
+  ),
+
+  CHECK (route_scope IN ('agent', 'workspace', 'session', 'unknown')),
+  CHECK (status IN ('active', 'archived', 'invalid', 'unknown')),
+  CHECK (
+    (
+      route_scope = 'unknown'
+      AND status = 'unknown'
+      AND agent_provider IS NULL
+      AND workspace_id IS NULL
+      AND workspace_path IS NULL
+      AND session_id IS NULL
+    )
+    OR (
+      route_scope = 'agent'
+      AND status IN ('active', 'archived', 'invalid')
+      AND agent_provider IS NOT NULL
+      AND workspace_id IS NULL
+      AND session_id IS NULL
+    )
+    OR (
+      route_scope = 'workspace'
+      AND status IN ('active', 'archived', 'invalid')
+      AND agent_provider IS NOT NULL
+      AND workspace_id IS NOT NULL
+      AND session_id IS NULL
+    )
+    OR (
+      route_scope = 'session'
+      AND status IN ('active', 'archived', 'invalid')
+      AND agent_provider IS NOT NULL
+      AND workspace_id IS NOT NULL
+      AND session_id IS NOT NULL
+    )
+  )
+)
+"""
 
 
 @dataclass(frozen=True)
@@ -48,75 +113,16 @@ class ImRouteStore:
         with self._connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA busy_timeout=5000")
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS im_routes (
-                  im_provider TEXT NOT NULL,
-                  im_account_id TEXT NOT NULL DEFAULT 'default',
-                  im_space_id TEXT NOT NULL,
-                  im_entry_id TEXT NOT NULL,
-                  im_entry_kind TEXT NOT NULL DEFAULT 'unknown',
-
-                  route_scope TEXT NOT NULL,
-                  agent_provider TEXT,
-                  workspace_id TEXT,
-                  workspace_path TEXT,
-                  session_id TEXT,
-
-                  display_name TEXT,
-
-                  status TEXT NOT NULL DEFAULT 'active',
-                  source TEXT NOT NULL DEFAULT 'observed',
-
-                  created_at INTEGER NOT NULL,
-                  updated_at INTEGER NOT NULL,
-                  last_seen_at INTEGER NOT NULL,
-
-                  PRIMARY KEY (
-                    im_provider,
-                    im_account_id,
-                    im_space_id,
-                    im_entry_id
-                  ),
-
-                  CHECK (route_scope IN ('agent', 'workspace', 'session', 'unknown')),
-                  CHECK (status IN ('active', 'closed', 'deleted', 'unknown')),
-                  CHECK (
-                    route_scope = 'unknown'
-                    OR (
-                      route_scope = 'agent'
-                      AND agent_provider IS NOT NULL
-                      AND workspace_id IS NULL
-                      AND session_id IS NULL
-                    )
-                    OR (
-                      route_scope = 'workspace'
-                      AND agent_provider IS NOT NULL
-                      AND workspace_id IS NOT NULL
-                      AND session_id IS NULL
-                    )
-                    OR (
-                      route_scope = 'session'
-                      AND agent_provider IS NOT NULL
-                      AND workspace_id IS NOT NULL
-                      AND session_id IS NOT NULL
-                    )
-                  )
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_im_routes_entry
-                ON im_routes(im_provider, im_account_id, im_space_id, im_entry_id)
-                """
-            )
+            conn.execute(IM_ROUTES_TABLE_SQL)
+            self._rebuild_legacy_schema_if_needed(conn)
+            conn.execute("DROP INDEX IF EXISTS idx_im_routes_entry")
             conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_im_routes_scope
                 ON im_routes(agent_provider, workspace_id, session_id)
                 """
             )
+            self._normalize_legacy_statuses(conn)
             conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_im_routes_seen
@@ -156,6 +162,19 @@ class ImRouteStore:
         space_id = str(chat_id)
         now = _now()
         with self._connect() as conn:
+            existing_count = conn.execute(
+                """
+                SELECT COUNT(*) FROM im_routes
+                WHERE im_provider = 'telegram'
+                  AND im_account_id = ?
+                  AND im_space_id = ?
+                  AND route_scope != 'unknown'
+                """,
+                (account_id, space_id),
+            ).fetchone()[0]
+            if existing_count:
+                return
+
             for tool_name, topic_id in sorted(storage.global_topic_ids.items()):
                 if topic_id is None:
                     continue
@@ -217,34 +236,6 @@ class ImRouteStore:
                         source="migrated",
                         now=now,
                     )
-
-    def restore_telegram_topic_mirrors(
-        self,
-        storage: AppStorage,
-        chat_id: int | str,
-        *,
-        account_id: str = "default",
-    ) -> None:
-        self.initialize()
-        for route in self.list_routes(
-            im_provider="telegram",
-            im_account_id=account_id,
-            im_space_id=str(chat_id),
-            active_only=True,
-        ):
-            topic_id = _parse_topic_id(route.im_entry_id)
-            if topic_id is None:
-                continue
-            if route.route_scope == "agent" and route.agent_provider:
-                storage.global_topic_ids[route.agent_provider] = topic_id
-            elif route.route_scope == "workspace" and route.workspace_id:
-                ws = storage.workspaces.get(route.workspace_id)
-                if ws is not None:
-                    ws.topic_id = topic_id
-            elif route.route_scope == "session" and route.workspace_id and route.session_id:
-                ws = storage.workspaces.get(route.workspace_id)
-                if ws is not None and route.session_id in ws.threads:
-                    ws.threads[route.session_id].topic_id = topic_id
 
     def upsert_telegram_agent_route(
         self,
@@ -330,17 +321,90 @@ class ImRouteStore:
         account_id: str = "default",
         display_name: str | None = None,
     ) -> None:
-        self.upsert_route(
-            im_provider="telegram",
-            im_account_id=account_id,
-            im_space_id=str(chat_id),
-            im_entry_id=str(topic_id),
-            im_entry_kind="topic",
-            route_scope="unknown",
-            display_name=display_name,
-            status="unknown",
-            source="observed",
-        )
+        self.initialize()
+        now = _now()
+        with self._connect() as conn:
+            existing = conn.execute(
+                """
+                SELECT 1 FROM im_routes
+                WHERE im_provider = 'telegram'
+                  AND im_account_id = ?
+                  AND im_space_id = ?
+                  AND im_entry_id = ?
+                """,
+                (account_id, str(chat_id), str(topic_id)),
+            ).fetchone()
+            if existing is not None:
+                conn.execute(
+                    """
+                    UPDATE im_routes
+                    SET last_seen_at = ?,
+                        updated_at = CASE WHEN status = 'unknown' THEN ? ELSE updated_at END,
+                        display_name = CASE
+                            WHEN status = 'unknown' AND ? IS NOT NULL THEN ?
+                            ELSE display_name
+                        END
+                    WHERE im_provider = 'telegram'
+                      AND im_account_id = ?
+                      AND im_space_id = ?
+                      AND im_entry_id = ?
+                    """,
+                    (now, now, display_name, display_name, account_id, str(chat_id), str(topic_id)),
+                )
+                return
+            self._upsert_route_conn(
+                conn,
+                im_provider="telegram",
+                im_account_id=account_id,
+                im_space_id=str(chat_id),
+                im_entry_id=str(topic_id),
+                im_entry_kind="topic",
+                route_scope="unknown",
+                agent_provider=None,
+                workspace_id=None,
+                workspace_path=None,
+                session_id=None,
+                display_name=display_name,
+                status="unknown",
+                source="observed",
+                now=now,
+            )
+
+    def mark_telegram_topic_status(
+        self,
+        chat_id: int | str,
+        topic_id: int,
+        status: str,
+        *,
+        account_id: str = "default",
+    ) -> bool:
+        if status not in {"active", "archived", "invalid", "unknown"}:
+            raise ValueError(f"invalid im route status: {status}")
+        self.initialize()
+        now = _now()
+        if status == "active":
+            status_filter = "status IN ('archived', 'invalid')"
+        elif status == "invalid":
+            status_filter = "status IN ('active', 'archived', 'unknown')"
+        elif status == "archived":
+            status_filter = "status = 'active'"
+        else:
+            status_filter = "status = 'unknown'"
+        with self._connect() as conn:
+            result = conn.execute(
+                f"""
+                UPDATE im_routes
+                SET status = ?,
+                    updated_at = ?
+                WHERE im_provider = 'telegram'
+                  AND im_account_id = ?
+                  AND im_space_id = ?
+                  AND im_entry_id = ?
+                  AND {status_filter}
+                """,
+                (status, now, account_id, str(chat_id), str(topic_id)),
+            )
+        return result.rowcount > 0
 
     def upsert_route(
         self,
@@ -638,12 +702,83 @@ class ImRouteStore:
         conn.execute(
             f"""
             UPDATE im_routes
-            SET status = 'closed',
+            SET status = 'invalid',
                 updated_at = ?
             WHERE {" AND ".join(where)}
             """,
             tuple(params),
         )
+
+    def _normalize_legacy_statuses(self, conn: sqlite3.Connection) -> None:
+        try:
+            conn.execute("UPDATE im_routes SET status = 'archived' WHERE status = 'closed'")
+            conn.execute("UPDATE im_routes SET status = 'invalid' WHERE status = 'deleted'")
+        except sqlite3.DatabaseError:
+            pass
+
+    def _rebuild_legacy_schema_if_needed(self, conn: sqlite3.Connection) -> None:
+        row = conn.execute(
+            """
+            SELECT sql FROM sqlite_master
+            WHERE type = 'table' AND name = 'im_routes'
+            """
+        ).fetchone()
+        table_sql = str(row["sql"] if row is not None else "")
+        if "archived" in table_sql and "invalid" in table_sql and "workspace_path IS NULL" in table_sql:
+            return
+
+        legacy_table = "im_routes_legacy_status_migration"
+        conn.execute(f"DROP TABLE IF EXISTS {legacy_table}")
+        conn.execute(f"ALTER TABLE im_routes RENAME TO {legacy_table}")
+        conn.execute(IM_ROUTES_TABLE_SQL)
+        conn.execute(
+            f"""
+            INSERT OR REPLACE INTO im_routes (
+              im_provider,
+              im_account_id,
+              im_space_id,
+              im_entry_id,
+              im_entry_kind,
+              route_scope,
+              agent_provider,
+              workspace_id,
+              workspace_path,
+              session_id,
+              display_name,
+              status,
+              source,
+              created_at,
+              updated_at,
+              last_seen_at
+            )
+            SELECT
+              im_provider,
+              im_account_id,
+              im_space_id,
+              im_entry_id,
+              im_entry_kind,
+              route_scope,
+              CASE WHEN route_scope = 'unknown' THEN NULL ELSE agent_provider END,
+              CASE WHEN route_scope = 'unknown' THEN NULL ELSE workspace_id END,
+              CASE WHEN route_scope = 'unknown' THEN NULL ELSE workspace_path END,
+              CASE WHEN route_scope = 'unknown' THEN NULL ELSE session_id END,
+              display_name,
+              CASE
+                WHEN route_scope = 'unknown' THEN 'unknown'
+                WHEN status = 'closed' THEN 'archived'
+                WHEN status = 'deleted' THEN 'invalid'
+                WHEN status IN ('active', 'archived', 'invalid') THEN status
+                ELSE 'invalid'
+              END,
+              source,
+              created_at,
+              updated_at,
+              last_seen_at
+            FROM {legacy_table}
+            WHERE route_scope IN ('agent', 'workspace', 'session', 'unknown')
+            """
+        )
+        conn.execute(f"DROP TABLE {legacy_table}")
 
 
 def _route_from_row(row: sqlite3.Row) -> ImRoute:

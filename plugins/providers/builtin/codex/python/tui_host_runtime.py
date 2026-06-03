@@ -107,42 +107,10 @@ def resolve_host_thread_id(
         return thread_id
 
     if topic_id is not None:
-        storage_path = os.path.join(data_dir, "onlineworker_state.json")
-        storage = load_storage(storage_path)
-        for ws in storage.workspaces.values():
-            if os.path.abspath(ws.path) != os.path.abspath(cwd):
-                continue
-            if ws.tool != "codex":
-                continue
-            active_ids: Optional[set[str]] = None
-            for candidate_thread_id, thread in ws.threads.items():
-                if thread.archived:
-                    if active_ids is None:
-                        try:
-                            active_ids = query_provider_active_thread_ids(ws.tool, ws.path)
-                        except Exception as e:
-                            logger.warning(
-                                "[tui-host] 查询活跃 thread 失败，tool=%s ws=%s tid=%s err=%s",
-                                ws.tool,
-                                ws.name,
-                                candidate_thread_id,
-                                e,
-                            )
-                            active_ids = set()
-                    if candidate_thread_id not in active_ids:
-                        continue
-                    thread.archived = False
-                    thread.is_active = True
-                    save_storage(storage, storage_path)
-                    logger.warning(
-                        "[tui-host] 已清理本地误归档 thread，tool=%s ws=%s tid=%s",
-                        ws.tool,
-                        ws.name,
-                        candidate_thread_id,
-                    )
-                if thread.topic_id == topic_id:
-                    return candidate_thread_id
-        raise RuntimeError(f"当前工作区下找不到 topic_id={topic_id} 对应的 codex thread")
+        raise RuntimeError(
+            "当前版本不再从 onlineworker_state.json 按 topic_id 反查 codex thread；"
+            "请传入 codex thread_id。"
+        )
 
     recent_threads = list_codex_threads_by_cwd(cwd, limit=1)
     if recent_threads:

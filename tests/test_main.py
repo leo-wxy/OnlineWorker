@@ -50,26 +50,18 @@ class _FakeApplicationBuilder:
     def request(self, request):
         return self
 
+    def get_updates_request(self, request):
+        return self
+
     def build(self):
         return _FakeApp(self._run_polling_calls)
 
 
-def test_main_retry_path_keeps_event_loop_open(monkeypatch):
-    run_polling_calls = []
-    dummy_filter = _DummyFilter()
-
-    cfg = SimpleNamespace(
-        telegram_token="token",
-        allowed_user_id=123,
-        group_chat_id=456,
-        log_level="INFO",
-    )
-
+def _stub_main_dependencies(monkeypatch, run_polling_calls, cfg, dummy_filter):
     monkeypatch.setattr(main, "_acquire_flock", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main, "load_config", lambda data_dir=None: cfg)
     monkeypatch.setattr(main, "load_storage", AppStorage)
     monkeypatch.setattr(main, "AppState", AppState)
-    monkeypatch.setattr(main, "HTTPXRequest", lambda **kwargs: object())
     monkeypatch.setattr(main, "Application", SimpleNamespace(builder=lambda: _FakeApplicationBuilder(run_polling_calls)))
     monkeypatch.setattr(main, "WhitelistFilter", lambda allowed_user_id: dummy_filter)
     monkeypatch.setattr(
@@ -112,6 +104,21 @@ def test_main_retry_path_keeps_event_loop_open(monkeypatch):
     ):
         monkeypatch.setattr(main, factory_name, lambda *args, **kwargs: object())
 
+
+def test_main_retry_path_keeps_event_loop_open(monkeypatch):
+    run_polling_calls = []
+    dummy_filter = _DummyFilter()
+
+    cfg = SimpleNamespace(
+        telegram_token="token",
+        allowed_user_id=123,
+        group_chat_id=456,
+        log_level="INFO",
+    )
+
+    monkeypatch.setattr(main, "HTTPXRequest", lambda **kwargs: object())
+    _stub_main_dependencies(monkeypatch, run_polling_calls, cfg, dummy_filter)
+
     main.main()
 
     assert run_polling_calls == [
@@ -126,6 +133,31 @@ def test_main_retry_path_keeps_event_loop_open(monkeypatch):
             "allowed_updates": ["message", "callback_query"],
         },
     ]
+
+
+def test_main_disables_env_proxy_for_telegram_request(monkeypatch):
+    run_polling_calls = []
+    request_calls = []
+    dummy_filter = _DummyFilter()
+
+    cfg = SimpleNamespace(
+        telegram_token="token",
+        allowed_user_id=123,
+        group_chat_id=456,
+        log_level="INFO",
+    )
+
+    def fake_request(**kwargs):
+        request_calls.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(main, "HTTPXRequest", fake_request)
+    _stub_main_dependencies(monkeypatch, run_polling_calls, cfg, dummy_filter)
+
+    main.main()
+
+    assert len(request_calls) == 4
+    assert all(call["httpx_kwargs"] == {"trust_env": False} for call in request_calls)
 
 
 def test_main_uses_stable_default_data_dir_when_flag_missing(monkeypatch, tmp_path):

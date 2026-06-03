@@ -72,7 +72,12 @@ def parse_question_request(
 def should_materialize_unbound_thread_topic(state, ws_info, thread_info) -> bool:
     # App/Session Tab-created Claude sessions stay inside the desktop app until
     # a TG topic is explicitly bound.
-    return getattr(thread_info, "topic_id", None) is not None
+    return _thread_topic_id(state, ws_info, thread_info) is not None
+
+
+def _thread_topic_id(state, ws_info, thread_info) -> int | None:
+    workspace_id = state.get_workspace_storage_key(ws_info) or ws_info.daemon_workspace_id or f"{ws_info.tool}:{ws_info.name}"
+    return state.get_thread_topic_id(workspace_id, ws_info, thread_info)
 
 
 def new_imported_thread_source() -> str:
@@ -89,7 +94,7 @@ def build_approval_reply(approval, action: str) -> tuple[str, dict]:
     return "✅ 已允许", {"behavior": "allow"}
 
 
-async def _refresh_inferred_thread_source(ws_info, thread_info) -> None:
+async def _refresh_inferred_thread_source(state, ws_info, thread_info) -> None:
     if ws_info.tool != "claude":
         return
 
@@ -97,9 +102,10 @@ async def _refresh_inferred_thread_source(ws_info, thread_info) -> None:
     if thread_source != "unknown":
         return
 
+    topic_id = _thread_topic_id(state, ws_info, thread_info)
     inferred_source = infer_claude_thread_source_from_logs(
         thread_info.thread_id,
-        thread_info.topic_id,
+        topic_id,
     )
     if inferred_source != "unknown":
         thread_info.source = inferred_source
@@ -108,7 +114,7 @@ async def _refresh_inferred_thread_source(ws_info, thread_info) -> None:
             "thread=%s source=%s topic=%s",
             thread_info.thread_id[:8],
             inferred_source,
-            thread_info.topic_id,
+            topic_id,
         )
 
 
@@ -148,7 +154,7 @@ async def prepare_send(
     )
 
     if not has_active_owned_turn:
-        await _refresh_inferred_thread_source(ws_info, thread_info)
+        await _refresh_inferred_thread_source(state, ws_info, thread_info)
         await _reject_if_external_thread_busy(adapter, thread_info.thread_id)
     await adapter.resume_thread(workspace_id, thread_info.thread_id)
     return True
@@ -239,7 +245,8 @@ async def sync_existing_topics_after_startup(manager, bot) -> None:
         state_changed = state_changed or repaired
 
         for thread_id, thread_info in ws_info.threads.items():
-            if thread_info.archived or thread_info.topic_id is None:
+            topic_id = _thread_topic_id(manager.state, ws_info, thread_info)
+            if thread_info.archived or topic_id is None:
                 continue
             if not thread_info.is_active:
                 continue
@@ -248,7 +255,7 @@ async def sync_existing_topics_after_startup(manager, bot) -> None:
                 synced = await _sync_existing_claude_thread_history(
                     bot=bot,
                     group_chat_id=manager.gid,
-                    topic_id=thread_info.topic_id,
+                    topic_id=topic_id,
                     thread_info=thread_info,
                     thread_id=thread_id,
                     storage=manager.storage,
@@ -260,8 +267,9 @@ async def sync_existing_topics_after_startup(manager, bot) -> None:
                     "[claude-startup-sync] topic 已不存在，清理映射：ws=%s tid=%s topic=%s",
                     ws_name,
                     thread_id[:12],
-                    thread_info.topic_id,
+                    topic_id,
                 )
+                manager.state.invalidate_telegram_topic(topic_id)
                 thread_info.topic_id = None
                 state_changed = True
             except Exception as e:
@@ -269,7 +277,7 @@ async def sync_existing_topics_after_startup(manager, bot) -> None:
                     "[claude-startup-sync] 同步失败：ws=%s tid=%s topic=%s err=%s",
                     ws_name,
                     thread_id[:12],
-                    thread_info.topic_id,
+                    topic_id,
                     e,
                 )
 

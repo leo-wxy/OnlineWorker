@@ -106,5 +106,6 @@ pub struct DashboardComputationInput {
     pub service_pid: Option<u32>,
     pub providers: Vec<ProviderDashboardStatus>,
     pub telegram_connected: Option<bool>,
+    pub telegram_detail: Option<String>,
     pub recent_activity: Option<RecentActivitySummary>,
 }

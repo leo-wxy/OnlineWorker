@@ -3,6 +3,7 @@
 测试 bot/handlers/thread.py 中的纯逻辑辅助函数：_resolve_workspace。
 """
 import pytest
+from core.im_routes import ImRouteStore
 from core.state import AppState
 from core.storage import AppStorage, WorkspaceInfo, ThreadInfo
 from bot.handlers.thread import _resolve_workspace
@@ -60,6 +61,30 @@ class TestResolveWorkspace:
         state = make_state({"proj": ws}, active_workspace="proj")
         # topic_id=9999 没有任何匹配，回退到 active_workspace
         result = _resolve_workspace(state, src_topic_id=9999)
+        assert result is ws
+
+    def test_unknown_topic_fails_closed_when_route_store_is_configured(self, tmp_path):
+        ws = WorkspaceInfo(name="proj", path="/proj", tool="codex", topic_id=100)
+        state = make_state({"proj": ws}, active_workspace="proj")
+        store = ImRouteStore(tmp_path / "im-routes.sqlite3")
+        state.set_im_route_store(store, -100123456)
+
+        result = _resolve_workspace(state, src_topic_id=9999)
+
+        assert result is None
+        route = store.get_route("telegram", "default", "-100123456", "9999")
+        assert route is not None
+        assert route.route_scope == "unknown"
+
+    def test_global_topic_still_uses_active_workspace_when_route_store_is_configured(self, tmp_path):
+        ws = WorkspaceInfo(name="proj", path="/proj", tool="codex", topic_id=100)
+        state = make_state({"proj": ws}, active_workspace="proj")
+        store = ImRouteStore(tmp_path / "im-routes.sqlite3")
+        store.upsert_telegram_agent_route(-100123456, 11, "codex")
+        state.set_im_route_store(store, -100123456)
+
+        result = _resolve_workspace(state, src_topic_id=11)
+
         assert result is ws
 
     def test_workspace_topic_takes_priority_over_active(self):

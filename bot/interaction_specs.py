@@ -82,6 +82,11 @@ def _get_provider_command_hooks(tool_name: str):
     return provider.command_hooks if provider is not None else None
 
 
+def _thread_topic_id(state: AppState, ws_info: WorkspaceInfo, thread_info: ThreadInfo) -> int | None:
+    workspace_id = state.get_workspace_storage_key(ws_info) or ws_info.daemon_workspace_id or f"{ws_info.tool}:{ws_info.name}"
+    return state.get_thread_topic_id(workspace_id, ws_info, thread_info)
+
+
 def _build_text_command_text(command_name: str, text_value: str | None) -> str:
     suffix = (text_value or "").strip()
     return f"/{command_name}" if not suffix else f"/{command_name} {suffix}"
@@ -177,7 +182,7 @@ async def resolve_thread_command_wrapper(
             command_name=command_name,
             workspace_id=ws_info.daemon_workspace_id or "",
             thread_id=thread_info.thread_id,
-            topic_id=thread_info.topic_id,
+            topic_id=_thread_topic_id(state, ws_info, thread_info),
             tool_name=ws_info.tool,
             prompt_text="",
             interaction_type="text",

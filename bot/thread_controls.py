@@ -42,11 +42,14 @@ async def send_thread_control_panel(
     intro: str | None = None,
     topic_id: int | None = None,
 ) -> None:
+    if topic_id is None:
+        workspace_id = state.get_workspace_storage_key(ws) or ws.daemon_workspace_id or f"{ws.tool}:{ws.name}"
+        topic_id = state.get_thread_topic_id(workspace_id, ws, thread_info)
     await _send_to_group(
         bot,
         group_chat_id,
         build_thread_control_text(state, ws, thread_info, intro=intro),
-        topic_id=topic_id if topic_id is not None else thread_info.topic_id,
+        topic_id=topic_id,
         parse_mode="Markdown",
         reply_markup=build_thread_control_keyboard(
             allow_interrupt=thread_interrupt_supported(state, ws),

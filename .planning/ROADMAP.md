@@ -17,7 +17,7 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 8: General AI Capability Layer** - Add a top-level AI sidebar tab plus a provider-neutral AI capability layer. Service API settings and scenario prompt settings are separate; notification summary is the first scenario, current local summary rules remain the fallback, and packaged-app verification is complete.
 - [x] **Phase 9: Session Archive Actions** - Add Session tab archive actions and adjacent provider usage operations. Archive executes the provider's real source operation, archived rows remain visible through post-success local overlay, `/token_usage` is scoped to agent topics, and packaged-app verification is complete.
 - [x] **Phase 10: Codebase Structure Refinement** - Audit and restructure oversized classes/modules and misplaced responsibilities without changing product behavior. Completed staged refactor slices for Tauri config/dashboard helpers, Python workspace helpers, and frontend Dashboard state/presentation.
-- [ ] **Phase 11: Telegram Topic SQLite Storage Migration** - Make Telegram topics independent durable records in a single SQLite table, migrate existing JSON topic ids once, and route all topic lookups through SQLite so runtime JSON saves cannot erase topic bindings.
+- [x] **Phase 11: Telegram Topic SQLite Storage Migration** - Make Telegram topics independent durable records in a single SQLite table, migrate existing JSON topic ids once, and route all topic lookups through SQLite so runtime JSON saves cannot erase topic bindings. Source implementation and regression coverage are complete; packaged-app verification was not run in this turn because it requires explicit approval.
 - [x] **Phase 12: Codex Managed App-Server Approval Host** - Follow the Paseo/Happy/Codex IDE host-client model: OnlineWorker-managed Codex sessions own the app-server request/response channel, Telegram is the remote approval UI for those sessions, and existing Desktop/VS Code/ordinary CLI sessions stay native and mirror-only. 12-02 implements `unix://` support and the installed fixed OnlineWorker Unix remote proxy; fixed-session shared CLI + TG authorization convergence has been user-accepted through `codex_remote_proxy.sock`.
 
 ## Phase Details
@@ -283,12 +283,22 @@ Success Criteria (what must be TRUE):
   1. Existing JSON topic ids from `global_topic_ids`, workspace `topic_id`, and thread `topic_id` migrate into SQLite exactly once.
   2. Topic lookup and routing use SQLite as the only topic truth source after migration.
   3. JSON storage saves no longer create, delete, clear, or overwrite Telegram topic bindings.
-  4. Every newly created, observed, closed, deleted, or manually rebound topic updates SQLite without physically deleting topic history.
+  4. Every newly created, observed, archived, invalidated, or manually rebound topic updates SQLite without physically deleting topic history.
   5. Unknown topics are recorded as `unknown` and do not fallback to active workspace or thread routing.
   6. Tests prove migration, routing, topic creation, unknown-topic handling, and cleanup/archive paths cannot lose topic bindings.
 
 Plans:
-- [ ] 11-01: Migrate Telegram topic storage to one SQLite table
+- [x] 11-01: Migrate Telegram topic storage to one SQLite table
+
+Latest verification:
+- Source verification passed:
+  - `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest -q tests/test_im_route_store.py tests/test_storage.py tests/test_thread_controls.py tests/test_events.py tests/test_events_streaming.py tests/test_workspace_thread_open.py tests/test_thread_helpers.py tests/test_handlers.py tests/test_slash_router.py tests/test_workspace_helpers.py tests/test_startup_runtime.py tests/test_claude_runtime.py tests/test_codex_runtime.py tests/test_codex_tui_mode.py tests/test_provider_owner_bridge.py` -> `354 passed`.
+  - `git diff --check` -> passed.
+
+Remaining Phase 11 verification:
+- Packaged-app verification was not run in this turn because the combined
+  repository instructions require explicit current-conversation permission
+  before build, package, install, restart, or packaged-app verification.
 
 ### Phase 12: Codex Managed App-Server Approval Host
 

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -487,6 +488,7 @@ logging:
     try:
         result = subprocess.run(
             [
+                sys.executable,
                 str(ROOT / "scripts" / "ow-claude"),
                 "--data-dir",
                 str(tmp_path),

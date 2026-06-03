@@ -371,13 +371,27 @@ def main() -> None:
 
             im_route_store = ImRouteStore()
             im_route_store.migrate_telegram_json_topics(storage, gid)
-            im_route_store.restore_telegram_topic_mirrors(storage, gid)
             state.set_im_route_store(im_route_store, gid)
 
             app = (
                 Application.builder()
                 .token(cfg.telegram_token)
-                .request(HTTPXRequest(read_timeout=20, write_timeout=20, connect_timeout=10))
+                .request(
+                    HTTPXRequest(
+                        read_timeout=20,
+                        write_timeout=20,
+                        connect_timeout=10,
+                        httpx_kwargs={"trust_env": False},
+                    )
+                )
+                .get_updates_request(
+                    HTTPXRequest(
+                        read_timeout=20,
+                        write_timeout=20,
+                        connect_timeout=10,
+                        httpx_kwargs={"trust_env": False},
+                    )
+                )
                 .build()
             )
 

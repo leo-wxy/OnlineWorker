@@ -199,7 +199,11 @@ class AppState:
             self.telegram_group_chat_id,
             topic_id,
             account_id=self.telegram_im_account_id,
+            active_only=False,
         )
+
+    def has_telegram_route_store(self) -> bool:
+        return self.im_route_store is not None and self.telegram_group_chat_id is not None
 
     def observe_unknown_telegram_topic(
         self,
@@ -219,6 +223,30 @@ class AppState:
             account_id=self.telegram_im_account_id,
             display_name=display_name,
         )
+
+    def mark_telegram_topic_status(
+        self,
+        topic_id: int | None,
+        status: str,
+    ) -> bool:
+        if (
+            self.im_route_store is None
+            or self.telegram_group_chat_id is None
+            or topic_id is None
+        ):
+            return False
+        return self.im_route_store.mark_telegram_topic_status(
+            self.telegram_group_chat_id,
+            topic_id,
+            status,
+            account_id=self.telegram_im_account_id,
+        )
+
+    def archive_telegram_topic(self, topic_id: int | None) -> bool:
+        return self.mark_telegram_topic_status(topic_id, "archived")
+
+    def invalidate_telegram_topic(self, topic_id: int | None) -> bool:
+        return self.mark_telegram_topic_status(topic_id, "invalid")
 
     def bind_telegram_workspace_topic(
         self,
@@ -382,22 +410,24 @@ class AppState:
 
     def get_global_topic_id(self, tool: str) -> Optional[int]:
         """获取指定工具的全局 Topic ID。"""
-        if self.im_route_store is not None and self.telegram_group_chat_id is not None:
+        if self.has_telegram_route_store():
             topic_id = self.im_route_store.get_telegram_agent_topic_id(
                 self.telegram_group_chat_id,
                 tool,
                 account_id=self.telegram_im_account_id,
             )
-            if topic_id is not None:
-                return topic_id
+            return topic_id
         if not self.storage:
             return None
         return self.storage.global_topic_ids.get(tool)
 
     def set_global_topic_id(self, tool: str, topic_id: int | None) -> None:
+        if topic_id is None:
+            existing = self.get_global_topic_id(tool)
+            self.invalidate_telegram_topic(existing)
+            return
         if (
-            topic_id is not None
-            and self.im_route_store is not None
+            self.im_route_store is not None
             and self.telegram_group_chat_id is not None
         ):
             self.im_route_store.upsert_telegram_agent_route(
@@ -406,17 +436,16 @@ class AppState:
                 tool,
                 account_id=self.telegram_im_account_id,
             )
-        if self.storage:
-            if topic_id is None:
-                self.storage.global_topic_ids.pop(tool, None)
-            else:
-                self.storage.global_topic_ids[tool] = topic_id
+        elif self.storage:
+            self.storage.global_topic_ids[tool] = topic_id
 
     def is_global_topic(self, topic_id: Optional[int]) -> bool:
         """判断 topic_id 是否是某个工具的全局控制台 Topic。"""
         route = self._telegram_route(topic_id)
         if route is not None:
-            return route.route_scope == "agent"
+            return route.status == "active" and route.route_scope == "agent"
+        if self.has_telegram_route_store():
+            return False
         if not self.storage or topic_id is None:
             return False
         return topic_id in self.storage.global_topic_ids.values()
@@ -424,8 +453,10 @@ class AppState:
     def get_tool_by_global_topic(self, topic_id: Optional[int]) -> Optional[str]:
         """根据全局 Topic ID 反查工具名，不匹配返回 None。"""
         route = self._telegram_route(topic_id)
-        if route is not None and route.route_scope == "agent":
+        if route is not None and route.status == "active" and route.route_scope == "agent":
             return route.agent_provider
+        if self.has_telegram_route_store():
+            return None
         if not self.storage or topic_id is None:
             return None
         for tool_name, tid in self.storage.global_topic_ids.items():
@@ -437,15 +468,45 @@ class AppState:
         """按 workspace 管理 Topic ID 查找 workspace。"""
         route = self._telegram_route(topic_id)
         if route is not None:
-            if route.route_scope != "workspace" or not route.workspace_id:
+            if route.status != "active" or route.route_scope != "workspace" or not route.workspace_id:
                 return None
             return self.storage.workspaces.get(route.workspace_id) if self.storage else None
+        if self.has_telegram_route_store():
+            return None
         if not self.storage:
             return None
         for ws in self.storage.workspaces.values():
             if ws.topic_id == topic_id:
                 return ws
         return None
+
+    def get_workspace_topic_id(self, workspace_id: str, ws: WorkspaceInfo) -> Optional[int]:
+        """返回 workspace 的 active Telegram 管理 Topic ID。"""
+        if self.has_telegram_route_store():
+            return self.im_route_store.get_telegram_workspace_topic_id(
+                self.telegram_group_chat_id,
+                agent_provider=ws.tool,
+                workspace_id=workspace_id,
+                account_id=self.telegram_im_account_id,
+            )
+        return ws.topic_id
+
+    def get_thread_topic_id(
+        self,
+        workspace_id: str,
+        ws: WorkspaceInfo,
+        thread: ThreadInfo,
+    ) -> Optional[int]:
+        """返回 thread/session 的 active Telegram Topic ID。"""
+        if self.has_telegram_route_store():
+            return self.im_route_store.get_telegram_session_topic_id(
+                self.telegram_group_chat_id,
+                agent_provider=ws.tool,
+                workspace_id=workspace_id,
+                session_id=thread.thread_id,
+                account_id=self.telegram_im_account_id,
+            )
+        return thread.topic_id
 
     # ------------------------------------------------------------------
     # 活跃 workspace
@@ -479,42 +540,16 @@ class AppState:
     def get_active_workspace_topic_id(self) -> Optional[int]:
         """活跃 workspace 的管理 Topic ID。"""
         ws = self.get_active_workspace()
-        if (
-            ws is not None
-            and self.storage is not None
-            and self.storage.active_workspace
-            and self.im_route_store is not None
-            and self.telegram_group_chat_id is not None
-        ):
-            topic_id = self.im_route_store.get_telegram_workspace_topic_id(
-                self.telegram_group_chat_id,
-                agent_provider=ws.tool,
-                workspace_id=self.storage.active_workspace,
-                account_id=self.telegram_im_account_id,
-            )
-            if topic_id is not None:
-                return topic_id
-        return ws.topic_id if ws else None
+        if ws is None or self.storage is None or not self.storage.active_workspace:
+            return None
+        return self.get_workspace_topic_id(self.storage.active_workspace, ws)
 
     def get_active_workspace_topic_id_for_tool(self, tool: str) -> Optional[int]:
         """仅当当前 active workspace 属于指定工具时返回其管理 Topic ID。"""
         ws = self.get_active_workspace_for_tool(tool)
-        if (
-            ws is not None
-            and self.storage is not None
-            and self.storage.active_workspace
-            and self.im_route_store is not None
-            and self.telegram_group_chat_id is not None
-        ):
-            topic_id = self.im_route_store.get_telegram_workspace_topic_id(
-                self.telegram_group_chat_id,
-                agent_provider=tool,
-                workspace_id=self.storage.active_workspace,
-                account_id=self.telegram_im_account_id,
-            )
-            if topic_id is not None:
-                return topic_id
-        return ws.topic_id if ws else None
+        if ws is None or self.storage is None or not self.storage.active_workspace:
+            return None
+        return self.get_workspace_topic_id(self.storage.active_workspace, ws)
 
     # ------------------------------------------------------------------
     # 按 daemon_workspace_id 查 workspace
@@ -546,7 +581,12 @@ class AppState:
         """返回 (WorkspaceInfo, ThreadInfo) 或 None。"""
         route = self._telegram_route(topic_id)
         if route is not None:
-            if route.route_scope != "session" or not route.workspace_id or not route.session_id:
+            if (
+                route.status != "active"
+                or route.route_scope != "session"
+                or not route.workspace_id
+                or not route.session_id
+            ):
                 return None
             if not self.storage:
                 return None
@@ -555,6 +595,8 @@ class AppState:
                 return None
             thread = ws.threads.get(route.session_id)
             return (ws, thread) if thread is not None else None
+        if self.has_telegram_route_store():
+            return None
         if not self.storage:
             return None
         for ws in self.storage.workspaces.values():

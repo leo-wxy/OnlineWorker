@@ -47,6 +47,11 @@ DEFAULT_REASONING_OPTIONS = ["minimal", "low", "medium", "high", "xhigh"]
 CODEX_APP_SERVER_RESOLVED_METHOD = "serverRequest/resolved"
 
 
+def _thread_topic_id(state: "AppState", ws_info: "WorkspaceInfo", thread_info: "ThreadInfo") -> int | None:
+    workspace_id = state.get_workspace_storage_key(ws_info) or ws_info.daemon_workspace_id or f"{ws_info.tool}:{ws_info.name}"
+    return state.get_thread_topic_id(workspace_id, ws_info, thread_info)
+
+
 def log_app_server_process_snapshot(
     proc: Optional[AppServerProcess],
     *,
@@ -636,7 +641,7 @@ async def build_model_wrapper(
         command_name="model",
         workspace_id=ws_info.daemon_workspace_id or "",
         thread_id=thread_info.thread_id,
-        topic_id=thread_info.topic_id,
+        topic_id=_thread_topic_id(state, ws_info, thread_info),
         tool_name=ws_info.tool,
         prompt_text="",
         options=[],
@@ -799,7 +804,7 @@ async def handle_local_owner(
             ws_info,
             context.bot,
             group_chat_id,
-            src_topic_id or thread_info.topic_id or 0,
+            src_topic_id or _thread_topic_id(state, ws_info, thread_info) or 0,
             thread_info.thread_id,
             text,
         )
@@ -1340,7 +1345,7 @@ async def setup_connection(manager, bot, adapter, **kwargs) -> None:
             streaming_state = manager.state.streaming_turns.get(thread_id)
             if (
                 thread_info.streaming_msg_id is not None
-                and thread_info.topic_id is not None
+                and _thread_topic_id(manager.state, ws_info, thread_info) is not None
                 and streaming_state is not None
             ):
                 if streaming_state.throttle_task and not streaming_state.throttle_task.done():

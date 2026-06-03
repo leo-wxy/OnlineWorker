@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from config import Config, ToolConfig
+from core.im_routes import ImRouteStore
 from core.state import (
     AppState,
     PendingCommandWrapper,
@@ -816,6 +817,55 @@ async def test_archive_handler_uses_provider_thread_hooks_for_custom_provider(mo
     assert args[2] == "custom-1"
     assert args[3] is adapter
     adapter.archive_thread.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_archive_handler_marks_sqlite_route_archived_after_topic_delete(monkeypatch, tmp_path):
+    from bot.handlers.thread import make_archive_thread_handler
+
+    state = _build_state(tool="custom")
+    store = ImRouteStore(tmp_path / "im-routes.sqlite3")
+    state.set_im_route_store(store, GROUP_CHAT_ID)
+
+    ws = state.storage.workspaces["custom:onlineWorker"]
+    thread = ThreadInfo(thread_id="custom-1", topic_id=100, archived=False)
+    ws.threads["custom-1"] = thread
+    state.bind_telegram_session_topic("custom:onlineWorker", ws, thread, 100)
+
+    adapter = MagicMock()
+    adapter.connected = True
+    state.set_adapter("custom", adapter)
+
+    archive_thread = AsyncMock()
+    monkeypatch.setattr(
+        "bot.handlers.thread.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            thread_hooks=SimpleNamespace(
+                resolve_adapter=lambda state, ws: adapter,
+                archive_thread=archive_thread,
+            )
+        ) if name == "custom" else None,
+    )
+
+    update = MagicMock()
+    update.effective_message = MagicMock()
+    update.effective_message.message_thread_id = 100
+
+    ctx = MagicMock()
+    ctx.args = []
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+    ctx.bot.delete_forum_topic = AsyncMock()
+
+    handler = make_archive_thread_handler(state, GROUP_CHAT_ID)
+    await handler(update, ctx)
+
+    route = store.get_route("telegram", "default", str(GROUP_CHAT_ID), "100")
+    assert route is not None
+    assert route.status == "archived"
+    assert thread.archived is True
+    assert thread.topic_id is None
+    assert state.find_thread_by_topic_id(100) is None
 
 
 @pytest.mark.asyncio

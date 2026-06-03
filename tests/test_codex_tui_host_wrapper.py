@@ -130,7 +130,7 @@ def test_resolve_host_thread_id_prefers_explicit_thread_id(tmp_path):
     assert thread_id == "tid-explicit"
 
 
-def test_resolve_host_thread_id_uses_topic_mapping_from_onlineworker_state(tmp_path):
+def test_resolve_host_thread_id_rejects_topic_mapping_from_onlineworker_state(tmp_path):
     ws = WorkspaceInfo(
         name="onlineWorker",
         path="/Users/example/Projects/onlineWorker",
@@ -142,16 +142,15 @@ def test_resolve_host_thread_id_uses_topic_mapping_from_onlineworker_state(tmp_p
     storage = AppStorage(workspaces={"codex:onlineWorker": ws})
     save_storage(storage, str(tmp_path / "onlineworker_state.json"))
 
-    thread_id = resolve_host_thread_id(
-        cwd="/Users/example/Projects/onlineWorker",
-        data_dir=str(tmp_path),
-        topic_id=4586,
-    )
+    with pytest.raises(RuntimeError, match="不再从 onlineworker_state.json 按 topic_id 反查"):
+        resolve_host_thread_id(
+            cwd="/Users/example/Projects/onlineWorker",
+            data_dir=str(tmp_path),
+            topic_id=4586,
+        )
 
-    assert thread_id == "tid-1"
 
-
-def test_resolve_host_thread_id_revives_stale_archived_active_topic_mapping(tmp_path, monkeypatch):
+def test_resolve_host_thread_id_does_not_revive_archived_topic_mapping(tmp_path, monkeypatch):
     ws = WorkspaceInfo(
         name="onlineWorker",
         path="/Users/example/Projects/onlineWorker",
@@ -169,17 +168,17 @@ def test_resolve_host_thread_id_revives_stale_archived_active_topic_mapping(tmp_
         raising=False,
     )
 
-    thread_id = resolve_host_thread_id(
-        cwd="/Users/example/Projects/onlineWorker",
-        data_dir=str(tmp_path),
-        topic_id=4586,
-    )
+    with pytest.raises(RuntimeError, match="不再从 onlineworker_state.json 按 topic_id 反查"):
+        resolve_host_thread_id(
+            cwd="/Users/example/Projects/onlineWorker",
+            data_dir=str(tmp_path),
+            topic_id=4586,
+        )
 
     repaired = load_storage(str(storage_path))
     repaired_thread = repaired.workspaces["codex:onlineWorker"].threads["tid-1"]
-    assert thread_id == "tid-1"
-    assert repaired_thread.archived is False
-    assert repaired_thread.is_active is True
+    assert repaired_thread.archived is True
+    assert repaired_thread.is_active is False
 
 
 def test_resolve_host_thread_id_falls_back_to_latest_thread_for_cwd(tmp_path, monkeypatch):

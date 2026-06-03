@@ -23,6 +23,18 @@ ACTIVE_BOOTSTRAP_TAIL_BYTES = 128 * 1024
 COMMENTARY_IDLE_COMPLETION_POLLS = 6
 
 
+def _workspace_key(state: AppState, ws: WorkspaceInfo) -> str:
+    return state.get_workspace_storage_key(ws) or ws.daemon_workspace_id or f"{ws.tool}:{ws.name}"
+
+
+def _workspace_topic_id(state: AppState, ws: WorkspaceInfo) -> int | None:
+    return state.get_workspace_topic_id(_workspace_key(state, ws), ws)
+
+
+def _thread_topic_id(state: AppState, ws: WorkspaceInfo, thread) -> int | None:
+    return state.get_thread_topic_id(_workspace_key(state, ws), ws, thread)
+
+
 def watch_codex_thread(
     state: AppState,
     ws: WorkspaceInfo,
@@ -37,6 +49,9 @@ def watch_codex_thread(
     thread = ws.threads.get(thread_id)
     if thread is None:
         return
+    topic_id = _thread_topic_id(state, ws, thread) or _workspace_topic_id(state, ws)
+    if topic_id is None:
+        return
 
     runtime = codex_state.get_runtime(state)
     now = time.monotonic()
@@ -44,7 +59,7 @@ def watch_codex_thread(
     if watch is None:
         runtime.watched_threads[thread_id] = ProviderWatchState(
             workspace_id=ws.daemon_workspace_id or "",
-            topic_id=thread.topic_id or ws.topic_id or 0,
+            topic_id=topic_id,
             active_until=now + ttl_seconds,
             poll_interval_seconds=ACTIVE_POLL_INTERVAL_SECONDS,
             next_poll_at=now,
@@ -53,7 +68,7 @@ def watch_codex_thread(
         return
 
     watch.workspace_id = ws.daemon_workspace_id or watch.workspace_id
-    watch.topic_id = thread.topic_id or watch.topic_id
+    watch.topic_id = _thread_topic_id(state, ws, thread) or watch.topic_id
     watch.active_until = now + ttl_seconds
     watch.poll_interval_seconds = ACTIVE_POLL_INTERVAL_SECONDS
     watch.next_poll_at = now
@@ -187,7 +202,7 @@ def _ensure_bound_codex_thread_watches(
         for thread_id, thread in (getattr(ws, "threads", {}) or {}).items():
             if getattr(thread, "archived", False):
                 continue
-            topic_id = getattr(thread, "topic_id", None)
+            topic_id = _thread_topic_id(state, ws, thread)
             if topic_id is None:
                 continue
 
@@ -224,7 +239,7 @@ def _ensure_bound_codex_thread_watches(
                 watch.next_poll_at = 0.0
 
             watch.workspace_id = ws.daemon_workspace_id or watch.workspace_id
-            watch.topic_id = topic_id or ws.topic_id or watch.topic_id
+            watch.topic_id = topic_id or _workspace_topic_id(state, ws) or watch.topic_id
             watch.active_until = now + DEFAULT_WATCH_TTL_SECONDS
 
     return changed

@@ -1,7 +1,11 @@
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
+
+use chrono::{Local, NaiveDateTime, TimeZone};
 
 use super::config::ensure_data_dir;
 use super::service::{ensure_service_running_if_needed, snapshot_service_status, BotState};
@@ -29,6 +33,14 @@ use recent_activity::{
 };
 
 const REQUIRED_ENV_KEYS: &[&str] = &["TELEGRAM_TOKEN", "ALLOWED_USER_ID", "GROUP_CHAT_ID"];
+const TELEGRAM_POLLING_STALE_AFTER_SECS: u64 = 90;
+const TELEGRAM_LOG_SCAN_BYTES: u64 = 256 * 1024;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TelegramPollingDiagnostic {
+    connected: Option<bool>,
+    detail: Option<String>,
+}
 
 #[tauri::command]
 pub async fn get_dashboard_state(
@@ -60,13 +72,23 @@ pub(crate) async fn compute_dashboard_state(
         now,
     );
 
+    let telegram = if service.running {
+        read_telegram_polling_diagnostic(&dir, now)
+    } else {
+        TelegramPollingDiagnostic {
+            connected: Some(false),
+            detail: Some("Bot process is not running".to_string()),
+        }
+    };
+
     Ok(build_dashboard_state(DashboardComputationInput {
         config_ready,
         missing_config_fields,
         service_running: service.running,
         service_pid: service.pid,
         providers,
-        telegram_connected: if service.running { None } else { Some(false) },
+        telegram_connected: telegram.connected,
+        telegram_detail: telegram.detail,
         recent_activity: read_recent_activity_summary(&dir),
     }))
 }
@@ -136,8 +158,10 @@ pub(crate) fn build_dashboard_state(input: DashboardComputationInput) -> Dashboa
             level: AlertLevel::Warning,
             code: "telegram_unavailable".to_string(),
             title: "Telegram connection unavailable".to_string(),
-            detail: "Bot process is up, but Telegram connectivity is reported as disconnected"
-                .to_string(),
+            detail: input.telegram_detail.clone().unwrap_or_else(|| {
+                "Bot process is up, but Telegram connectivity is reported as disconnected"
+                    .to_string()
+            }),
             action: Some("Open Setup".to_string()),
             action_code: Some("open_setup".to_string()),
             missing_fields: Vec::new(),
@@ -212,16 +236,153 @@ fn read_env_key(raw: &str, key: &str) -> Option<String> {
     })
 }
 
+fn read_tail(path: &Path, max_bytes: u64) -> Result<String, String> {
+    let mut file =
+        File::open(path).map_err(|e| format!("Cannot open {}: {}", path.display(), e))?;
+    let len = file
+        .metadata()
+        .map_err(|e| format!("Cannot stat {}: {}", path.display(), e))?
+        .len();
+    let start = len.saturating_sub(max_bytes);
+    file.seek(SeekFrom::Start(start))
+        .map_err(|e| format!("Cannot seek {}: {}", path.display(), e))?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)
+        .map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+fn is_telegram_polling_success_line(line: &str) -> bool {
+    line.contains("api.telegram.org")
+        && line.contains("/getUpdates")
+        && line.contains("\"HTTP/1.1 200 OK\"")
+}
+
+fn is_telegram_polling_error_line(line: &str) -> bool {
+    line.contains("[ptb-error]")
+        || line.contains("telegram.error.NetworkError")
+        || line.contains("telegram.error.TimedOut")
+        || line.contains("httpx.ConnectError")
+        || (line.contains("api.telegram.org")
+            && line.contains("/getUpdates")
+            && !line.contains("\"HTTP/1.1 200 OK\""))
+}
+
+fn parse_log_timestamp(line: &str) -> Option<SystemTime> {
+    let raw = line.get(0..23).or_else(|| line.get(0..19))?;
+    let format = if raw.len() >= 23 {
+        "%Y-%m-%d %H:%M:%S,%3f"
+    } else {
+        "%Y-%m-%d %H:%M:%S"
+    };
+    let naive = NaiveDateTime::parse_from_str(raw, format).ok()?;
+    let local = Local.from_local_datetime(&naive).single()?;
+    let timestamp = local.timestamp();
+    let nanos = local.timestamp_subsec_nanos();
+    if timestamp >= 0 {
+        Some(
+            UNIX_EPOCH + Duration::from_secs(timestamp as u64) + Duration::from_nanos(nanos.into()),
+        )
+    } else {
+        UNIX_EPOCH
+            .checked_sub(Duration::from_secs(timestamp.unsigned_abs()))
+            .and_then(|time| time.checked_add(Duration::from_nanos(nanos.into())))
+    }
+}
+
+fn redact_telegram_token(line: &str) -> String {
+    let Some(start) = line.find("/bot") else {
+        return line.to_string();
+    };
+    let token_start = start + "/bot".len();
+    let token_end = line[token_start..]
+        .find('/')
+        .map(|offset| token_start + offset)
+        .unwrap_or(line.len());
+    let mut redacted = String::with_capacity(line.len());
+    redacted.push_str(&line[..token_start]);
+    redacted.push_str("[redacted]");
+    redacted.push_str(&line[token_end..]);
+    redacted
+}
+
+fn diagnose_telegram_polling_from_log(raw: &str, now: SystemTime) -> TelegramPollingDiagnostic {
+    let mut current_timestamp: Option<SystemTime> = None;
+    let mut last_polling_event: Option<(bool, SystemTime, String)> = None;
+
+    for line in raw.lines() {
+        if let Some(timestamp) = parse_log_timestamp(line) {
+            current_timestamp = Some(timestamp);
+        }
+        if is_telegram_polling_success_line(line) {
+            let ts = current_timestamp.unwrap_or(now);
+            last_polling_event = Some((true, ts, line.to_string()));
+        } else if is_telegram_polling_error_line(line) {
+            let ts = current_timestamp.unwrap_or(now);
+            last_polling_event = Some((false, ts, line.to_string()));
+        }
+    }
+
+    if let Some((ok, timestamp, line)) = last_polling_event {
+        let age = now.duration_since(timestamp).unwrap_or_default().as_secs();
+        if ok && age <= TELEGRAM_POLLING_STALE_AFTER_SECS {
+            return TelegramPollingDiagnostic {
+                connected: Some(true),
+                detail: Some(format!("Last Telegram getUpdates success {}s ago", age)),
+            };
+        }
+        if ok {
+            return TelegramPollingDiagnostic {
+                connected: Some(false),
+                detail: Some(format!(
+                    "Telegram getUpdates has no recent successful response for {}s",
+                    age
+                )),
+            };
+        }
+        return TelegramPollingDiagnostic {
+            connected: Some(false),
+            detail: Some(format!(
+                "Recent Telegram polling error: {}",
+                redact_telegram_token(&line)
+            )),
+        };
+    }
+
+    TelegramPollingDiagnostic {
+        connected: None,
+        detail: Some("No Telegram polling result has been observed yet".to_string()),
+    }
+}
+
+fn read_telegram_polling_diagnostic(data_dir: &Path, now: SystemTime) -> TelegramPollingDiagnostic {
+    let log_path = data_dir.join("onlineworker.log");
+    if !log_path.exists() {
+        return TelegramPollingDiagnostic {
+            connected: None,
+            detail: Some("onlineworker.log is not available yet".to_string()),
+        };
+    }
+    match read_tail(&log_path, TELEGRAM_LOG_SCAN_BYTES) {
+        Ok(raw) => diagnose_telegram_polling_from_log(&raw, now),
+        Err(error) => TelegramPollingDiagnostic {
+            connected: None,
+            detail: Some(error),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         build_claude_activity_index, build_dashboard_state, build_provider_statuses,
-        extract_thread_summary, read_claude_workspace_activity, read_env_key,
-        read_provider_runtime_status_via_owner_bridge_with_timeout, read_recent_activity_summary,
-        read_recent_activity_summary_cached_with_now, resolve_builtin_provider_snapshots,
-        AlertLevel, DashboardComputationInput, ProviderConfigSnapshot, ProviderDashboardStatus,
-        RecentActivitySummary, ServiceHealth, SystemHealth, WorkspaceSnapshot,
-        RECENT_ACTIVITY_CACHE_TTL,
+        diagnose_telegram_polling_from_log, extract_thread_summary, read_claude_workspace_activity,
+        read_env_key, read_provider_runtime_status_via_owner_bridge_with_timeout,
+        read_recent_activity_summary, read_recent_activity_summary_cached_with_now,
+        redact_telegram_token, resolve_builtin_provider_snapshots, AlertLevel,
+        DashboardComputationInput, ProviderConfigSnapshot, ProviderDashboardStatus,
+        RecentActivitySummary, ServiceHealth, SystemHealth, TelegramPollingDiagnostic,
+        WorkspaceSnapshot, RECENT_ACTIVITY_CACHE_TTL,
     };
     use serde_json::json;
     use std::collections::HashMap;
@@ -230,6 +391,12 @@ mod tests {
     use std::os::unix::net::UnixListener;
     use std::thread;
     use std::time::{Duration, SystemTime};
+
+    fn local_log_time(now: SystemTime, delta: Duration) -> String {
+        let timestamp = now.checked_sub(delta).unwrap_or(now);
+        let datetime: chrono::DateTime<chrono::Local> = timestamp.into();
+        datetime.format("%Y-%m-%d %H:%M:%S,%3f").to_string()
+    }
 
     #[test]
     fn build_dashboard_state_marks_missing_required_config_as_misconfigured() {
@@ -240,6 +407,7 @@ mod tests {
             service_pid: None,
             providers: vec![],
             telegram_connected: None,
+            telegram_detail: None,
             recent_activity: None,
         });
 
@@ -257,6 +425,7 @@ mod tests {
             service_pid: None,
             providers: vec![],
             telegram_connected: Some(false),
+            telegram_detail: None,
             recent_activity: None,
         });
 
@@ -285,12 +454,97 @@ mod tests {
                 bin: Some("codex".into()),
             }],
             telegram_connected: None,
+            telegram_detail: None,
             recent_activity: None,
         });
 
         assert_eq!(state.overall, SystemHealth::Degraded);
         assert_eq!(state.providers[0].health, ServiceHealth::Degraded);
         assert_eq!(state.bot.process, ServiceHealth::Healthy);
+    }
+
+    #[test]
+    fn build_dashboard_state_marks_degraded_when_telegram_is_disconnected() {
+        let state = build_dashboard_state(DashboardComputationInput {
+            config_ready: true,
+            missing_config_fields: vec![],
+            service_running: true,
+            service_pid: Some(4321),
+            providers: vec![],
+            telegram_connected: Some(false),
+            telegram_detail: Some("Recent Telegram polling error: connection refused".into()),
+            recent_activity: None,
+        });
+
+        assert_eq!(state.overall, SystemHealth::Degraded);
+        assert_eq!(state.bot.telegram, super::ConnectionStatus::Disconnected);
+        assert_eq!(state.alerts.len(), 1);
+        assert_eq!(state.alerts[0].code, "telegram_unavailable");
+        assert_eq!(
+            state.alerts[0].detail,
+            "Recent Telegram polling error: connection refused"
+        );
+    }
+
+    #[test]
+    fn telegram_polling_diagnostic_marks_recent_get_updates_success_connected() {
+        let now = SystemTime::now();
+        let raw = format!(
+            "{} [INFO] httpx: HTTP Request: POST https://api.telegram.org/botsecret-token/getUpdates \"HTTP/1.1 200 OK\"",
+            local_log_time(now, Duration::from_secs(12))
+        );
+
+        assert_eq!(
+            diagnose_telegram_polling_from_log(&raw, now),
+            TelegramPollingDiagnostic {
+                connected: Some(true),
+                detail: Some("Last Telegram getUpdates success 12s ago".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn telegram_polling_diagnostic_marks_stale_success_disconnected() {
+        let now = SystemTime::now();
+        let raw = format!(
+            "{} [INFO] httpx: HTTP Request: POST https://api.telegram.org/botsecret-token/getUpdates \"HTTP/1.1 200 OK\"",
+            local_log_time(now, Duration::from_secs(120))
+        );
+        let diagnostic = diagnose_telegram_polling_from_log(&raw, now);
+
+        assert_eq!(diagnostic.connected, Some(false));
+        assert!(diagnostic
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("no recent successful response"));
+    }
+
+    #[test]
+    fn telegram_polling_diagnostic_marks_recent_error_disconnected_and_redacts_token() {
+        let now = SystemTime::now();
+        let raw = format!(
+            "{} [ERROR] __main__: [ptb-error] update_type=None error=httpx.ConnectError: All connection attempts failed\n\
+             {} [INFO] httpx: HTTP Request: POST https://api.telegram.org/bot8533277450:SECRET/getUpdates \"HTTP/1.1 500 ERROR\"",
+            local_log_time(now, Duration::from_secs(10)),
+            local_log_time(now, Duration::from_secs(10))
+        );
+        let diagnostic = diagnose_telegram_polling_from_log(&raw, now);
+
+        assert_eq!(diagnostic.connected, Some(false));
+        let detail = diagnostic.detail.unwrap_or_default();
+        assert!(detail.contains("Recent Telegram polling error"));
+        assert!(!detail.contains("8533277450:SECRET"));
+        assert!(detail.contains("/bot[redacted]/getUpdates"));
+    }
+
+    #[test]
+    fn telegram_token_redaction_leaves_non_telegram_lines_unchanged() {
+        assert_eq!(redact_telegram_token("plain error"), "plain error");
+        assert_eq!(
+            redact_telegram_token("https://api.telegram.org/botabc:def/getUpdates"),
+            "https://api.telegram.org/bot[redacted]/getUpdates"
+        );
     }
 
     #[test]
@@ -610,6 +864,7 @@ mod tests {
                 },
             ],
             telegram_connected: Some(true),
+            telegram_detail: None,
             recent_activity: Some(RecentActivitySummary {
                 active_workspace_id: Some("codex:onlineWorker".into()),
                 active_workspace_name: Some("onlineWorker".into()),
@@ -678,6 +933,7 @@ mod tests {
                 },
             ],
             telegram_connected: Some(true),
+            telegram_detail: None,
             recent_activity: None,
         });
 
@@ -721,6 +977,7 @@ mod tests {
                 },
             ],
             telegram_connected: Some(true),
+            telegram_detail: None,
             recent_activity: None,
         });
 

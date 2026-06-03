@@ -63,7 +63,8 @@ def _resolve_workspace(state: AppState, src_topic_id: Optional[int]) -> Optional
     根据消息所在 topic_id 推断当前 workspace：
     - workspace Topic → 直接返回该 workspace
     - thread Topic → 返回 thread 所属 workspace
-    - 其他 → 返回 active_workspace
+    - global Topic 或无 route store 的旧运行态 → 返回 active_workspace
+    - SQLite route store 已配置时未知/关闭 Topic → fail closed
     """
     if src_topic_id is not None:
         # workspace Topic？
@@ -74,6 +75,9 @@ def _resolve_workspace(state: AppState, src_topic_id: Optional[int]) -> Optional
         found = state.find_thread_by_topic_id(src_topic_id)
         if found is not None:
             return found[0]
+        if state.has_telegram_route_store() and not state.is_global_topic(src_topic_id):
+            state.observe_unknown_telegram_topic(src_topic_id)
+            return None
     return state.get_active_workspace()
 
 
@@ -104,11 +108,13 @@ async def _rollback_failed_new_thread(
     if topic_id is None:
         return
 
+    state.invalidate_telegram_topic(topic_id)
     try:
         await bot.delete_forum_topic(
             chat_id=group_chat_id,
             message_thread_id=topic_id,
         )
+        state.invalidate_telegram_topic(topic_id)
         logger.info(f"已回滚删除新建失败的 Topic {topic_id}")
         return
     except Exception as e:
@@ -119,6 +125,7 @@ async def _rollback_failed_new_thread(
             chat_id=group_chat_id,
             message_thread_id=topic_id,
         )
+        state.invalidate_telegram_topic(topic_id)
         logger.info(f"已回滚关闭新建失败的 Topic {topic_id}")
     except Exception as e:
         logger.warning(f"回滚关闭 Topic {topic_id} 失败：{e}")
@@ -223,8 +230,6 @@ def _list_sort_key(session: dict) -> tuple[int, int, str]:
 def _should_include_state_only_thread(tool_name: str, thread_info: ThreadInfo) -> bool:
     if tool_name != "codex":
         return True
-    if thread_info.topic_id is not None:
-        return True
     return str(thread_info.source or "unknown").strip().lower() == "app"
 
 
@@ -310,7 +315,10 @@ async def _handle_archive_request(
         if thread_info:
             found = (ws, thread_info)
 
-    reply_topic_id = (ws.topic_id if ws else None) or src_topic_id
+    ws_key = state.get_workspace_storage_key(ws) if ws else None
+    reply_topic_id = (
+        state.get_workspace_topic_id(ws_key, ws) if ws is not None and ws_key is not None else None
+    ) or src_topic_id
 
     if found is None:
         await _send_to_group(
@@ -323,6 +331,7 @@ async def _handle_archive_request(
         return
 
     ws_info, thread_info = found
+    workspace_key = state.get_workspace_storage_key(ws_info)
 
     try:
         await _archive_thread_in_source(state, ws_info, thread_info.thread_id)
@@ -342,21 +351,29 @@ async def _handle_archive_request(
 
     thread_info.archived = True
 
-    if thread_info.topic_id:
+    topic_id = (
+        state.get_thread_topic_id(workspace_key, ws_info, thread_info)
+        if workspace_key is not None
+        else thread_info.topic_id
+    )
+    if topic_id:
+        state.archive_telegram_topic(topic_id)
         try:
             if delete_topic:
                 await bot.delete_forum_topic(
                     chat_id=group_chat_id,
-                    message_thread_id=thread_info.topic_id,
+                    message_thread_id=topic_id,
                 )
-                logger.info(f"已删除 Topic {thread_info.topic_id}")
+                state.archive_telegram_topic(topic_id)
+                logger.info(f"已删除 Topic {topic_id}")
                 action_text = "已删除"
             else:
                 await bot.close_forum_topic(
                     chat_id=group_chat_id,
-                    message_thread_id=thread_info.topic_id,
+                    message_thread_id=topic_id,
                 )
-                logger.info(f"已关闭 Topic {thread_info.topic_id}")
+                state.archive_telegram_topic(topic_id)
+                logger.info(f"已关闭 Topic {topic_id}")
                 action_text = "已关闭"
 
             if delete_topic:
@@ -565,7 +582,10 @@ def make_new_thread_handler(state: AppState, group_chat_id: int) -> Callable:
         src_topic_id = msg.message_thread_id if msg else None  # type: ignore[union-attr]
 
         ws = _resolve_workspace(state, src_topic_id)
-        reply_topic_id = (ws.topic_id if ws else None) or src_topic_id
+        ws_key = state.get_workspace_storage_key(ws) if ws else None
+        reply_topic_id = (
+            state.get_workspace_topic_id(ws_key, ws) if ws is not None and ws_key is not None else None
+        ) or src_topic_id
 
         if not ws:
             await _send_to_group(
@@ -742,7 +762,10 @@ def make_list_thread_handler(state: AppState, group_chat_id: int) -> Callable:
         logger.info(f"[/list] src_topic_id={src_topic_id}")
 
         ws = _resolve_workspace(state, src_topic_id)
-        reply_topic_id = (ws.topic_id if ws else None) or src_topic_id
+        ws_key = state.get_workspace_storage_key(ws) if ws else None
+        reply_topic_id = (
+            state.get_workspace_topic_id(ws_key, ws) if ws is not None and ws_key is not None else None
+        ) or src_topic_id
         logger.info(f"[/list] resolved ws={ws.name if ws else None} reply_topic_id={reply_topic_id}")
 
         if not ws:
@@ -885,8 +908,14 @@ def make_list_thread_handler(state: AppState, group_chat_id: int) -> Callable:
                 reply_markup=reply_markup,
             )
         except TopicNotFoundError:
-            if ws and ws.topic_id == reply_topic_id:
-                logger.info(f"workspace {ws.name} topic {ws.topic_id} 已不存在，清除 topic_id")
+            ws_topic_id = (
+                state.get_workspace_topic_id(ws_key, ws)
+                if ws is not None and ws_key is not None
+                else None
+            )
+            if ws and ws_topic_id == reply_topic_id:
+                logger.info(f"workspace {ws.name} topic {ws_topic_id} 已不存在，标记 invalid")
+                state.invalidate_telegram_topic(ws_topic_id)
                 ws.topic_id = None
                 if state.storage:
                     save_storage(state.storage)

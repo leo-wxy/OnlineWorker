@@ -105,6 +105,18 @@ def _list_provider_local_threads(tool_name: str, workspace_path: str, *, limit: 
     return []
 
 
+def _workspace_key(state: AppState, ws_info: WorkspaceInfo) -> str:
+    return state.get_workspace_storage_key(ws_info) or ws_info.daemon_workspace_id or f"{ws_info.tool}:{ws_info.name}"
+
+
+def _workspace_topic_id(state: AppState, ws_info: WorkspaceInfo) -> Optional[int]:
+    return state.get_workspace_topic_id(_workspace_key(state, ws_info), ws_info)
+
+
+def _thread_topic_id(state: AppState, ws_info: WorkspaceInfo, thread_info: ThreadInfo) -> Optional[int]:
+    return state.get_thread_topic_id(_workspace_key(state, ws_info), ws_info, thread_info)
+
+
 async def _sync_existing_claude_thread_history(
     *,
     bot,
@@ -274,7 +286,7 @@ def make_workspace_handler(state: AppState, group_chat_id: int, cfg: Config):
         opened: dict[tuple, WorkspaceInfo] = {}
         if storage:
             for ws in storage.workspaces.values():
-                if ws.topic_id is not None:
+                if _workspace_topic_id(state, ws) is not None:
                     opened[(ws.tool, ws.path)] = ws
 
         # 存入 bot_data 供 callback 按 index 查找
@@ -358,11 +370,12 @@ def make_ws_open_callback_handler(state: AppState, group_chat_id: int) -> Callba
         existing_ws: Optional[WorkspaceInfo] = None
         if storage:
             for ws in storage.workspaces.values():
-                if ws.tool == tool_name and ws.path == path and ws.topic_id is not None:
+                if ws.tool == tool_name and ws.path == path and _workspace_topic_id(state, ws) is not None:
                     existing_ws = ws
                     break
 
         if existing_ws is not None:
+            existing_topic_id = _workspace_topic_id(state, existing_ws)
             # 直接发消息到已有 topic，如果 topic 被删了会抛 TopicNotFoundError
             bot = query.get_bot()
             try:
@@ -373,13 +386,14 @@ def make_ws_open_callback_handler(state: AppState, group_chat_id: int) -> Callba
                 await _send_to_group(
                     bot, group_chat_id,
                     f"workspace `{name}` 已打开。",
-                    topic_id=existing_ws.topic_id,
+                    topic_id=existing_topic_id,
                     parse_mode="Markdown",
                 )
                 return
             except TopicNotFoundError:
                 # topic 已被删除，重建 workspace topic（保留 thread 数据）
-                logger.info(f"workspace {name} 的 topic {existing_ws.topic_id} 已不存在，重建 topic")
+                logger.info(f"workspace {name} 的 topic {existing_topic_id} 已不存在，重建 topic")
+                state.invalidate_telegram_topic(existing_topic_id)
                 try:
                     ws_topic_name = f"[{tool_name}] {name}"[:128]
                     new_topic = await bot.create_forum_topic(chat_id=group_chat_id, name=ws_topic_name)
@@ -395,7 +409,7 @@ def make_ws_open_callback_handler(state: AppState, group_chat_id: int) -> Callba
                         existing_ws.topic_id = new_topic.message_thread_id
                     if storage:
                         save_storage(storage)
-                    logger.info(f"workspace {name} topic 重建成功：{existing_ws.topic_id}")
+                    logger.info(f"workspace {name} topic 重建成功：{new_topic.message_thread_id}")
 
                     await query.edit_message_text(
                         f"✅ `[{tool_name}] {name}` topic 已重建",
@@ -438,12 +452,13 @@ def make_ws_open_callback_handler(state: AppState, group_chat_id: int) -> Callba
             return
 
         thread_count = len(ws_info.threads)
+        ws_topic_id = _workspace_topic_id(state, ws_info)
         await _send_to_group(
             bot, group_chat_id,
             f"✅ `[{tool_name}] {name}` 已打开\n"
             f"路径：`{path}`\n"
             f"已同步 {thread_count} 个最新 thread。",
-            topic_id=ws_info.topic_id,
+            topic_id=ws_topic_id,
             parse_mode="Markdown",
         )
 
@@ -624,17 +639,19 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
 
         try:
             bot = query.get_bot()
-            if thread_info.topic_id is not None:
-                old_topic_id = thread_info.topic_id
+            existing_thread_topic_id = _thread_topic_id(state, ws_info, thread_info)
+            workspace_topic_id = _workspace_topic_id(state, ws_info)
+            if existing_thread_topic_id is not None:
+                old_topic_id = existing_thread_topic_id
                 # 直接发消息验证 topic 是否存在
                 try:
                     await _send_to_group(
                         bot, group_chat_id,
                         f"thread `{full_tid[-8:]}` ✅ 已存在，跳转中。",
-                        topic_id=thread_info.topic_id,
+                        topic_id=existing_thread_topic_id,
                         parse_mode="Markdown",
                     )
-                    if preview_changed and thread_info.topic_id is not None:
+                    if preview_changed:
                         topic_name = _make_thread_topic_name(
                             ws_info.tool,
                             ws_info.name,
@@ -643,12 +660,12 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                         )
                         await bot.edit_forum_topic(
                             chat_id=group_chat_id,
-                            message_thread_id=thread_info.topic_id,
+                            message_thread_id=existing_thread_topic_id,
                             name=topic_name,
                         )
                         logger.info(
                             "[thread_open] 已同步重命名 topic %s: %r -> %r",
-                            thread_info.topic_id,
+                            existing_thread_topic_id,
                             previous_preview,
                             thread_info.preview,
                         )
@@ -656,7 +673,7 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                         await _sync_existing_claude_thread_history(
                             bot=bot,
                             group_chat_id=group_chat_id,
-                            topic_id=thread_info.topic_id,
+                            topic_id=existing_thread_topic_id,
                             thread_info=thread_info,
                             thread_id=full_tid,
                             storage=storage,
@@ -668,17 +685,18 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                         ws_info,
                         thread_info,
                         intro=_thread_control_intro(ws_info.tool, full_tid, "已就绪"),
-                        topic_id=thread_info.topic_id,
+                        topic_id=existing_thread_topic_id,
                     )
                     await query.answer(f"已有 Topic {old_topic_id}", show_alert=False)
                     return
                 except TopicNotFoundError:
                     # topic 已被删除，清掉旧 topic_id，继续走下面的创建流程
-                    logger.info(f"thread {full_tid[:8]}… 的 topic {thread_info.topic_id} 已不存在，将重建")
+                    logger.info(f"thread {full_tid[:8]}… 的 topic {old_topic_id} 已不存在，将重建")
+                    state.invalidate_telegram_topic(old_topic_id)
                     await _send_to_group(
                         bot, group_chat_id,
                         f"⚠️ thread {full_tid[-8:]} 旧 topic id={old_topic_id} 已失效，重建中…",
-                        topic_id=ws_info.topic_id,
+                        topic_id=workspace_topic_id,
                     )
                     thread_info.topic_id = None
                     if storage:
@@ -695,33 +713,34 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
 
             try:
                 topic = await bot.create_forum_topic(chat_id=group_chat_id, name=topic_name)
+                topic_id = topic.message_thread_id
                 workspace_key = state.get_workspace_storage_key(ws_info)
                 if workspace_key is not None:
                     state.bind_telegram_session_topic(
                         workspace_key,
                         ws_info,
                         thread_info,
-                        topic.message_thread_id,
+                        topic_id,
                         display_name=thread_info.preview,
                     )
                 else:
-                    thread_info.topic_id = topic.message_thread_id
+                    thread_info.topic_id = topic_id
                 if storage:
                     save_storage(storage)
-                logger.info(f"[on-demand] thread {full_tid[:8]}… → Topic {thread_info.topic_id}")
+                logger.info(f"[on-demand] thread {full_tid[:8]}… → Topic {topic_id}")
 
                 await query.answer("✅ Topic 已创建")
                 await _send_to_group(
                     bot, group_chat_id,
-                    f"✅ thread {full_tid[-8:]} 新建 topic id={thread_info.topic_id}",
-                    topic_id=ws_info.topic_id,
+                    f"✅ thread {full_tid[-8:]} 新建 topic id={topic_id}",
+                    topic_id=workspace_topic_id,
                 )
 
                 # Replay history
                 replay_cursor = await _replay_thread_history(
                     bot=bot,
                     group_chat_id=group_chat_id,
-                    topic_id=thread_info.topic_id,
+                    topic_id=topic_id,
                     thread_id=full_tid,
                     sessions_dir=None,
                     tool_name=tool_name,
@@ -734,11 +753,11 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                     state,
                     bot,
                     group_chat_id,
-                    ws_info,
-                    thread_info,
-                    intro=_thread_control_intro(ws_info.tool, full_tid, "已打开"),
-                    topic_id=thread_info.topic_id,
-                )
+                        ws_info,
+                        thread_info,
+                        intro=_thread_control_intro(ws_info.tool, full_tid, "已打开"),
+                        topic_id=topic_id,
+                    )
             except Exception as e:
                 logger.warning(f"[on-demand] 创建 Topic 失败：{e}")
                 await query.answer(f"❌ 创建失败：{e}", show_alert=True)
@@ -913,7 +932,7 @@ async def _send_workspace_thread_overview(
     """发送 workspace 的 thread 概览 + 按钮到 workspace topic。"""
     name = ws_info.name
     ws_id = ws_info.daemon_workspace_id or f"{tool_name}:{name}"
-    topic_id = ws_info.topic_id
+    topic_id = _workspace_topic_id(state, ws_info)
 
     reconcile_workspace_threads_with_source(state, ws_info, active_ids=active_ids)
 
@@ -933,7 +952,7 @@ async def _send_workspace_thread_overview(
                 {
                     "id": tid,
                     "preview": session.get("preview") or session.get("title") or getattr(thread_info, "preview", None),
-                    "topic_id": getattr(thread_info, "topic_id", None),
+                    "topic_id": _thread_topic_id(state, ws_info, thread_info) if thread_info else None,
                     "is_active": tid in (active_ids or set()),
                 }
             )
@@ -945,7 +964,7 @@ async def _send_workspace_thread_overview(
                 {
                     "id": tid,
                     "preview": thread_info.preview,
-                    "topic_id": thread_info.topic_id,
+                    "topic_id": _thread_topic_id(state, ws_info, thread_info),
                     "is_active": thread_info.is_active,
                 }
             )
@@ -1081,10 +1100,7 @@ def make_cli_handler(state: AppState, group_chat_id: int, cfg: Config):
         
         for tool in cfg.enabled_tools:
             tool_name = tool.name
-            # 查找该工具的全局 topic（从 global_topic_ids 中查找）
-            global_topic_id = None
-            if storage and storage.global_topic_ids:
-                global_topic_id = storage.global_topic_ids.get(tool_name)
+            global_topic_id = state.get_global_topic_id(tool_name)
             
             if global_topic_id:
                 status = "✅ 已创建"
@@ -1153,7 +1169,7 @@ def make_cli_callback_handler(state: AppState, group_chat_id: int, cfg: Config) 
         bot = query.get_bot()
         
         # 如果是重建，先检查是否已存在
-        existing_topic_id = storage.global_topic_ids.get(tool_name) if storage.global_topic_ids else None
+        existing_topic_id = state.get_global_topic_id(tool_name)
         
         if action == "cli_recreate:" and not existing_topic_id:
             await query.answer(f"⚠️ {tool_name} topic 不存在，将创建新的", show_alert=False)
@@ -1164,7 +1180,6 @@ def make_cli_callback_handler(state: AppState, group_chat_id: int, cfg: Config) 
             topic = await bot.create_forum_topic(chat_id=group_chat_id, name=topic_name)
             new_topic_id = topic.message_thread_id
             
-            # 更新 storage (global_topic_ids 是 tool_name -> topic_id)
             state.set_global_topic_id(tool_name, new_topic_id)
             save_storage(storage)
             

@@ -43,6 +43,11 @@ CODEX_REMOTE_PROXY_SOCKET_NAME = "codex_remote_proxy.sock"
 DEFAULT_APPROVAL_TIMEOUT_SECONDS = 600.0
 MACOS_LOCAL_PEERPID = 2
 UPSTREAM_UNAVAILABLE_CLOSE_CODE = 1013
+
+
+def _thread_topic_id(state, ws_info, thread_info) -> int | None:
+    workspace_id = state.get_workspace_storage_key(ws_info) or getattr(ws_info, "daemon_workspace_id", "") or f"{getattr(ws_info, 'tool', 'codex')}:{getattr(ws_info, 'name', '')}"
+    return state.get_thread_topic_id(workspace_id, ws_info, thread_info)
 UPSTREAM_UNAVAILABLE_CLOSE_REASON = "codex app-server unavailable"
 
 
@@ -978,12 +983,13 @@ class CodexRemoteMessageProxy:
         found = self.state.find_thread_by_id_global(thread_id)
         if found:
             ws_info, thread_info = found
-            if getattr(thread_info, "archived", False) or thread_info.topic_id is None:
+            topic_id = _thread_topic_id(self.state, ws_info, thread_info)
+            if getattr(thread_info, "archived", False) or topic_id is None:
                 return None
             workspace_id = str(getattr(ws_info, "daemon_workspace_id", "") or "")
             if not workspace_id:
                 workspace_id = f"{getattr(ws_info, 'tool', 'codex')}:{getattr(ws_info, 'path', '')}"
-            return workspace_id, int(thread_info.topic_id), thread_id
+            return workspace_id, int(topic_id), thread_id
 
         runtime = self.state.get_provider_runtime("codex")
         watch_state = getattr(runtime, "watched_threads", {}).get(thread_id)

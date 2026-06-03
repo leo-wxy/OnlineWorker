@@ -89,6 +89,19 @@ async def _notification_result_task_override_with_ai(**kwargs):
 # 防止 turn/started 并发重复建同一个 thread topic
 _MATERIALIZING_THREAD_TOPICS: set[str] = set()
 
+
+def _workspace_key(state: AppState, ws_info) -> str:
+    return state.get_workspace_storage_key(ws_info) or ws_info.daemon_workspace_id or f"{ws_info.tool}:{ws_info.name}"
+
+
+def _workspace_topic_id(state: AppState, ws_info) -> Optional[int]:
+    return state.get_workspace_topic_id(_workspace_key(state, ws_info), ws_info)
+
+
+def _thread_topic_id(state: AppState, ws_info, thread_info: ThreadInfo) -> Optional[int]:
+    return state.get_thread_topic_id(_workspace_key(state, ws_info), ws_info, thread_info)
+
+
 def _provider_should_materialize_unbound_thread_topic(
     state: AppState,
     thread_id: str,
@@ -117,8 +130,9 @@ async def _materialize_thread_topic_if_needed(
         return None
 
     ws_info, thread_info = found
-    if thread_info.topic_id is not None:
-        return thread_info.topic_id
+    existing_topic_id = _thread_topic_id(state, ws_info, thread_info)
+    if existing_topic_id is not None:
+        return existing_topic_id
 
     if thread_id in _MATERIALIZING_THREAD_TOPICS:
         return None
@@ -135,17 +149,18 @@ async def _materialize_thread_topic_if_needed(
             thread_id,
         )
         topic = await bot.create_forum_topic(chat_id=group_chat_id, name=topic_name)
+        topic_id = topic.message_thread_id
         workspace_key = state.get_workspace_storage_key(ws_info)
         if workspace_key is not None:
             state.bind_telegram_session_topic(
                 workspace_key,
                 ws_info,
                 thread_info,
-                topic.message_thread_id,
+                topic_id,
                 display_name=thread_info.preview,
             )
         else:
-            thread_info.topic_id = topic.message_thread_id
+            thread_info.topic_id = topic_id
         if state.storage is not None:
             save_storage(state.storage)
 
@@ -154,13 +169,13 @@ async def _materialize_thread_topic_if_needed(
             ws_info.tool,
             ws_info.name,
             thread_id[:12],
-            thread_info.topic_id,
+            topic_id,
         )
 
         replay_cursor = await _replay_thread_history(
             bot=bot,
             group_chat_id=group_chat_id,
-            topic_id=thread_info.topic_id,
+            topic_id=topic_id,
             thread_id=thread_id,
             sessions_dir=None,
             tool_name=ws_info.tool,
@@ -172,7 +187,7 @@ async def _materialize_thread_topic_if_needed(
         ):
             thread_info.history_sync_cursor = replay_cursor
             save_storage(state.storage)
-        return thread_info.topic_id
+        return topic_id
     except Exception as e:
         logger.warning(
             "[streaming] 按需 materialize thread topic 失败: tool=%s ws=%s thread=%s err=%s",
@@ -403,10 +418,11 @@ def _resolve_approval_target(
     if thread_info.archived:
         return workspace_id, None, f"thread archived: {thread_id}"
 
-    if thread_info.topic_id is None:
+    topic_id = _thread_topic_id(state, ws_info, thread_info)
+    if topic_id is None:
         return workspace_id, None, f"thread topic missing: {thread_id}"
 
-    return workspace_id, thread_info.topic_id, None
+    return workspace_id, topic_id, None
 
 
 def _parse_provider_approval_request(
@@ -598,7 +614,7 @@ def _resolve_topic_id(
                 _repair_local_archived_thread_if_active(state, ws, t)
             if not t.archived:
                 thread_found = True
-                topic_id = t.topic_id  # 可能为 None（按需创建模式）
+                topic_id = _thread_topic_id(state, ws, t)  # 可能为 None（按需创建模式）
                 thread_waiting_for_topic = topic_id is None
                 if topic_id is not None:
                     logger.debug(
@@ -615,7 +631,7 @@ def _resolve_topic_id(
     if not thread_found and ws_daemon_id:
         ws = state.find_workspace_by_daemon_id(ws_daemon_id)
         if ws:
-            topic_id = ws.topic_id
+            topic_id = _workspace_topic_id(state, ws)
             if topic_id:
                 logger.debug(
                     f"[resolve_topic] thread 未知，使用 workspace topic: "
@@ -1803,7 +1819,8 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             return
 
         ws_info, thread_info = found
-        if not thread_info.topic_id:
+        topic_id = _thread_topic_id(state, ws_info, thread_info)
+        if not topic_id:
             return
 
         new_topic_name = _make_thread_topic_name(
@@ -1816,15 +1833,15 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         try:
             await bot.edit_forum_topic(
                 chat_id=group_chat_id,
-                message_thread_id=thread_info.topic_id,
+                message_thread_id=topic_id,
                 name=new_topic_name,
             )
             thread_info.preview = title
             if state.storage:
                 save_storage(state.storage)
-            logger.info(f"[title_update] Topic {thread_info.topic_id} renamed → {new_topic_name}")
+            logger.info(f"[title_update] Topic {topic_id} renamed → {new_topic_name}")
         except Exception as e:
-            logger.warning(f"[title_update] rename Topic {thread_info.topic_id} 失败：{e}")
+            logger.warning(f"[title_update] rename Topic {topic_id} 失败：{e}")
 
     _EVENT_HANDLERS = {
         "approval_requested": _handle_approval,

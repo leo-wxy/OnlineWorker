@@ -81,6 +81,7 @@ class LifecycleManager:
                     continue
                 except TopicNotFoundError:
                     logger.warning(f"[{tool.name}] 全局 Topic {existing} 已不存在，重建中…")
+                    self.state.invalidate_telegram_topic(existing)
                     # 清掉旧 id，下面走创建流程
                     self.state.set_global_topic_id(tool.name, None)  # type: ignore[arg-type]
             try:
@@ -345,7 +346,7 @@ class LifecycleManager:
                     logger.debug(f"更新 thread {thread_id[:12]}… preview: {db_preview[:50]}")
 
         for thread_id, thread_info in ws_info.threads.items():
-            if thread_info.topic_id is not None or thread_info.archived:
+            if self.state.get_thread_topic_id(workspace_id, ws_info, thread_info) is not None or thread_info.archived:
                 continue
             if not thread_info.is_active:
                 continue  # on-demand only
@@ -376,14 +377,15 @@ class LifecycleManager:
                     topic.message_thread_id,
                     display_name=thread_info.preview,
                 )
+                topic_id = topic.message_thread_id
                 logger.info(
-                    f"为 thread {thread_id[:12]}… 创建了 Topic {thread_info.topic_id}"
+                    f"为 thread {thread_id[:12]}… 创建了 Topic {topic_id}"
                 )
                 save_storage(self.storage)
                 replay_cursor = await _replay_thread_history(
                     bot=bot,
                     group_chat_id=self.gid,
-                    topic_id=thread_info.topic_id,
+                    topic_id=topic_id,
                     thread_id=thread_id,
                     sessions_dir=None,
                     tool_name=tool_name,
@@ -432,10 +434,11 @@ class LifecycleManager:
                     continue
 
                 # 检查是否在源工具中已归档
-                if thread_id not in active_ids and thread_info.topic_id:
+                topic_id = self.state.get_thread_topic_id(ws_name, ws_info, thread_info)
+                if thread_id not in active_ids and topic_id:
                     logger.info(
                         f"[cleanup] 检测到外部归档的 thread：{tool_name}/{ws_name}/{thread_id[:12]}… "
-                        f"topic={thread_info.topic_id}"
+                        f"topic={topic_id}"
                     )
 
                     # 更新本地状态
@@ -444,6 +447,8 @@ class LifecycleManager:
 
                     if await self._cleanup_thread_topic(
                         bot,
+                        ws_name,
+                        ws_info,
                         thread_info,
                         log_prefix="[cleanup]",
                     ):
@@ -457,14 +462,23 @@ class LifecycleManager:
         else:
             logger.info("[cleanup] 无需清理已归档的 topics")
 
-    async def _cleanup_thread_topic(self, bot, thread_info: ThreadInfo, *, log_prefix: str) -> bool:
+    async def _cleanup_thread_topic(
+        self,
+        bot,
+        workspace_id: str,
+        ws_info,
+        thread_info: ThreadInfo,
+        *,
+        log_prefix: str,
+    ) -> bool:
         """按配置删除或关闭 thread 对应的 Telegram topic。"""
-        if thread_info.topic_id is None:
+        topic_id = self.state.get_thread_topic_id(workspace_id, ws_info, thread_info)
+        if topic_id is None:
             return False
 
         delete_topics = self.cfg.delete_archived_topics
         action = "删除" if delete_topics else "关闭"
-        topic_id = thread_info.topic_id
+        self.state.archive_telegram_topic(topic_id)
 
         try:
             if delete_topics:
@@ -472,12 +486,14 @@ class LifecycleManager:
                     chat_id=self.gid,
                     message_thread_id=topic_id,
                 )
+                self.state.archive_telegram_topic(topic_id)
                 thread_info.topic_id = None
             else:
                 await bot.close_forum_topic(
                     chat_id=self.gid,
                     message_thread_id=topic_id,
                 )
+                self.state.archive_telegram_topic(topic_id)
             logger.info(f"{log_prefix} 已{action} topic {topic_id}")
             return True
         except Exception as e:
@@ -517,17 +533,20 @@ class LifecycleManager:
 
                 logger.info(
                     f"[subagent-cleanup] 检测到 {ws_info.tool} subagent thread："
-                    f"{ws_name}/{thread_id[:12]}… topic={thread_info.topic_id}"
+                    f"{ws_name}/{thread_id[:12]}… topic="
+                    f"{self.state.get_thread_topic_id(ws_name, ws_info, thread_info)}"
                 )
                 thread_info.archived = True
                 thread_info.is_active = False
 
-                if thread_info.topic_id is None:
+                if self.state.get_thread_topic_id(ws_name, ws_info, thread_info) is None:
                     cleaned_count += 1
                     continue
 
                 if await self._cleanup_thread_topic(
                     bot,
+                    ws_name,
+                    ws_info,
                     thread_info,
                     log_prefix="[subagent-cleanup]",
                 ):

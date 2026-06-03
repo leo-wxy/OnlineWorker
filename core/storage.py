@@ -12,6 +12,8 @@ STORAGE_PATH = "onlineworker_state.json"
 class ThreadInfo:
     """单个 thread/session 的持久化元数据。"""
     thread_id: str
+    # Legacy migration input only. Telegram topic routes are persisted in
+    # im_routes.sqlite3 and are intentionally not serialized back to JSON.
     topic_id: Optional[int] = None
     preview: Optional[str] = None
     archived: bool = False
@@ -28,6 +30,8 @@ class WorkspaceInfo:
     name: str
     path: str
     tool: str = ""
+    # Legacy migration input only. Telegram topic routes are persisted in
+    # im_routes.sqlite3 and are intentionally not serialized back to JSON.
     topic_id: Optional[int] = None
     daemon_workspace_id: Optional[str] = None
     threads: dict = field(default_factory=dict)
@@ -39,6 +43,8 @@ class AppStorage:
     """持久化的应用状态。"""
     workspaces: dict = field(default_factory=dict)
     active_workspace: Optional[str] = None
+    # Legacy migration input only. Telegram topic routes are persisted in
+    # im_routes.sqlite3 and are intentionally not serialized back to JSON.
     global_topic_ids: dict = field(default_factory=dict)
 
 
@@ -59,7 +65,6 @@ def _thread_info_from_dict(d: dict) -> ThreadInfo:
 def _thread_info_to_dict(t: ThreadInfo) -> dict:
     return {
         "thread_id": t.thread_id,
-        "topic_id": t.topic_id,
         "preview": t.preview,
         "archived": t.archived,
         "streaming_msg_id": t.streaming_msg_id,
@@ -99,7 +104,6 @@ def _workspace_info_to_dict(ws: WorkspaceInfo) -> dict:
         "name": ws.name,
         "path": ws.path,
         "tool": ws.tool,
-        "topic_id": ws.topic_id,
         "daemon_workspace_id": ws.daemon_workspace_id,
         "threads": {
             tid: _thread_info_to_dict(t)
@@ -144,7 +148,6 @@ def save_storage(storage: AppStorage, path: str = STORAGE_PATH) -> None:
             for name, ws in storage.workspaces.items()
         },
         "active_workspace": storage.active_workspace,
-        "global_topic_ids": storage.global_topic_ids,
     }
     tmp_path = path + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:

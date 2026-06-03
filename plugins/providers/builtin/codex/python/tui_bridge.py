@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 read_thread_history = storage_runtime.read_thread_history
 
 
+def _thread_topic_id(state: AppState, ws: WorkspaceInfo, thread) -> int | None:
+    workspace_id = state.get_workspace_storage_key(ws) or ws.daemon_workspace_id or f"{ws.tool}:{ws.name}"
+    return state.get_thread_topic_id(workspace_id, ws, thread)
+
+
 def _revive_stale_archived_thread_if_active(
     state: AppState,
     ws: WorkspaceInfo,
@@ -468,7 +473,7 @@ async def send_message_via_tui_host(
     topic_id = None
     thread = ws.threads.get(thread_id)
     if thread is not None:
-        topic_id = thread.topic_id
+        topic_id = _thread_topic_id(state, ws, thread)
     codex_state.mark_send_started(state, thread_id)
     state.mark_provider_task_summary("codex", thread_id, text)
     return await send_message_to_codex_tui_host(
@@ -643,7 +648,7 @@ async def sync_codex_tui_final_replies_once(
                     thread,
                     active_ids=active_ids,
                 )
-            topic_id = thread.topic_id
+            topic_id = _thread_topic_id(state, ws, thread)
             if thread.archived or topic_id is None:
                 continue
 
@@ -710,7 +715,7 @@ async def prime_codex_tui_reply_state(state: AppState) -> None:
                     thread,
                     active_ids=active_ids,
                 )
-            topic_id = thread.topic_id
+            topic_id = _thread_topic_id(state, ws, thread)
             if thread.archived or topic_id is None:
                 continue
 
