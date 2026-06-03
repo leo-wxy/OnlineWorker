@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 import pytest
@@ -1346,6 +1347,118 @@ async def test_codex_delayed_final_events_skip_when_reply_already_synced(monkeyp
     assert len(notifications.events) == 0
     assert run.final_reply_synced_to_tg is True
     assert run.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_codex_item_and_turn_completed_race_emits_one_notification(monkeypatch):
+    entered_summary = asyncio.Event()
+    release_summary = asyncio.Event()
+    summary_calls = 0
+
+    async def slow_notification_summary(**kwargs):
+        nonlocal summary_calls
+        summary_calls += 1
+        entered_summary.set()
+        await release_summary.wait()
+        return (
+            "源码修复已完成",
+            "已完成源码层修复、回归测试和提交推送，但真实安装态重启验证尚未完成。",
+            "完成摘要：已完成源码层修复、回归测试和提交推送，但真实安装态重启验证尚未完成。",
+        )
+
+    monkeypatch.setattr(
+        "bot.events._notification_result_task_override_with_ai",
+        slow_notification_summary,
+    )
+
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-123"] = ThreadInfo(
+        thread_id="tid-123",
+        topic_id=3794,
+        preview="你确定修复完成？",
+        archived=False,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    run = codex_state.start_run(
+        state,
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-123",
+        turn_id="turn-new",
+    )
+    state.streaming_turns["tid-123"] = StreamingTurn(
+        message_id=5002,
+        topic_id=3794,
+        turn_id="turn-new",
+        buffer="💭 分析中",
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    item_task = asyncio.create_task(
+        handler(
+            "app-server-event",
+            {
+                "workspace_id": "codex:onlineWorker",
+                "message": {
+                    "method": "item/completed",
+                    "params": {
+                        "threadId": "tid-123",
+                        "turnId": "turn-new",
+                        "item": {
+                            "type": "agentMessage",
+                            "threadId": "tid-123",
+                            "phase": "final_answer",
+                            "text": (
+                                "源码层已修复，测试也通过了。"
+                                "安装态还需要继续验证。"
+                            ),
+                        },
+                    },
+                },
+            },
+        )
+    )
+    await entered_summary.wait()
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "tid-123",
+                    "turnId": "turn-new",
+                    "turn": {"id": "turn-new", "status": "completed"},
+                },
+            },
+        },
+    )
+
+    release_summary.set()
+    await item_task
+
+    assert summary_calls == 1
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.status == "completed"
+    assert event.task_id == "turn-new"
+    assert event.task_name == "源码修复已完成"
+    assert "真实安装态重启验证尚未完成" in event.task_summary
+    assert run.final_reply_synced_to_tg is True
 
 
 @pytest.mark.asyncio
