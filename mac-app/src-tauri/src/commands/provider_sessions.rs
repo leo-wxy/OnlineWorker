@@ -1022,6 +1022,23 @@ mod tests {
     }
 
     #[test]
+    fn provider_session_bridge_env_resets_pyinstaller_parent_state() {
+        let dir = std::env::temp_dir().join(format!(
+            "onlineworker-provider-session-pyi-env-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create data dir");
+
+        let envs = provider_bridge_env(&dir);
+
+        assert!(envs.iter().any(|(key, value)| {
+            key == "PYINSTALLER_RESET_ENVIRONMENT" && value == "1"
+        }));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn provider_session_bridge_env_reads_overlay_from_app_env_file() {
         let _guard = ENV_LOCK.lock().expect("lock env");
         let dir = std::env::temp_dir().join(format!(

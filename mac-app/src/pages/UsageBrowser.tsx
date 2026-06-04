@@ -3,9 +3,8 @@ import { fetchProviderMetadata, fetchProviderUsageSummary } from "../components/
 import { StatePanel, getProviderUi } from "../components/session-browser/presentation";
 import { useI18n } from "../i18n";
 import type { ProviderMetadata, ProviderUsageQuery, ProviderUsageSummary } from "../types";
+import { buildDefaultUsageQuery } from "../utils/usageDateRange";
 import { visibleUsageProviders } from "../utils/usageProviders";
-
-const DEFAULT_RANGE_DAYS = 7;
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
@@ -28,31 +27,19 @@ function chartBackground(providerId: string) {
   return "linear-gradient(180deg, rgba(71,85,105,0.95) 0%, rgba(148,163,184,0.82) 100%)";
 }
 
-function isoDateOffset(daysAgo: number) {
-  const date = new Date();
-  date.setDate(date.getDate() - daysAgo);
-  return date.toISOString().slice(0, 10);
-}
-
-function buildDefaultQuery(): ProviderUsageQuery {
-  return {
-    startDate: isoDateOffset(DEFAULT_RANGE_DAYS - 1),
-    endDate: isoDateOffset(0),
-  };
-}
-
 export function UsageBrowser() {
   const { t } = useI18n();
   const [providers, setProviders] = useState<ProviderMetadata[]>([]);
   const [activeProviderId, setActiveProviderId] = useState<string | null>(null);
-  const [query, setQuery] = useState<ProviderUsageQuery>(() => buildDefaultQuery());
-  const [draftQuery, setDraftQuery] = useState<ProviderUsageQuery>(() => buildDefaultQuery());
+  const [query, setQuery] = useState<ProviderUsageQuery>(() => buildDefaultUsageQuery());
+  const [draftQuery, setDraftQuery] = useState<ProviderUsageQuery>(() => buildDefaultUsageQuery());
   const [summary, setSummary] = useState<ProviderUsageSummary | null>(null);
   const [providersLoading, setProvidersLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasLoadedRef = useRef(false);
+  const autoRangeRef = useRef(true);
 
   const usageProviders = useMemo(() => visibleUsageProviders(providers), [providers]);
   const activeProvider = useMemo(() => {
@@ -113,6 +100,22 @@ export function UsageBrowser() {
     }
   }, []);
 
+  const refreshUsage = useCallback(() => {
+    if (!activeProvider?.id) {
+      return;
+    }
+    if (autoRangeRef.current) {
+      const next = buildDefaultUsageQuery();
+      setDraftQuery(next);
+      setQuery(next);
+      if (next.startDate === query.startDate && next.endDate === query.endDate) {
+        void loadSummary(activeProvider.id, next);
+      }
+      return;
+    }
+    void loadSummary(activeProvider.id, query);
+  }, [activeProvider?.id, loadSummary, query]);
+
   useEffect(() => {
     if (!activeProvider?.id) {
       setLoading(false);
@@ -157,7 +160,7 @@ export function UsageBrowser() {
         </div>
         <button
           type="button"
-          onClick={() => activeProvider?.id && void loadSummary(activeProvider.id, query)}
+          onClick={refreshUsage}
           className="ow-btn rounded-xl px-3 py-2 text-sm font-semibold"
           disabled={!activeProvider || loading || refreshing}
         >
@@ -203,7 +206,8 @@ export function UsageBrowser() {
         <button
           type="button"
           onClick={() => {
-            const next = buildDefaultQuery();
+            const next = buildDefaultUsageQuery();
+            autoRangeRef.current = true;
             setDraftQuery(next);
             setQuery(next);
           }}
@@ -239,7 +243,10 @@ export function UsageBrowser() {
                 type="date"
                 value={draftQuery.startDate}
                 max={draftQuery.endDate}
-                onChange={(event) => setDraftQuery((current) => ({ ...current, startDate: event.target.value }))}
+                onChange={(event) => {
+                  autoRangeRef.current = false;
+                  setDraftQuery((current) => ({ ...current, startDate: event.target.value }));
+                }}
                 className="rounded-xl border border-[var(--ow-line-soft)] bg-white px-3 py-2 text-sm font-medium text-gray-900"
               />
             </label>
@@ -249,14 +256,20 @@ export function UsageBrowser() {
                 type="date"
                 value={draftQuery.endDate}
                 min={draftQuery.startDate}
-                onChange={(event) => setDraftQuery((current) => ({ ...current, endDate: event.target.value }))}
+                onChange={(event) => {
+                  autoRangeRef.current = false;
+                  setDraftQuery((current) => ({ ...current, endDate: event.target.value }));
+                }}
                 className="rounded-xl border border-[var(--ow-line-soft)] bg-white px-3 py-2 text-sm font-medium text-gray-900"
               />
             </label>
             <div className="flex items-end">
               <button
                 type="button"
-                onClick={() => setQuery(draftQuery)}
+                onClick={() => {
+                  autoRangeRef.current = false;
+                  setQuery(draftQuery);
+                }}
                 disabled={loading || refreshing || draftQuery.startDate > draftQuery.endDate}
                 className="w-full rounded-xl border border-[var(--ow-line-soft)] bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
               >

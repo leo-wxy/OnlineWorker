@@ -307,7 +307,7 @@ async def test_sync_codex_tui_realtime_once_in_app_mode_auto_watches_bound_threa
 
 
 @pytest.mark.asyncio
-async def test_sync_codex_tui_realtime_once_bootstraps_active_bound_thread_from_latest_assistant_item(tmp_path):
+async def test_sync_codex_tui_realtime_once_does_not_replay_active_thread_bootstrap_commentary(tmp_path):
     from plugins.providers.builtin.codex.python.tui_realtime_mirror import sync_codex_tui_realtime_once
 
     state, ws, session_file, sessions_dir = _make_state(tmp_path)
@@ -326,7 +326,7 @@ async def test_sync_codex_tui_realtime_once_bootstraps_active_bound_thread_from_
         session_file,
         role="assistant",
         phase="commentary",
-        text="最近过程需要同步",
+        text="最近旧过程也不应重放",
         timestamp="2026-04-06T10:00:02Z",
     )
 
@@ -338,12 +338,28 @@ async def test_sync_codex_tui_realtime_once_bootstraps_active_bound_thread_from_
 
     watch = codex_state.get_runtime(state).watched_threads["tid-1"]
     assert watch.last_offset == session_file.stat().st_size
-    assert watch.last_commentary_text == "最近过程需要同步"
+    assert watch.last_commentary_text == "最近旧过程也不应重放"
+    handler.assert_not_awaited()
+
+    _append_response_item(
+        session_file,
+        role="assistant",
+        phase="commentary",
+        text="新过程需要同步",
+        timestamp="2026-04-06T10:00:03Z",
+    )
+    watch.next_poll_at = 0.0
+
+    await sync_codex_tui_realtime_once(
+        state,
+        handler,
+        sessions_dir=str(sessions_dir),
+    )
 
     payloads = [call.args[1] for call in handler.await_args_list]
     methods = [payload["message"]["method"] for payload in payloads]
-    assert methods == ["turn/started", "item/agentMessage/delta"]
-    assert payloads[1]["message"]["params"]["delta"] == "最近过程需要同步"
+    assert methods == ["turn/started", "item/completed"]
+    assert payloads[1]["message"]["params"]["item"]["text"] == "新过程需要同步"
 
 
 @pytest.mark.asyncio

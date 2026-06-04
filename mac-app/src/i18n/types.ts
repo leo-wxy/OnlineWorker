@@ -264,6 +264,8 @@ export interface AppTexts {
     attachmentUnsupported: string;
     sessionActions: string;
     alreadyArchived: string;
+    pinSession: string;
+    unpinSession: string;
     archiveSession: string;
     archivingSession: string;
     archiveSucceeded: string;

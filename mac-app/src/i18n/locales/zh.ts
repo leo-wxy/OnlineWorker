@@ -350,6 +350,8 @@ export const zhTexts: AppTexts = {
       attachmentUnsupported: "当前 provider 会话暂不支持附件发送。",
       sessionActions: "会话操作",
       alreadyArchived: "已归档",
+      pinSession: "关注会话",
+      unpinSession: "取消关注",
       archiveSession: "归档",
       archivingSession: "正在归档...",
       archiveSucceeded: "会话已归档。",

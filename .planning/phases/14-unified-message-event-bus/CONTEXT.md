@@ -152,6 +152,47 @@ Cards should show:
 - attention reason
 - updated time
 
+Current UI constraints from implementation review:
+
+- TaskBoard must listen to the message/event bus activity stream. It should not
+  depend on a periodic auto-refresh loop to discover activity updates.
+- The card title should be the real session title when known. Assistant stream
+  text must not replace the card title.
+- The preview area should show the latest useful content. Prefer current
+  assistant/final content when present, but fall back to the last user message
+  so a running card does not render a large blank area.
+- Preview text must be visually clamped to exactly three lines; partial fourth
+  lines are not acceptable.
+- The "Pinned" lane needs a first-class entry point from Session Browser. The
+  Session Browser follow/unfollow action should write the same TaskBoard pinned
+  state as the TaskBoard card star button.
+- Pinned idle cards should still show the latest useful session message when
+  available. A followed session remains useful even when it is not currently
+  running.
+
+### Usage
+
+Usage date windows should be based on the local app date.
+
+The default seven-day window should roll forward when the local day changes.
+For example, on 2026-06-05 the default range should end at 2026-06-05. Refresh
+should not keep using a stale 2026-06-04 end date when the user has not manually
+applied a custom range.
+
+If the user has manually applied a custom date range, Usage should preserve that
+range across refreshes.
+
+### Workflow Note
+
+When a user identifies a new Phase 14 product requirement during implementation,
+update the phase plan/context first, then modify code. This keeps the phase
+state aligned with the current product target and avoids untracked behavioral
+drift.
+
+2026-06-05 source verification covered the TaskBoard pinned idle last-message
+preview, the three-line preview clamp regression, and the Usage local-date
+default range rollover.
+
 ### Notifications
 
 Notification summary should be a consumer of final reply / turn completion

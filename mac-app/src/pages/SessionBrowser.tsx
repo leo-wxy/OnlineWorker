@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "../i18n";
 import {
   fetchClaudeSessions,
@@ -29,6 +30,7 @@ import {
   type UnifiedSession,
 } from "../components/session-browser/presentation";
 import { visibleSessionProviders } from "../utils/sessionProviders.js";
+import type { TaskBoardState } from "../utils/taskBoard";
 import type {
   ClaudeSession,
   CodexSession,
@@ -43,6 +45,16 @@ interface SessionBrowserOpenTarget {
 
 interface Props {
   openTarget?: SessionBrowserOpenTarget | null;
+}
+
+const DEFAULT_TASK_BOARD_STATE: TaskBoardState = {
+  version: 1,
+  pinned: [],
+  hidden: [],
+};
+
+function sessionTaskBoardKey(session: UnifiedSession) {
+  return `${session.type}:${session.id}`;
 }
 
 export function SessionBrowser({ openTarget = null }: Props) {
@@ -60,6 +72,7 @@ export function SessionBrowser({ openTarget = null }: Props) {
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionActionMenuState | null>(null);
   const [archivingSessionId, setArchivingSessionId] = useState<string | null>(null);
   const [archiveNotice, setArchiveNotice] = useState<ArchiveNotice | null>(null);
+  const [taskBoardState, setTaskBoardState] = useState<TaskBoardState>(DEFAULT_TASK_BOARD_STATE);
   const loadedProvidersRef = useRef<Set<ProviderFilter>>(new Set());
   const loadTokenRef = useRef(0);
   const visibleProviders = useMemo(
@@ -72,6 +85,10 @@ export function SessionBrowser({ openTarget = null }: Props) {
   const providerCapabilities = useMemo(() => Object.fromEntries(
     visibleProviders.map((provider) => [provider.id, provider.capabilities]),
   ) as Record<string, ProviderMetadata["capabilities"]>, [visibleProviders]);
+  const pinnedSessionIds = useMemo(
+    () => new Set(taskBoardState.pinned.map((item) => `${item.providerId}:${item.sessionId}`)),
+    [taskBoardState],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -83,6 +100,22 @@ export function SessionBrowser({ openTarget = null }: Props) {
       })
       .catch((error) => {
         console.warn("Failed to load session provider metadata", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void invoke<TaskBoardState>("get_task_board_state")
+      .then((state) => {
+        if (!cancelled) {
+          setTaskBoardState(state);
+        }
+      })
+      .catch((error) => {
+        console.warn("Failed to load task board pinned sessions", error);
       });
     return () => {
       cancelled = true;
@@ -241,6 +274,22 @@ export function SessionBrowser({ openTarget = null }: Props) {
     setArchivingSessionId(null);
   }, [archivingSessionId, refreshCurrentProvider, selectedSessionId, t.sessions]);
 
+  const handleTogglePinSession = useCallback(async (session: UnifiedSession) => {
+    const isPinned = pinnedSessionIds.has(sessionTaskBoardKey(session));
+    try {
+      const nextState = await invoke<TaskBoardState>(
+        isPinned ? "unpin_task_board_session" : "pin_task_board_session",
+        {
+          providerId: session.type,
+          sessionId: session.id,
+        },
+      );
+      setTaskBoardState(nextState);
+    } catch (error) {
+      console.warn("Failed to update task board pinned session", error);
+    }
+  }, [pinnedSessionIds]);
+
   const unifiedSessions = useMemo<UnifiedSession[]>(() => {
     if (providerFilter === "codex") {
       return codexSessions.map(s => ({
@@ -323,8 +372,11 @@ export function SessionBrowser({ openTarget = null }: Props) {
             archived: "Archived",
             archivingSession: t.sessions.archivingSession,
             noSessions: t.sessions.noSessions,
+            pinSession: t.sessions.pinSession,
+            unpinSession: t.sessions.unpinSession,
             sessionActions: t.sessions.sessionActions,
           }}
+          pinnedSessionIds={pinnedSessionIds}
           renderSessionMeta={(session) => (
             session.type === "codex" ? (
               <div className="pl-1">
@@ -334,6 +386,7 @@ export function SessionBrowser({ openTarget = null }: Props) {
           )}
           onArchiveFilterChange={setArchiveFilter}
           onSelectSession={setSelectedSessionId}
+          onTogglePinSession={(session) => void handleTogglePinSession(session)}
           onOpenContextMenu={openSessionContextMenu}
           onOpenActionMenu={openSessionActionMenu}
         />

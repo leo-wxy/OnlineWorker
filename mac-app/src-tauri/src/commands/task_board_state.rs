@@ -1,14 +1,17 @@
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::ipc::Channel;
 
 use super::config::ensure_data_dir;
 use super::provider_bridge_common::provider_owner_bridge_socket_path;
 
 const TASK_BOARD_STATE_FILE: &str = "task_board_state.json";
+static TASK_BOARD_ACTIVITY_STREAM_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -48,6 +51,32 @@ struct SessionActivitiesResponse {
     ok: bool,
     #[serde(default)]
     activities: Vec<TaskBoardSessionActivity>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskBoardActivityStreamEvent {
+    pub kind: String,
+    #[serde(default)]
+    pub activities: Vec<TaskBoardSessionActivity>,
+    #[serde(default)]
+    pub activity: Option<TaskBoardSessionActivity>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawTaskBoardActivityStreamEvent {
+    #[serde(default)]
+    ok: bool,
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    activities: Vec<TaskBoardSessionActivity>,
+    #[serde(default)]
+    activity: Option<TaskBoardSessionActivity>,
     #[serde(default)]
     error: Option<String>,
 }
@@ -184,6 +213,143 @@ pub async fn get_task_board_session_activities() -> Result<Vec<TaskBoardSessionA
     }
 }
 
+fn task_board_activity_stream_generation() -> &'static AtomicU64 {
+    &TASK_BOARD_ACTIVITY_STREAM_GENERATION
+}
+
+fn parse_task_board_activity_stream_event(line: &str) -> Option<TaskBoardActivityStreamEvent> {
+    let raw = serde_json::from_str::<RawTaskBoardActivityStreamEvent>(line.trim()).ok()?;
+    if raw.ok && raw.kind == "snapshot" {
+        return Some(TaskBoardActivityStreamEvent {
+            kind: "snapshot".to_string(),
+            activities: raw.activities,
+            activity: None,
+            error: None,
+        });
+    }
+    if raw.ok && raw.kind == "activity" {
+        return Some(TaskBoardActivityStreamEvent {
+            kind: "activity".to_string(),
+            activities: Vec::new(),
+            activity: raw.activity,
+            error: None,
+        });
+    }
+    Some(TaskBoardActivityStreamEvent {
+        kind: "error".to_string(),
+        activities: Vec::new(),
+        activity: None,
+        error: raw
+            .error
+            .or_else(|| Some("provider owner bridge stream failed".to_string())),
+    })
+}
+
+#[tauri::command]
+pub async fn start_task_board_activity_stream(
+    channel: Channel<TaskBoardActivityStreamEvent>,
+) -> Result<(), String> {
+    let data_dir = ensure_data_dir()?;
+    let socket_path = provider_owner_bridge_socket_path(&data_dir);
+    let generation = task_board_activity_stream_generation();
+    let my_generation = generation.fetch_add(1, Ordering::SeqCst) + 1;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let reconnect_delay = Duration::from_millis(500);
+        while generation.load(Ordering::SeqCst) == my_generation {
+            if !socket_path.exists() {
+                let _ = channel.send(TaskBoardActivityStreamEvent {
+                    kind: "error".to_string(),
+                    activities: Vec::new(),
+                    activity: None,
+                    error: Some(format!(
+                        "provider owner bridge not ready: {}",
+                        socket_path.display()
+                    )),
+                });
+                std::thread::sleep(reconnect_delay);
+                continue;
+            }
+
+            let mut socket = match UnixStream::connect(&socket_path) {
+                Ok(socket) => socket,
+                Err(error) => {
+                    let _ = channel.send(TaskBoardActivityStreamEvent {
+                        kind: "error".to_string(),
+                        activities: Vec::new(),
+                        activity: None,
+                        error: Some(format!("connect provider owner bridge failed: {error}")),
+                    });
+                    std::thread::sleep(reconnect_delay);
+                    continue;
+                }
+            };
+            let _ = socket.set_read_timeout(Some(Duration::from_secs(1)));
+            let payload = serde_json::json!({
+                "type": "session_activity_stream",
+                "limit": 200,
+            });
+            let raw_request = format!("{}\n", payload);
+            if let Err(error) = socket.write_all(raw_request.as_bytes()) {
+                let _ = channel.send(TaskBoardActivityStreamEvent {
+                    kind: "error".to_string(),
+                    activities: Vec::new(),
+                    activity: None,
+                    error: Some(format!(
+                        "write provider owner bridge stream request failed: {error}"
+                    )),
+                });
+                std::thread::sleep(reconnect_delay);
+                continue;
+            }
+
+            let mut reader = BufReader::new(socket);
+            while generation.load(Ordering::SeqCst) == my_generation {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        if let Some(event) = parse_task_board_activity_stream_event(&line) {
+                            let _ = channel.send(event);
+                        }
+                    }
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted
+                        ) =>
+                    {
+                        continue;
+                    }
+                    Err(error) => {
+                        let _ = channel.send(TaskBoardActivityStreamEvent {
+                            kind: "error".to_string(),
+                            activities: Vec::new(),
+                            activity: None,
+                            error: Some(format!(
+                                "read provider owner bridge stream failed: {error}"
+                            )),
+                        });
+                        break;
+                    }
+                }
+            }
+
+            if generation.load(Ordering::SeqCst) == my_generation {
+                std::thread::sleep(reconnect_delay);
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn stop_task_board_activity_stream() -> Result<(), String> {
+    task_board_activity_stream_generation().fetch_add(1, Ordering::SeqCst);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn pin_task_board_session(
     provider_id: String,
@@ -244,5 +410,31 @@ mod tests {
         assert_eq!(state.pinned.len(), 1);
         assert_eq!(state.pinned[0].provider_id, "codex");
         assert_eq!(state.pinned[0].session_id, "thread-a");
+    }
+
+    #[test]
+    fn parses_task_board_activity_stream_snapshot() {
+        let event = parse_task_board_activity_stream_event(
+            r#"{"ok":true,"kind":"snapshot","activities":[{"providerId":"codex","workspaceId":"codex:/tmp/project","workspacePath":"/tmp/project","sessionId":"thread-a","title":"Run tests","status":"running","attentionReason":"","lastUserMessage":"Run tests","lastAssistantMessage":"","lastFinalMessage":"","lastEventKind":"message.user.accepted","updatedAt":10.0}]}"#,
+        )
+        .expect("event");
+
+        assert_eq!(event.kind, "snapshot");
+        assert_eq!(event.activities.len(), 1);
+        assert_eq!(event.activities[0].last_user_message, "Run tests");
+    }
+
+    #[test]
+    fn parses_task_board_activity_stream_activity() {
+        let event = parse_task_board_activity_stream_event(
+            r#"{"ok":true,"kind":"activity","activity":{"providerId":"codex","workspaceId":"codex:/tmp/project","workspacePath":"/tmp/project","sessionId":"thread-a","title":"Run tests","status":"running","attentionReason":"","lastUserMessage":"Run tests","lastAssistantMessage":"working","lastFinalMessage":"","lastEventKind":"message.assistant.delta","updatedAt":20.0}}"#,
+        )
+        .expect("event");
+
+        assert_eq!(event.kind, "activity");
+        assert_eq!(
+            event.activity.expect("activity").last_assistant_message,
+            "working"
+        );
     }
 }

@@ -18,11 +18,19 @@ test("session browser exposes provider-backed archive actions from visible and c
   assert.match(api, /providerId,\s*[\s\S]*sessionId,\s*[\s\S]*workspaceDir:\s*workspaceDir \?\? null,\s*[\s\S]*sessionTitle:\s*sessionTitle \?\? null/);
 
   assert.match(sessionBrowser, /archiveSessionWithFeedback,/);
+  assert.match(sessionBrowser, /invoke<TaskBoardState>\("get_task_board_state"\)/);
+  assert.match(sessionBrowser, /pin_task_board_session/);
+  assert.match(sessionBrowser, /unpin_task_board_session/);
   assert.match(sessionBrowser, /SessionActionMenu,/);
   assert.match(sessionBrowser, /<SessionListPanel/);
+  assert.match(sessionBrowser, /pinnedSessionIds=\{pinnedSessionIds\}/);
+  assert.match(sessionBrowser, /onTogglePinSession=\{\(session\) => void handleTogglePinSession\(session\)\}/);
   assert.match(sessionBrowser, /onOpenContextMenu=\{openSessionContextMenu\}/);
   assert.match(sessionBrowser, /onOpenActionMenu=\{openSessionActionMenu\}/);
   assert.match(navigation, /ArchiveNoticeBanner/);
+  assert.match(navigation, /aria-pressed=\{isPinned\}/);
+  assert.match(navigation, /aria-label=\{isPinned \? labels\.unpinSession : labels\.pinSession\}/);
+  assert.match(navigation, /onTogglePinSession\(session\)/);
   assert.match(navigation, /onContextMenu=\{\(event\) => onOpenContextMenu\(event, session\)\}/);
   assert.match(navigation, /onOpenActionMenu\(event, session\)/);
   assert.match(navigation, /aria-label=\{labels\.sessionActions\}/);
@@ -42,6 +50,8 @@ test("session archive strings exist in both locales and the i18n contract", () =
   const types = readFileSync(join(root, "src", "i18n", "types.ts"), "utf8");
   assert.match(types, /sessionActions: string;/);
   assert.match(types, /alreadyArchived: string;/);
+  assert.match(types, /pinSession: string;/);
+  assert.match(types, /unpinSession: string;/);
   assert.match(types, /archiveSession: string;/);
   assert.match(types, /archivingSession: string;/);
   assert.match(types, /archiveSucceeded: string;/);
@@ -51,6 +61,8 @@ test("session archive strings exist in both locales and the i18n contract", () =
     const source = readFileSync(join(root, "src", "i18n", "locales", `${locale}.ts`), "utf8");
     assert.match(source, /sessionActions:/);
     assert.match(source, /alreadyArchived:/);
+    assert.match(source, /pinSession:/);
+    assert.match(source, /unpinSession:/);
     assert.match(source, /archiveSession:/);
     assert.match(source, /archivingSession:/);
     assert.match(source, /archiveSucceeded:/);

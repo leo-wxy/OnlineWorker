@@ -106,6 +106,51 @@ def test_message_user_submitted_records_input_without_marking_running():
     assert activity["lastEventKind"] == "message.user.submitted"
 
 
+def test_projection_replaces_session_id_title_placeholder_with_user_message():
+    bus = MessageEventBus()
+
+    bus.publish(
+        create_message_event(
+            "turn.started",
+            provider_id="codex",
+            session_id="019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+            created_at=10,
+        )
+    )
+    bus.publish(
+        create_message_event(
+            "message.user.accepted",
+            provider_id="codex",
+            session_id="019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+            payload={"text": "修复 TaskBoard 卡片标题"},
+            created_at=20,
+        )
+    )
+
+    activity = bus.session_activity("codex", "019e92cb-9559-7eb0-be3e-ab23f37f7b27")
+    assert activity["title"] == "修复 TaskBoard 卡片标题"
+    assert activity["lastUserMessage"] == "修复 TaskBoard 卡片标题"
+
+
+def test_projection_keeps_assistant_delta_out_of_title():
+    bus = MessageEventBus()
+    session_id = "019e92cb-9559-7eb0-be3e-ab23f37f7b27"
+
+    bus.publish(
+        create_message_event(
+            "message.assistant.delta",
+            provider_id="codex",
+            session_id=session_id,
+            payload={"delta": "正在检查事件总线活动流"},
+            created_at=10,
+        )
+    )
+
+    activity = bus.session_activity("codex", session_id)
+    assert activity["title"] == ""
+    assert activity["lastAssistantMessage"] == "正在检查事件总线活动流"
+
+
 def test_message_event_bus_isolates_subscriber_failures():
     bus = MessageEventBus()
     seen = []

@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { useI18n } from "../i18n";
 import {
   fetchClaudeSessions,
+  fetchClaudeMessages,
   fetchCodexSessions,
+  fetchCodexThreadState,
   fetchProviderMetadata,
+  fetchProviderSession,
   fetchProviderSessions,
 } from "../components/session-browser/api";
 import { normalizeGenericProviderSessions } from "../components/session-browser/sessionData";
@@ -21,6 +24,7 @@ import type {
   CodexSession,
   DashboardState,
   ProviderMetadata,
+  SessionTurn,
 } from "../types";
 
 export interface TaskBoardOpenSessionTarget {
@@ -38,6 +42,35 @@ const DEFAULT_TASK_BOARD_STATE: TaskBoardState = {
   pinned: [],
   hidden: [],
 };
+
+interface TaskBoardActivityStreamEvent {
+  kind: "snapshot" | "activity" | "error";
+  activities?: TaskBoardSessionActivity[];
+  activity?: TaskBoardSessionActivity | null;
+  error?: string | null;
+}
+
+interface RefreshOptions {
+  includeActivities?: boolean;
+}
+
+function taskActivityKey(activity: TaskBoardSessionActivity) {
+  return `${activity.providerId}:${activity.sessionId}`;
+}
+
+function taskSessionKey(providerId: string, sessionId: string) {
+  return `${providerId}:${sessionId}`;
+}
+
+function upsertSessionActivity(
+  activities: TaskBoardSessionActivity[],
+  activity: TaskBoardSessionActivity,
+) {
+  const key = taskActivityKey(activity);
+  const next = activities.filter((item) => taskActivityKey(item) !== key);
+  next.unshift(activity);
+  return next;
+}
 
 function formatRelativeTime(epochMs: number | null, nowMs: number, texts: ReturnType<typeof useI18n>["t"]) {
   if (!epochMs) {
@@ -85,6 +118,64 @@ function toClaudeSession(session: ClaudeSession, workspaceFallback: string): Uni
     archived: session.archived ?? false,
     raw: session,
   };
+}
+
+function lastTurnMessage(turns: SessionTurn[]) {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const content = turns[index]?.content?.trim();
+    if (content) {
+      return content;
+    }
+  }
+  return null;
+}
+
+async function readSessionLastMessage(session: UnifiedSession) {
+  if (session.type === "codex") {
+    const rolloutPath = (session.raw as CodexSession).rolloutPath;
+    if (!rolloutPath) {
+      return null;
+    }
+    return lastTurnMessage((await fetchCodexThreadState(rolloutPath)).turns);
+  }
+  if (session.type === "claude") {
+    return lastTurnMessage(await fetchClaudeMessages(session.id, session.workspace));
+  }
+  return lastTurnMessage(await fetchProviderSession(session.type, session.id, session.workspace));
+}
+
+async function hydratePinnedSessionPreviews(
+  sessions: UnifiedSession[],
+  taskBoardState: TaskBoardState,
+) {
+  const pinnedKeys = new Set(
+    taskBoardState.pinned.map((item) => taskSessionKey(item.providerId, item.sessionId)),
+  );
+  if (pinnedKeys.size === 0) {
+    return sessions;
+  }
+
+  return Promise.all(sessions.map(async (session) => {
+    if (!pinnedKeys.has(taskSessionKey(session.type, session.id))) {
+      return session;
+    }
+    try {
+      const lastMessage = await readSessionLastMessage(session);
+      if (!lastMessage) {
+        return session;
+      }
+      return {
+        ...session,
+        raw: {
+          ...(session.raw ?? {}),
+          lastMessage,
+        },
+      };
+    } catch (lastMessageError) {
+      console.warn(`Failed to load pinned session preview for ${session.type}:${session.id}`, lastMessageError);
+      return session;
+    }
+  }));
 }
 
 function taskAccent(providerId: string) {
@@ -162,6 +253,8 @@ function TaskCard({
   const { t } = useI18n();
   const accent = taskAccent(task.providerId);
   const toneClasses = laneTone(tone);
+  const pinLabel = task.pinned ? t.taskBoard.unpin : t.taskBoard.pin;
+  const showPinText = task.pinned && tone === "pinned";
 
   return (
     <div
@@ -174,7 +267,7 @@ function TaskCard({
           onOpen(task);
         }
       }}
-      className={`group rounded-md border p-3 text-left shadow-[0_2px_10px_rgba(15,23,42,0.035)] transition-colors focus:outline-none focus:ring-2 focus:ring-blue-300/70 ${toneClasses.card} ${accent.card}`}
+      className={`group flex min-h-[250px] flex-col rounded-md border p-3 text-left shadow-[0_2px_10px_rgba(15,23,42,0.035)] transition-colors focus:outline-none focus:ring-2 focus:ring-blue-300/70 ${toneClasses.card} ${accent.card}`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
@@ -192,12 +285,19 @@ function TaskCard({
               event.stopPropagation();
               onTogglePin(task);
             }}
-            title={task.pinned ? t.taskBoard.unpin : t.taskBoard.pin}
-            className="grid h-7 w-7 place-items-center rounded-md border border-slate-200 bg-white/78 text-slate-500 transition-colors hover:text-slate-900"
+            aria-pressed={task.pinned}
+            aria-label={pinLabel}
+            title={pinLabel}
+            className={`inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white/78 text-slate-500 transition-colors hover:text-slate-900 ${
+              showPinText ? "gap-1.5 px-2" : "w-7"
+            }`}
           >
             <svg className={`h-3.5 w-3.5 ${task.pinned ? "fill-current" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.9" d="M11.05 3.6a1 1 0 011.9 0l1.7 5.24h5.5a1 1 0 01.59 1.81l-4.45 3.23 1.7 5.24a1 1 0 01-1.54 1.12L12 17.01l-4.45 3.23a1 1 0 01-1.54-1.12l1.7-5.24-4.45-3.23a1 1 0 01.59-1.81h5.5l1.7-5.24z" />
             </svg>
+            {showPinText ? (
+              <span className="text-[11px] font-semibold">{pinLabel}</span>
+            ) : null}
           </button>
           <button
             type="button"
@@ -226,15 +326,29 @@ function TaskCard({
       </div>
 
       {task.preview ? (
-        <p className="mt-3 line-clamp-3 rounded bg-white/60 px-2.5 py-2 text-xs font-medium leading-5 text-slate-600">
-          {task.preview}
-        </p>
+        <div className="mt-3 overflow-hidden rounded bg-white/60 px-2.5 py-2">
+          <p
+            className="overflow-hidden text-xs font-medium leading-5 text-slate-600"
+            style={{
+              display: "-webkit-box",
+              WebkitBoxOrient: "vertical",
+              WebkitLineClamp: 3,
+              maxHeight: "3.75rem",
+            }}
+          >
+            {task.preview}
+          </p>
+        </div>
       ) : null}
 
-      <div className="mt-3 flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-400">
-        <span className="truncate" title={task.sessionId}>
-          {task.statusReason || (task.recentEvent ? t.taskBoard.eventLabel(task.recentEvent) : task.sessionId)}
-        </span>
+      <div className="mt-auto flex items-center justify-between gap-2 pt-3 text-[11px] font-semibold text-slate-400">
+        {task.statusReason ? (
+          <span className="truncate" title={task.statusReason}>
+            {task.statusReason}
+          </span>
+        ) : (
+          <span />
+        )}
         <span className="shrink-0">
           {formatRelativeTime(task.updatedAtEpochMs, nowMs, t)}
         </span>
@@ -320,18 +434,20 @@ export function TaskBoard({ onOpenSession }: Props) {
     [providers],
   );
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ includeActivities = true }: RefreshOptions = {}) => {
     setRefreshing(true);
     try {
-      const [nextProviders, nextDashboard, nextTaskBoardState, nextSessionActivities] = await Promise.all([
+      const [nextProviders, nextDashboard, nextTaskBoardState] = await Promise.all([
         fetchProviderMetadata(),
         invoke<DashboardState>("get_dashboard_state"),
         invoke<TaskBoardState>("get_task_board_state"),
-        invoke<TaskBoardSessionActivity[]>("get_task_board_session_activities").catch((activityError) => {
+      ]);
+      const nextSessionActivities = includeActivities
+        ? await invoke<TaskBoardSessionActivity[]>("get_task_board_session_activities").catch((activityError) => {
           console.warn("Failed to load task board session activity projection", activityError);
           return [];
-        }),
-      ]);
+        })
+        : null;
       const visibleProviders = visibleSessionProviders(nextProviders) as ProviderMetadata[];
       const sessionResults = await Promise.all(
         visibleProviders.map(async (provider) => {
@@ -361,8 +477,10 @@ export function TaskBoard({ onOpenSession }: Props) {
       setProviders(nextProviders);
       setDashboardState(nextDashboard);
       setTaskBoardState(nextTaskBoardState);
-      setSessionActivities(nextSessionActivities);
-      setSessions(sessionResults.flat());
+      if (nextSessionActivities !== null) {
+        setSessionActivities(nextSessionActivities);
+      }
+      setSessions(await hydratePinnedSessionPreviews(sessionResults.flat(), nextTaskBoardState));
       setNowMs(Date.now());
       setError(null);
     } catch (err) {
@@ -374,12 +492,38 @@ export function TaskBoard({ onOpenSession }: Props) {
   }, [t.sessions.workspaceFallback]);
 
   useEffect(() => {
-    void refresh();
-    const timer = window.setInterval(() => {
-      void refresh();
-    }, 5000);
-    return () => window.clearInterval(timer);
+    void refresh({ includeActivities: false });
   }, [refresh]);
+
+  useEffect(() => {
+    const channel = new Channel<TaskBoardActivityStreamEvent>();
+    channel.onmessage = (event) => {
+      if (event.kind === "snapshot") {
+        setSessionActivities(event.activities ?? []);
+        setNowMs(Date.now());
+        return;
+      }
+      if (event.kind === "activity" && event.activity) {
+        const activity = event.activity;
+        setSessionActivities((current) => upsertSessionActivity(current, activity));
+        setNowMs(Date.now());
+        return;
+      }
+      if (event.kind === "error" && event.error) {
+        console.warn("Task board activity stream failed", event.error);
+      }
+    };
+
+    void invoke("start_task_board_activity_stream", { channel }).catch((streamError) => {
+      console.warn("Failed to start task board activity stream", streamError);
+    });
+
+    return () => {
+      void invoke("stop_task_board_activity_stream").catch((streamError) => {
+        console.warn("Failed to stop task board activity stream", streamError);
+      });
+    };
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);

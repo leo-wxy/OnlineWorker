@@ -47,29 +47,107 @@ function sessionTitle(session) {
   return session.title || session.id;
 }
 
+function isUuidLike(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    normalizedString(value),
+  );
+}
+
+function isPlaceholderTitle(title, sessionId) {
+  const text = normalizedString(title);
+  return !text || text === normalizedString(sessionId) || isUuidLike(text);
+}
+
+function shortSessionLabel(sessionId) {
+  const text = normalizedString(sessionId);
+  return text.length > 12 ? text.slice(0, 12) : text;
+}
+
+function activityTitle(activity, session) {
+  const sessionId = normalizedString(activity.sessionId);
+  const sessionLabel = normalizedString(session?.title);
+  if (!isPlaceholderTitle(sessionLabel, sessionId)) {
+    return sessionLabel;
+  }
+  const rawTitle = normalizedString(activity.title);
+  if (!isPlaceholderTitle(rawTitle, sessionId)) {
+    return rawTitle;
+  }
+  const userMessage = normalizedString(activity.lastUserMessage);
+  if (userMessage) {
+    return userMessage.slice(0, 160);
+  }
+  return shortSessionLabel(sessionId) || "未命名任务";
+}
+
 function sessionPreview(session) {
-  const raw = session.raw ?? {};
+  const raw = session?.raw ?? {};
   const preview =
-    raw.preview ??
-    raw.summary ??
     raw.lastMessage ??
     raw.last_message ??
+    raw.latestMessage ??
+    raw.latest_message ??
+    raw.preview ??
+    raw.summary ??
     raw.highlightedThreadPreview;
-  return typeof preview === "string" && preview.trim() ? preview.trim() : null;
+  const text = typeof preview === "string" && preview.trim() ? previewText(preview) : "";
+  return text || null;
 }
 
 function activityPreview(activity) {
-  return (
-    normalizedString(activity.lastFinalMessage) ||
-    normalizedString(activity.lastAssistantMessage) ||
-    normalizedString(activity.attentionReason) ||
-    normalizedString(activity.lastUserMessage) ||
-    null
-  );
+  const status = normalizedString(activity.status).toLowerCase();
+  const eventKind = normalizedString(activity.lastEventKind);
+  const lastAssistantMessage = previewText(activity.lastAssistantMessage);
+  const lastFinalMessage = previewText(activity.lastFinalMessage);
+  const attentionReason = normalizedString(activity.attentionReason);
+  const lastUserMessage = previewText(activity.lastUserMessage);
+
+  if (status === "running" || eventKind === "message.assistant.delta") {
+    return lastAssistantMessage || attentionReason || lastUserMessage || null;
+  }
+  if (status === "needs_attention" || status === "failed") {
+    return attentionReason || lastAssistantMessage || lastUserMessage || lastFinalMessage || null;
+  }
+  return lastFinalMessage || lastAssistantMessage || attentionReason || lastUserMessage || null;
 }
 
 function normalizedString(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function previewText(value) {
+  let text = normalizedString(value).replace(/\s+/g, " ");
+  for (let index = 0; index < 4; index += 1) {
+    const next = text
+      .replace(/^你说得对[，。:：]\s*/, "")
+      .replace(/^是[，,]\s*/, "")
+      .replace(/^我明白[^。！？:：]*[。！？:：]\s*/, "")
+      .replace(/^可以结合\s*hook[，,，]\s*但位置要放对[:：]\s*/i, "")
+      .replace(/^我(?:现在|继续|正在|先|会)(?:继续|先|会|正在)?\s*/, "")
+      .replace(/^现在我(?:继续|正在|先|会)?\s*/, "")
+      .trim();
+    if (next === text) {
+      break;
+    }
+    text = next;
+  }
+  return text;
+}
+
+function meaningfulPreview(preview, title, fallback) {
+  const text = normalizedString(preview);
+  if (text && text !== normalizedString(title)) {
+    return text;
+  }
+  return normalizedString(fallback) || null;
+}
+
+function activityStatusReason(activity, fallback) {
+  const attentionReason = normalizedString(activity.attentionReason);
+  if (attentionReason) {
+    return attentionReason;
+  }
+  return fallback === "需要处理" ? fallback : "";
 }
 
 function readStatusValue(raw) {
@@ -175,6 +253,9 @@ export function buildTaskBoardModel({
   const generatedAtEpochMs = normalizeTimestamp(dashboardState?.generatedAtEpoch) ?? nowEpochMs;
   const pinnedKeys = sessionRefSet(taskBoardState?.pinned);
   const hiddenKeys = sessionRefSet(taskBoardState?.hidden);
+  const sessionsByKey = new Map(
+    sessions.map((session) => [taskBoardKey(session.type, session.id), session]),
+  );
 
   const tasks = sessionActivities.flatMap((activity) => {
     const providerId = normalizedString(activity.providerId);
@@ -183,14 +264,19 @@ export function buildTaskBoardModel({
       return [];
     }
     const key = taskBoardKey(providerId, sessionId);
+    const session = sessionsByKey.get(key);
     const needsAttention = activityNeedsAttention(activity);
     const running = !needsAttention && activityRunning(activity);
     const pinned = pinnedKeys.has(key);
-    const preview = activityPreview(activity);
-    const title =
-      normalizedString(activity.title) ||
-      normalizedString(activity.lastUserMessage) ||
-      sessionId;
+    const title = activityTitle({ ...activity, sessionId }, session);
+    const fallbackReason = needsAttention
+      ? "需要处理"
+      : running
+        ? "正在执行"
+        : pinned
+          ? "关注中"
+          : "";
+    const preview = normalizedString(activityPreview(activity)) || sessionPreview(session) || null;
 
     return [{
       id: key,
@@ -198,21 +284,16 @@ export function buildTaskBoardModel({
       providerId,
       providerLabel: providerLabelFor(providerLabels, providerId),
       title,
-      workspace: normalizedString(activity.workspacePath) || normalizedString(activity.workspaceId),
+      workspace: normalizedString(activity.workspacePath) ||
+        normalizedString(activity.workspaceId) ||
+        normalizedString(session?.workspace),
       preview,
-      archived: false,
+      archived: Boolean(session?.archived),
       needsAttention,
       running,
       pinned,
       hidden: hiddenKeys.has(key),
-      statusReason: normalizedString(activity.attentionReason) ||
-        (needsAttention
-          ? "需要处理"
-          : running
-            ? "正在执行"
-            : pinned
-              ? "关注中"
-              : ""),
+      statusReason: activityStatusReason(activity, fallbackReason),
       recentEvent: normalizedString(activity.lastEventKind) || null,
       updatedAtEpochMs: normalizeTimestamp(activity.updatedAt),
     }];
@@ -233,29 +314,35 @@ export function buildTaskBoardModel({
     const needsAttention = hasNeedsAttentionSignal(raw);
     const running = !needsAttention && (isActive || hasRunningSignal(raw));
     const pinned = pinnedKeys.has(key);
+    const title = sessionTitle(session);
+    const fallbackReason = needsAttention
+      ? "需要处理"
+      : running
+        ? "正在执行"
+        : pinned
+          ? "关注中"
+          : "";
+    const rawPreview = isActive
+      ? recentActivity?.highlightedThreadPreview || sessionPreview(session)
+      : sessionPreview(session);
+    const preview = pinned
+      ? normalizedString(rawPreview) || null
+      : meaningfulPreview(rawPreview, title, "");
 
     tasks.push({
       id: key,
       sessionId: session.id,
       providerId: session.type,
       providerLabel: providerLabelFor(providerLabels, session.type),
-      title: sessionTitle(session),
+      title,
       workspace: session.workspace,
-      preview: isActive
-        ? recentActivity?.highlightedThreadPreview || sessionPreview(session)
-        : sessionPreview(session),
+      preview,
       archived: session.archived,
       needsAttention,
       running,
       pinned,
       hidden: hiddenKeys.has(key),
-      statusReason: needsAttention
-        ? "需要处理"
-        : running
-          ? "正在执行"
-          : pinned
-            ? "关注中"
-            : "",
+      statusReason: needsAttention ? fallbackReason : "",
       recentEvent: isActive ? "active_session" : readRecentEvent(raw),
       updatedAtEpochMs: isActive ? Math.max(updatedAtEpochMs ?? 0, generatedAtEpochMs) : updatedAtEpochMs,
     });

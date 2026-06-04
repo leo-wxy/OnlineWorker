@@ -355,6 +355,8 @@ export const enTexts: AppTexts = {
       attachmentUnsupported: "This provider session does not support attachments yet.",
       sessionActions: "Session actions",
       alreadyArchived: "Archived",
+      pinSession: "Follow session",
+      unpinSession: "Unfollow session",
       archiveSession: "Archive",
       archivingSession: "Archiving...",
       archiveSucceeded: "Session archived.",

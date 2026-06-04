@@ -147,9 +147,11 @@ export function SessionListPanel({
   archivingSessionId,
   archiveNotice,
   labels,
+  pinnedSessionIds,
   renderSessionMeta,
   onArchiveFilterChange,
   onSelectSession,
+  onTogglePinSession,
   onOpenContextMenu,
   onOpenActionMenu,
 }: {
@@ -165,11 +167,15 @@ export function SessionListPanel({
     archived: string;
     archivingSession: string;
     noSessions: string;
+    pinSession: string;
+    unpinSession: string;
     sessionActions: string;
   };
+  pinnedSessionIds?: Set<string>;
   renderSessionMeta?: (session: UnifiedSession) => ReactNode;
   onArchiveFilterChange: (filter: ArchiveFilter) => void;
   onSelectSession: (sessionId: string) => void;
+  onTogglePinSession?: (session: UnifiedSession) => void;
   onOpenContextMenu: (event: MouseEvent<HTMLElement>, session: UnifiedSession) => void;
   onOpenActionMenu: (event: MouseEvent<HTMLElement>, session: UnifiedSession) => void;
 }) {
@@ -222,6 +228,7 @@ export function SessionListPanel({
           const isActive = selectedSessionId === session.id;
           const ui = getProviderUi(session.type, providerLabels[session.type]);
           const isArchiving = archivingSessionId === session.id;
+          const isPinned = Boolean(pinnedSessionIds?.has(`${session.type}:${session.id}`));
 
           return (
             <div
@@ -263,6 +270,29 @@ export function SessionListPanel({
                     <span className="rounded-full bg-white/88 px-2 py-1 text-[10px] font-semibold text-slate-500">
                       {labels.archivingSession}
                     </span>
+                  ) : null}
+                  {onTogglePinSession ? (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onTogglePinSession(session);
+                      }}
+                      disabled={isArchiving}
+                      aria-pressed={isPinned}
+                      aria-label={isPinned ? labels.unpinSession : labels.pinSession}
+                      title={isPinned ? labels.unpinSession : labels.pinSession}
+                      className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border transition-colors disabled:cursor-progress disabled:opacity-50 ${
+                        isPinned
+                          ? "border-violet-200 bg-violet-50 text-violet-600"
+                          : "border-transparent text-slate-400 hover:border-slate-200 hover:bg-white hover:text-slate-700"
+                      }`}
+                    >
+                      <svg className={`h-4 w-4 ${isPinned ? "fill-current" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.9" d="M11.05 3.6a1 1 0 011.9 0l1.7 5.24h5.5a1 1 0 01.59 1.81l-4.45 3.23 1.7 5.24a1 1 0 01-1.54 1.12L12 17.01l-4.45 3.23a1 1 0 01-1.54-1.12l1.7-5.24-4.45-3.23a1 1 0 01.59-1.81h5.5l1.7-5.24z" />
+                      </svg>
+                    </button>
                   ) : null}
                   <button
                     type="button"

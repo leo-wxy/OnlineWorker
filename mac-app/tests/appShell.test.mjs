@@ -287,3 +287,53 @@ test("dashboard renders provider icons from provider metadata", () => {
   assert.match(providerList, /<ProviderIcon provider=\{provider\} \/>/);
   assert.equal(dashboard.includes("function ProviderIcon()"), false);
 });
+
+test("task board listens to activity stream without fallback polling", () => {
+  const taskBoard = readFileSync(join(root, "src", "pages", "TaskBoard.tsx"), "utf8");
+  const lib = readFileSync(join(root, "src-tauri", "src", "lib.rs"), "utf8");
+  const taskBoardState = readFileSync(join(root, "src-tauri", "src", "commands", "task_board_state.rs"), "utf8");
+
+  assert.match(taskBoard, /onClick=\{\(\) => void refresh\(\)\}/);
+  assert.match(taskBoard, /start_task_board_activity_stream/);
+  assert.match(taskBoard, /function upsertSessionActivity/);
+  assert.match(taskBoard, /const activity = event\.activity;/);
+  assert.match(taskBoard, /setSessionActivities\(\(current\) => upsertSessionActivity\(current, activity\)\)/);
+  assert.match(taskBoard, /refresh\(\{ includeActivities: false \}\)/);
+  assert.equal(taskBoard.includes("window.setInterval(() => {\n      void refresh();"), false);
+  assert.match(taskBoard, /setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 30_000\)/);
+  assert.match(taskBoardState, /session_activity_stream/);
+  assert.match(taskBoardState, /while generation\.load\(Ordering::SeqCst\) == my_generation/);
+  assert.match(taskBoardState, /std::thread::sleep\(reconnect_delay\)/);
+  assert.match(lib, /start_task_board_activity_stream/);
+  assert.match(lib, /stop_task_board_activity_stream/);
+});
+
+test("task board clamps activity preview without covering card footer", () => {
+  const taskBoard = readFileSync(join(root, "src", "pages", "TaskBoard.tsx"), "utf8");
+
+  assert.match(taskBoard, /WebkitLineClamp:\s*3/);
+  assert.match(taskBoard, /maxHeight:\s*"3\.75rem"/);
+  assert.equal(taskBoard.includes("line-clamp-3 min-h-[4.5rem]"), false);
+  assert.match(taskBoard, /mt-auto flex items-center justify-between/);
+});
+
+test("task board pinned cards expose an explicit unfollow action", () => {
+  const taskBoard = readFileSync(join(root, "src", "pages", "TaskBoard.tsx"), "utf8");
+
+  assert.match(taskBoard, /const pinLabel = task\.pinned \? t\.taskBoard\.unpin : t\.taskBoard\.pin/);
+  assert.match(taskBoard, /const showPinText = task\.pinned && tone === "pinned"/);
+  assert.match(taskBoard, /aria-pressed=\{task\.pinned\}/);
+  assert.match(taskBoard, /aria-label=\{pinLabel\}/);
+  assert.match(taskBoard, /<span className="text-\[11px\] font-semibold">\{pinLabel\}<\/span>/);
+  assert.match(taskBoard, /task\.pinned \? "unpin_task_board_session" : "pin_task_board_session"/);
+});
+
+test("task board hydrates previews for pinned idle sessions", () => {
+  const taskBoard = readFileSync(join(root, "src", "pages", "TaskBoard.tsx"), "utf8");
+
+  assert.match(taskBoard, /async function hydratePinnedSessionPreviews/);
+  assert.match(taskBoard, /taskBoardState\.pinned\.map/);
+  assert.match(taskBoard, /readSessionLastMessage\(session\)/);
+  assert.match(taskBoard, /raw:\s*\{\s*\.\.\.\(session\.raw \?\? \{\}\),\s*lastMessage,/);
+  assert.match(taskBoard, /setSessions\(await hydratePinnedSessionPreviews\(sessionResults\.flat\(\), nextTaskBoardState\)\)/);
+});

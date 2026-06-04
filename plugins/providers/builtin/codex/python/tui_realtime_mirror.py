@@ -221,7 +221,12 @@ def _ensure_bound_codex_thread_watches(
                         if is_active_thread:
                             bootstrap_item = _latest_assistant_response_item_snapshot(session_file)
                             if bootstrap_item is not None and bootstrap_item.get("phase") == "commentary":
-                                watch.last_offset = int(bootstrap_item.get("offset") or 0)
+                                watch.last_offset = int(
+                                    bootstrap_item.get("end_offset")
+                                    or bootstrap_item.get("file_size")
+                                    or os.path.getsize(session_file)
+                                )
+                                watch.last_commentary_text = str(bootstrap_item.get("text") or "")
                             else:
                                 watch.last_offset = os.path.getsize(session_file)
                                 if bootstrap_item is not None:

@@ -84,6 +84,64 @@ test("buildTaskBoardModel separates archived sessions", () => {
   assert.equal(board.pinnedIdle[0].sessionId, "thread-a");
 });
 
+test("buildTaskBoardModel shows latest message for pinned idle sessions", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "thread-a",
+        title: "梳理一下当前未完成的 phase",
+        raw: {
+          lastMessage: "最后一条会话内容应该显示在关注中卡片里。",
+          updatedAt: nowEpochMs - 60_000,
+        },
+      }),
+    ],
+    providerLabels: { codex: "Codex" },
+    taskBoardState: {
+      version: 1,
+      pinned: [
+        { providerId: "codex", sessionId: "thread-a", updatedAtEpoch: nowEpochMs },
+      ],
+      hidden: [],
+    },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.counts.pinnedIdle, 1);
+  assert.equal(board.pinnedIdle[0].title, "梳理一下当前未完成的 phase");
+  assert.equal(board.pinnedIdle[0].preview, "最后一条会话内容应该显示在关注中卡片里。");
+});
+
+test("buildTaskBoardModel keeps title text visible as pinned preview fallback", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "thread-a",
+        title: "梳理一下当前未完成的 phase",
+        raw: {
+          lastMessage: "梳理一下当前未完成的 phase",
+          updatedAt: nowEpochMs - 60_000,
+        },
+      }),
+    ],
+    providerLabels: { codex: "Codex" },
+    taskBoardState: {
+      version: 1,
+      pinned: [
+        { providerId: "codex", sessionId: "thread-a", updatedAtEpoch: nowEpochMs },
+      ],
+      hidden: [],
+    },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.counts.pinnedIdle, 1);
+  assert.equal(board.pinnedIdle[0].title, "梳理一下当前未完成的 phase");
+  assert.equal(board.pinnedIdle[0].preview, "梳理一下当前未完成的 phase");
+});
+
 test("buildTaskBoardModel creates a running fallback from dashboard activity", () => {
   const board = buildTaskBoardModel({
     sessions: [],
@@ -106,7 +164,7 @@ test("buildTaskBoardModel creates a running fallback from dashboard activity", (
   assert.equal(board.running[0].workspace, "/tmp/live");
 });
 
-test("buildTaskBoardModel prefers session activity projection over session raw fields", () => {
+test("buildTaskBoardModel renders session title above activity summary", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -138,8 +196,242 @@ test("buildTaskBoardModel prefers session activity projection over session raw f
   assert.equal(board.counts.total, 1);
   assert.equal(board.counts.needsAttention, 1);
   assert.equal(board.counts.running, 0);
-  assert.equal(board.needsAttention[0].title, "Projection title");
+  assert.equal(board.needsAttention[0].title, "Thread A");
   assert.equal(board.needsAttention[0].preview, "需要处理授权请求");
   assert.equal(board.needsAttention[0].statusReason, "需要处理授权请求");
   assert.equal(board.needsAttention[0].recentEvent, "approval.requested");
+});
+
+test("buildTaskBoardModel leaves running preview empty without message content", () => {
+  const board = buildTaskBoardModel({
+    sessions: [],
+    sessionActivities: [
+      {
+        providerId: "codex",
+        workspaceId: "codex:/Users/wxy/Projects/onlineWorker",
+        workspacePath: "/Users/wxy/Projects/onlineWorker",
+        sessionId: "thread-a",
+        title: "切换 codex/phase-14-message-event-bus 这个分支",
+        status: "running",
+        attentionReason: "",
+        lastUserMessage: "",
+        lastAssistantMessage: "",
+        lastFinalMessage: "",
+        lastEventKind: "message.user.accepted",
+        updatedAt: Math.floor(nowEpochMs / 1000),
+      },
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.running[0].title, "切换 codex/phase-14-message-event-bus 这个分支");
+  assert.equal(board.running[0].preview, null);
+  assert.equal(board.running[0].statusReason, "");
+});
+
+test("buildTaskBoardModel shows latest user message when activity has no assistant summary", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "thread-a",
+        title: "切换 codex/phase-14-message-event-bus 这个分支",
+        raw: { updatedAt: nowEpochMs - 30_000 },
+      }),
+    ],
+    sessionActivities: [
+      {
+        providerId: "codex",
+        workspaceId: "codex:/Users/wxy/Projects/onlineWorker",
+        workspacePath: "/Users/wxy/Projects/onlineWorker",
+        sessionId: "thread-a",
+        title: "切换 codex/phase-14-message-event-bus 这个分支",
+        status: "running",
+        attentionReason: "",
+        lastUserMessage: "切换 codex/phase-14-message-event-bus 这个分支",
+        lastAssistantMessage: "",
+        lastFinalMessage: "",
+        lastEventKind: "message.user.accepted",
+        updatedAt: Math.floor(nowEpochMs / 1000),
+      },
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.running[0].title, "切换 codex/phase-14-message-event-bus 这个分支");
+  assert.equal(board.running[0].preview, "切换 codex/phase-14-message-event-bus 这个分支");
+  assert.equal(board.running[0].statusReason, "");
+});
+
+test("buildTaskBoardModel replaces uuid activity title with session title", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        title: "修复 TaskBoard 卡片标题",
+        raw: { updatedAt: nowEpochMs - 30_000 },
+      }),
+    ],
+    sessionActivities: [
+      {
+        providerId: "codex",
+        workspaceId: "codex:/Users/wxy/Projects/onlineWorker",
+        workspacePath: "/Users/wxy/Projects/onlineWorker",
+        sessionId: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        title: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        status: "running",
+        attentionReason: "",
+        lastUserMessage: "",
+        lastAssistantMessage: "我现在继续修 TaskBoard。",
+        lastFinalMessage: "旧的完成摘要不应该盖过当前流式内容。",
+        lastEventKind: "message.assistant.delta",
+        updatedAt: Math.floor(nowEpochMs / 1000),
+      },
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.running[0].title, "修复 TaskBoard 卡片标题");
+  assert.equal(board.running[0].preview, "修 TaskBoard。");
+});
+
+test("buildTaskBoardModel renders session title above live assistant summary", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        title: "切换 codex/phase-14-message-event-bus 这个分支",
+        raw: { updatedAt: nowEpochMs - 30_000 },
+      }),
+    ],
+    sessionActivities: [
+      {
+        providerId: "codex",
+        workspaceId: "codex:/Users/wxy/Projects/onlineWorker",
+        workspacePath: "/Users/wxy/Projects/onlineWorker",
+        sessionId: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        title: "我正在通过事件流更新 TaskBoard。",
+        status: "running",
+        attentionReason: "",
+        lastUserMessage: "",
+        lastAssistantMessage: "我正在通过事件流更新 TaskBoard。",
+        lastFinalMessage: "",
+        lastEventKind: "message.assistant.delta",
+        updatedAt: Math.floor(nowEpochMs / 1000),
+      },
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.running[0].title, "切换 codex/phase-14-message-event-bus 这个分支");
+  assert.equal(board.running[0].preview, "通过事件流更新 TaskBoard。");
+});
+
+test("buildTaskBoardModel trims assistant process preface from live preview", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        title: "切换 codex/phase-14-message-event-bus 这个分支",
+        raw: { updatedAt: nowEpochMs - 30_000 },
+      }),
+    ],
+    sessionActivities: [
+      {
+        providerId: "codex",
+        workspaceId: "codex:/Users/wxy/Projects/onlineWorker",
+        workspacePath: "/Users/wxy/Projects/onlineWorker",
+        sessionId: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        title: "",
+        status: "running",
+        attentionReason: "",
+        lastUserMessage: "",
+        lastAssistantMessage: "我明白你的意思了：不能等“下一条 activity”才出现。当前会话已经存在，TaskBoard 打开时就应该显示当前 running 卡片；stream 只负责后续更新。",
+        lastFinalMessage: "",
+        lastEventKind: "message.assistant.delta",
+        updatedAt: Math.floor(nowEpochMs / 1000),
+      },
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.running[0].title, "切换 codex/phase-14-message-event-bus 这个分支");
+  assert.equal(
+    board.running[0].preview,
+    "不能等“下一条 activity”才出现。当前会话已经存在，TaskBoard 打开时就应该显示当前 running 卡片；stream 只负责后续更新。",
+  );
+});
+
+test("buildTaskBoardModel trims hook discussion preface from live preview", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        title: "切换 codex/phase-14-message-event-bus 这个分支",
+        raw: { updatedAt: nowEpochMs - 30_000 },
+      }),
+    ],
+    sessionActivities: [
+      {
+        providerId: "codex",
+        workspaceId: "codex:/Users/wxy/Projects/onlineWorker",
+        workspacePath: "/Users/wxy/Projects/onlineWorker",
+        sessionId: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        title: "",
+        status: "running",
+        attentionReason: "",
+        lastUserMessage: "",
+        lastAssistantMessage: "是，可以结合 hook，但位置要放对：hook 把更早到达的 user/turn 信号发布进同一个 message bus；TaskBoard 仍然只监听 bus stream。",
+        lastFinalMessage: "",
+        lastEventKind: "message.assistant.delta",
+        updatedAt: Math.floor(nowEpochMs / 1000),
+      },
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.running[0].title, "切换 codex/phase-14-message-event-bus 这个分支");
+  assert.equal(
+    board.running[0].preview,
+    "hook 把更早到达的 user/turn 信号发布进同一个 message bus；TaskBoard 仍然只监听 bus stream。",
+  );
+});
+
+test("buildTaskBoardModel does not use assistant text as title without session metadata", () => {
+  const board = buildTaskBoardModel({
+    sessions: [],
+    sessionActivities: [
+      {
+        providerId: "codex",
+        workspaceId: "codex:/Users/wxy/Projects/onlineWorker",
+        workspacePath: "/Users/wxy/Projects/onlineWorker",
+        sessionId: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        title: "",
+        status: "running",
+        attentionReason: "",
+        lastUserMessage: "",
+        lastAssistantMessage: "我正在通过事件流更新 TaskBoard。",
+        lastFinalMessage: "",
+        lastEventKind: "message.assistant.delta",
+        updatedAt: Math.floor(nowEpochMs / 1000),
+      },
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.running[0].title, "019e92cb-955");
+  assert.equal(board.running[0].preview, "通过事件流更新 TaskBoard。");
 });

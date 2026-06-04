@@ -14,6 +14,7 @@ use super::config::{
 };
 
 const PROVIDER_OVERLAY_ENV: &str = "ONLINEWORKER_PROVIDER_OVERLAY";
+const PYINSTALLER_RESET_ENVIRONMENT_ENV: &str = "PYINSTALLER_RESET_ENVIRONMENT";
 
 /// Managed state for the sidecar bot process.
 pub struct BotState {
@@ -94,6 +95,27 @@ fn overlay_env_spec(data_dir: &Path) -> Option<String> {
             }
         })
         .or_else(|| overlay_env_spec_from_app_env(data_dir))
+}
+
+fn bot_sidecar_env(data_dir: &Path) -> Vec<(String, String)> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let path = format!(
+        "{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+        home
+    );
+    let mut envs = vec![
+        ("PATH".to_string(), path),
+        ("HOME".to_string(), home),
+        ("LANG".to_string(), "en_US.UTF-8".to_string()),
+        (
+            PYINSTALLER_RESET_ENVIRONMENT_ENV.to_string(),
+            "1".to_string(),
+        ),
+    ];
+    if let Some(overlay_env) = overlay_env_spec(data_dir) {
+        envs.push((PROVIDER_OVERLAY_ENV.to_string(), overlay_env));
+    }
+    envs
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -521,13 +543,6 @@ async fn do_spawn(app: &AppHandle, state: &Arc<Mutex<BotState>>) -> Result<u32, 
     let dir_str = dir.to_string_lossy().to_string();
     eprintln!("[service] do_spawn: data_dir={}", dir_str);
 
-    let home = std::env::var("HOME").unwrap_or_default();
-    let path = format!(
-        "{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-        home
-    );
-    let overlay_env = overlay_env_spec(&dir);
-
     eprintln!("[service] do_spawn: creating sidecar command...");
     let sidecar = app.shell().sidecar("onlineworker-bot").map_err(|e| {
         eprintln!("[service] Sidecar not found: {}", e);
@@ -538,13 +553,9 @@ async fn do_spawn(app: &AppHandle, state: &Arc<Mutex<BotState>>) -> Result<u32, 
         "[service] do_spawn: spawning sidecar with --data-dir {}...",
         dir_str
     );
-    let mut sidecar = sidecar
-        .args(["--data-dir", &dir_str])
-        .env("PATH", &path)
-        .env("HOME", &home)
-        .env("LANG", "en_US.UTF-8");
-    if let Some(overlay_env) = overlay_env {
-        sidecar = sidecar.env(PROVIDER_OVERLAY_ENV, overlay_env);
+    let mut sidecar = sidecar.args(["--data-dir", &dir_str]);
+    for (key, value) in bot_sidecar_env(&dir) {
+        sidecar = sidecar.env(key, value);
     }
     let (rx, child) = sidecar.spawn().map_err(|e| {
         eprintln!("[service] Failed to spawn: {}", e);
@@ -905,11 +916,11 @@ mod tests {
     use super::should_ignore_sidecar_output_event;
     use super::{
         apply_manual_stop_policy, apply_service_start_policy,
-        cleanup_owner_bridge_socket_files_in_dir, cleanup_process_matchers, compute_service_status,
-        managed_bot_cleanup_pids_from_rows, overlay_env_spec, overlay_env_spec_from_app_env,
-        pid_parent_pairs_from_output, pids_from_bot_process_rows, pids_from_output,
-        probe_http_health, process_tree_pids, read_env_key, select_primary_pid,
-        should_attempt_background_service_recovery, command_program_token, BotState,
+        bot_sidecar_env, cleanup_owner_bridge_socket_files_in_dir, cleanup_process_matchers,
+        command_program_token, compute_service_status, managed_bot_cleanup_pids_from_rows,
+        overlay_env_spec, overlay_env_spec_from_app_env, pid_parent_pairs_from_output,
+        pids_from_bot_process_rows, pids_from_output, probe_http_health, process_tree_pids,
+        read_env_key, select_primary_pid, should_attempt_background_service_recovery, BotState,
         ManagedProcessCleanupPolicy,
     };
     use std::collections::HashMap;
@@ -1170,6 +1181,23 @@ mod tests {
 
         std::env::remove_var("ONLINEWORKER_PROVIDER_OVERLAY");
         let _ = fs::remove_file(dir.join(".env"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bot_sidecar_env_resets_pyinstaller_parent_state() {
+        let dir = std::env::temp_dir().join(format!(
+            "onlineworker-sidecar-env-{}",
+            std::process::id()
+        ));
+        let _ = fs::create_dir_all(&dir);
+
+        let envs = bot_sidecar_env(&dir);
+
+        assert!(envs.iter().any(|(key, value)| {
+            key == "PYINSTALLER_RESET_ENVIRONMENT" && value == "1"
+        }));
+
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -38,7 +38,8 @@ use commands::provider_sessions::{
 use commands::provider_usage::get_provider_usage_summary;
 use commands::task_board_state::{
     get_task_board_session_activities, get_task_board_state, hide_task_board_session,
-    pin_task_board_session, unpin_task_board_session,
+    pin_task_board_session, start_task_board_activity_stream, stop_task_board_activity_stream,
+    unpin_task_board_session,
 };
 use commands::service::{
     check_cli, check_http_health, service_restart, service_start, service_status, service_stop,
@@ -299,6 +300,8 @@ pub fn run() {
             get_task_board_session_activities,
             get_task_board_state,
             pin_task_board_session,
+            start_task_board_activity_stream,
+            stop_task_board_activity_stream,
             unpin_task_board_session,
             hide_task_board_session,
             test_bot_token,

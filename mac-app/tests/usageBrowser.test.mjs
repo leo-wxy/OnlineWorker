@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
+import { buildDefaultUsageQuery } from "../src/utils/usageDateRange.js";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
 
@@ -11,6 +13,7 @@ test("usage browser discovers provider usage tabs from metadata", () => {
   const page = readFileSync(join(root, "src", "pages", "UsageBrowser.tsx"), "utf8");
   const api = readFileSync(join(root, "src", "components", "session-browser", "api.ts"), "utf8");
   const types = readFileSync(join(root, "src", "types.ts"), "utf8");
+  const dateRange = readFileSync(join(root, "src", "utils", "usageDateRange.js"), "utf8");
 
   assert.match(types, /export interface ProviderUsageDay/);
   assert.match(types, /export interface ProviderUsageSummary/);
@@ -31,7 +34,13 @@ test("usage browser discovers provider usage tabs from metadata", () => {
   assert.doesNotMatch(page, /const PROVIDER_TABS = \["codex", "claude"\] as const;/);
   assert.match(page, /fetchProviderMetadata/);
   assert.match(page, /visibleUsageProviders/);
-  assert.match(page, /const DEFAULT_RANGE_DAYS = 7;/);
+  assert.match(dateRange, /const DEFAULT_RANGE_DAYS = 7;/);
+  assert.match(dateRange, /function localIsoDate\(date\)/);
+  assert.match(dateRange, /export function buildDefaultUsageQuery/);
+  assert.match(page, /import \{ buildDefaultUsageQuery \} from "\.\.\/utils\/usageDateRange"/);
+  assert.match(page, /const autoRangeRef = useRef\(true\)/);
+  assert.match(page, /const refreshUsage = useCallback/);
+  assert.match(page, /autoRangeRef\.current = false/);
   assert.match(page, /const \[draftQuery,\s*setDraftQuery\]/);
   assert.match(page, /fetchProviderUsageSummary\(providerId,\s*query\)/);
   assert.match(page, /activeProvider\?\.id/);
@@ -51,6 +60,16 @@ test("usage browser discovers provider usage tabs from metadata", () => {
   assert.match(page, /background:/);
   assert.match(page, /t\.usage\.title/);
   assert.doesNotMatch(page, /t\.usage\.providerTabs\[activeProvider\]/);
+});
+
+test("usage browser default range rolls forward on local date", () => {
+  assert.deepEqual(
+    buildDefaultUsageQuery(new Date(2026, 5, 5, 0, 5, 0)),
+    {
+      startDate: "2026-05-30",
+      endDate: "2026-06-05",
+    },
+  );
 });
 
 test("usage token detail table keeps its own bounded scroll area", () => {

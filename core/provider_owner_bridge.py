@@ -336,6 +336,9 @@ class ProviderOwnerBridge:
                 response = await self._handle_usage_summary(request)
             elif request_type == "session_activities":
                 response = await self._handle_session_activities(request)
+            elif request_type == "session_activity_stream":
+                await self._handle_session_activity_stream(reader, writer, request)
+                return
             elif request_type == "mirror_approval":
                 response = await self._handle_mirror_approval(request)
             else:
@@ -470,6 +473,87 @@ class ProviderOwnerBridge:
             "ok": True,
             "activities": bus.session_activities()[:limit],
         }
+
+    async def _handle_session_activity_stream(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        request: dict,
+    ) -> None:
+        try:
+            limit = int(request.get("limit") or 200)
+        except (TypeError, ValueError):
+            limit = 200
+        if limit <= 0:
+            limit = 200
+
+        bus = getattr(self.state, "message_bus", None)
+        if bus is None or not callable(getattr(bus, "session_activities", None)):
+            writer.write(
+                (
+                    json.dumps(
+                        {
+                            "ok": False,
+                            "kind": "error",
+                            "error": "message bus unavailable",
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                ).encode("utf-8")
+            )
+            await writer.drain()
+            return
+
+        write_lock = asyncio.Lock()
+        pending: set[asyncio.Task] = set()
+
+        async def send_payload(payload: dict) -> None:
+            async with write_lock:
+                writer.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
+                await writer.drain()
+
+        await send_payload(
+            {
+                "ok": True,
+                "kind": "snapshot",
+                "activities": bus.session_activities()[:limit],
+            }
+        )
+
+        loop = asyncio.get_running_loop()
+
+        def on_event(event) -> None:
+            if not getattr(event, "provider_id", "") or not getattr(event, "session_id", ""):
+                return
+            activity = bus.session_activity(event.provider_id, event.session_id)
+            if activity is None:
+                return
+            task = loop.create_task(
+                send_payload(
+                    {
+                        "ok": True,
+                        "kind": "activity",
+                        "activity": activity,
+                        "event": {
+                            "kind": event.kind,
+                            "eventId": event.event_id,
+                        },
+                    }
+                )
+            )
+            pending.add(task)
+            task.add_done_callback(pending.discard)
+
+        unsubscribe = bus.subscribe(on_event)
+        try:
+            await reader.read()
+        finally:
+            unsubscribe()
+            for task in tuple(pending):
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
 
     async def _handle_archive_session(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
