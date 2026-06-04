@@ -1,8 +1,9 @@
 # 13-01 Summary: Claude Provider Auth Runtime Hardening
 
-**Status:** source-verified; fast packaged build/install/restart verified; Claude TG UAT pending
+**Status:** completed; source-verified; fast packaged build/install/restart verified; Claude TG UAT accepted
 **Completed source verification:** 2026-06-04
 **Completed packaged verification:** 2026-06-04
+**Completed user acceptance:** 2026-06-04
 
 ## What Changed
 
@@ -166,12 +167,50 @@ Installed Claude readiness/status smoke passed:
 # owner_bridge_status.detail="Claude CLI is not logged in."
 ```
 
+Final packaged install and user acceptance passed after explicit configured
+launch methods were validated on the installed app:
+
+```bash
+bash verify-packaged-fast.sh
+# Combined fast packaged verification complete (97s)
+# DMG sha256: 2b28968e55530ce616ea5545ddcdb9591811cb2e25d16cb15d8f3414ddf17d2f
+# installed /Applications/OnlineWorker.app
+# installed version: 1.4.0
+# running: /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-app
+# running: /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir ~/Library/Application Support/OnlineWorker
+# bundled private plugins verified:
+#   /Applications/OnlineWorker.app/Contents/Resources/provider-plugins/codemaker/plugin.yaml
+#   /Applications/OnlineWorker.app/Contents/Resources/notification-plugins/popo/plugin.yaml
+```
+
+Installed readiness smoke after the final package confirmed the configured
+Raven launch method and owner bridge status:
+
+```bash
+/Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --owner-bridge-status --data-dir "$HOME/Library/Application Support/OnlineWorker" --timeout 12
+# configured_bin=/Users/wxy/.nvm/versions/node/v20.20.1/bin/raven cc
+# readiness.ready=true
+# readiness.authMethod=oauth_token
+# readiness.apiProvider=firstParty
+# readiness.launchMethod.id=primary
+# owner_bridge_status.ok=true
+# owner_bridge_status.health=healthy
+# owner_bridge_status.detail="• claude CLI：✅ 已连接"
+```
+
+User acceptance:
+
+- User refreshed/validated the installed app after the final package and replied
+  `可以了` on 2026-06-04.
+- The final accepted configuration kept the user-supplied launch candidates:
+
+```text
+/Users/wxy/.nvm/versions/node/v20.20.1/bin/raven cc
+claude
+```
+
 ## Remaining Verification
 
-Fast packaged build/install/restart is complete. Phase 13 should still stay open
-until the Claude topic user-flow checks are completed:
-
-- Negative: logged-out Claude shows Dashboard/TG unavailable state and does not
-  spawn a normal Claude turn.
-- Positive: a valid CLI auth or runtime env source lets Claude messages complete
-  normally.
+None for Phase 13. Future regressions should use
+`scripts/claude_readiness_smoke.py --owner-bridge-status` plus a real Claude
+topic send check before release packaging.
