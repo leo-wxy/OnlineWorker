@@ -41,13 +41,15 @@ from core.providers.interactions import (
 from core.telegram_formatting import format_telegram_assistant_final_text
 from core.notifications import NotificationEvent, build_notification_router
 from core.notifications.result_summary import (
-    notification_result_message as _notification_result_message,
-    notification_result_task_override_with_ai,
     notification_safe_preview_title as _notification_safe_preview_title,
     notification_summary_text as _notification_summary_text,
     notification_text_is_url_only as _notification_text_is_url_only,
     notification_title_from_summary as _notification_title_from_summary,
     short_notification_title as _short_notification_title,
+)
+from core.messages.publishing import (
+    publish_notification_activity,
+    publish_session_message_event,
 )
 from core.ai.scenarios import run_ai_scenario
 from core.storage import save_storage, ThreadInfo
@@ -79,12 +81,6 @@ logger = logging.getLogger(__name__)
 # 流式输出节流间隔（秒）
 THROTTLE_INTERVAL = 0.6
 
-
-async def _notification_result_task_override_with_ai(**kwargs):
-    return await notification_result_task_override_with_ai(
-        **kwargs,
-        run_scenario=run_ai_scenario,
-    )
 
 # 防止 turn/started 并发重复建同一个 thread topic
 _MATERIALIZING_THREAD_TOPICS: set[str] = set()
@@ -804,8 +800,17 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 agent_id=agent_id,
                 task_summary=task_summary,
             )
+            publish_notification_activity(state, event, "notification.requested")
             result = await notification_router.notify(event)
         except Exception as e:
+            if "event" in locals():
+                publish_notification_activity(
+                    state,
+                    event,
+                    "notification.failed",
+                    reason="exception",
+                    errors=(str(e),),
+                )
             logger.warning(
                 "[notification] 发送任务通知异常 thread=%s status=%s error=%s",
                 thread_id or "N/A",
@@ -815,13 +820,32 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             return
 
         if result.sent:
+            publish_notification_activity(
+                state,
+                event,
+                "notification.emitted",
+                channels=tuple(result.channels),
+            )
             logger.info(
                 "[notification] 已发送任务通知 channels=%s thread=%s status=%s",
                 ",".join(result.channels),
                 thread_id or "N/A",
                 status,
             )
-        elif result.reason not in {"deduped", "no_channels"}:
+        else:
+            skipped_kind = (
+                "notification.skipped"
+                if result.reason in {"deduped", "no_channels"}
+                else "notification.failed"
+            )
+            publish_notification_activity(
+                state,
+                event,
+                skipped_kind,
+                reason=result.reason,
+                errors=tuple(result.errors),
+            )
+        if not result.sent and result.reason not in {"deduped", "no_channels"}:
             detail = f" errors={'; '.join(result.errors)}" if result.errors else ""
             logger.warning(
                 "[notification] 任务通知未发送 reason=%s thread=%s status=%s%s",
@@ -922,25 +946,25 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             task_name_snapshot,
         ) = _notification_context(ctx, thread_id)
         task_summary_snapshot = _notification_task_summary(snapshot_agent_id, thread_id)
-        (
-            task_name_override,
-            result_task_summary,
-            notification_message,
-        ) = await _notification_result_task_override_with_ai(
+        event_turn_id = _extract_turn_id(ctx.event_params)
+        result = await state.message_bus.notification_summary.build_completed_notification(
             final_message=text,
+            provider_id=snapshot_agent_id,
+            session_id=thread_id,
+            turn_id=event_turn_id or "",
             current_title=task_name_snapshot,
             current_task_summary=task_summary_snapshot,
             agent_name=snapshot_agent_name,
             status="completed",
-            provider_id=snapshot_agent_id,
+            run_scenario=run_ai_scenario,
         )
         task_summary_override: str | None = None
-        if result_task_summary or task_name_override:
-            task_summary_override = result_task_summary
+        if result.task_summary_override or result.task_name_override:
+            task_summary_override = result.task_summary_override
         return (
             notification_status,
-            notification_message,
-            task_name_override or task_name_snapshot,
+            result.message or notification_message,
+            result.task_name_override or task_name_snapshot,
             task_summary_override if task_summary_override is not None else task_summary_snapshot,
         )
 
@@ -1872,6 +1896,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             f"ws={ws_daemon_id[:8] if ws_daemon_id else '?'} "
             f"thread={thread_id[:8] if thread_id else '?'}"
         )
+        publish_session_message_event(state, event)
 
         ctx = EventContext(
             event=event,

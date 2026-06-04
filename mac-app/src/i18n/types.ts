@@ -45,6 +45,7 @@ export interface AppTexts {
     };
     tabs: {
       dashboard: string;
+      tasks: string;
       sessions: string;
       usage: string;
       ai: string;
@@ -497,6 +498,31 @@ export interface AppTexts {
     openCodexTuiHostDescription: string;
     openLogsTitle: string;
     openLogsDescription: string;
+  };
+  taskBoard: {
+    eyebrow: string;
+    title: string;
+    refresh: string;
+    refreshing: string;
+    needsAttentionColumn: string;
+    runningColumn: string;
+    pinnedColumn: string;
+    noNeedsAttentionTasks: string;
+    noRunningTasks: string;
+    noPinnedTasks: string;
+    statusNeedsAttention: string;
+    statusRunning: string;
+    statusPinned: string;
+    pin: string;
+    unpin: string;
+    removeFromBoard: string;
+    openSession: string;
+    pinToBoard: string;
+    pinSucceeded: string;
+    pinFailed: (error: string) => string;
+    eventLabel: (event: string) => string;
+    nativeDataUnavailable: string;
+    failedToLoad: (error: string) => string;
   };
   alerts: {
     configurationIncomplete: {

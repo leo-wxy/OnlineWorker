@@ -13,5 +13,6 @@ pub mod provider_sessions;
 pub mod provider_usage;
 pub mod service;
 pub mod session_state;
+pub mod task_board_state;
 pub mod telegram;
 pub mod terminal;

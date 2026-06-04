@@ -1263,14 +1263,6 @@ async def test_final_answer_item_completed_sends_task_notification_and_dedupes_l
 
 @pytest.mark.asyncio
 async def test_codex_delayed_final_events_skip_when_reply_already_synced(monkeypatch):
-    async def fail_if_notification_summary_runs(**kwargs):
-        raise AssertionError("duplicate final item should not generate notification summary")
-
-    monkeypatch.setattr(
-        "bot.events._notification_result_task_override_with_ai",
-        fail_if_notification_summary_runs,
-    )
-
     ws = WorkspaceInfo(
         name="onlineWorker",
         path="/Users/example/Projects/onlineWorker",
@@ -1297,6 +1289,9 @@ async def test_codex_delayed_final_events_skip_when_reply_already_synced(monkeyp
         thread_id="tid-123",
         final_reply_synced_to_tg=True,
         status="completed",
+    )
+    state.message_bus.notification_summary.build_completed_notification = AsyncMock(
+        side_effect=AssertionError("duplicate final item should not generate notification summary")
     )
 
     bot = SimpleNamespace()
@@ -1360,16 +1355,11 @@ async def test_codex_item_and_turn_completed_race_emits_one_notification(monkeyp
         summary_calls += 1
         entered_summary.set()
         await release_summary.wait()
-        return (
-            "源码修复已完成",
-            "已完成源码层修复、回归测试和提交推送，但真实安装态重启验证尚未完成。",
-            "完成摘要：已完成源码层修复、回归测试和提交推送，但真实安装态重启验证尚未完成。",
+        return SimpleNamespace(
+            task_name_override="源码修复已完成",
+            task_summary_override="已完成源码层修复、回归测试和提交推送，但真实安装态重启验证尚未完成。",
+            message="完成摘要：已完成源码层修复、回归测试和提交推送，但真实安装态重启验证尚未完成。",
         )
-
-    monkeypatch.setattr(
-        "bot.events._notification_result_task_override_with_ai",
-        slow_notification_summary,
-    )
 
     ws = WorkspaceInfo(
         name="onlineWorker",
@@ -1392,6 +1382,7 @@ async def test_codex_item_and_turn_completed_race_emits_one_notification(monkeyp
         thread_id="tid-123",
         turn_id="turn-new",
     )
+    state.message_bus.notification_summary.build_completed_notification = slow_notification_summary
     state.streaming_turns["tid-123"] = StreamingTurn(
         message_id=5002,
         topic_id=3794,

@@ -7,6 +7,12 @@ import os
 from typing import Optional
 
 from config import get_data_dir
+from core.messages.publishing import (
+    publish_user_message_accepted,
+    publish_user_message_submitted,
+)
+from core.user_messages.contracts import UserMessageSendRequest
+from core.user_messages.gateway import prepare_user_message_text
 from plugins.providers.builtin.codex.python.adapter import DEFAULT_APPROVALS_REVIEWER
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
 
@@ -243,6 +249,7 @@ class CodexOwnerBridge:
         text = str(request.get("text") or "").strip()
         cwd = str(request.get("cwd") or "").strip()
         attachments = request.get("attachments") or []
+        source = str(request.get("source") or "session_tab").strip() or "session_tab"
         approval_policy = request.get("approval_policy")
         approvals_reviewer = request.get("approvals_reviewer")
         sandbox_policy = request.get("sandbox_policy")
@@ -262,6 +269,36 @@ class CodexOwnerBridge:
             if cwd and callable(register_workspace_cwd):
                 register_workspace_cwd(workspace_id, cwd)
             adapter._thread_workspace_map[thread_id] = workspace_id
+        else:
+            workspace_id = ""
+
+        gateway_result = await prepare_user_message_text(
+            self.state,
+            UserMessageSendRequest(
+                source=source,
+                provider_id="codex",
+                workspace_id=str(workspace_id),
+                thread_id=thread_id,
+                text=text,
+                attachments=attachments,
+            ),
+        )
+        text = gateway_result.text
+        message_event_request = UserMessageSendRequest(
+            source=source,
+            provider_id="codex",
+            workspace_id=str(workspace_id),
+            thread_id=thread_id,
+            text=text,
+            attachments=attachments,
+            metadata={"bridge": "codex_owner"},
+        )
+        publish_user_message_submitted(
+            self.state,
+            message_event_request,
+            text=text,
+            workspace_path=cwd,
+        )
 
         tracked_thread = None
         if hasattr(self.state, "find_thread_by_id_global"):
@@ -367,6 +404,20 @@ class CodexOwnerBridge:
         if workspace_id and cwd:
             _ensure_storage_workspace(self.state, workspace_id, cwd)
             _persist_storage(self.state, self.data_dir)
+        publish_user_message_accepted(
+            self.state,
+            UserMessageSendRequest(
+                source=source,
+                provider_id="codex",
+                workspace_id=str(workspace_id),
+                thread_id=effective_thread_id,
+                text=text,
+                attachments=attachments,
+                metadata={"bridge": "codex_owner"},
+            ),
+            text=text,
+            workspace_path=cwd,
+        )
 
         return {
             "ok": True,

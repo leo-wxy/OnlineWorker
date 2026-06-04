@@ -40,22 +40,25 @@ test("sidebar collapse labels exist in both locales", () => {
   }
 });
 
-test("app shell exposes first-class usage, ai, and notification tabs in navigation and routing", () => {
+test("app shell exposes first-class task, usage, ai, and notification tabs in navigation and routing", () => {
   const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
   const tabs = readFileSync(join(root, "src", "utils", "appTabs.js"), "utf8");
   const types = readFileSync(join(root, "src", "utils", "appTabs.d.ts"), "utf8");
   const pages = readFileSync(join(root, "src", "pages", "index.ts"), "utf8");
   const components = readFileSync(join(root, "src", "components", "index.ts"), "utf8");
 
-  assert.match(tabs, /PRIMARY_APP_TABS = \["dashboard", "sessions", "usage", "ai", "commands", "notifications", "setup"\]/);
-  assert.match(types, /"dashboard" \| "sessions" \| "usage" \| "ai" \| "commands" \| "notifications" \| "config" \| "setup"/);
+  assert.match(tabs, /PRIMARY_APP_TABS = \["dashboard", "tasks", "sessions", "usage", "ai", "commands", "notifications", "setup"\]/);
+  assert.match(types, /"dashboard" \| "tasks" \| "sessions" \| "usage" \| "ai" \| "commands" \| "notifications" \| "config" \| "setup"/);
+  assert.match(app, /activeTab === "tasks"/);
   assert.match(app, /activeTab === "usage"/);
   assert.match(app, /activeTab === "ai"/);
   assert.match(app, /activeTab === "notifications"/);
+  assert.match(app, /<TaskBoard /);
   assert.match(app, /<UsageBrowser \/>/);
   assert.match(app, /<AiSettingsPanel \/>/);
   assert.match(app, /<NotificationSettingsPanel \/>/);
   assert.match(components, /export \{ AiSettingsPanel \}/);
+  assert.match(pages, /export \{ TaskBoard \} from "\.\/TaskBoard";/);
   assert.match(pages, /export \{ UsageBrowser \} from "\.\/UsageBrowser";/);
 });
 

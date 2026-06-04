@@ -37,6 +37,12 @@ from core.state import AppState, PendingCommandWrapper
 from core.storage import save_storage, ThreadInfo
 from core.user_messages.contracts import UserMessageSendRequest
 from core.user_messages.gateway import prepare_user_message_text
+from core.messages.publishing import (
+    publish_approval_answered,
+    publish_question_answered,
+    publish_user_message_accepted,
+    publish_user_message_submitted,
+)
 from bot.keyboards import (
     build_command_wrapper_keyboard,
     parse_approval_callback,
@@ -185,6 +191,7 @@ async def _reply_pending_question(state: AppState, pending_question, answers: li
         raise RuntimeError(f"{label} 未注册问题回复能力。")
 
     await reply_question(adapter, pending_question, answers)
+    publish_question_answered(state, pending_question, answers)
 
 
 async def _dispatch_thread_message(
@@ -250,6 +257,28 @@ async def _dispatch_thread_message(
         ),
     )
     send_text = gateway_result.text
+    message = update.effective_message
+    tg_message_id = int(getattr(message, "message_id", 0) or 0)
+    message_event_request = UserMessageSendRequest(
+        source="telegram",
+        provider_id=str(ws_info.tool),
+        workspace_id=str(workspace_id),
+        thread_id=str(thread_info.thread_id),
+        text=send_text,
+        attachments=attachments or [],
+        metadata={
+            "source_topic_id": src_topic_id,
+            "telegram_message_id": tg_message_id,
+            **(message_metadata or {}),
+        },
+    )
+    publish_user_message_submitted(
+        state,
+        message_event_request,
+        text=send_text,
+        workspace_path=str(getattr(ws_info, "path", "") or ""),
+        event_id=f"tg:{tg_message_id}" if tg_message_id > 0 else "",
+    )
 
     handle_local_owner = (
         getattr(message_hooks, "handle_local_owner", None)
@@ -271,6 +300,13 @@ async def _dispatch_thread_message(
             attachments=attachments,
         )
         if handled:
+            publish_user_message_accepted(
+                state,
+                message_event_request,
+                text=send_text,
+                workspace_path=str(getattr(ws_info, "path", "") or ""),
+                event_id=f"tg:{tg_message_id}" if tg_message_id > 0 else "",
+            )
             return
 
     if message_hooks is not None:
@@ -358,6 +394,25 @@ async def _dispatch_thread_message(
             thread_info.last_tg_user_message_id = original_last_tg_user_message_id
             ws_info.threads[original_thread_id] = thread_info
         raise
+    publish_user_message_accepted(
+        state,
+        UserMessageSendRequest(
+            source="telegram",
+            provider_id=str(ws_info.tool),
+            workspace_id=str(workspace_id),
+            thread_id=str(thread_info.thread_id),
+            text=send_text,
+            attachments=attachments or [],
+            metadata={
+                "source_topic_id": src_topic_id,
+                "telegram_message_id": tg_message_id,
+                **(message_metadata or {}),
+            },
+        ),
+        text=send_text,
+        workspace_path=str(getattr(ws_info, "path", "") or ""),
+        event_id=f"tg:{tg_message_id}" if tg_message_id > 0 else "",
+    )
 
     remapped = thread_info.thread_id != original_thread_id
     source_changed = str(getattr(thread_info, "source", "") or "unknown") != original_source
@@ -366,8 +421,6 @@ async def _dispatch_thread_message(
         thread_info.preview = preview_value
         preview_changed = True
 
-    message = update.effective_message
-    tg_message_id = int(getattr(message, "message_id", 0) or 0)
     reply_anchor_changed = False
     if tg_message_id > 0:
         if getattr(thread_info, "last_tg_user_message_id", None) != tg_message_id:
@@ -785,6 +838,12 @@ def make_callback_handler(state: AppState, group_chat_id: int) -> Callable:
                         )
                         return
                     state.pending_approvals.pop(msg_id, None)
+                    publish_approval_answered(
+                        state,
+                        approval,
+                        action=action,
+                        message_id=msg_id,
+                    )
                     await query.edit_message_text(  # type: ignore[union-attr]
                         _approval_completion_text(label, approval),
                         parse_mode="Markdown",
@@ -823,6 +882,12 @@ def make_callback_handler(state: AppState, group_chat_id: int) -> Callable:
                         tg_message_id=msg_id,
                     )
                 state.pending_approvals.pop(msg_id, None)
+                publish_approval_answered(
+                    state,
+                    approval,
+                    action=action,
+                    message_id=msg_id,
+                )
                 await query.edit_message_text(  # type: ignore[union-attr]
                     _approval_completion_text(label, approval),
                     parse_mode="Markdown",

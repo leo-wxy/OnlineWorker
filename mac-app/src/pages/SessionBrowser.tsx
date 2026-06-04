@@ -35,7 +35,17 @@ import type {
   ProviderMetadata,
 } from "../types";
 
-export function SessionBrowser() {
+interface SessionBrowserOpenTarget {
+  providerId: string;
+  sessionId: string;
+  workspace?: string;
+}
+
+interface Props {
+  openTarget?: SessionBrowserOpenTarget | null;
+}
+
+export function SessionBrowser({ openTarget = null }: Props) {
   const { t } = useI18n();
   const [providers, setProviders] = useState<ProviderMetadata[]>([]);
   const [codexSessions, setCodexSessions] = useState<CodexSession[]>([]);
@@ -89,11 +99,14 @@ export function SessionBrowser() {
   }, [providerFilter, visibleProviders]);
 
   useEffect(() => {
+    if (openTarget?.providerId === providerFilter) {
+      return;
+    }
     setSelectedWorkspace(null);
     setSelectedSessionId(null);
     setSessionContextMenu(null);
     setArchiveNotice(null);
-  }, [providerFilter]);
+  }, [openTarget?.providerId, providerFilter]);
 
   useEffect(() => {
     if (sessionContextMenu === null) {
@@ -161,6 +174,19 @@ export function SessionBrowser() {
   useEffect(() => {
     void loadProvider(providerFilter);
   }, [loadProvider, providerFilter]);
+
+  useEffect(() => {
+    if (!openTarget) {
+      return;
+    }
+    setProviderFilter(openTarget.providerId);
+    setArchiveFilter("active");
+    setSelectedWorkspace(openTarget.workspace?.trim() || null);
+    setSelectedSessionId(openTarget.sessionId);
+    setSessionContextMenu(null);
+    setArchiveNotice(null);
+    void loadProvider(openTarget.providerId);
+  }, [loadProvider, openTarget?.providerId, openTarget?.sessionId, openTarget?.workspace]);
 
   const refreshCurrentProvider = useCallback(async () => {
     await loadProvider(providerFilter, { force: true });
@@ -245,7 +271,7 @@ export function SessionBrowser() {
   }, [unifiedSessions]);
 
   useEffect(() => {
-    if (selectedWorkspace && !workspaces.includes(selectedWorkspace)) {
+    if (selectedWorkspace && workspaces.length > 0 && !workspaces.includes(selectedWorkspace)) {
       setSelectedWorkspace(null);
     }
   }, [workspaces, selectedWorkspace]);

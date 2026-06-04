@@ -70,6 +70,14 @@ async def test_codex_owner_bridge_uses_workspace_mapping_when_cwd_matches(tmp_pa
         ("send", "ws-1", "tid-1", "hello", [], {}),
     ]
     assert codex_state.get_runtime(state).thread_pending_send_started_at["tid-1"] > 0
+    assert [event["kind"] for event in state.message_bus.recent_events()] == [
+        "message.user.submitted",
+        "message.user.accepted",
+    ]
+    activity = state.message_bus.session_activity("codex", "tid-1")
+    assert activity["workspaceId"] == "ws-1"
+    assert activity["lastUserMessage"] == "hello"
+    assert activity["status"] == "running"
 
 
 @pytest.mark.asyncio

@@ -523,6 +523,7 @@ fn send_codex_thread_message_via_owner_bridge(
         "type": "send_message",
         "thread_id": thread_id,
         "text": text,
+        "source": "session_tab",
     });
     if !attachments.is_empty() {
         payload["attachments"] = serde_json::to_value(attachments)

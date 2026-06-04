@@ -753,6 +753,13 @@ async def test_message_handler_tracks_last_tg_user_message_id_per_thread():
     adapter.send_user_message.assert_awaited_once_with("dummy:demo", "tid-123", "hello")
     assert state.thread_last_tg_user_message_ids["tid-123"] == 321
     assert ws.threads["tid-123"].last_tg_user_message_id == 321
+    assert [event["kind"] for event in state.message_bus.recent_events()] == [
+        "message.user.submitted",
+        "message.user.accepted",
+    ]
+    activity = state.message_bus.session_activity("dummy", "tid-123")
+    assert activity["lastUserMessage"] == "hello"
+    assert activity["status"] == "running"
 
 
 @pytest.mark.asyncio

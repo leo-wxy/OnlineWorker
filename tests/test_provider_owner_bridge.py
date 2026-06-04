@@ -164,6 +164,14 @@ async def test_provider_owner_bridge_uses_registry_message_hooks(monkeypatch, tm
         ],
     )
     assert state.get_provider_runtime("overlay-tool").thread_pending_send_started_at["tid-1"] > 0
+    assert [event["kind"] for event in state.message_bus.recent_events()] == [
+        "message.user.submitted",
+        "message.user.accepted",
+    ]
+    activity = state.message_bus.session_activity("overlay-tool", "tid-1")
+    assert activity["workspacePath"] == "/tmp/project-a"
+    assert activity["lastUserMessage"] == "hello owner bridge"
+    assert activity["status"] == "running"
 
 
 @pytest.mark.asyncio

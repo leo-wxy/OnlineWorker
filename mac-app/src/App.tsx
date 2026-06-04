@@ -15,8 +15,10 @@ import {
   Dashboard,
   SessionBrowser,
   SetupWizard,
+  TaskBoard,
   UsageBrowser,
 } from "./pages";
+import type { TaskBoardOpenSessionTarget } from "./pages";
 import { useI18n, type Locale } from "./i18n";
 import {
   isSupportedAppTab,
@@ -33,6 +35,7 @@ export default function App() {
   const [settingsSection, setSettingsSection] = useState<"onlineworker" | "agents" | "extensions" | "maintenance" | "advanced">("onlineworker");
   const [showLogs, setShowLogs] = useState(false);
   const [isFirstRun, setIsFirstRun] = useState(false);
+  const [sessionOpenTarget, setSessionOpenTarget] = useState<TaskBoardOpenSessionTarget | null>(null);
 
   // First-run detection: auto-switch to Guide tab on first launch
   useEffect(() => {
@@ -77,6 +80,7 @@ export default function App() {
   const getTabIcon = (tab: AppTab) => {
     switch (tab) {
       case "dashboard": return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>;
+      case "tasks": return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"></path></svg>;
       case "sessions": return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"></path></svg>;
       case "usage": return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 12h3m4-6h3m-3 12h7m-7-6h7M7 6h.01M7 12h.01M7 18h.01"></path></svg>;
       case "ai": return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v3m0 12v3m9-9h-3M6 12H3m14.95-6.95l-2.12 2.12M8.17 15.83l-2.12 2.12m11.9 0l-2.12-2.12M8.17 8.17L6.05 6.05M12 8a4 4 0 100 8 4 4 0 000-8z"></path></svg>;
@@ -99,6 +103,12 @@ export default function App() {
     } catch {
       // Non-Tauri environments do not expose native window APIs.
     }
+  }, []);
+
+  const handleOpenTaskSession = useCallback((target: TaskBoardOpenSessionTarget) => {
+    setSessionOpenTarget(target);
+    setActiveTab("sessions");
+    setShowLogs(false);
   }, []);
 
   return (
@@ -262,6 +272,11 @@ export default function App() {
               />
             </div>
           )}
+          {activeTab === "tasks" && (
+            <div className="flex min-h-0 flex-1 flex-col p-5 sm:p-6">
+              <TaskBoard onOpenSession={handleOpenTaskSession} />
+            </div>
+          )}
           {activeTab === "config" && (
             <div className="h-full p-5 sm:p-6">
               <ConfigEditor />
@@ -332,7 +347,7 @@ export default function App() {
           )}
           {activeTab === "sessions" && (
             <div className="flex min-h-0 flex-1 flex-col p-5 sm:p-6">
-              <SessionBrowser />
+              <SessionBrowser openTarget={sessionOpenTarget} />
             </div>
           )}
         </main>

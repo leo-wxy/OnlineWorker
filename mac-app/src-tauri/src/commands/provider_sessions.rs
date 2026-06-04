@@ -103,6 +103,7 @@ fn send_provider_session_message_via_owner_bridge(
         "provider_id": provider_id,
         "thread_id": session_id,
         "text": text,
+        "source": "session_tab",
     });
     if !attachments.is_empty() {
         payload["attachments"] = serde_json::to_value(attachments)

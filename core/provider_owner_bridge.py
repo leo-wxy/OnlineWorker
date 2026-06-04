@@ -13,6 +13,10 @@ from core.providers.registry import get_provider
 from core.storage import ThreadInfo, WorkspaceInfo, save_storage
 from core.user_messages.contracts import UserMessageSendRequest
 from core.user_messages.gateway import prepare_user_message_text
+from core.messages.publishing import (
+    publish_user_message_accepted,
+    publish_user_message_submitted,
+)
 
 
 OWNER_BRIDGE_SOCKET_FILENAME = "provider_owner_bridge.sock"
@@ -330,6 +334,8 @@ class ProviderOwnerBridge:
                 response = await self._handle_runtime_status(request)
             elif request_type == "usage_summary":
                 response = await self._handle_usage_summary(request)
+            elif request_type == "session_activities":
+                response = await self._handle_session_activities(request)
             elif request_type == "mirror_approval":
                 response = await self._handle_mirror_approval(request)
             else:
@@ -448,6 +454,22 @@ class ProviderOwnerBridge:
             )
         )
         return {"ok": True, "sessions": sessions}
+
+    async def _handle_session_activities(self, request: dict) -> dict:
+        try:
+            limit = int(request.get("limit") or 200)
+        except (TypeError, ValueError):
+            limit = 200
+        if limit <= 0:
+            limit = 200
+
+        bus = getattr(self.state, "message_bus", None)
+        if bus is None or not callable(getattr(bus, "session_activities", None)):
+            return {"ok": True, "activities": []}
+        return {
+            "ok": True,
+            "activities": bus.session_activities()[:limit],
+        }
 
     async def _handle_archive_session(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
@@ -669,7 +691,7 @@ class ProviderOwnerBridge:
         gateway_result = await prepare_user_message_text(
             self.state,
             UserMessageSendRequest(
-                source="owner_bridge",
+                source=str(request.get("source") or "session_tab"),
                 provider_id=provider_id,
                 workspace_id=str(workspace_id),
                 thread_id=thread_id,
@@ -678,6 +700,21 @@ class ProviderOwnerBridge:
             ),
         )
         text = gateway_result.text
+        message_event_request = UserMessageSendRequest(
+            source=str(request.get("source") or "session_tab"),
+            provider_id=provider_id,
+            workspace_id=str(workspace_id),
+            thread_id=thread_id,
+            text=text,
+            attachments=attachments,
+            metadata={"bridge": "provider_owner"},
+        )
+        publish_user_message_submitted(
+            self.state,
+            message_event_request,
+            text=text,
+            workspace_path=str(getattr(ws_info, "path", "") or ""),
+        )
 
         owner_bridge_router = getattr(message_hooks, "try_route_owner_bridge_send", None)
         if callable(owner_bridge_router) and not attachments:
@@ -689,6 +726,12 @@ class ProviderOwnerBridge:
             )
             if route_result:
                 self.state.mark_provider_send_started(provider_id, thread_id)
+                publish_user_message_accepted(
+                    self.state,
+                    message_event_request,
+                    text=text,
+                    workspace_path=str(getattr(ws_info, "path", "") or ""),
+                )
                 return {
                     "ok": True,
                     "accepted": True,
@@ -785,6 +828,21 @@ class ProviderOwnerBridge:
         except Exception as exc:
             rollback_thread_remap()
             return {"ok": False, "error": str(exc)}
+
+        publish_user_message_accepted(
+            self.state,
+            UserMessageSendRequest(
+                source=str(request.get("source") or "session_tab"),
+                provider_id=provider_id,
+                workspace_id=str(workspace_id),
+                thread_id=str(thread_info.thread_id),
+                text=text,
+                attachments=attachments,
+                metadata={"bridge": "provider_owner"},
+            ),
+            text=text,
+            workspace_path=str(getattr(ws_info, "path", "") or ""),
+        )
 
         return {
             "ok": True,

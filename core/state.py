@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import time
 from types import SimpleNamespace
 from typing import Any, Optional
+from core.messages import MessageEventBus
 from core.providers.registry import get_provider
 from core.provider_runtime_state import (
     ProviderInterruptionState,
@@ -176,6 +177,7 @@ class AppState:
     im_route_store: ImRouteStore | None = None
     telegram_group_chat_id: int | None = None
     telegram_im_account_id: str = "default"
+    message_bus: MessageEventBus = field(default_factory=MessageEventBus)
 
     def set_im_route_store(
         self,
