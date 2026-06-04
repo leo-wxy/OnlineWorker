@@ -129,6 +129,7 @@ class ToolConfig:
     health: dict[str, Any] = field(default_factory=dict)
     auth: dict[str, str] = field(default_factory=dict)
     external_cli: dict[str, Any] = field(default_factory=dict)
+    launch_methods: list[dict[str, str]] = field(default_factory=list)
     message_hooks: "MessageHooksConfig | None" = None
 
     def __post_init__(self) -> None:
@@ -159,6 +160,7 @@ class ToolConfig:
             if k is not None
         }
         self.external_cli = dict(self.external_cli or {})
+        self.launch_methods = _normalize_launch_methods(self.launch_methods)
 
 
 @dataclass
@@ -373,6 +375,44 @@ def _message_hooks_from_raw(raw: Any) -> MessageHooksConfig | None:
     )
 
 
+def _normalize_launch_methods(raw: Any) -> list[dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+
+    methods: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(raw):
+        if isinstance(item, str):
+            command = item.strip()
+            method_id = f"method_{index + 1}"
+            label = command
+        elif isinstance(item, dict):
+            command = str(item.get("bin") or item.get("command") or "").strip()
+            method_id = str(item.get("id") or item.get("name") or f"method_{index + 1}").strip()
+            label = str(item.get("label") or item.get("name") or method_id or command).strip()
+        else:
+            continue
+
+        if not command:
+            continue
+        if not method_id:
+            method_id = f"method_{index + 1}"
+        original_method_id = method_id
+        suffix = 2
+        while method_id in seen:
+            method_id = f"{original_method_id}_{suffix}"
+            suffix += 1
+        seen.add(method_id)
+        methods.append(
+            {
+                "id": method_id,
+                "label": label or method_id,
+                "bin": command,
+            }
+        )
+    return methods
+
+
 _positive_int_value = positive_int_value
 _build_ai_service_config = build_ai_service_config
 _default_ai_service_raw = default_ai_service_raw
@@ -409,6 +449,7 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
                 "files": False,
                 "usage": True,
                 "commands": True,
+                "launch_methods": False,
                 "command_wrappers": ["model", "review"],
                 "control_modes": ["app", "tui", "hybrid"],
             },
@@ -418,6 +459,7 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
             "health": {},
             "auth": {},
             "external_cli": {},
+            "launch_methods": [],
         }
     if name == "claude":
         return {
@@ -441,6 +483,7 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
                 "files": False,
                 "usage": True,
                 "commands": True,
+                "launch_methods": True,
                 "command_wrappers": [],
                 "control_modes": ["app"],
             },
@@ -450,6 +493,7 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
             "health": {},
             "auth": {},
             "external_cli": {},
+            "launch_methods": [],
         }
     return {
         "visible": True,
@@ -468,6 +512,7 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
         "health": {},
         "auth": {},
         "external_cli": {},
+        "launch_methods": [],
     }
 
 
@@ -516,6 +561,7 @@ def _load_builtin_provider_plugin_blueprint(name: str) -> dict[str, Any] | None:
             "files": metadata.capabilities.files,
             "usage": metadata.capabilities.usage,
             "commands": metadata.capabilities.commands,
+            "launch_methods": bool(getattr(metadata.capabilities, "launch_methods", False)),
             "command_wrappers": list(metadata.capabilities.command_wrappers),
             "control_modes": list(metadata.capabilities.control_modes),
             "message_rewrite": dict(getattr(metadata.capabilities, "message_rewrite", {}) or {}),
@@ -528,6 +574,7 @@ def _load_builtin_provider_plugin_blueprint(name: str) -> dict[str, Any] | None:
         } if metadata.health.url else {},
         "auth": auth,
         "external_cli": provider_raw.get("external_cli") if isinstance(provider_raw.get("external_cli"), dict) else {},
+        "launch_methods": provider_raw.get("launch_methods") if isinstance(provider_raw.get("launch_methods"), list) else [],
     }
 
 
@@ -789,6 +836,7 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
         health=raw.get("health") if isinstance(raw.get("health"), dict) else defaults["health"],
         auth=auth,
         external_cli=raw.get("external_cli") if isinstance(raw.get("external_cli"), dict) else defaults["external_cli"],
+        launch_methods=raw.get("launch_methods") if isinstance(raw.get("launch_methods"), list) else defaults["launch_methods"],
         message_hooks=_message_hooks_from_raw(raw.get("message_hooks")),
     )
 

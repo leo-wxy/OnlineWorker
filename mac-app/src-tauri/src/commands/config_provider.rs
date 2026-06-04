@@ -79,6 +79,17 @@ pub(crate) struct ProviderExternalCliConfig {
     pub(crate) launcher_wraps_claude: bool,
 }
 
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderLaunchMethodConfig {
+    #[serde(default)]
+    pub(crate) id: String,
+    #[serde(default)]
+    pub(crate) label: String,
+    #[serde(default)]
+    pub(crate) bin: String,
+}
+
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 pub(crate) struct NotificationConfigDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -274,6 +285,8 @@ pub(crate) struct ProviderConfigEntry {
     auth: Option<BTreeMap<String, String>>,
     #[serde(alias = "externalCli", skip_serializing_if = "Option::is_none")]
     external_cli: Option<BTreeMap<String, serde_yaml::Value>>,
+    #[serde(alias = "launchMethods", skip_serializing_if = "Option::is_none")]
+    launch_methods: Option<Vec<ProviderLaunchMethodConfig>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) capabilities: Option<ProviderCapabilitiesEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -305,6 +318,8 @@ pub(crate) struct ProviderCapabilitiesEntry {
     pub(crate) files: bool,
     #[serde(default)]
     pub(crate) usage: bool,
+    #[serde(default, alias = "launch_methods")]
+    pub(crate) launch_methods: bool,
     #[serde(default, alias = "command_wrappers")]
     pub(crate) command_wrappers: Vec<String>,
     #[serde(default, alias = "control_modes")]
@@ -385,6 +400,7 @@ pub(crate) struct ProviderMetadata {
     pub(crate) capabilities: ProviderCapabilitiesEntry,
     pub(crate) message_hooks: ProviderMessageHooksMetadata,
     pub(crate) external_cli: ProviderExternalCliConfig,
+    pub(crate) launch_methods: Vec<ProviderLaunchMethodConfig>,
     pub(crate) install: ProviderInstallEntry,
     pub(crate) process: ProviderProcessEntry,
     pub(crate) icon: Option<ProviderIconEntry>,
@@ -797,6 +813,7 @@ fn plugin_manifest_to_default(manifest: ProviderPluginManifest) -> Option<Provid
             auth: provider.auth,
             capabilities: Some(provider.capabilities.unwrap_or_default()),
             message_hooks: None,
+            launch_methods: None,
             install: Some(ProviderInstallEntry {
                 cli_names: vec![install_cli_name],
             }),
@@ -874,6 +891,7 @@ fn generic_provider_config(provider_id: &str) -> ProviderConfigEntry {
         control_mode: Some("app".to_string()),
         capabilities: Some(ProviderCapabilitiesEntry::default()),
         message_hooks: None,
+        launch_methods: None,
         install: Some(ProviderInstallEntry {
             cli_names: vec![provider_id.to_string()],
         }),
@@ -999,9 +1017,46 @@ fn normalize_provider_entry(provider_id: &str, provider: &mut ProviderConfigEntr
     provider.capabilities =
         merge_provider_capabilities(provider.capabilities.take(), defaults.capabilities);
     provider.message_hooks = provider.message_hooks.take().or(defaults.message_hooks);
+    provider.launch_methods = normalize_launch_methods(provider.launch_methods.take());
     provider.install = provider.install.take().or(defaults.install);
     provider.process = provider.process.take().or(defaults.process);
     provider.icon = merge_provider_icon(provider.icon.take(), defaults.icon);
+}
+
+fn normalize_launch_methods(
+    methods: Option<Vec<ProviderLaunchMethodConfig>>,
+) -> Option<Vec<ProviderLaunchMethodConfig>> {
+    let mut normalized = Vec::new();
+    let mut seen = BTreeSet::new();
+    for (index, method) in methods.unwrap_or_default().into_iter().enumerate() {
+        let bin = method.bin.trim().to_string();
+        if bin.is_empty() {
+            continue;
+        }
+        let mut id = if method.id.trim().is_empty() {
+            format!("method_{}", index + 1)
+        } else {
+            method.id.trim().to_string()
+        };
+        let original_id = id.clone();
+        let mut suffix = 2;
+        while seen.contains(&id) {
+            id = format!("{}_{}", original_id, suffix);
+            suffix += 1;
+        }
+        seen.insert(id.clone());
+        let label = if method.label.trim().is_empty() {
+            id.clone()
+        } else {
+            method.label.trim().to_string()
+        };
+        normalized.push(ProviderLaunchMethodConfig { id, label, bin });
+    }
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
 }
 
 fn merge_provider_icon(
@@ -1034,6 +1089,8 @@ fn merge_provider_capabilities(
     match (capabilities, default_capabilities) {
         (Some(mut capabilities), Some(default_capabilities)) => {
             capabilities.usage = capabilities.usage || default_capabilities.usage;
+            capabilities.launch_methods =
+                capabilities.launch_methods || default_capabilities.launch_methods;
             if capabilities.command_wrappers.is_empty() {
                 capabilities.command_wrappers = default_capabilities.command_wrappers;
             }
@@ -1209,6 +1266,7 @@ fn provider_metadata_from_entry(
         capabilities: provider.capabilities.clone().unwrap_or_default(),
         message_hooks: provider_message_hooks_metadata(provider),
         external_cli: provider_external_cli_config(provider),
+        launch_methods: provider.launch_methods.clone().unwrap_or_default(),
         install: provider.install.clone().unwrap_or_default(),
         process: provider.process.clone().unwrap_or_default(),
         icon: provider.icon.clone(),
@@ -1448,6 +1506,7 @@ pub(super) fn set_provider_cli_config_in_document(
     provider_id: &str,
     bin: Option<String>,
     external_cli: ProviderExternalCliConfig,
+    launch_methods: Option<Vec<ProviderLaunchMethodConfig>>,
 ) {
     let normalized_provider_id = provider_id.trim();
     if normalized_provider_id.is_empty() {
@@ -1465,7 +1524,7 @@ pub(super) fn set_provider_cli_config_in_document(
         }
     }
 
-    let config = provider.external_cli.get_or_insert_with(BTreeMap::new);
+    let mut config = provider.external_cli.take().unwrap_or_default();
     config.remove("upstreamBaseUrl");
     config.remove("launcherWrapsClaude");
 
@@ -1485,13 +1544,23 @@ pub(super) fn set_provider_cli_config_in_document(
         }
     }
 
-    config.insert(
-        "launcher_wraps_claude".to_string(),
-        serde_yaml::Value::Bool(external_cli.launcher_wraps_claude),
-    );
+    if external_cli.launcher_wraps_claude {
+        config.insert(
+            "launcher_wraps_claude".to_string(),
+            serde_yaml::Value::Bool(true),
+        );
+    } else {
+        config.remove("launcher_wraps_claude");
+    }
 
     if config.is_empty() {
         provider.external_cli = None;
+    } else {
+        provider.external_cli = Some(config);
+    }
+
+    if let Some(launch_methods) = launch_methods {
+        provider.launch_methods = normalize_launch_methods(Some(launch_methods));
     }
 
     normalize_provider_entry(normalized_provider_id, provider);
@@ -1561,7 +1630,8 @@ mod tests {
         set_notification_channel_enabled_in_document, set_provider_cli_config_in_document,
         set_provider_flags_in_document, set_provider_message_hook_enabled_in_document,
         set_test_process_env_override, AiScenarioConfigEntry, AiServiceConfigEntry,
-        ProviderCapabilitiesEntry, ProviderExternalCliConfig, NOTIFICATION_OVERLAY_ENV,
+        ProviderCapabilitiesEntry, ProviderExternalCliConfig, ProviderLaunchMethodConfig,
+        NOTIFICATION_OVERLAY_ENV,
     };
 
     #[test]
@@ -2116,6 +2186,7 @@ providers:
                 upstream_base_url: Some("https://upstream.example.test/anthropic".to_string()),
                 launcher_wraps_claude: true,
             },
+            None,
         );
 
         let providers = doc.providers.expect("providers");
@@ -2143,6 +2214,123 @@ providers:
         );
         assert!(external_cli.get("upstreamBaseUrl").is_none());
         assert!(external_cli.get("launcherWrapsClaude").is_none());
+    }
+
+    #[test]
+    fn provider_metadata_exposes_provider_launch_methods() {
+        let raw = r#"
+schema_version: 2
+providers:
+  claude:
+    managed: true
+    bin: "claude"
+    launch_methods:
+      - id: native
+        label: Native Claude
+        bin: "claude"
+      - id: raven
+        label: Raven Claude
+        bin: "/Users/example/.nvm/versions/node/v20.20.1/bin/raven cc"
+"#;
+
+        let providers = provider_metadata_from_raw(raw, None).expect("metadata");
+        let claude = providers
+            .iter()
+            .find(|provider| provider.id == "claude")
+            .expect("claude");
+
+        assert_eq!(claude.launch_methods.len(), 2);
+        assert_eq!(claude.launch_methods[0].id, "native");
+        assert_eq!(claude.launch_methods[0].label, "Native Claude");
+        assert_eq!(claude.launch_methods[0].bin, "claude");
+        assert_eq!(claude.launch_methods[1].id, "raven");
+        assert_eq!(
+            claude.launch_methods[1].bin,
+            "/Users/example/.nvm/versions/node/v20.20.1/bin/raven cc"
+        );
+    }
+
+    #[test]
+    fn set_provider_cli_config_updates_provider_launch_methods() {
+        let raw = r#"
+schema_version: 2
+providers:
+  claude:
+    managed: true
+    bin: "claude"
+"#;
+
+        let mut doc = normalize_provider_document(raw).expect("normalized config");
+        set_provider_cli_config_in_document(
+            &mut doc,
+            "claude",
+            Some("claude".to_string()),
+            ProviderExternalCliConfig::default(),
+            Some(vec![
+                ProviderLaunchMethodConfig {
+                    id: "native".to_string(),
+                    label: "Native Claude".to_string(),
+                    bin: "claude".to_string(),
+                },
+                ProviderLaunchMethodConfig {
+                    id: "raven".to_string(),
+                    label: "Raven Claude".to_string(),
+                    bin: "/Users/example/.nvm/versions/node/v20.20.1/bin/raven cc".to_string(),
+                },
+            ]),
+        );
+
+        let providers = doc.providers.expect("providers");
+        let claude = providers.get("claude").expect("claude");
+        let launch_methods = claude.launch_methods.as_ref().expect("launch methods");
+
+        assert_eq!(launch_methods.len(), 2);
+        assert_eq!(launch_methods[0].id, "native");
+        assert_eq!(launch_methods[0].bin, "claude");
+        assert_eq!(launch_methods[1].id, "raven");
+        assert_eq!(
+            launch_methods[1].bin,
+            "/Users/example/.nvm/versions/node/v20.20.1/bin/raven cc"
+        );
+    }
+
+    #[test]
+    fn set_provider_cli_config_with_launch_methods_does_not_create_empty_external_cli() {
+        let raw = r#"
+schema_version: 2
+providers:
+  custom:
+    managed: true
+    bin: "custom"
+"#;
+
+        let mut doc = normalize_provider_document(raw).expect("normalized config");
+        set_provider_cli_config_in_document(
+            &mut doc,
+            "custom",
+            Some("custom".to_string()),
+            ProviderExternalCliConfig::default(),
+            Some(vec![ProviderLaunchMethodConfig {
+                id: "primary".to_string(),
+                label: "Primary".to_string(),
+                bin: "custom".to_string(),
+            }]),
+        );
+
+        let providers = doc.providers.expect("providers");
+        let custom = providers.get("custom").expect("custom");
+
+        assert!(custom.external_cli.is_none());
+        assert_eq!(custom.bin.as_deref(), Some("custom"));
+        assert_eq!(
+            custom
+                .launch_methods
+                .as_ref()
+                .expect("launch methods")
+                .first()
+                .map(|method| method.bin.as_str()),
+            Some("custom")
+        );
     }
 
     #[test]
@@ -2379,6 +2567,7 @@ providers:
                 photos: true,
                 files: true,
                 usage: true,
+                launch_methods: false,
                 command_wrappers: vec!["model".to_string(), "review".to_string()],
                 control_modes: vec!["app".to_string(), "tui".to_string(), "hybrid".to_string()],
                 message_rewrite: super::ProviderMessageRewriteCapabilities {
@@ -2400,6 +2589,7 @@ providers:
                 photos: true,
                 files: true,
                 usage: true,
+                launch_methods: true,
                 command_wrappers: Vec::new(),
                 control_modes: vec!["app".to_string()],
                 message_rewrite: super::ProviderMessageRewriteCapabilities {
@@ -2410,6 +2600,8 @@ providers:
                 },
             }
         );
+        assert!(!codex.capabilities.launch_methods);
+        assert!(claude.capabilities.launch_methods);
     }
 
     #[test]

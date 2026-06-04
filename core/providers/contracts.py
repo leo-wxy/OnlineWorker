@@ -73,6 +73,7 @@ class ProviderManifestCapabilities:
     files: bool = False
     usage: bool = False
     commands: bool = False
+    launch_methods: bool = False
     command_wrappers: tuple[str, ...] = ()
     control_modes: tuple[str, ...] = ("app",)
     message_rewrite: dict = field(default_factory=dict)

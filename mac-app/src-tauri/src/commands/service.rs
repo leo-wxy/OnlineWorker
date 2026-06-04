@@ -811,25 +811,58 @@ fn is_pid_alive(pid: u32) -> bool {
     }
 }
 
-/// Check if a CLI binary is installed.
-/// Expands leading `~/` and then checks PATH via `which`, falling back to
-/// a direct executable check for absolute/expanded paths.
-/// Note: .app bundles have minimal PATH, so we set a rich PATH for `which`.
+fn command_program_token(command: &str) -> String {
+    let mut token = String::new();
+    let mut chars = command.trim_start().chars().peekable();
+    let mut quote: Option<char> = None;
+    while let Some(ch) = chars.next() {
+        if let Some(active_quote) = quote {
+            if ch == active_quote {
+                quote = None;
+            } else if ch == '\\' {
+                token.push(chars.next().unwrap_or(ch));
+            } else {
+                token.push(ch);
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '\\' => token.push(chars.next().unwrap_or(ch)),
+            ch if ch.is_whitespace() => break,
+            _ => token.push(ch),
+        }
+    }
+    token
+}
+
+fn expand_home_path(value: &str) -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    if value.starts_with("~/") {
+        format!("{}{}", home, &value[1..])
+    } else {
+        value.to_string()
+    }
+}
+
+/// Check if a CLI command is installed.
+/// Accepts command lines such as `/path/to/raven cc`; only the executable token
+/// is checked. .app bundles have minimal PATH, so we set a rich PATH for `which`.
 #[tauri::command]
 pub async fn check_cli(bin: String) -> Result<bool, String> {
-    let home = std::env::var("HOME").unwrap_or_default();
-
-    let expanded = if bin.starts_with("~/") {
-        format!("{}{}", home, &bin[1..])
-    } else {
-        bin.clone()
-    };
+    let program = command_program_token(&bin);
+    if program.is_empty() {
+        return Ok(false);
+    }
+    let expanded = expand_home_path(&program);
 
     if expanded.starts_with('/') {
-        return Ok(std::path::Path::new(&expanded).exists());
+        let path = std::path::Path::new(&expanded);
+        return Ok(path.exists() && path.is_file());
     }
 
     // .app bundles inherit minimal PATH; provide a rich one for `which`
+    let home = std::env::var("HOME").unwrap_or_default();
     let rich_path = format!(
         "{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
         home
@@ -876,7 +909,8 @@ mod tests {
         managed_bot_cleanup_pids_from_rows, overlay_env_spec, overlay_env_spec_from_app_env,
         pid_parent_pairs_from_output, pids_from_bot_process_rows, pids_from_output,
         probe_http_health, process_tree_pids, read_env_key, select_primary_pid,
-        should_attempt_background_service_recovery, BotState, ManagedProcessCleanupPolicy,
+        should_attempt_background_service_recovery, command_program_token, BotState,
+        ManagedProcessCleanupPolicy,
     };
     use std::collections::HashMap;
     use std::fs;
@@ -886,6 +920,18 @@ mod tests {
     use std::thread;
     use std::time::Duration;
     use tauri_plugin_shell::process::CommandEvent;
+
+    #[test]
+    fn command_program_token_accepts_command_lines_with_arguments() {
+        assert_eq!(
+            command_program_token("/Users/wxy/.nvm/versions/node/v20.20.1/bin/raven cc"),
+            "/Users/wxy/.nvm/versions/node/v20.20.1/bin/raven"
+        );
+        assert_eq!(
+            command_program_token("\"/some path/bin/raven\" cc"),
+            "/some path/bin/raven"
+        );
+    }
 
     #[test]
     fn compute_service_status_reports_external_orphan_process_as_running() {

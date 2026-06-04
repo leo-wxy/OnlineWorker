@@ -36,7 +36,11 @@ from core.storage import (
 )
 from core.user_messages.contracts import UserMessageSendRequest
 from core.user_messages.gateway import prepare_user_message_text
-from bot.handlers.common import _send_to_group, reconcile_workspace_threads_with_source
+from bot.handlers.common import (
+    _send_to_group,
+    get_route_aware_thread_topic_id,
+    reconcile_workspace_threads_with_source,
+)
 from bot.handlers.workspace import (
     _make_thread_topic_name,
     make_thread_open_callback_data,
@@ -351,11 +355,7 @@ async def _handle_archive_request(
 
     thread_info.archived = True
 
-    topic_id = (
-        state.get_thread_topic_id(workspace_key, ws_info, thread_info)
-        if workspace_key is not None
-        else thread_info.topic_id
-    )
+    topic_id = get_route_aware_thread_topic_id(state, ws_info, thread_info)
     if topic_id:
         state.archive_telegram_topic(topic_id)
         try:
@@ -887,7 +887,12 @@ def make_list_thread_handler(state: AppState, group_chat_id: int) -> Callable:
             tid_short = tid[-8:]
             label = preview or f"thread-{tid_short}"
             existing_thread = ws.threads.get(tid)
-            icon = "✅" if getattr(existing_thread, "topic_id", None) else "📌"
+            existing_topic_id = (
+                get_route_aware_thread_topic_id(state, ws, existing_thread)
+                if existing_thread is not None
+                else None
+            )
+            icon = "✅" if existing_topic_id else "📌"
             lines.append(f"{icon} `{tid_short}`  {preview}")
 
             label = f"{icon} {label}"[:40]

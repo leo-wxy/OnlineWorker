@@ -30,6 +30,7 @@ export interface ProviderCapabilitiesMetadata {
   photos: boolean;
   files: boolean;
   usage: boolean;
+  launchMethods: boolean;
   commandWrappers: string[];
   controlModes: string[];
   messageRewrite?: ProviderMessageRewriteCapabilities | null;
@@ -54,6 +55,12 @@ export interface ProviderMessageHooksMetadata {
 export interface ProviderExternalCliConfig {
   upstreamBaseUrl?: string | null;
   launcherWrapsClaude: boolean;
+}
+
+export interface ProviderLaunchMethodConfig {
+  id: string;
+  label: string;
+  bin: string;
 }
 
 export interface ComposerAttachment {
@@ -94,6 +101,7 @@ export interface ProviderMetadata {
   capabilities: ProviderCapabilitiesMetadata;
   messageHooks?: ProviderMessageHooksMetadata | null;
   externalCli: ProviderExternalCliConfig;
+  launchMethods?: ProviderLaunchMethodConfig[];
   install?: ProviderInstallMetadata;
   process?: ProviderProcessMetadata;
   icon?: ProviderIconMetadata | null;

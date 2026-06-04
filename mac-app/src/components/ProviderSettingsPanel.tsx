@@ -19,8 +19,8 @@ function providerSettingClass(enabled: boolean) {
     : "border-slate-200/80 bg-slate-50/80 opacity-75";
 }
 
-function supportsClaudeLauncher(providerId: string) {
-  return providerId === "claude";
+function supportsLaunchMethods(provider: ProviderMetadata | undefined) {
+  return provider?.capabilities.launchMethods === true;
 }
 
 const CIVILITY_MODE_SEALED = true;
@@ -30,6 +30,7 @@ const CODEX_REMOTE_PROXY_ALIAS =
 interface ProviderCliDraft {
   bin: string;
   launcherWrapsClaude: boolean;
+  launchCommands: string;
 }
 
 function Toggle({
@@ -106,6 +107,9 @@ export function ProviderSettingsPanel({ mode }: Props) {
           {
             bin: provider.bin ?? provider.install?.cliNames?.[0] ?? provider.id,
             launcherWrapsClaude: provider.externalCli?.launcherWrapsClaude ?? false,
+            launchCommands: (provider.launchMethods?.length
+              ? provider.launchMethods.map((method) => method.bin).join("\n")
+              : provider.bin ?? provider.install?.cliNames?.[0] ?? provider.id),
           },
         ])
       ));
@@ -178,6 +182,9 @@ export function ProviderSettingsPanel({ mode }: Props) {
       const previous = current[providerId] ?? {
         bin: provider?.bin ?? provider?.install?.cliNames?.[0] ?? providerId,
         launcherWrapsClaude: provider?.externalCli?.launcherWrapsClaude ?? false,
+        launchCommands: provider?.launchMethods?.length
+          ? provider.launchMethods.map((method) => method.bin).join("\n")
+          : provider?.bin ?? provider?.install?.cliNames?.[0] ?? providerId,
       };
       return {
         ...current,
@@ -193,17 +200,40 @@ export function ProviderSettingsPanel({ mode }: Props) {
     const draft = cliDrafts[provider.id] ?? {
       bin: provider.bin ?? provider.install?.cliNames?.[0] ?? provider.id,
       launcherWrapsClaude: provider.externalCli?.launcherWrapsClaude ?? false,
+      launchCommands: provider.launchMethods?.length
+        ? provider.launchMethods.map((method) => method.bin).join("\n")
+        : provider.bin ?? provider.install?.cliNames?.[0] ?? provider.id,
     };
+    const canEditLaunchMethods = supportsLaunchMethods(provider);
+    const launchCommands = draft.launchCommands
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const primaryBin = canEditLaunchMethods
+      ? launchCommands[0] ?? draft.bin.trim()
+      : draft.bin.trim();
+    const launchMethods = canEditLaunchMethods
+      ? launchCommands.map((bin, index) => ({
+          id: index === 0 ? "primary" : `method_${index + 1}`,
+          label: index === 0 ? "Primary" : `Method ${index + 1}`,
+          bin,
+        }))
+      : null;
     setSavingCliProviderId(provider.id);
     try {
       await invoke("set_provider_cli_config", {
         providerId: provider.id,
-        bin: draft.bin.trim(),
+        bin: primaryBin,
         externalCli: {
           upstreamBaseUrl: null,
-          launcherWrapsClaude: supportsClaudeLauncher(provider.id) && draft.launcherWrapsClaude,
+          launcherWrapsClaude: provider.id === "claude" && draft.launcherWrapsClaude,
         },
+        launchMethods,
       });
+      const status = await invoke<ServiceStatus>("service_status");
+      if (status.running) {
+        await invoke("service_restart");
+      }
       startTransition(() => {
         void load();
       });
@@ -275,7 +305,8 @@ export function ProviderSettingsPanel({ mode }: Props) {
           const canEnable = setting.enabled || cliAvailable;
           const supportsExternalCliRewrite = Boolean(provider?.capabilities.messageRewrite?.externalCli);
           const showCodexRemoteProxyAlias = provider?.id === "codex";
-          const supportsClaudeCliLauncher = supportsClaudeLauncher(setting.id);
+          const canEditLaunchMethods = supportsLaunchMethods(provider);
+          const supportsClaudeCliLauncher = provider?.id === "claude";
           const supportsMessageRewrite = !CIVILITY_MODE_SEALED && Boolean(
             provider?.capabilities.messageRewrite?.appSend ||
             provider?.capabilities.messageRewrite?.telegram ||
@@ -285,7 +316,13 @@ export function ProviderSettingsPanel({ mode }: Props) {
           const draft = cliDrafts[setting.id] ?? {
             bin: provider?.bin ?? provider?.install?.cliNames?.[0] ?? setting.id,
             launcherWrapsClaude: provider?.externalCli?.launcherWrapsClaude ?? false,
+            launchCommands: provider?.launchMethods?.length
+              ? provider.launchMethods.map((method) => method.bin).join("\n")
+              : provider?.bin ?? provider?.install?.cliNames?.[0] ?? setting.id,
           };
+          const canSaveCliConfig = canEditLaunchMethods
+            ? draft.launchCommands.split("\n").some((line) => line.trim())
+            : Boolean(draft.bin.trim());
           return (
             <div
               key={setting.id}
@@ -362,10 +399,10 @@ export function ProviderSettingsPanel({ mode }: Props) {
                 )}
               </div>
 
-              {provider && (supportsExternalCliRewrite || showCodexRemoteProxyAlias) && (
+              {provider && (supportsExternalCliRewrite || showCodexRemoteProxyAlias || canEditLaunchMethods) && (
                 <div className="mt-5 grid gap-3 rounded-xl border border-slate-200/80 bg-white/70 p-4">
                   <div className="flex items-center justify-between gap-3">
-                    <h4 className="text-sm font-bold text-gray-900">{texts.externalCliTitle}</h4>
+                    <h4 className="text-sm font-bold text-gray-900">{texts.cliConfigTitle}</h4>
                     {cliBusy && <span className="text-xs font-semibold text-blue-600">{texts.saving}</span>}
                   </div>
                   {showCodexRemoteProxyAlias && (
@@ -382,18 +419,37 @@ export function ProviderSettingsPanel({ mode }: Props) {
                       </code>
                     </div>
                   )}
-                  {supportsExternalCliRewrite && (
+                  {(supportsExternalCliRewrite || canEditLaunchMethods) && (
                     <>
                       <div className="grid gap-3">
                         <label className="grid gap-1.5 text-xs font-bold text-slate-600">
-                          {texts.externalCliBin}
-                          <input
-                            value={draft.bin}
-                            disabled={cliBusy}
-                            onChange={(event) => updateCliDraft(setting.id, { bin: event.currentTarget.value })}
-                            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-mono text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
-                          />
+                          {canEditLaunchMethods ? texts.launchMethodCommands : texts.externalCliBin}
+                          {canEditLaunchMethods ? (
+                            <textarea
+                              value={draft.launchCommands}
+                              disabled={cliBusy}
+                              rows={3}
+                              onChange={(event) => updateCliDraft(setting.id, {
+                                launchCommands: event.currentTarget.value,
+                                bin: event.currentTarget.value.split("\n").map((line) => line.trim()).find(Boolean) ?? draft.bin,
+                              })}
+                              className="min-h-[84px] resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-mono leading-5 text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                              placeholder={texts.launchMethodCommandsPlaceholder}
+                            />
+                          ) : (
+                            <input
+                              value={draft.bin}
+                              disabled={cliBusy}
+                              onChange={(event) => updateCliDraft(setting.id, { bin: event.currentTarget.value })}
+                              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-mono text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                            />
+                          )}
                         </label>
+                        {canEditLaunchMethods && (
+                          <p className="text-xs font-medium leading-5 text-slate-500">
+                            {texts.launchMethodCommandsHint}
+                          </p>
+                        )}
                       </div>
                       <div className="flex flex-wrap items-center justify-end gap-3">
                         {supportsClaudeCliLauncher && (
@@ -408,7 +464,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
                         )}
                         <button
                           type="button"
-                          disabled={cliBusy || !draft.bin.trim()}
+                          disabled={cliBusy || !canSaveCliConfig}
                           onClick={() => void saveProviderCliConfig(provider)}
                           className="h-9 rounded-lg bg-slate-900 px-3 text-sm font-bold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                         >

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 
 from core.providers.interactions import (
@@ -20,7 +21,10 @@ from core.providers.thread_runtime import (
     resolve_default_thread_adapter,
 )
 from core.providers.workspace_runtime import default_normalize_server_threads
-from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+from plugins.providers.builtin.claude.python.adapter import (
+    ClaudeAdapter,
+    format_claude_unavailable_message,
+)
 from plugins.providers.builtin.claude.python.storage_runtime import infer_claude_thread_source_from_logs
 
 logger = logging.getLogger(__name__)
@@ -133,6 +137,17 @@ async def _reject_if_external_thread_busy(adapter, thread_id: str) -> None:
     raise RuntimeError(message)
 
 
+async def _reject_if_claude_not_ready(adapter) -> None:
+    check_readiness = getattr(adapter, "check_readiness", None)
+    if not callable(check_readiness):
+        return
+
+    readiness_result = check_readiness(force=True)
+    readiness = await readiness_result if inspect.isawaitable(readiness_result) else readiness_result
+    if isinstance(readiness, dict) and readiness.get("ready") is False:
+        raise RuntimeError(format_claude_unavailable_message(readiness))
+
+
 async def prepare_send(
     state,
     adapter,
@@ -156,6 +171,7 @@ async def prepare_send(
     if not has_active_owned_turn:
         await _refresh_inferred_thread_source(state, ws_info, thread_info)
         await _reject_if_external_thread_busy(adapter, thread_info.thread_id)
+    await _reject_if_claude_not_ready(adapter)
     await adapter.resume_thread(workspace_id, thread_info.thread_id)
     return True
 
@@ -163,7 +179,11 @@ async def prepare_send(
 async def start_runtime(manager, bot, tool_cfg) -> None:
     """Start Claude local adapter backed by the provider-owned CLI runtime."""
     configured_claude_bin = str(tool_cfg.codex_bin or "claude").strip() or "claude"
-    adapter = ClaudeAdapter(claude_bin=configured_claude_bin)
+    launch_methods = getattr(tool_cfg, "launch_methods", None) or None
+    if launch_methods:
+        adapter = ClaudeAdapter(claude_bin=configured_claude_bin, launch_methods=launch_methods)
+    else:
+        adapter = ClaudeAdapter(claude_bin=configured_claude_bin)
     await adapter.connect()
     data_dir = manager.state.config.data_dir if manager.state.config is not None else None
     if data_dir:
@@ -289,11 +309,16 @@ async def sync_existing_topics_after_startup(manager, bot) -> None:
         logger.info("[claude-startup-sync] 无需补齐 Claude topic")
 
 
-def build_status_lines(state) -> list[str]:
+async def build_status_lines(state) -> list[str]:
     adapter = state.get_adapter("claude")
     if adapter is not None and adapter.connected:
+        readiness = getattr(adapter, "readiness", None)
+        if isinstance(readiness, dict) and readiness.get("ready") is False:
+            detail = str(readiness.get("detail") or "").strip()
+            suffix = f"：{detail}" if detail else ""
+            return [f"• claude CLI：⚠️ 已连接，但不可用{suffix}"]
         if getattr(adapter, "auth_ready", None) is False:
-            return ["• claude CLI：⚠️ 已连接，但未鉴权"]
+            return ["• claude CLI：⚠️ 已连接，但不可用：Claude CLI is not logged in."]
         return ["• claude CLI：✅ 已连接"]
     if adapter is not None:
         return ["• claude CLI：❌ 已断开"]

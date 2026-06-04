@@ -388,6 +388,7 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
     use std::thread;
     use std::time::{Duration, SystemTime};
@@ -575,6 +576,50 @@ mod tests {
             providers[0].detail.as_deref(),
             Some("CLI not found in PATH: /definitely/missing/onlineworker-test-codex")
         );
+    }
+
+    #[test]
+    fn build_provider_statuses_accepts_cli_command_line_with_arguments() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ow-dashboard-cli-command-line-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let cli = temp_dir.join("raven");
+        fs::write(&cli, "#!/bin/sh\nexit 0\n").expect("write cli");
+        let mut permissions = fs::metadata(&cli).expect("cli metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&cli, permissions).expect("chmod cli");
+
+        let providers = build_provider_statuses(
+            vec![ProviderConfigSnapshot {
+                id: "claude".into(),
+                icon: None,
+                visible: true,
+                managed: true,
+                autostart: true,
+                transport: "stdio".into(),
+                live_transport: "owner_bridge".into(),
+                port: None,
+                app_server_url: None,
+                control_mode: Some("app".into()),
+                bin: Some(format!("{} cc", cli.display())),
+            }],
+            &temp_dir,
+            true,
+            true,
+            Some(SystemTime::UNIX_EPOCH),
+            SystemTime::UNIX_EPOCH + Duration::from_secs(60),
+        );
+
+        assert_ne!(providers[0].health, ServiceHealth::Stopped);
+        assert_ne!(
+            providers[0].detail.as_deref(),
+            Some(format!("CLI not found in PATH: {} cc", cli.display()).as_str())
+        );
+
+        let _ = fs::remove_file(cli);
+        let _ = fs::remove_dir_all(temp_dir);
     }
 
     #[test]

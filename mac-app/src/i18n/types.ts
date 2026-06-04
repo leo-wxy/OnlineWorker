@@ -360,10 +360,13 @@ export interface AppTexts {
     autostart: string;
     civilityModeTitle: string;
     civilityModeDescription: string;
-    externalCliTitle: string;
+    cliConfigTitle: string;
     externalCliBin: string;
     externalCliCodexAliasTitle: string;
     externalCliCodexAliasDescription: string;
+    launchMethodCommands: string;
+    launchMethodCommandsPlaceholder: string;
+    launchMethodCommandsHint: string;
     externalCliLauncherWrapsClaude: string;
     externalCliSave: string;
   };

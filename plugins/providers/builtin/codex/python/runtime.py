@@ -877,7 +877,7 @@ async def try_route_owner_bridge_send(state, ws_info, thread_info, *, text: str)
         ws_info,
         thread_id,
         text,
-        topic_id=getattr(thread_info, "topic_id", None),
+        topic_id=_thread_topic_id(state, ws_info, thread_info),
     )
     return "codex_tui_host"
 

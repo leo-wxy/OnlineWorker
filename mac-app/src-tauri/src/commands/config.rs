@@ -10,7 +10,7 @@ use super::config_provider::{
     set_notification_channel_enabled_in_document, set_provider_cli_config_in_document,
     set_provider_flags_in_document, set_provider_message_hook_enabled_in_document,
     visible_provider_ids_from_raw, AiConfigMetadata, AiScenarioConfigEntry, AiServiceConfigEntry,
-    NotificationChannelMetadata, ProviderExternalCliConfig, ProviderMetadata,
+    NotificationChannelMetadata, ProviderExternalCliConfig, ProviderLaunchMethodConfig, ProviderMetadata,
     ProviderRuntimePolicy,
 };
 
@@ -217,6 +217,7 @@ pub async fn set_provider_cli_config(
     provider_id: String,
     bin: Option<String>,
     external_cli: ProviderExternalCliConfig,
+    launch_methods: Option<Vec<ProviderLaunchMethodConfig>>,
 ) -> Result<(), String> {
     let dir = ensure_data_dir()?;
     cleanup_legacy_claude_config(&dir)?;
@@ -229,7 +230,7 @@ pub async fn set_provider_cli_config(
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
 
     let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
-    set_provider_cli_config_in_document(&mut doc, &provider_id, bin, external_cli);
+    set_provider_cli_config_in_document(&mut doc, &provider_id, bin, external_cli, launch_methods);
     let serialized = serialize_config_document_for_persistence(doc, &raw)?;
     std::fs::write(&path, serialized).map_err(|e| format!("Cannot write config.yaml: {}", e))
 }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -169,12 +170,17 @@ def _new_thread_info(thread_id: str, *, source: str = "app"):
 
 
 def _runtime_health_from_lines(lines: list[str], adapter) -> str:
-    if adapter is not None:
-        return "healthy" if bool(getattr(adapter, "connected", False)) else "degraded"
-
     normalized_lines = [str(line or "").strip() for line in lines if str(line or "").strip()]
     for line in normalized_lines:
         lowered = line.lower()
+        if (
+            "⚠️" in line
+            or "未鉴权" in line
+            or "不可用" in line
+            or "unavailable" in lowered
+            or "not logged in" in lowered
+        ):
+            return "degraded"
         if "✅" in line or "已连接" in line or "connected" in lowered or "healthy" in lowered:
             return "healthy"
         if (
@@ -187,6 +193,8 @@ def _runtime_health_from_lines(lines: list[str], adapter) -> str:
             return "degraded"
         if "未启动" in line or "stopped" in lowered:
             return "stopped"
+    if adapter is not None:
+        return "healthy" if bool(getattr(adapter, "connected", False)) else "degraded"
     return "unknown"
 
 
@@ -245,11 +253,13 @@ def _approval_mirror_command(payload: dict) -> str:
     return str(command or "")
 
 
-def _status_lines_for_provider(state, provider_id: str, provider) -> list[str]:
+async def _status_lines_for_provider(state, provider_id: str, provider) -> list[str]:
     status_builder = getattr(provider, "status_builder", None)
     if callable(status_builder):
-        raw_lines = status_builder(state) or []
-        return [str(line).strip() for line in raw_lines if str(line).strip()]
+        raw_lines = status_builder(state)
+        if inspect.isawaitable(raw_lines):
+            raw_lines = await raw_lines
+        return [str(line).strip() for line in (raw_lines or []) if str(line).strip()]
 
     adapter = state.get_adapter(provider_id)
     if adapter is not None and getattr(adapter, "connected", False):
@@ -585,8 +595,8 @@ class ProviderOwnerBridge:
         if provider is None:
             return {"ok": False, "error": f"Provider '{provider_id}' 未启用"}
 
-        lines = _status_lines_for_provider(self.state, provider_id, provider)
         adapter = self.state.get_adapter(provider_id)
+        lines = await _status_lines_for_provider(self.state, provider_id, provider)
         detail = " · ".join(lines) if lines else None
         return {
             "ok": True,

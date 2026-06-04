@@ -1128,3 +1128,60 @@ async def test_list_thread_handler_revives_stale_locally_archived_active_thread(
     assert ws.threads["tid-1"].is_active is True
     kwargs = ctx.bot.send_message.await_args.kwargs
     assert "fresh preview" in kwargs["text"]
+
+
+@pytest.mark.asyncio
+async def test_list_thread_handler_uses_sqlite_route_for_existing_topic_icon(monkeypatch, tmp_path):
+    from bot.handlers.thread import make_list_thread_handler
+
+    state = _build_state(tool="codex")
+    store = ImRouteStore(tmp_path / "im-routes.sqlite3")
+    state.set_im_route_store(store, GROUP_CHAT_ID)
+    ws = state.storage.workspaces["codex:onlineWorker"]
+    thread = ThreadInfo(
+        thread_id="tid-routed",
+        topic_id=None,
+        preview="state routed",
+        archived=False,
+        is_active=True,
+    )
+    ws.threads["tid-routed"] = thread
+    state.bind_telegram_workspace_topic("codex:onlineWorker", ws, 50)
+    state.bind_telegram_session_topic("codex:onlineWorker", ws, thread, 150)
+    ws.topic_id = None
+    thread.topic_id = None
+
+    monkeypatch.setattr(
+        "bot.handlers.thread.list_provider_threads",
+        lambda tool_name, path, limit=20: [
+            {"id": "tid-routed", "preview": "fresh routed", "createdAt": 20, "updatedAt": 20},
+        ],
+    )
+    monkeypatch.setattr(
+        "bot.handlers.thread._list_provider_local_threads",
+        lambda tool_name, path, limit=20: [],
+    )
+    monkeypatch.setattr(
+        "bot.handlers.thread._list_provider_subagent_thread_ids",
+        lambda tool_name, thread_ids: set(),
+    )
+    monkeypatch.setattr(
+        "bot.handlers.thread.query_provider_active_thread_ids",
+        lambda tool_name, path: {"tid-routed"},
+    )
+
+    update = MagicMock()
+    update.effective_message = MagicMock()
+    update.effective_message.message_thread_id = 50
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+
+    handler = make_list_thread_handler(state, GROUP_CHAT_ID)
+    await handler(update, ctx)
+
+    kwargs = ctx.bot.send_message.await_args.kwargs
+    assert "✅ `d-routed`  fresh routed" in kwargs["text"]
+    button_label = kwargs["reply_markup"].inline_keyboard[0][0].text
+    assert button_label.startswith("✅ fresh routed")

@@ -521,10 +521,40 @@ fn resolve_cli_bin(bin: &str) -> String {
     }
 }
 
+fn command_program_token(command: &str) -> String {
+    let mut token = String::new();
+    let mut chars = command.trim_start().chars().peekable();
+    let mut quote: Option<char> = None;
+    while let Some(ch) = chars.next() {
+        if let Some(active_quote) = quote {
+            if ch == active_quote {
+                quote = None;
+            } else if ch == '\\' {
+                token.push(chars.next().unwrap_or(ch));
+            } else {
+                token.push(ch);
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '\\' => token.push(chars.next().unwrap_or(ch)),
+            ch if ch.is_whitespace() => break,
+            _ => token.push(ch),
+        }
+    }
+    token
+}
+
 fn check_cli_available_sync(bin: &str) -> bool {
-    let resolved = resolve_cli_bin(bin);
+    let program = command_program_token(bin);
+    if program.is_empty() {
+        return false;
+    }
+    let resolved = resolve_cli_bin(&program);
     if resolved.starts_with('/') {
-        return Path::new(&resolved).exists();
+        let path = Path::new(&resolved);
+        return path.exists() && path.is_file();
     }
 
     Command::new("which")

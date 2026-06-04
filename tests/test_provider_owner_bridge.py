@@ -958,6 +958,75 @@ async def test_provider_owner_bridge_reports_runtime_status_via_status_builder(m
     }
 
 
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_runtime_status_does_not_force_readiness_refresh(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    class _FakeAdapter:
+        connected = True
+
+        async def check_readiness(self, *, force: bool = False):
+            raise AssertionError("runtime_status should not force CLI readiness checks")
+
+    state = AppState(storage=AppStorage())
+    state.set_adapter("overlay-tool", _FakeAdapter())
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            status_builder=lambda current_state: ["• overlay-tool：✅ 已连接"]
+        )
+        if name == "overlay-tool"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_runtime_status(
+        {
+            "provider_id": "overlay-tool",
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["health"] == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_reports_claude_logged_out_status_as_degraded(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    class _FakeAdapter:
+        connected = True
+
+    state = AppState(storage=AppStorage())
+    state.set_adapter("claude", _FakeAdapter())
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            status_builder=lambda current_state: [
+                "• claude CLI：⚠️ 已连接，但不可用：Claude CLI is not logged in."
+            ]
+        )
+        if name == "claude"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_runtime_status(
+        {
+            "provider_id": "claude",
+        }
+    )
+
+    assert response == {
+        "ok": True,
+        "health": "degraded",
+        "detail": "• claude CLI：⚠️ 已连接，但不可用：Claude CLI is not logged in.",
+        "lines": ["• claude CLI：⚠️ 已连接，但不可用：Claude CLI is not logged in."],
+    }
+
+
 
 @pytest.mark.asyncio
 async def test_provider_owner_bridge_ignores_legacy_mirror_approval(tmp_path):

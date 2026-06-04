@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator
 
 from core.storage import AppStorage
 
@@ -611,11 +612,19 @@ class ImRouteStore:
             ).fetchone()
         return _route_from_row(row) if row else None
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout=5000")
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=5000")
+            yield conn
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _upsert_route_conn(self, conn: sqlite3.Connection, **kwargs) -> None:
         now = int(kwargs.pop("now"))

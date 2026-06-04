@@ -36,6 +36,27 @@
 - Preserves legacy JSON fallback behavior only when no SQLite route store is
   configured.
 
+## Post-Close Regression Fix
+
+**Date:** 2026-06-04
+
+- Closed a post-close gap where some business code still treated
+  `ThreadInfo.topic_id` / `WorkspaceInfo.topic_id` as the route truth source
+  after JSON topic fields stopped being serialized.
+- Re-routed TG thread list icons, Claude workspace thread reconciliation, and
+  Codex TUI host send metadata through `AppState.get_thread_topic_id(...)` so
+  a restarted process with `topic_id=None` in `onlineworker_state.json` still
+  resolves active bindings from `im_routes.sqlite3`.
+- Added route-aware regressions for:
+  - `/list` showing `✅` when JSON mirrors are missing but SQLite session routes
+    exist.
+  - Claude reconcile keeping a stale local thread with an active SQLite route
+    instead of pruning it as an unbound JSON-only remnant.
+  - Codex owner-bridge/TUI-host sends passing the route-store topic id after the
+    in-memory JSON mirror is cleared.
+  - A static guard preventing handler/provider business code from reintroducing
+    direct legacy topic mirror reads.
+
 ## Files Changed
 
 - `core/im_routes.py`
@@ -98,6 +119,19 @@
 ```
 
 Result: `354 passed`.
+
+Post-close regression verification:
+
+```bash
+/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest -q \
+  tests/test_topic_route_access.py \
+  tests/test_im_route_store.py \
+  tests/test_thread_controls.py \
+  tests/test_handlers.py \
+  tests/test_codex_tui_mode.py
+```
+
+Result: `123 passed`.
 
 ```bash
 git diff --check

@@ -67,10 +67,14 @@ async def send_default_message(
     attachments=None,
 ) -> None:
     if attachments:
-        return await adapter.send_user_message(
+        result = await adapter.send_user_message(
             ws_info.daemon_workspace_id,
             thread_info.thread_id,
             text,
             attachments=attachments,
         )
-    return await adapter.send_user_message(ws_info.daemon_workspace_id, thread_info.thread_id, text)
+    else:
+        result = await adapter.send_user_message(ws_info.daemon_workspace_id, thread_info.thread_id, text)
+    if isinstance(result, dict) and str(result.get("status") or "") == "error":
+        raise RuntimeError(str(result.get("error") or f"{ws_info.tool} send failed"))
+    return result

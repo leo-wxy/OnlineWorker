@@ -3,6 +3,7 @@
 基础命令处理器：/start /ping /echo /status /active /restart /stop
 """
 import asyncio
+import inspect
 import logging
 import os
 import sys
@@ -52,6 +53,20 @@ def _load_authoritative_thread_ids(ws_info) -> Optional[set[str]]:
         for session in sessions
         if isinstance(session, dict) and session.get("id")
     }
+
+
+def get_route_aware_thread_topic_id(
+    state: AppState,
+    ws_info,
+    thread_info,
+) -> Optional[int]:
+    """Return the active Telegram topic through the configured route store."""
+    workspace_id = (
+        state.get_workspace_storage_key(ws_info)
+        or getattr(ws_info, "daemon_workspace_id", None)
+        or f"{getattr(ws_info, 'tool', '')}:{getattr(ws_info, 'name', '')}"
+    )
+    return state.get_thread_topic_id(workspace_id, ws_info, thread_info)
 
 
 def clear_stale_thread_archive_if_active(state: AppState, ws_info, thread_info, *, active_ids: Optional[set[str]] = None) -> bool:
@@ -119,7 +134,7 @@ def reconcile_workspace_threads_with_source(
             getattr(ws_info, "tool", "") == "claude"
             and authoritative_ids is not None
             and thread_id not in authoritative_ids
-            and getattr(thread_info, "topic_id", None) is None
+            and get_route_aware_thread_topic_id(state, ws_info, thread_info) is None
             and str(getattr(thread_info, "source", "") or "unknown").strip().lower() != "app"
         ):
             removable_thread_ids.append(thread_id)
@@ -148,7 +163,7 @@ def reconcile_workspace_threads_with_source(
             getattr(ws_info, "tool", "") == "claude"
             and not next_active
             and not getattr(thread_info, "archived", False)
-            and getattr(thread_info, "topic_id", None) is None
+            and get_route_aware_thread_topic_id(state, ws_info, thread_info) is None
             and str(getattr(thread_info, "source", "") or "unknown").strip().lower() != "app"
         ):
             removable_thread_ids.append(thread_id)
@@ -210,6 +225,13 @@ def is_codex_unmaterialized_error(error: object) -> bool:
 def tg_empty_turn_completed_text() -> str:
     """当 turn 没有产生正文时，给 TG 的最小完成态提示。"""
     return "✅ 已完成"
+
+
+async def _call_status_builder(status_builder, state) -> list[str]:
+    raw_lines = status_builder(state)
+    if inspect.isawaitable(raw_lines):
+        raw_lines = await raw_lines
+    return [str(line).strip() for line in (raw_lines or []) if str(line).strip()]
 
 
 def tg_approval_request_text(command: str, reason: str, tool_type: str) -> str:
@@ -530,7 +552,7 @@ def make_status_handler(state: AppState, group_chat_id: int) -> Callable:
         for provider_name in _status_provider_names(state):
             descriptor = get_provider(provider_name)
             if descriptor is not None and descriptor.status_builder is not None:
-                lines.extend(descriptor.status_builder(state))
+                lines.extend(await _call_status_builder(descriptor.status_builder, state))
                 continue
 
             adapter = state.get_adapter(provider_name)

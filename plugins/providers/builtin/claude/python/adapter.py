@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import shlex
-import subprocess
+import shutil
 import sys
 import time
 import uuid
@@ -52,6 +52,22 @@ CLAUDE_STREAM_BUFFER_LIMIT = 10 * 1024 * 1024
 _PRETOOL_PERMISSION_TOOLS = frozenset(
     {"Bash", "Edit", "Write", "AskUserQuestion", "ExitPlanMode"}
 )
+CLAUDE_REASON_DETAILS = {
+    "ok": "Claude provider is ready.",
+    "loggedOut": "Claude CLI is not logged in.",
+    "missingCli": "Claude CLI executable was not found.",
+    "missingRuntime": "Claude runtime environment is not configured.",
+    "staleEnv": "Claude runtime environment points to a stale local proxy.",
+    "emptyAuthStatus": "Claude auth status returned no output.",
+    "unknownAuthStatus": "Claude auth status returned unrecognized output.",
+    "authStatusFailed": "Claude auth status failed.",
+}
+
+
+class ClaudeProviderUnavailable(RuntimeError):
+    def __init__(self, readiness: dict[str, Any]):
+        self.readiness = dict(readiness)
+        super().__init__(format_claude_unavailable_message(self.readiness))
 
 
 def _to_text(value: Any) -> str:
@@ -486,61 +502,218 @@ def _claude_runtime_env_is_usable(env: dict[str, str]) -> bool:
     )
 
 
-def _detect_claude_runtime_env(base_env: dict[str, str] | None = None) -> dict[str, str]:
+def _collect_claude_runtime_env(base_env: dict[str, str] | None = None) -> dict[str, str]:
     source = base_env or os.environ
-    current = {
+    return {
         key: str(source.get(key) or "").strip()
         for key in CLAUDE_ENV_VARS
         if str(source.get(key) or "").strip()
     }
+
+
+def _detect_claude_runtime_env(base_env: dict[str, str] | None = None) -> dict[str, str]:
+    current = _collect_claude_runtime_env(base_env)
     if _claude_runtime_env_is_usable(current):
         return current
-    active = _scan_active_claude_process_env()
-    if _claude_runtime_env_is_usable(active):
-        return active
     return {}
 
 
-def _extract_env_from_process_command(raw: str) -> dict[str, str]:
-    env: dict[str, str] = {}
-    try:
-        parts = shlex.split(raw)
-    except ValueError:
-        parts = raw.split()
-    for part in parts:
-        if "=" not in part:
-            continue
-        key, value = part.split("=", 1)
-        if key in CLAUDE_ENV_VARS and value.strip():
-            env[key] = value.strip()
-    return env
+def _runtime_auth_method(runtime_env: dict[str, str]) -> str:
+    if runtime_env.get("ANTHROPIC_BASE_URL"):
+        return "proxyEnv"
+    if runtime_env.get("ANTHROPIC_API_KEY"):
+        return "apiKeyEnv"
+    if runtime_env.get("ANTHROPIC_AUTH_TOKEN"):
+        return "authTokenEnv"
+    return ""
 
 
-def _scan_active_claude_process_env() -> dict[str, str]:
-    try:
-        raw_pids = subprocess.check_output(
-            ["pgrep", "-x", "claude"],
-            text=True,
-            stderr=subprocess.DEVNULL,
-            timeout=1,
+def _new_claude_readiness(
+    *,
+    ready: bool,
+    source: str,
+    reason: str,
+    auth_method: str = "",
+    detail: str | None = None,
+    raw_status: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_detail = str(detail or CLAUDE_REASON_DETAILS.get(reason) or reason).strip()
+    status = {
+        "ready": bool(ready),
+        "source": str(source or "unknown"),
+        "reason": str(reason or "unknown"),
+        "authMethod": str(auth_method or ""),
+        "checked_at": time.time(),
+        "detail": normalized_detail,
+    }
+    if isinstance(raw_status, dict):
+        api_provider = str(raw_status.get("apiProvider") or "").strip()
+        if api_provider:
+            status["apiProvider"] = api_provider
+    return status
+
+
+def _readiness_from_runtime_env(runtime_env: dict[str, str]) -> dict[str, Any] | None:
+    if not runtime_env:
+        return None
+    base_url = str(runtime_env.get("ANTHROPIC_BASE_URL") or "").strip()
+    if _is_stale_claude_base_url(base_url):
+        return _new_claude_readiness(
+            ready=False,
+            source="runtimeEnv",
+            reason="staleEnv",
+            auth_method=_runtime_auth_method(runtime_env),
         )
-    except Exception:
-        return {}
+    if _claude_runtime_env_is_usable(runtime_env):
+        return _new_claude_readiness(
+            ready=True,
+            source="runtimeEnv",
+            reason="ok",
+            auth_method=_runtime_auth_method(runtime_env),
+        )
+    return None
 
-    for pid in [line.strip() for line in raw_pids.splitlines() if line.strip()]:
-        try:
-            raw_command = subprocess.check_output(
-                ["ps", "eww", "-p", pid, "-o", "command="],
-                text=True,
-                stderr=subprocess.DEVNULL,
-                timeout=1,
-            )
-        except Exception:
+
+def format_claude_unavailable_message(readiness: dict[str, Any] | None) -> str:
+    status = readiness if isinstance(readiness, dict) else {}
+    reason = str(status.get("reason") or "").strip()
+    detail = str(status.get("detail") or "").strip()
+    if reason == "loggedOut":
+        return "Claude provider unavailable: Claude CLI is not logged in."
+    if reason == "missingCli":
+        return f"Claude provider unavailable: {detail or CLAUDE_REASON_DETAILS['missingCli']}"
+    if detail:
+        return f"Claude provider unavailable: {detail}"
+    return "Claude provider unavailable: readiness check failed."
+
+
+def _readiness_to_legacy_auth_status(readiness: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "loggedIn": bool(readiness.get("ready")),
+        "authMethod": str(readiness.get("authMethod") or ""),
+    }
+
+
+def _normalize_claude_launch_methods(
+    claude_bin: str,
+    launch_methods: list[dict[str, Any]] | None = None,
+) -> list[dict[str, str]]:
+    raw_methods = launch_methods if isinstance(launch_methods, list) else []
+    if not raw_methods:
+        command = str(claude_bin or "claude").strip() or "claude"
+        return [
+            {
+                "id": "configured_cli",
+                "label": "Configured Claude provider CLI",
+                "bin": command,
+            }
+        ]
+
+    methods: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(raw_methods):
+        if isinstance(item, str):
+            command = item.strip()
+            method_id = f"method_{index + 1}"
+            label = command
+        elif isinstance(item, dict):
+            command = str(item.get("bin") or item.get("command") or "").strip()
+            method_id = str(item.get("id") or item.get("name") or f"method_{index + 1}").strip()
+            label = str(item.get("label") or item.get("name") or method_id or command).strip()
+        else:
             continue
-        env = _extract_env_from_process_command(raw_command)
-        if _claude_runtime_env_is_usable(env):
-            return env
-    return {}
+
+        if not command:
+            continue
+        if not method_id:
+            method_id = f"method_{index + 1}"
+        original_method_id = method_id
+        suffix = 2
+        while method_id in seen:
+            method_id = f"{original_method_id}_{suffix}"
+            suffix += 1
+        seen.add(method_id)
+        methods.append(
+            {
+                "id": method_id,
+                "label": label or method_id,
+                "bin": command,
+            }
+        )
+
+    if methods:
+        return methods
+    return _normalize_claude_launch_methods(claude_bin, None)
+
+
+def _cli_method_status(
+    method: dict[str, str],
+    prefix: list[str],
+    readiness: dict[str, Any],
+    *,
+    selected: bool = False,
+    available_override: bool | None = None,
+    reason_override: str | None = None,
+    detail_override: str | None = None,
+) -> dict[str, Any]:
+    reason = str(reason_override or readiness.get("reason") or "").strip()
+    detected = reason != "missingCli" and str(readiness.get("source") or "") != "missingCli"
+    ready = bool(readiness.get("ready"))
+    available = ready if available_override is None else bool(available_override)
+    return {
+        "id": str(method.get("id") or ""),
+        "label": str(method.get("label") or method.get("id") or ""),
+        "selected": bool(selected),
+        "detected": detected,
+        "available": available,
+        "ready": available,
+        "reason": reason or ("ok" if available else "unknown"),
+        "detail": str(detail_override or readiness.get("detail") or "").strip(),
+        "command": " ".join(str(part or "").strip() for part in prefix if str(part or "").strip()),
+        "configured": str(method.get("bin") or "").strip(),
+    }
+
+
+def _command_prefix_available(prefix: list[str]) -> tuple[bool, str]:
+    command = prefix[0] if prefix else ""
+    if not command:
+        return False, "empty command"
+    expanded = os.path.expanduser(command)
+    if os.path.sep in command:
+        if os.path.isfile(expanded) and os.access(expanded, os.X_OK):
+            return True, expanded
+        if os.path.exists(expanded):
+            return False, f"not executable: {expanded}"
+        return False, f"not found: {expanded}"
+    resolved = shutil.which(command)
+    if resolved:
+        return True, resolved
+    return False, f"not found on PATH: {command}"
+
+
+def _missing_cli_readiness(detail: str | None = None) -> dict[str, Any]:
+    return _new_claude_readiness(
+        ready=False,
+        source="missingCli",
+        reason="missingCli",
+        detail=detail or CLAUDE_REASON_DETAILS["missingCli"],
+    )
+
+
+def _attach_launch_method_readiness(
+    readiness: dict[str, Any],
+    method_statuses: list[dict[str, Any]],
+    selected_method: dict[str, str] | None,
+) -> dict[str, Any]:
+    result = dict(readiness)
+    if selected_method is not None:
+        result["launchMethod"] = {
+            "id": str(selected_method.get("id") or ""),
+            "label": str(selected_method.get("label") or selected_method.get("id") or ""),
+            "command": str(selected_method.get("bin") or "").strip(),
+        }
+    result["methods"] = [dict(method) for method in method_statuses]
+    return result
 
 
 class ClaudeAdapter:
@@ -552,14 +725,22 @@ class ClaudeAdapter:
     - 输出归一化成现有 app-server event 结构
     """
 
-    def __init__(self, claude_bin: str = "claude", auth: dict[str, str] | None = None):
+    def __init__(
+        self,
+        claude_bin: str = "claude",
+        auth: dict[str, str] | None = None,
+        launch_methods: list[dict[str, Any]] | None = None,
+    ):
         self._claude_command_prefix = resolve_claude_command_prefix(claude_bin)
         self.claude_bin = self._claude_command_prefix[0]
+        self._configured_claude_bin = str(claude_bin or "claude").strip() or "claude"
+        self._launch_methods = _normalize_claude_launch_methods(self._configured_claude_bin, launch_methods)
         # auth is accepted for descriptor compatibility only. Claude CLI owns
         # provider/auth configuration; OnlineWorker treats it as a black-box CLI.
         self._connected = False
         self._auth_ready: bool | None = None
         self._auth_method: str = ""
+        self._readiness: dict[str, Any] | None = None
         self._event_callbacks: list[EventCallback] = []
         self._server_request_callbacks: list[ServerRequestCallback] = []
         self._disconnect_callbacks: list[Callable[[], None]] = []
@@ -587,6 +768,22 @@ class ClaudeAdapter:
     @property
     def auth_method(self) -> str:
         return self._auth_method
+
+    @property
+    def readiness(self) -> dict[str, Any] | None:
+        return dict(self._readiness) if isinstance(self._readiness, dict) else None
+
+    def set_cached_readiness_for_tests(self, readiness: dict[str, Any] | None) -> None:
+        self._set_readiness(readiness)
+
+    def _set_readiness(self, readiness: dict[str, Any] | None) -> None:
+        self._readiness = dict(readiness) if isinstance(readiness, dict) else None
+        if not isinstance(self._readiness, dict):
+            self._auth_ready = None
+            self._auth_method = ""
+            return
+        self._auth_ready = bool(self._readiness.get("ready"))
+        self._auth_method = str(self._readiness.get("authMethod") or "")
 
     async def connect(self) -> None:
         self._connected = True
@@ -868,11 +1065,28 @@ class ClaudeAdapter:
             env["ANTHROPIC_API_KEY"] = "dummy"
 
         preferred_node_bin = resolve_preferred_node_bin_dir()
+        required_path_entries = [
+            entry
+            for entry in (
+                preferred_node_bin,
+                "/opt/homebrew/bin",
+                "/usr/local/bin",
+                "/usr/bin",
+                "/bin",
+                "/usr/sbin",
+                "/sbin",
+            )
+            if entry
+        ]
+        current_path = str(env.get("PATH") or "")
+        path_entries = [entry for entry in current_path.split(os.pathsep) if entry]
+        merged_path_entries = []
+        for entry in [*required_path_entries, *path_entries]:
+            if entry not in merged_path_entries:
+                merged_path_entries.append(entry)
+        if merged_path_entries:
+            env["PATH"] = os.pathsep.join(merged_path_entries)
         if preferred_node_bin:
-            current_path = str(env.get("PATH") or "")
-            path_entries = [entry for entry in current_path.split(os.pathsep) if entry]
-            path_entries = [entry for entry in path_entries if entry != preferred_node_bin]
-            env["PATH"] = os.pathsep.join([preferred_node_bin, *path_entries]) if path_entries else preferred_node_bin
             env["NVM_BIN"] = preferred_node_bin
         return env
 
@@ -896,23 +1110,27 @@ class ClaudeAdapter:
             return [*base_args, "--resume", thread_id, text]
         return [*base_args, "--session-id", thread_id, text]
 
+    async def check_readiness(self, *, force: bool = False) -> dict[str, Any]:
+        if not force and isinstance(self._readiness, dict):
+            return dict(self._readiness)
+
+        raw_runtime_env = _collect_claude_runtime_env()
+        runtime_readiness = _readiness_from_runtime_env(raw_runtime_env)
+        readiness = await self._check_launch_methods_readiness(runtime_readiness)
+        self._set_readiness(readiness)
+        return dict(readiness)
+
     async def refresh_auth_status(self) -> dict:
-        runtime_env = _detect_claude_runtime_env()
-        if runtime_env:
-            self._auth_ready = True
-            self._auth_method = (
-                "proxyEnv"
-                if runtime_env.get("ANTHROPIC_BASE_URL")
-                else "apiKeyEnv"
-                if runtime_env.get("ANTHROPIC_API_KEY")
-                else "authTokenEnv"
-            )
-            return {"loggedIn": True, "authMethod": self._auth_method}
+        readiness = await self.check_readiness(force=True)
+        legacy = _readiness_to_legacy_auth_status(readiness)
+        if "apiProvider" in readiness:
+            legacy["apiProvider"] = readiness["apiProvider"]
+        if not readiness.get("ready"):
+            legacy["reason"] = readiness.get("reason")
+            legacy["detail"] = readiness.get("detail")
+        return legacy
 
-        status = await self._refresh_auth_status_for_prefix(self._claude_command_prefix)
-        return status
-
-    async def _refresh_auth_status_for_prefix(self, prefix: list[str]) -> dict:
+    async def _check_cli_readiness_for_prefix(self, prefix: list[str]) -> dict[str, Any]:
         try:
             proc = await asyncio.create_subprocess_exec(
                 *prefix,
@@ -925,36 +1143,183 @@ class ClaudeAdapter:
                 limit=CLAUDE_STREAM_BUFFER_LIMIT,
             )
             stdout, stderr = await proc.communicate()
+        except FileNotFoundError as e:
+            return _new_claude_readiness(
+                ready=False,
+                source="missingCli",
+                reason="missingCli",
+                detail=str(e) or CLAUDE_REASON_DETAILS["missingCli"],
+            )
         except Exception as e:
             logger.warning(f"读取 Claude auth 状态失败：{e}")
-            self._auth_ready = None
-            self._auth_method = ""
-            return {"loggedIn": None, "authMethod": "", "error": str(e)}
+            return _new_claude_readiness(
+                ready=False,
+                source="cliAuth",
+                reason="authStatusFailed",
+                detail=str(e) or CLAUDE_REASON_DETAILS["authStatusFailed"],
+            )
 
         out_text = _to_text(stdout).strip()
         err_text = _to_text(stderr).strip()
         payload = out_text or err_text
         if not payload:
-            self._auth_ready = None
-            self._auth_method = ""
-            return {"loggedIn": None, "authMethod": ""}
+            return _new_claude_readiness(
+                ready=False,
+                source="cliAuth",
+                reason="emptyAuthStatus",
+            )
 
         try:
             status = json.loads(payload)
         except Exception:
-            logged_in = "not logged in" not in payload.lower()
-            self._auth_ready = True if logged_in else False
-            self._auth_method = "" if logged_in else "none"
-            return {"loggedIn": self._auth_ready, "authMethod": self._auth_method}
+            payload_lower = payload.lower()
+            if "not logged in" in payload_lower or "please run /login" in payload_lower:
+                return _new_claude_readiness(
+                    ready=False,
+                    source="cliAuth",
+                    reason="loggedOut",
+                    auth_method="none",
+                    detail=payload,
+                )
+            if "logged in" in payload_lower or "authenticated" in payload_lower:
+                return _new_claude_readiness(
+                    ready=True,
+                    source="cliAuth",
+                    reason="ok",
+                    detail=CLAUDE_REASON_DETAILS["ok"],
+                )
+            return _new_claude_readiness(
+                ready=False,
+                source="cliAuth",
+                reason="unknownAuthStatus",
+            )
 
         if isinstance(status, dict):
-            self._auth_ready = status.get("loggedIn")
-            self._auth_method = str(status.get("authMethod") or "")
-            return status
+            logged_in = bool(status.get("loggedIn"))
+            auth_method = str(status.get("authMethod") or "")
+            return _new_claude_readiness(
+                ready=logged_in,
+                source="cliAuth",
+                reason="ok" if logged_in else "loggedOut",
+                auth_method=auth_method,
+                detail=CLAUDE_REASON_DETAILS["ok"] if logged_in else CLAUDE_REASON_DETAILS["loggedOut"],
+                raw_status=status,
+            )
 
-        self._auth_ready = None
-        self._auth_method = ""
-        return {"loggedIn": None, "authMethod": ""}
+        return _new_claude_readiness(
+            ready=False,
+            source="cliAuth",
+            reason="unknownAuthStatus",
+        )
+
+    async def _check_launch_methods_readiness(
+        self,
+        runtime_readiness: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if runtime_readiness is not None and runtime_readiness.get("ready"):
+            method_statuses: list[dict[str, Any]] = []
+            first_missing: dict[str, Any] | None = None
+            first_method: dict[str, str] | None = None
+            for method in self._launch_methods:
+                prefix = resolve_claude_command_prefix(method["bin"])
+                available, detail = _command_prefix_available(prefix)
+                readiness = (
+                    _new_claude_readiness(
+                        ready=True,
+                        source="runtimeEnv",
+                        reason="ok",
+                        auth_method=str(runtime_readiness.get("authMethod") or ""),
+                        detail=runtime_readiness.get("detail"),
+                    )
+                    if available
+                    else _missing_cli_readiness(detail)
+                )
+                if first_missing is None:
+                    first_missing = readiness
+                    first_method = method
+                if available:
+                    self._claude_command_prefix = prefix
+                    self.claude_bin = prefix[0]
+                    method_statuses.append(
+                        _cli_method_status(
+                            method,
+                            prefix,
+                            readiness,
+                            selected=True,
+                            available_override=True,
+                            reason_override="runtimeEnv",
+                            detail_override=str(runtime_readiness.get("detail") or ""),
+                        )
+                    )
+                    return _attach_launch_method_readiness(
+                        runtime_readiness,
+                        method_statuses,
+                        method,
+                    )
+                method_statuses.append(_cli_method_status(method, prefix, readiness))
+
+            return _attach_launch_method_readiness(
+                first_missing or _missing_cli_readiness(),
+                method_statuses,
+                first_method,
+            )
+
+        method_statuses: list[dict[str, Any]] = []
+        first_cli_readiness: dict[str, Any] | None = None
+        first_cli_method: dict[str, str] | None = None
+
+        for method in self._launch_methods:
+            prefix = resolve_claude_command_prefix(method["bin"])
+            readiness = await self._check_cli_readiness_for_prefix(prefix)
+            if first_cli_readiness is None:
+                first_cli_readiness = readiness
+                first_cli_method = method
+
+            if readiness.get("ready"):
+                self._claude_command_prefix = prefix
+                self.claude_bin = prefix[0]
+                method_statuses.append(
+                    _cli_method_status(
+                        method,
+                        prefix,
+                        readiness,
+                        selected=True,
+                    )
+                )
+                return _attach_launch_method_readiness(
+                    readiness,
+                    method_statuses,
+                    method,
+                )
+
+            method_statuses.append(_cli_method_status(method, prefix, readiness))
+
+        if first_cli_method is not None:
+            for method_status in method_statuses:
+                if method_status.get("id") == first_cli_method.get("id"):
+                    method_status["selected"] = True
+                    break
+
+        if runtime_readiness is not None:
+            return _attach_launch_method_readiness(
+                runtime_readiness,
+                method_statuses,
+                None,
+            )
+
+        fallback = first_cli_readiness or _new_claude_readiness(
+            ready=False,
+            source="missingCli",
+            reason="missingCli",
+            detail=CLAUDE_REASON_DETAILS["missingCli"],
+        )
+        return _attach_launch_method_readiness(fallback, method_statuses, first_cli_method)
+
+    async def _ensure_ready_for_send(self) -> dict[str, Any]:
+        readiness = await self.check_readiness(force=True)
+        if not readiness.get("ready"):
+            raise ClaudeProviderUnavailable(readiness)
+        return readiness
 
     async def _emit_event(self, workspace_id: str, method: str, params: dict) -> None:
         envelope = {
@@ -1106,6 +1471,17 @@ class ClaudeAdapter:
             raise RuntimeError("Claude workspace 未注册 cwd")
         if not os.path.isdir(cwd):
             raise RuntimeError(f"Claude workspace cwd 不存在：{cwd}")
+
+        try:
+            await self._ensure_ready_for_send()
+        except ClaudeProviderUnavailable as e:
+            return {
+                "threadId": thread_id,
+                "turnId": "",
+                "status": "error",
+                "error": str(e),
+                "readiness": e.readiness,
+            }
 
         await self._ensure_hook_bridge_started()
         self._thread_workspace_map[thread_id] = workspace_id

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from config import Config, ToolConfig
+from core.im_routes import ImRouteStore
 from core.state import AppState
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
 from core.state import StreamingTurn
@@ -2884,6 +2885,10 @@ async def test_try_route_owner_bridge_send_auto_starts_tui_host_for_app_ws_mode(
         ],
     )
     state = AppState(storage=storage, config=cfg)
+    store = ImRouteStore(tmp_path / "im-routes.sqlite3")
+    state.set_im_route_store(store, GROUP_CHAT_ID)
+    state.bind_telegram_session_topic("codex:onlineWorker", ws, thread, 100)
+    thread.topic_id = None
 
     started = {}
 

@@ -30,6 +30,30 @@
 
 ## Smoke / diagnostics
 
+- `claude_readiness_smoke.py`：Claude provider readiness 真实诊断脚本。它直接调用当前源码的 `ClaudeAdapter.check_readiness(force=True)`，可真实读取本机 `claude auth status` 与当前进程 `ANTHROPIC_*` runtime env，并读取 OnlineWorker `config.yaml` 中 Claude provider 当前配置的 `bin` 与可选 `launch_methods`。输出只包含 `ready/source/reason/authMethod/detail/apiProvider/launchMethod` 与 `methods[]` 里的非敏感候选方式，不打印 token 或原始 env。若用户显式配置多条 `launch_methods`，脚本会按顺序测试并标出最终选中的可用命令；未配置时保持单 `bin` 行为。`methods[]` 也会展示其他检测项，例如 `ow-claude` wrapper 文件存在但未配置为 provider bin 时只显示为候选，不会被误判成 provider 可发送。示例：
+
+  ```bash
+  python3 scripts/claude_readiness_smoke.py
+  python3 scripts/claude_readiness_smoke.py --owner-bridge-status
+  ```
+
+  多启动方式使用 provider 通用 `launch_methods` 配置；只有声明
+  `capabilities.launch_methods` 的 provider 会在 Settings 卡片里显示
+  启动命令候选编辑区。Claude 当前声明了该能力，示例配置如下：
+
+  ```yaml
+  providers:
+    claude:
+      bin: "claude"
+      launch_methods:
+        - id: native
+          label: Native Claude
+          bin: "claude"
+        - id: raven
+          label: Raven Claude
+          bin: "/Users/me/.nvm/versions/node/v20.20.1/bin/raven cc"
+  ```
+
 - `claude_hook_smoke.py`：Claude hook smoke 脚本，已有 `tests/test_claude_hook_smoke.py` 保护。默认复用当前 Python 解释器；如需指定 bridge 解释器，可设置 `ONLINEWORKER_BRIDGE_PYTHON=/path/to/python`。
 - `archive_roundtrip_check.py`：手动 archive 诊断脚本，会创建真实 codex thread；只在 archive 端到端链路排障时手工运行，不纳入日常回归。
 

@@ -17,8 +17,9 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 8: General AI Capability Layer** - Add a top-level AI sidebar tab plus a provider-neutral AI capability layer. Service API settings and scenario prompt settings are separate; notification summary is the first scenario, current local summary rules remain the fallback, and packaged-app verification is complete.
 - [x] **Phase 9: Session Archive Actions** - Add Session tab archive actions and adjacent provider usage operations. Archive executes the provider's real source operation, archived rows remain visible through post-success local overlay, `/token_usage` is scoped to agent topics, and packaged-app verification is complete.
 - [x] **Phase 10: Codebase Structure Refinement** - Audit and restructure oversized classes/modules and misplaced responsibilities without changing product behavior. Completed staged refactor slices for Tauri config/dashboard helpers, Python workspace helpers, and frontend Dashboard state/presentation.
-- [x] **Phase 11: Telegram Topic SQLite Storage Migration** - Make Telegram topics independent durable records in a single SQLite table, migrate existing JSON topic ids once, and route all topic lookups through SQLite so runtime JSON saves cannot erase topic bindings. Source implementation and regression coverage are complete; packaged-app verification was not run in this turn because it requires explicit approval.
+- [x] **Phase 11: Telegram Topic SQLite Storage Migration** - Make Telegram topics independent durable records in a single SQLite table, migrate existing JSON topic ids once, and route all topic lookups through SQLite so runtime JSON saves cannot erase topic bindings. Full regression, Dashboard Telegram polling visibility, packaged build, and installed-app verification are complete.
 - [x] **Phase 12: Codex Managed App-Server Approval Host** - Follow the Paseo/Happy/Codex IDE host-client model: OnlineWorker-managed Codex sessions own the app-server request/response channel, Telegram is the remote approval UI for those sessions, and existing Desktop/VS Code/ordinary CLI sessions stay native and mirror-only. 12-02 implements `unix://` support and the installed fixed OnlineWorker Unix remote proxy; fixed-session shared CLI + TG authorization convergence has been user-accepted through `codex_remote_proxy.sock`.
+- [ ] **Phase 13: Claude Provider Auth Runtime Hardening** - Replace the current fragile Claude runtime/auth fallback with an explicit, durable provider readiness contract. Source implementation and focused verification are complete: Telegram/provider sends now fail fast with visible diagnostics when Claude auth is unavailable, Dashboard/status paths surface the same reason before user traffic, active-process environment scanning is removed from the normal readiness path, and Claude can opt into user-configured multi-launch-method readiness through a generic Settings UI shown for providers that declare `capabilities.launch_methods`. Fast packaged build/install/restart verification is complete; Claude topic negative/positive UAT remains pending.
 
 ## Phase Details
 
@@ -291,14 +292,14 @@ Plans:
 - [x] 11-01: Migrate Telegram topic storage to one SQLite table
 
 Latest verification:
-- Source verification passed:
-  - `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest -q tests/test_im_route_store.py tests/test_storage.py tests/test_thread_controls.py tests/test_events.py tests/test_events_streaming.py tests/test_workspace_thread_open.py tests/test_thread_helpers.py tests/test_handlers.py tests/test_slash_router.py tests/test_workspace_helpers.py tests/test_startup_runtime.py tests/test_claude_runtime.py tests/test_codex_runtime.py tests/test_codex_tui_mode.py tests/test_provider_owner_bridge.py` -> `354 passed`.
-  - `git diff --check` -> passed.
-
-Remaining Phase 11 verification:
-- Packaged-app verification was not run in this turn because the combined
-  repository instructions require explicit current-conversation permission
-  before build, package, install, restart, or packaged-app verification.
+- Full verification passed on 2026-06-03 after explicit user approval:
+  - `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest` -> `811 passed`.
+  - `cargo test dashboard --lib` -> `26 passed`.
+  - `/Applications/Codex.app/Contents/Resources/node node_modules/typescript/bin/tsc --noEmit` -> passed.
+  - `git -C OnlineWorker diff --check` -> passed.
+  - `bash build.sh` -> passed and produced `OnlineWorker_1.4.0_aarch64.dmg`.
+  - `bash verify-packaged-fast.sh` -> passed, installed `/Applications/OnlineWorker.app`, and verified bundled private plugins.
+  - Installed runtime after restart showed Telegram `getUpdates` returning `HTTP/1.1 200 OK`.
 
 ### Phase 12: Codex Managed App-Server Approval Host
 
@@ -427,3 +428,64 @@ Latest Phase 12 verification:
 
 Remaining Phase 12 verification:
 - None for the managed app-server approval host and fixed Unix proxy path. Arbitrary external Unix socket path investigation remains future transport-hardening work.
+
+### Phase 13: Claude Provider Auth Runtime Hardening
+
+**Goal:** Make Claude provider runtime readiness deterministic and user-visible so `Not logged in · Please run /login` cannot keep reappearing as a late provider failure after Telegram already accepted a user message. Claude auth/runtime checks must use an explicit contract, not active-process environment scraping, and every unavailable state must be visible in Dashboard and Telegram before or at send time.
+**Requirements**: TBD
+**Depends on:** Phase 7 provider send gateway, Phase 9 provider status/error visibility, Phase 11 route stability
+**Scope Fence:** This phase is limited to Claude provider auth/runtime readiness, status surfacing, and send preflight. It must not change Codex app-server approval semantics, Telegram route storage, notification plugins, or AI service configuration. It must not log or persist auth secrets in plaintext artifacts.
+**Plans:** 1 plan
+
+Plans:
+- [x] 13-01: Harden Claude provider auth/runtime readiness
+  - [x] Replace process-scanning as a runtime dependency with an explicit Claude readiness probe.
+  - [x] Define supported Claude readiness sources: native Claude CLI login status and explicit current-process runtime environment.
+  - [x] Support explicit user-configured Claude `launch_methods`, tested in order and selected at send time, without changing bundled defaults.
+  - [x] Add Settings Claude-card editing for multiple launch commands, one per line.
+  - [x] Remove active Claude process env discovery from the normal readiness/send path.
+  - [x] Add status and force-refreshed send-time preflight so unavailable Claude auth fails before spawning a normal provider turn.
+  - [x] Surface the exact non-secret reason in Dashboard provider status and Telegram topic responses.
+  - [x] Add regression coverage proving `loggedIn:false` does not become a silent or delayed no-response state.
+
+Success Criteria (what must be TRUE):
+  1. OnlineWorker no longer depends on `pgrep -x claude` / `ps eww` process scraping to make Claude provider sends work.
+  2. Claude provider readiness has one explicit status object with non-secret fields such as `ready`, `source`, `reason`, `checked_at`, and `detail`.
+  3. `claude auth status` returning `loggedIn:false` is detected during startup/status refresh and before each send.
+  4. When Claude is not ready, Telegram responds promptly in the target topic with a clear provider-unavailable message instead of starting a normal streaming turn.
+  5. Dashboard shows Claude as unavailable with the same high-level reason, without requiring the user to inspect logs.
+  6. Provider send code does not spawn `claude -p` when preflight proves Claude auth is unavailable.
+  7. Any env/config/token handling is redacted in logs, test output, Dashboard payloads, and planning artifacts.
+  8. Focused tests cover native CLI logged-in, native CLI logged-out, explicit runtime env, missing CLI, stale env/proxy, and no-active-process cases.
+  9. Installed-app verification includes a real negative check for logged-out Claude and a real positive check after a valid readiness source is present.
+
+Known failure evidence from 2026-06-03:
+- Installed app received Telegram message in Claude topic `7431`, started a Claude turn, and sent the eventual provider error back through Telegram.
+- Runtime log showed `Claude 执行失败 ... error=Not logged in · Please run /login`.
+- Local `claude auth status` returned `{"loggedIn": false, "authMethod": "none", "apiProvider": "firstParty"}`.
+- Current process list had no active `claude` process, so the existing active-process env fallback had no usable runtime env to reuse.
+- Current provider config uses `bin: claude`; the declared `ow-claude` wrapper capability is not a stable provider send auth contract.
+
+Latest source and live diagnostic verification:
+- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest -q tests/test_claude_adapter.py` -> `38 passed`.
+- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest -q tests/test_config.py tests/test_claude_readiness_smoke.py tests/test_claude_adapter.py tests/test_claude_runtime.py tests/test_handlers.py tests/test_startup_runtime.py tests/test_provider_owner_bridge.py` -> `193 passed`.
+- `cd mac-app && ./node_modules/.bin/tsc` -> passed.
+- `node --test mac-app/tests/settingsProviders.test.mjs mac-app/tests/configProviders.test.mjs` -> `7 passed`.
+- `cd mac-app/src-tauri && cargo test config_provider --lib` -> `35 passed`.
+- `git -C OnlineWorker diff --check` -> passed.
+- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --claude-bin claude` -> sanitized live readiness reported `ready=false`, `reason=loggedOut`, `authMethod=none`, `source=cliAuth`; `configured_cli` was selected and unavailable, while `ow_claude_wrapper` was detected but not considered available for provider send.
+- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --config /tmp/onlineworker-claude-launch-methods-smoke.yaml` -> with explicit candidates `native=claude` and `raven=/Users/wxy/.nvm/versions/node/v20.20.1/bin/raven cc`, smoke selected `raven`, reported `readiness.ready=true`, and kept `path_claude` logged out.
+- `cd mac-app && ./node_modules/.bin/vite build` was attempted but blocked by a local Rollup native optional dependency code-signature failure for `@rollup/rollup-darwin-arm64`; this was not a TypeScript/code failure.
+- `cargo test --manifest-path mac-app/src-tauri/Cargo.toml dashboard --quiet` -> `26 passed`.
+- `node --test mac-app/tests/dashboardProviderStatus.test.mjs mac-app/tests/appShell.test.mjs` -> `13 passed`.
+- `cd mac-app && /Applications/Codex.app/Contents/Resources/node node_modules/typescript/bin/tsc --noEmit` -> passed.
+- `git -C OnlineWorker diff --check` -> passed.
+- `rg` over Claude provider/runtime/status source and focused tests found no remaining `_scan_active_claude_process_env`, `pgrep`, `ps eww`, `subprocess.check_output`, or active-process-env dependency.
+
+Packaged verification:
+- `bash build.sh` -> passed, produced `OnlineWorker_1.4.0_aarch64.dmg`.
+- `bash verify-packaged-fast.sh` -> passed, installed `/Applications/OnlineWorker.app`, launched app/bot processes, and verified bundled codemaker/popo private plugins.
+- Installed owner-bridge readiness smoke reported Claude degraded with `Claude CLI is not logged in`.
+
+Remaining Phase 13 verification:
+- Phase 13 should stay open until the packaged app proves logged-out Claude is visible in Dashboard/TG and valid Claude readiness still sends normally.

@@ -334,3 +334,18 @@ def test_im_route_store_uses_requested_test_database_only(tmp_path):
             ).fetchall()
         }
     assert names == {"im_routes"}
+
+
+def test_im_route_store_connect_context_closes_connection(tmp_path):
+    store = _route_store(tmp_path)
+    store.initialize()
+
+    with store._connect() as conn:
+        conn.execute("SELECT 1").fetchone()
+
+    try:
+        conn.execute("SELECT 1").fetchone()
+    except sqlite3.ProgrammingError as error:
+        assert "closed" in str(error)
+    else:
+        raise AssertionError("route store connection remained open after context exit")

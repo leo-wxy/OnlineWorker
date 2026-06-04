@@ -168,6 +168,13 @@ async def test_status_handler_reports_claude_auth_missing_when_connected(state, 
     )
     claude_adapter = MagicMock()
     claude_adapter.connected = True
+    claude_adapter.readiness = {
+        "ready": False,
+        "source": "cliAuth",
+        "reason": "loggedOut",
+        "authMethod": "none",
+        "detail": "Claude CLI is not logged in.",
+    }
     claude_adapter.auth_ready = False
     state.set_adapter("claude", claude_adapter)
 
@@ -176,7 +183,8 @@ async def test_status_handler_reports_claude_auth_missing_when_connected(state, 
 
     text = mock_context.bot.send_message.call_args[1]["text"]
     assert "claude CLI" in text
-    assert "未鉴权" in text
+    assert "不可用" in text
+    assert "not logged in" in text
 
 
 @pytest.mark.asyncio
@@ -338,6 +346,10 @@ def test_reconcile_workspace_threads_with_source_prunes_stale_imported_claude_th
 
     save_calls: list[bool] = []
     monkeypatch.setattr(
+        "bot.handlers.common.list_provider_threads",
+        lambda tool_name, path, limit=200: [],
+    )
+    monkeypatch.setattr(
         "bot.handlers.common.save_storage",
         lambda storage_obj: save_calls.append(True),
     )
@@ -409,6 +421,61 @@ def test_reconcile_workspace_threads_with_source_prunes_stale_unknown_claude_thr
     assert "tid-unknown-stale" not in ws.threads
     assert ws.threads["tid-unknown-topic"].is_active is False
     assert ws.threads["tid-live"].is_active is True
+    assert save_calls == [True]
+
+
+def test_reconcile_workspace_threads_with_source_keeps_stale_claude_thread_with_sqlite_route(monkeypatch, tmp_path):
+    from bot.handlers.common import reconcile_workspace_threads_with_source
+    from core.im_routes import ImRouteStore
+
+    state = AppState()
+    state.storage = AppStorage()
+    store = ImRouteStore(tmp_path / "im-routes.sqlite3")
+    state.set_im_route_store(store, GROUP_CHAT_ID)
+    ws = WorkspaceInfo(
+        name="ncmplayerengine",
+        path="/Users/example/Projects/sample-project",
+        tool="claude",
+        topic_id=None,
+        daemon_workspace_id="claude:ncmplayerengine",
+    )
+    thread = ThreadInfo(
+        thread_id="tid-unknown-routed",
+        topic_id=None,
+        preview="旧 topic route",
+        archived=False,
+        is_active=True,
+        source="unknown",
+    )
+    ws.threads[thread.thread_id] = thread
+    state.storage.workspaces["claude:ncmplayerengine"] = ws
+    state.bind_telegram_session_topic(
+        "claude:ncmplayerengine",
+        ws,
+        thread,
+        5457,
+        display_name=thread.preview,
+    )
+    thread.topic_id = None
+
+    save_calls: list[bool] = []
+    monkeypatch.setattr(
+        "bot.handlers.common.save_storage",
+        lambda storage_obj: save_calls.append(True),
+    )
+
+    active_ids, changed = reconcile_workspace_threads_with_source(
+        state,
+        ws,
+        active_ids=set(),
+    )
+
+    assert active_ids == set()
+    assert changed is True
+    assert ws.threads[thread.thread_id] is thread
+    assert thread.archived is True
+    assert thread.is_active is False
+    assert state.get_thread_topic_id("claude:ncmplayerengine", ws, thread) == 5457
     assert save_calls == [True]
 
 
@@ -727,6 +794,81 @@ async def test_message_handler_tracks_current_task_summary_per_thread():
     await handler(update, ctx)
 
     assert state.get_provider_task_summary("dummy", "tid-123") == "把通知功能再完善一下 完成后贴当前会话关键字"
+
+
+@pytest.mark.asyncio
+async def test_message_handler_reports_claude_not_ready_before_provider_send():
+    from bot.handlers.message import make_message_handler
+    from core.providers.message_runtime import ensure_default_connected, send_default_message
+    from plugins.providers.builtin.claude.python import runtime as claude_runtime
+    import bot.handlers.message as message_module
+
+    state = AppState()
+    state.storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="demo",
+        path="/tmp/demo",
+        tool="claude",
+        topic_id=50,
+        daemon_workspace_id="claude:demo",
+    )
+    ws.threads["tid-claude"] = ThreadInfo(thread_id="tid-claude", topic_id=100, archived=False)
+    state.storage.workspaces["claude:demo"] = ws
+
+    adapter = MagicMock()
+    adapter.connected = True
+    adapter.check_readiness = AsyncMock(
+        return_value={
+            "ready": False,
+            "source": "cliAuth",
+            "reason": "loggedOut",
+            "authMethod": "none",
+            "detail": "Claude CLI is not logged in.",
+        }
+    )
+    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.send_user_message = AsyncMock(return_value={})
+    adapter.inspect_thread_activity = None
+    state.set_adapter("claude", adapter)
+
+    original_get_provider = message_module.get_provider
+    message_module.get_provider = lambda name, *args, **kwargs: SimpleNamespace(  # type: ignore[assignment]
+        message_hooks=SimpleNamespace(
+            supports_photo=False,
+            supports_files=False,
+            ensure_connected=ensure_default_connected,
+            handle_local_owner=None,
+            prepare_send=claude_runtime.prepare_send,
+            send=send_default_message,
+        )
+    ) if name == "claude" else original_get_provider(name, *args, **kwargs)
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.text = "hello"
+    update.effective_message.caption = None
+    update.effective_message.photo = None
+    update.effective_message.document = None
+    update.effective_message.message_id = 321
+    update.effective_message.message_thread_id = 100
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+
+    handler = make_message_handler(state, GROUP_CHAT_ID)
+    try:
+        await handler(update, ctx)
+    finally:
+        message_module.get_provider = original_get_provider  # type: ignore[assignment]
+
+    adapter.check_readiness.assert_awaited_once()
+    adapter.resume_thread.assert_not_awaited()
+    adapter.send_user_message.assert_not_awaited()
+    text = ctx.bot.send_message.await_args.kwargs["text"]
+    assert "Claude provider unavailable" in text
+    assert "not logged in" in text
 
 
 @pytest.mark.asyncio
