@@ -517,7 +517,6 @@ export interface AppTexts {
     statusPinned: string;
     pin: string;
     unpin: string;
-    removeFromBoard: string;
     openSession: string;
     pinToBoard: string;
     pinSucceeded: string;

@@ -298,11 +298,17 @@ test("task board listens to activity stream without fallback polling", () => {
   assert.match(taskBoard, /function upsertSessionActivity/);
   assert.match(taskBoard, /const activity = event\.activity;/);
   assert.match(taskBoard, /setSessionActivities\(\(current\) => upsertSessionActivity\(current, activity\)\)/);
-  assert.match(taskBoard, /refresh\(\{ includeActivities: false \}\)/);
+  assert.match(taskBoard, /refresh\(\{ includeActivities: true \}\)/);
+  assert.match(taskBoard, /setLoading\(false\);/);
   assert.equal(taskBoard.includes("window.setInterval(() => {\n      void refresh();"), false);
   assert.match(taskBoard, /setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 30_000\)/);
+  assert.match(taskBoard, /let activeStreamId: number \| null = null/);
+  assert.match(taskBoard, /invoke<number>\("start_task_board_activity_stream", \{ channel \}\)/);
+  assert.match(taskBoard, /invoke\("stop_task_board_activity_stream", \{ streamId: activeStreamId \}\)/);
   assert.match(taskBoardState, /session_activity_stream/);
-  assert.match(taskBoardState, /while generation\.load\(Ordering::SeqCst\) == my_generation/);
+  assert.match(taskBoardState, /fn begin_task_board_activity_stream\(\) -> u64/);
+  assert.match(taskBoardState, /fn stop_task_board_activity_stream_id\(stream_id: u64\)/);
+  assert.match(taskBoardState, /while task_board_activity_stream_is_active\(stream_id\)/);
   assert.match(taskBoardState, /std::thread::sleep\(reconnect_delay\)/);
   assert.match(lib, /start_task_board_activity_stream/);
   assert.match(lib, /stop_task_board_activity_stream/);
@@ -326,13 +332,17 @@ test("task board pinned cards expose an explicit unfollow action", () => {
   assert.match(taskBoard, /aria-label=\{pinLabel\}/);
   assert.match(taskBoard, /<span className="text-\[11px\] font-semibold">\{pinLabel\}<\/span>/);
   assert.match(taskBoard, /task\.pinned \? "unpin_task_board_session" : "pin_task_board_session"/);
+  assert.equal(taskBoard.includes("hide_task_board_session"), false);
+  assert.equal(taskBoard.includes("removeFromBoard"), false);
 });
 
 test("task board hydrates previews for pinned idle sessions", () => {
   const taskBoard = readFileSync(join(root, "src", "pages", "TaskBoard.tsx"), "utf8");
 
   assert.match(taskBoard, /async function hydratePinnedSessionPreviews/);
+  assert.match(taskBoard, /const PINNED_PREVIEW_HYDRATION_LIMIT = 12/);
   assert.match(taskBoard, /taskBoardState\.pinned\.map/);
+  assert.match(taskBoard, /\.slice\(0, PINNED_PREVIEW_HYDRATION_LIMIT\)/);
   assert.match(taskBoard, /readSessionLastMessage\(session\)/);
   assert.match(taskBoard, /raw:\s*\{\s*\.\.\.\(session\.raw \?\? \{\}\),\s*lastMessage,/);
   assert.match(taskBoard, /setSessions\(await hydratePinnedSessionPreviews\(sessionResults\.flat\(\), nextTaskBoardState\)\)/);

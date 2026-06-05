@@ -663,7 +663,6 @@ export const enTexts: AppTexts = {
       statusPinned: "Pinned",
       pin: "Pin",
       unpin: "Unpin",
-      removeFromBoard: "Remove from board",
       openSession: "Open Session",
       pinToBoard: "Add to Task Board",
       pinSucceeded: "Added to Task Board.",

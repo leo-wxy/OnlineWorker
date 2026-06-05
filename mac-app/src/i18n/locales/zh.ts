@@ -662,7 +662,6 @@ export const zhTexts: AppTexts = {
       statusPinned: "关注中",
       pin: "关注",
       unpin: "取消关注",
-      removeFromBoard: "移出看板",
       openSession: "打开 Session",
       pinToBoard: "加入任务看板",
       pinSucceeded: "已加入任务看板。",

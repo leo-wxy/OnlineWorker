@@ -40,8 +40,9 @@ interface Props {
 const DEFAULT_TASK_BOARD_STATE: TaskBoardState = {
   version: 1,
   pinned: [],
-  hidden: [],
 };
+
+const PINNED_PREVIEW_HYDRATION_LIMIT = 12;
 
 interface TaskBoardActivityStreamEvent {
   kind: "snapshot" | "activity" | "error";
@@ -155,8 +156,26 @@ async function hydratePinnedSessionPreviews(
     return sessions;
   }
 
+  const pinnedUpdatedAtByKey = new Map(
+    taskBoardState.pinned.map((item) => [
+      taskSessionKey(item.providerId, item.sessionId),
+      item.updatedAtEpoch ?? 0,
+    ]),
+  );
+  const pinnedCandidates = sessions
+    .filter((session) => pinnedKeys.has(taskSessionKey(session.type, session.id)))
+    .sort((left, right) => {
+      const leftUpdatedAt = pinnedUpdatedAtByKey.get(taskSessionKey(left.type, left.id)) ?? 0;
+      const rightUpdatedAt = pinnedUpdatedAtByKey.get(taskSessionKey(right.type, right.id)) ?? 0;
+      return rightUpdatedAt - leftUpdatedAt;
+    })
+    .slice(0, PINNED_PREVIEW_HYDRATION_LIMIT);
+  const hydrationKeys = new Set(
+    pinnedCandidates.map((session) => taskSessionKey(session.type, session.id)),
+  );
+
   return Promise.all(sessions.map(async (session) => {
-    if (!pinnedKeys.has(taskSessionKey(session.type, session.id))) {
+    if (!hydrationKeys.has(taskSessionKey(session.type, session.id))) {
       return session;
     }
     try {
@@ -241,14 +260,12 @@ function TaskCard({
   nowMs,
   onOpen,
   onTogglePin,
-  onHide,
 }: {
   task: TaskBoardTask;
   tone: "needsAttention" | "running" | "pinned";
   nowMs: number;
   onOpen: (task: TaskBoardTask) => void;
   onTogglePin: (task: TaskBoardTask) => void;
-  onHide: (task: TaskBoardTask) => void;
 }) {
   const { t } = useI18n();
   const accent = taskAccent(task.providerId);
@@ -298,19 +315,6 @@ function TaskCard({
             {showPinText ? (
               <span className="text-[11px] font-semibold">{pinLabel}</span>
             ) : null}
-          </button>
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onHide(task);
-            }}
-            title={t.taskBoard.removeFromBoard}
-            className="grid h-7 w-7 place-items-center rounded-md border border-slate-200 bg-white/78 text-slate-500 transition-colors hover:text-slate-900"
-          >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 6l12 12M18 6L6 18" />
-            </svg>
           </button>
         </div>
       </div>
@@ -366,7 +370,6 @@ function BoardLane({
   nowMs,
   onOpen,
   onTogglePin,
-  onHide,
 }: {
   title: string;
   count: number;
@@ -376,7 +379,6 @@ function BoardLane({
   nowMs: number;
   onOpen: (task: TaskBoardTask) => void;
   onTogglePin: (task: TaskBoardTask) => void;
-  onHide: (task: TaskBoardTask) => void;
 }) {
   const toneClasses = laneTone(tone);
 
@@ -406,7 +408,6 @@ function BoardLane({
               nowMs={nowMs}
               onOpen={onOpen}
               onTogglePin={onTogglePin}
-              onHide={onHide}
             />
           ))
         )}
@@ -448,6 +449,16 @@ export function TaskBoard({ onOpenSession }: Props) {
           return [];
         })
         : null;
+      setProviders(nextProviders);
+      setDashboardState(nextDashboard);
+      setTaskBoardState(nextTaskBoardState);
+      if (nextSessionActivities !== null) {
+        setSessionActivities(nextSessionActivities);
+      }
+      setNowMs(Date.now());
+      setError(null);
+      setLoading(false);
+
       const visibleProviders = visibleSessionProviders(nextProviders) as ProviderMetadata[];
       const sessionResults = await Promise.all(
         visibleProviders.map(async (provider) => {
@@ -474,15 +485,8 @@ export function TaskBoard({ onOpenSession }: Props) {
         }),
       );
 
-      setProviders(nextProviders);
-      setDashboardState(nextDashboard);
-      setTaskBoardState(nextTaskBoardState);
-      if (nextSessionActivities !== null) {
-        setSessionActivities(nextSessionActivities);
-      }
       setSessions(await hydratePinnedSessionPreviews(sessionResults.flat(), nextTaskBoardState));
       setNowMs(Date.now());
-      setError(null);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -492,21 +496,25 @@ export function TaskBoard({ onOpenSession }: Props) {
   }, [t.sessions.workspaceFallback]);
 
   useEffect(() => {
-    void refresh({ includeActivities: false });
+    void refresh({ includeActivities: true });
   }, [refresh]);
 
   useEffect(() => {
     const channel = new Channel<TaskBoardActivityStreamEvent>();
+    let activeStreamId: number | null = null;
+    let disposed = false;
     channel.onmessage = (event) => {
       if (event.kind === "snapshot") {
         setSessionActivities(event.activities ?? []);
         setNowMs(Date.now());
+        setLoading(false);
         return;
       }
       if (event.kind === "activity" && event.activity) {
         const activity = event.activity;
         setSessionActivities((current) => upsertSessionActivity(current, activity));
         setNowMs(Date.now());
+        setLoading(false);
         return;
       }
       if (event.kind === "error" && event.error) {
@@ -514,12 +522,26 @@ export function TaskBoard({ onOpenSession }: Props) {
       }
     };
 
-    void invoke("start_task_board_activity_stream", { channel }).catch((streamError) => {
-      console.warn("Failed to start task board activity stream", streamError);
-    });
+    void invoke<number>("start_task_board_activity_stream", { channel })
+      .then((streamId) => {
+        if (disposed) {
+          void invoke("stop_task_board_activity_stream", { streamId }).catch((streamError) => {
+            console.warn("Failed to stop task board activity stream", streamError);
+          });
+          return;
+        }
+        activeStreamId = streamId;
+      })
+      .catch((streamError) => {
+        console.warn("Failed to start task board activity stream", streamError);
+      });
 
     return () => {
-      void invoke("stop_task_board_activity_stream").catch((streamError) => {
+      disposed = true;
+      if (activeStreamId === null) {
+        return;
+      }
+      void invoke("stop_task_board_activity_stream", { streamId: activeStreamId }).catch((streamError) => {
         console.warn("Failed to stop task board activity stream", streamError);
       });
     };
@@ -531,7 +553,7 @@ export function TaskBoard({ onOpenSession }: Props) {
   }, []);
 
   const updateTaskBoardState = useCallback(async (
-    command: "pin_task_board_session" | "unpin_task_board_session" | "hide_task_board_session",
+    command: "pin_task_board_session" | "unpin_task_board_session",
     task: TaskBoardTask,
   ) => {
     try {
@@ -551,10 +573,6 @@ export function TaskBoard({ onOpenSession }: Props) {
       task.pinned ? "unpin_task_board_session" : "pin_task_board_session",
       task,
     );
-  }, [updateTaskBoardState]);
-
-  const handleHide = useCallback((task: TaskBoardTask) => {
-    void updateTaskBoardState("hide_task_board_session", task);
   }, [updateTaskBoardState]);
 
   const handleOpen = useCallback((task: TaskBoardTask) => {
@@ -647,7 +665,6 @@ export function TaskBoard({ onOpenSession }: Props) {
               nowMs={nowMs}
               onOpen={handleOpen}
               onTogglePin={handleTogglePin}
-              onHide={handleHide}
             />
             <BoardLane
               title={t.taskBoard.runningColumn}
@@ -658,7 +675,6 @@ export function TaskBoard({ onOpenSession }: Props) {
               nowMs={nowMs}
               onOpen={handleOpen}
               onTogglePin={handleTogglePin}
-              onHide={handleHide}
             />
             <BoardLane
               title={t.taskBoard.pinnedColumn}
@@ -669,7 +685,6 @@ export function TaskBoard({ onOpenSession }: Props) {
               nowMs={nowMs}
               onOpen={handleOpen}
               onTogglePin={handleTogglePin}
-              onHide={handleHide}
             />
           </div>
         </div>

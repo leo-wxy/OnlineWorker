@@ -111,6 +111,15 @@ function activityPreview(activity) {
   return lastFinalMessage || lastAssistantMessage || attentionReason || lastUserMessage || null;
 }
 
+function activityPreviewFallback(activity, title) {
+  const sessionId = normalizedString(activity.sessionId);
+  const text = previewText(activity.lastUserMessage) || previewText(activity.title) || previewText(title);
+  if (!text || isPlaceholderTitle(text, sessionId)) {
+    return null;
+  }
+  return text;
+}
+
 function normalizedString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -252,7 +261,6 @@ export function buildTaskBoardModel({
   const activeWorkspacePath = recentActivity?.activeWorkspacePath?.trim() || null;
   const generatedAtEpochMs = normalizeTimestamp(dashboardState?.generatedAtEpoch) ?? nowEpochMs;
   const pinnedKeys = sessionRefSet(taskBoardState?.pinned);
-  const hiddenKeys = sessionRefSet(taskBoardState?.hidden);
   const sessionsByKey = new Map(
     sessions.map((session) => [taskBoardKey(session.type, session.id), session]),
   );
@@ -276,7 +284,10 @@ export function buildTaskBoardModel({
         : pinned
           ? "关注中"
           : "";
-    const preview = normalizedString(activityPreview(activity)) || sessionPreview(session) || null;
+    const preview =
+      normalizedString(activityPreview(activity)) ||
+      sessionPreview(session) ||
+      activityPreviewFallback({ ...activity, sessionId }, title);
 
     return [{
       id: key,
@@ -292,7 +303,6 @@ export function buildTaskBoardModel({
       needsAttention,
       running,
       pinned,
-      hidden: hiddenKeys.has(key),
       statusReason: activityStatusReason(activity, fallbackReason),
       recentEvent: normalizedString(activity.lastEventKind) || null,
       updatedAtEpochMs: normalizeTimestamp(activity.updatedAt),
@@ -341,7 +351,6 @@ export function buildTaskBoardModel({
       needsAttention,
       running,
       pinned,
-      hidden: hiddenKeys.has(key),
       statusReason: needsAttention ? fallbackReason : "",
       recentEvent: isActive ? "active_session" : readRecentEvent(raw),
       updatedAtEpochMs: isActive ? Math.max(updatedAtEpochMs ?? 0, generatedAtEpochMs) : updatedAtEpochMs,
@@ -367,7 +376,6 @@ export function buildTaskBoardModel({
       needsAttention: false,
       running: true,
       pinned: pinnedKeys.has(key),
-      hidden: hiddenKeys.has(key),
       statusReason: "正在执行",
       recentEvent: "active_session",
       updatedAtEpochMs: generatedAtEpochMs,
@@ -381,7 +389,7 @@ export function buildTaskBoardModel({
     if (task.needsAttention || task.running) {
       return true;
     }
-    return task.pinned && !task.hidden;
+    return task.pinned;
   });
 
   const needsAttentionTasks = boardTasks

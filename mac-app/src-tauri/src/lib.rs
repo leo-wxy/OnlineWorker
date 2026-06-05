@@ -37,7 +37,7 @@ use commands::provider_sessions::{
 };
 use commands::provider_usage::get_provider_usage_summary;
 use commands::task_board_state::{
-    get_task_board_session_activities, get_task_board_state, hide_task_board_session,
+    get_task_board_session_activities, get_task_board_state,
     pin_task_board_session, start_task_board_activity_stream, stop_task_board_activity_stream,
     unpin_task_board_session,
 };
@@ -303,7 +303,6 @@ pub fn run() {
             start_task_board_activity_stream,
             stop_task_board_activity_stream,
             unpin_task_board_session,
-            hide_task_board_session,
             test_bot_token,
             test_group_access,
             test_bot_permissions,

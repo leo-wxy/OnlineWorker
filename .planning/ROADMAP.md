@@ -20,7 +20,8 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 11: Telegram Topic SQLite Storage Migration** - Make Telegram topics independent durable records in a single SQLite table, migrate existing JSON topic ids once, and route all topic lookups through SQLite so runtime JSON saves cannot erase topic bindings. Full regression, Dashboard Telegram polling visibility, packaged build, and installed-app verification are complete.
 - [x] **Phase 12: Codex Managed App-Server Approval Host** - Follow the Paseo/Happy/Codex IDE host-client model: OnlineWorker-managed Codex sessions own the app-server request/response channel, Telegram is the remote approval UI for those sessions, and existing Desktop/VS Code/ordinary CLI sessions stay native and mirror-only. 12-02 implements `unix://` support and the installed fixed OnlineWorker Unix remote proxy; fixed-session shared CLI + TG authorization convergence has been user-accepted through `codex_remote_proxy.sock`.
 - [x] **Phase 13: Claude Provider Auth Runtime Hardening** - Replace the current fragile Claude runtime/auth fallback with an explicit, durable provider readiness contract. Telegram/provider sends now fail fast with visible diagnostics when Claude auth is unavailable, Dashboard/status paths surface the same reason before user traffic, active-process environment scanning is removed from the normal readiness path, and Claude can opt into user-configured multi-launch-method readiness through a generic Settings UI shown for providers that declare `capabilities.launch_methods`. Source verification, fast packaged build/install/restart verification, installed Raven launch-method readiness, owner-bridge healthy status, and user UAT are complete.
-- [ ] **Phase 14: Unified Message Event Bus** - Establish a single OnlineWorker message/event bus so Telegram, App sessions, TaskBoard, notifications, approvals, questions, and future surfaces consume the same normalized event stream instead of each owning separate message-handling logic. 14-01 is source verified; packaged-app verification has not been run.
+- [ ] **Phase 14: Unified Message Event Bus** - Establish a single OnlineWorker message/event bus so Telegram, App sessions, TaskBoard, notifications, approvals, questions, and future surfaces consume the same normalized event stream instead of each owning separate message-handling logic. 14-01 through 14-04 are source verified; fast packaged build/install/restart verification passed after the 14-04 TaskBoard first-paint fix.
+- [ ] **Phase 15: Bus-Driven Rendering And Approval Command Boundary** - Follow up Phase 14 by migrating heavy first-party renderers onto the bus once the event schema is stable: App Session detail live updates and Telegram send/edit/topic rendering become bus-driven consumers, and approval/question events are re-evaluated for a command boundary instead of remaining observational only.
 
 ## Phase Details
 
@@ -206,7 +207,7 @@ Remaining Phase 9 verification:
 **Goal:** Reduce structural debt across the app by splitting oversized classes/modules, moving misplaced responsibilities behind existing boundaries, and making future provider/plugin/UI changes easier to reason about without changing user-facing behavior.
 **Requirements**: TBD
 **Depends on:** Phase 9
-**Plans:** 4 plans
+**Plans:** 2 plans
 
 Initial focus areas:
 - Identify oversized or high-churn classes/modules in Python bot/runtime code, Tauri command/state code, and frontend app shell/components.
@@ -308,7 +309,7 @@ Latest verification:
 **Requirements**: TBD
 **Depends on:** Phase 7 provider message gateway and Codex app-server integration boundaries
 **Scope Fence:** 12-01 code changes are limited to `plugins/providers/builtin/codex/`. 12-02 explicitly revises scope to include `config.py` because unix transport parsing is outside the Codex plugin. Shared core approval abstractions, non-Codex providers, Mac app UI, notification plugins, and packaging scripts remain out of scope unless the phase plan is explicitly revised.
-**Plans:** 2 plans
+**Plans:** 4 plans
 
 Plans:
 - [x] 12-01: Build OnlineWorker-managed Codex app-server approval host
@@ -495,11 +496,11 @@ Final Phase 13 packaged and user verification:
 
 ### Phase 14: Unified Message Event Bus
 
-**Goal:** Route all OnlineWorker message and lifecycle activity through one normalized event bus, then let Telegram, App session views, TaskBoard, notification plugins, approvals, questions, and future integrations subscribe to or project from that shared stream. Message entry points can remain different, but once inside OnlineWorker they must publish a canonical event before any surface-specific handling.
+**Goal:** Route all OnlineWorker message and lifecycle activity through one normalized in-process event bus, then let first-party consumers and projections use that shared stream. Message entry points can remain different, but once inside OnlineWorker they must publish a canonical event before any surface-specific handling.
 **Requirements**: TBD
 **Depends on:** Phase 6 notification channel abstraction, Phase 7 user message gateway, Phase 10 structure rails, Phase 11 route stability, Phase 12 Codex app-server host, Phase 13 provider readiness contract
-**Scope Fence:** This phase establishes the message/event bus boundary and migrates the first consumers behind it. It must not rewrite provider adapter protocols, replace Telegram polling, change Codex approval ownership semantics, or change notification plugin configuration unless the plan explicitly revises scope.
-**Plans:** 1 plan
+**Scope Fence:** This phase establishes the internal message/event bus boundary and migrates the first lightweight consumers behind it. It must not rewrite provider adapter protocols, expose a stable public plugin event API, add a persistent event audit/replay log, migrate App Session detail live rendering, migrate Telegram send/edit/topic rendering, change Codex approval ownership semantics, or change notification plugin configuration unless the plan explicitly revises scope. Ordinary runtime logs remain allowed; only per-event persistent audit logging is excluded.
+**Plans:** 4 plans
 
 Plans:
 - [x] 14-01: Establish unified message event bus and first projections
@@ -509,26 +510,46 @@ Plans:
   - [x] Add a session activity projection that TaskBoard and App-visible status can read.
   - [x] Move notification delivery activity toward the bus by publishing requested/emitted/skipped/failed events.
   - [x] Keep existing Telegram/App delivery behavior compatible while proving both surfaces derive from the same event stream.
-  - [ ] Fully migrate notification summary generation to consume only canonical final/turn events instead of the legacy completion helper path.
+  - [x] Fully migrate notification summary generation to consume only canonical final/turn events instead of the legacy completion helper path.
+- [x] 14-02: Harden TaskBoard activity stream follow-ups
+  - [x] Close the TaskBoard activity stream snapshot/subscribe race.
+  - [x] Make stream stop target a concrete stream instance.
+  - [x] Bound pinned idle preview hydration.
+  - [x] Record verified follow-up scope in Phase 14 docs.
+- [x] 14-03: Close consumer boundary cleanup
+  - [x] Move completed notification summary local/AI fallback logic under the bus consumer boundary.
+  - [x] Remove old completed-summary helper names and file boundary.
+  - [x] Remove TaskBoard hidden/remove-from-board state, command, UI action, types, tests, and i18n.
+  - [x] Record focused source verification in Phase 14 docs.
+- [x] 14-04: Fix TaskBoard running activity first paint
+  - [x] Include session activity projection in the initial TaskBoard refresh.
+  - [x] Render activity projection before full provider session metadata hydration completes.
+  - [x] Clear loading on activity stream snapshot/activity events.
+  - [x] Add running-card preview fallback from user intent, activity title, or resolved title.
+  - [x] Record focused source verification in Phase 14 docs.
 
 Success Criteria (what must be TRUE):
   1. All provider-bound user sends publish one canonical user-message event after the Phase 7 user message gateway has produced the final text.
   2. Provider runtime events such as turn started, assistant delta, final reply, approval requested, question requested, turn completed, and turn failed are normalized into canonical bus events.
-  3. Telegram delivery, App session display, TaskBoard cards, and notification routing can be explained as consumers or projections of the same bus event stream.
-  4. Notification summary is not a separate hidden task-completion pipeline; it consumes the same final-reply/turn-completed events used by other surfaces.
+  3. Telegram and App session send/lifecycle activity publish to the bus while their heavy rendering surfaces remain behavior-compatible.
+  4. Notification summary is not a separate hidden task-completion pipeline; it consumes the same final-reply/turn-completed events used by other surfaces and old helper boundaries are removed.
   5. TaskBoard cards show useful session/activity information, including provider, workspace, session id, status, recent user/final message summary, and attention reason from the projection.
   6. Approval and question handling keep the same source-of-truth ownership rules from Phase 12 and do not fall back to provider-global topics.
   7. Existing Telegram topic routing from Phase 11 remains the routing source for Telegram consumers.
   8. Existing provider-specific adapters remain behind the provider registry; the bus carries normalized OnlineWorker events, not private provider payloads as the public contract.
   9. The bus has deterministic tests for ordering, dedupe, projection updates, consumer failure isolation, and redaction of sensitive fields.
-  10. Migration is incremental: old per-surface logic may remain temporarily, but new message/notification/card behavior must use the bus boundary.
+  10. Migration is incremental: heavy App Session and Telegram rendering migrations are explicitly deferred to Phase 15, not left as implicit Phase 14 scope.
+  11. Approval/question bus events are observational lifecycle events in Phase 14; they do not execute commands or grant authorization authority.
+  12. Running TaskBoard activities render from the activity projection immediately and do not disappear while slower session metadata hydration is still in progress.
 
 Design reference for future development:
 - Inputs: Telegram text/files, App session composer sends, owner-bridge sends, provider-session bridge sends, provider app-server events, CLI/proxy mirrored events, approval callbacks, question answers, and notification requests.
 - Canonical event groups: `message.user.submitted`, `message.user.accepted`, `message.assistant.delta`, `message.assistant.final`, `turn.started`, `turn.completed`, `turn.failed`, `approval.requested`, `approval.answered`, `question.requested`, `question.answered`, `notification.requested`, `notification.emitted`.
-- Consumers/projections: Telegram renderer, App session stream, TaskBoard/session activity projection, notification router, status/dashboard projection, audit/debug logs, and future IM/plugin channels.
+- Consumers/projections: TaskBoard/session activity projection, notification router and summary consumer, status/dashboard projection, bounded in-memory debug reads, and future App/TG/IM/plugin consumers.
 - Durable identity: every event should carry provider id, workspace id/path when available, session/thread id, turn id when available, source surface, event id, created time, dedupe key, and redacted public payload.
 - Surface-specific payloads belong at the consumer edge. The bus should not expose Telegram message ids, parse-mode decisions, or provider-private raw payloads as its stable public contract.
+- Phase 14 does not persist every event as a structured audit/replay log. Existing runtime logging remains available for warnings, failures, and key diagnostics.
+- Phase 14 does not publish a stable third-party plugin event API. Future plugin/IM consumers should use a later, versioned adapter boundary after first-party consumers stabilize the schema.
 
 Fast verification path:
 - Python bus/session-event tests:
@@ -543,4 +564,34 @@ Fast verification path:
 Planning status:
 - Phase 14 was added on 2026-06-04 after the user identified the root architecture problem: notifications, Telegram sends, App session display, and TaskBoard cards should not each own separate message-handling logic. They should all consume one OnlineWorker message event bus.
 - 14-01 source verification passed on 2026-06-04. The first slice adds `core/messages/`, publishes TG/session-tab/provider/approval/question/notification activity into the bus, exposes session activity projection to TaskBoard, and keeps existing delivery behavior compatible.
-- Packaged app build/install/restart verification has not been run for Phase 14 because it requires explicit current-conversation approval.
+- 14-02 source verification passed on 2026-06-05. TaskBoard activity streaming is race-hardened, stream stop is keyed by stream id, and pinned preview hydration is bounded.
+- 14-03 source verification passed on 2026-06-05. Completed notification summary fallback logic now lives under the bus consumer boundary, old completed-summary helper names were removed, and TaskBoard hidden/remove-from-board state/action were removed.
+- 14-04 source verification passed on 2026-06-05. TaskBoard initial refresh now includes activity projection, stream events clear loading, and running cards use activity/user/title preview fallback so active sessions do not render as empty lanes or blank cards while metadata hydration is still in progress.
+- Product decisions from the 2026-06-05 Phase 14 review: App Session detail live rendering and Telegram rendering remain follow-up work; approval/question bus events remain observational in Phase 14; persistent event audit logs and public plugin event APIs are excluded from Phase 14; TaskBoard uses pin/unpin only.
+- Fast packaged build/install/restart verification passed on 2026-06-05 after the 14-04 UI follow-up. `verify-packaged-fast.sh` rebuilt `OnlineWorker_1.5.0_aarch64.dmg` with sha256 `42708ebfcea5c4b0df4d22128d90a93c6c94680ac0cbcd45ed661a535fce463c`, installed `/Applications/OnlineWorker.app`, launched app/bot processes, and verified bundled `codemaker` provider plus `popo` notification plugins.
+
+### Phase 15: Bus-Driven Rendering And Approval Command Boundary
+
+**Goal:** Continue the Phase 14 migration after the internal bus and first consumers stabilize. App Session detail live updates and Telegram send/edit/topic rendering should become bus-driven first-party consumers, and approval/question lifecycle events should be evaluated for a safe command boundary without violating Phase 12 approval ownership.
+**Requirements**: TBD
+**Depends on:** Phase 14 Unified Message Event Bus, Phase 11 Telegram route storage, Phase 12 Codex managed app-server approval host
+**Scope Fence:** This phase migrates heavy first-party rendering surfaces and designs the approval/question command boundary. It should not add a third-party plugin API, external broker, persistent event audit log, or change Codex approval source-of-truth semantics without a dedicated plan.
+**Plans:** 1 planned
+
+Plans:
+- [ ] 15-01: Migrate heavy bus consumers and define command boundary
+  - [ ] Migrate App Session detail live rendering from provider-specific session stream/polling behavior toward canonical bus events while preserving history merge, streaming delta/final behavior, scroll ergonomics, and error states.
+  - [ ] Migrate Telegram send/edit/topic rendering toward a bus-derived edge consumer while preserving Phase 11 route fail-closed behavior and Phase 12 Codex approval ownership.
+  - [ ] Decide whether approval/question remains event-only or gains an explicit command boundary. If command handling is added, keep commands separate from immutable lifecycle events.
+  - [ ] Add regression coverage for App live rendering, Telegram streaming/topic routing, approval/question authority, and duplicate/dedupe behavior.
+
+Success Criteria (what must be TRUE):
+  1. App Session detail view can render live user/assistant/turn state from bus-derived events without regressing existing provider session history behavior.
+  2. Telegram rendering/editing/topic routing is explained as a bus-derived edge consumer while retaining all Phase 11 route storage guardrails.
+  3. Approval/question handling has a clear command/event split. Events describe what happened; commands execute only through authorized owner/callback/app-server paths.
+  4. Codex app-server approval source-of-truth from Phase 12 remains intact. OnlineWorker does not invent approval authority from a bus event.
+  5. Source verification covers App live rendering, Telegram streaming/final replies, approval/question callbacks, and notification/event bus regressions.
+
+Planning status:
+- Phase 15 was added on 2026-06-05 during Phase 14 design review so deferred migration tasks would not be lost.
+- Phase 15 explicitly carries App Session detail live rendering migration, Telegram rendering migration, and the approval/question command boundary review that Phase 14 intentionally leaves out.

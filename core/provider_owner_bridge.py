@@ -507,46 +507,55 @@ class ProviderOwnerBridge:
 
         write_lock = asyncio.Lock()
         pending: set[asyncio.Task] = set()
+        queued_payloads: list[dict] = []
+        snapshot_sent = False
 
         async def send_payload(payload: dict) -> None:
             async with write_lock:
                 writer.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
                 await writer.drain()
 
-        await send_payload(
-            {
-                "ok": True,
-                "kind": "snapshot",
-                "activities": bus.session_activities()[:limit],
-            }
-        )
-
         loop = asyncio.get_running_loop()
 
+        def schedule_payload(payload: dict) -> None:
+            task = loop.create_task(send_payload(payload))
+            pending.add(task)
+            task.add_done_callback(pending.discard)
+
         def on_event(event) -> None:
+            nonlocal snapshot_sent
             if not getattr(event, "provider_id", "") or not getattr(event, "session_id", ""):
                 return
             activity = bus.session_activity(event.provider_id, event.session_id)
             if activity is None:
                 return
-            task = loop.create_task(
-                send_payload(
-                    {
-                        "ok": True,
-                        "kind": "activity",
-                        "activity": activity,
-                        "event": {
-                            "kind": event.kind,
-                            "eventId": event.event_id,
-                        },
-                    }
-                )
-            )
-            pending.add(task)
-            task.add_done_callback(pending.discard)
+            payload = {
+                "ok": True,
+                "kind": "activity",
+                "activity": activity,
+                "event": {
+                    "kind": event.kind,
+                    "eventId": event.event_id,
+                },
+            }
+            if not snapshot_sent:
+                queued_payloads.append(payload)
+                return
+            schedule_payload(payload)
 
         unsubscribe = bus.subscribe(on_event)
         try:
+            await send_payload(
+                {
+                    "ok": True,
+                    "kind": "snapshot",
+                    "activities": bus.session_activities()[:limit],
+                }
+            )
+            snapshot_sent = True
+            for payload in queued_payloads:
+                schedule_payload(payload)
+            queued_payloads.clear()
             await reader.read()
         finally:
             unsubscribe()

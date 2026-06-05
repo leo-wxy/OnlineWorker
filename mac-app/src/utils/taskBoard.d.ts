@@ -10,7 +10,6 @@ export interface TaskBoardSessionRef {
 export interface TaskBoardState {
   version: number;
   pinned: TaskBoardSessionRef[];
-  hidden: TaskBoardSessionRef[];
 }
 
 export interface TaskBoardSessionActivity {
@@ -40,7 +39,6 @@ export interface TaskBoardTask {
   needsAttention: boolean;
   running: boolean;
   pinned: boolean;
-  hidden: boolean;
   statusReason: string;
   recentEvent: string | null;
   updatedAtEpochMs: number | null;

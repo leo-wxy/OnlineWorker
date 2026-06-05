@@ -71,7 +71,6 @@ test("buildTaskBoardModel separates archived sessions", () => {
         { providerId: "codex", sessionId: "thread-a", updatedAtEpoch: nowEpochMs },
         { providerId: "codex", sessionId: "thread-archived", updatedAtEpoch: nowEpochMs },
       ],
-      hidden: [],
     },
     dashboardState: null,
     nowEpochMs,
@@ -102,7 +101,6 @@ test("buildTaskBoardModel shows latest message for pinned idle sessions", () => 
       pinned: [
         { providerId: "codex", sessionId: "thread-a", updatedAtEpoch: nowEpochMs },
       ],
-      hidden: [],
     },
     dashboardState: null,
     nowEpochMs,
@@ -131,7 +129,6 @@ test("buildTaskBoardModel keeps title text visible as pinned preview fallback", 
       pinned: [
         { providerId: "codex", sessionId: "thread-a", updatedAtEpoch: nowEpochMs },
       ],
-      hidden: [],
     },
     dashboardState: null,
     nowEpochMs,
@@ -202,7 +199,7 @@ test("buildTaskBoardModel renders session title above activity summary", () => {
   assert.equal(board.needsAttention[0].recentEvent, "approval.requested");
 });
 
-test("buildTaskBoardModel leaves running preview empty without message content", () => {
+test("buildTaskBoardModel uses activity title as running preview fallback without message content", () => {
   const board = buildTaskBoardModel({
     sessions: [],
     sessionActivities: [
@@ -227,7 +224,7 @@ test("buildTaskBoardModel leaves running preview empty without message content",
   });
 
   assert.equal(board.running[0].title, "切换 codex/phase-14-message-event-bus 这个分支");
-  assert.equal(board.running[0].preview, null);
+  assert.equal(board.running[0].preview, "切换 codex/phase-14-message-event-bus 这个分支");
   assert.equal(board.running[0].statusReason, "");
 });
 

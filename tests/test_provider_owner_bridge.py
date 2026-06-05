@@ -138,6 +138,80 @@ async def test_provider_owner_bridge_streams_session_activity_from_message_bus(t
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_activity_stream_does_not_drop_startup_event(tmp_path):
+    import asyncio
+
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(storage=AppStorage())
+    state.message_bus = MessageEventBus()
+    state.message_bus.publish(
+        create_message_event(
+            "message.user.accepted",
+            provider_id="codex",
+            workspace_id="codex:/tmp/project",
+            workspace_path="/tmp/project",
+            session_id="thread-a",
+            payload={"text": "initial task"},
+            created_at=10,
+        )
+    )
+    original_session_activities = state.message_bus.session_activities
+    startup_event_sent = False
+
+    def session_activities_with_startup_publish():
+        nonlocal startup_event_sent
+        activities = original_session_activities()
+        if not startup_event_sent:
+            startup_event_sent = True
+            state.message_bus.publish(
+                create_message_event(
+                    "message.assistant.delta",
+                    provider_id="codex",
+                    workspace_id="codex:/tmp/project",
+                    workspace_path="/tmp/project",
+                    session_id="thread-a",
+                    payload={"delta": "startup assistant text"},
+                    created_at=20,
+                )
+            )
+        return activities
+
+    state.message_bus.session_activities = session_activities_with_startup_publish
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+
+    socket_path = f"/tmp/ow-bridge-startup-{os.getpid()}.sock"
+    try:
+        os.remove(socket_path)
+    except FileNotFoundError:
+        pass
+    server = await asyncio.start_unix_server(bridge._handle_client, path=socket_path)
+    try:
+        reader, writer = await asyncio.open_unix_connection(socket_path)
+        writer.write(b'{"type":"session_activity_stream","limit":20}\n')
+        await writer.drain()
+
+        snapshot = json.loads((await reader.readline()).decode("utf-8"))
+        assert snapshot["kind"] == "snapshot"
+        assert snapshot["activities"][0]["lastUserMessage"] == "initial task"
+
+        update = json.loads((await reader.readline()).decode("utf-8"))
+        assert update["kind"] == "activity"
+        assert update["activity"]["lastAssistantMessage"] == "startup assistant text"
+        assert update["event"]["kind"] == "message.assistant.delta"
+
+        writer.close()
+        await writer.wait_closed()
+    finally:
+        server.close()
+        await server.wait_closed()
+        try:
+            os.remove(socket_path)
+        except FileNotFoundError:
+            pass
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_uses_registry_message_hooks(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 

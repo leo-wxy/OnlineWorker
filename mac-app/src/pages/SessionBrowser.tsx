@@ -50,7 +50,6 @@ interface Props {
 const DEFAULT_TASK_BOARD_STATE: TaskBoardState = {
   version: 1,
   pinned: [],
-  hidden: [],
 };
 
 function sessionTaskBoardKey(session: UnifiedSession) {

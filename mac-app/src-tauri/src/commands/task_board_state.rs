@@ -11,7 +11,8 @@ use super::config::ensure_data_dir;
 use super::provider_bridge_common::provider_owner_bridge_socket_path;
 
 const TASK_BOARD_STATE_FILE: &str = "task_board_state.json";
-static TASK_BOARD_ACTIVITY_STREAM_GENERATION: AtomicU64 = AtomicU64::new(0);
+static TASK_BOARD_ACTIVITY_STREAM_NEXT_ID: AtomicU64 = AtomicU64::new(0);
+static TASK_BOARD_ACTIVITY_STREAM_ACTIVE_ID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -26,7 +27,6 @@ pub struct TaskBoardSessionRef {
 pub struct TaskBoardState {
     pub version: u32,
     pub pinned: Vec<TaskBoardSessionRef>,
-    pub hidden: Vec<TaskBoardSessionRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -86,7 +86,6 @@ impl Default for TaskBoardState {
         Self {
             version: 1,
             pinned: Vec::new(),
-            hidden: Vec::new(),
         }
     }
 }
@@ -213,8 +212,23 @@ pub async fn get_task_board_session_activities() -> Result<Vec<TaskBoardSessionA
     }
 }
 
-fn task_board_activity_stream_generation() -> &'static AtomicU64 {
-    &TASK_BOARD_ACTIVITY_STREAM_GENERATION
+fn begin_task_board_activity_stream() -> u64 {
+    let stream_id = TASK_BOARD_ACTIVITY_STREAM_NEXT_ID.fetch_add(1, Ordering::SeqCst) + 1;
+    TASK_BOARD_ACTIVITY_STREAM_ACTIVE_ID.store(stream_id, Ordering::SeqCst);
+    stream_id
+}
+
+fn task_board_activity_stream_is_active(stream_id: u64) -> bool {
+    TASK_BOARD_ACTIVITY_STREAM_ACTIVE_ID.load(Ordering::SeqCst) == stream_id
+}
+
+fn stop_task_board_activity_stream_id(stream_id: u64) {
+    let _ = TASK_BOARD_ACTIVITY_STREAM_ACTIVE_ID.compare_exchange(
+        stream_id,
+        0,
+        Ordering::SeqCst,
+        Ordering::SeqCst,
+    );
 }
 
 fn parse_task_board_activity_stream_event(line: &str) -> Option<TaskBoardActivityStreamEvent> {
@@ -248,15 +262,14 @@ fn parse_task_board_activity_stream_event(line: &str) -> Option<TaskBoardActivit
 #[tauri::command]
 pub async fn start_task_board_activity_stream(
     channel: Channel<TaskBoardActivityStreamEvent>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let data_dir = ensure_data_dir()?;
     let socket_path = provider_owner_bridge_socket_path(&data_dir);
-    let generation = task_board_activity_stream_generation();
-    let my_generation = generation.fetch_add(1, Ordering::SeqCst) + 1;
+    let stream_id = begin_task_board_activity_stream();
 
     tauri::async_runtime::spawn_blocking(move || {
         let reconnect_delay = Duration::from_millis(500);
-        while generation.load(Ordering::SeqCst) == my_generation {
+        while task_board_activity_stream_is_active(stream_id) {
             if !socket_path.exists() {
                 let _ = channel.send(TaskBoardActivityStreamEvent {
                     kind: "error".to_string(),
@@ -304,7 +317,7 @@ pub async fn start_task_board_activity_stream(
             }
 
             let mut reader = BufReader::new(socket);
-            while generation.load(Ordering::SeqCst) == my_generation {
+            while task_board_activity_stream_is_active(stream_id) {
                 let mut line = String::new();
                 match reader.read_line(&mut line) {
                     Ok(0) => break,
@@ -335,18 +348,18 @@ pub async fn start_task_board_activity_stream(
                 }
             }
 
-            if generation.load(Ordering::SeqCst) == my_generation {
+            if task_board_activity_stream_is_active(stream_id) {
                 std::thread::sleep(reconnect_delay);
             }
         }
     });
 
-    Ok(())
+    Ok(stream_id)
 }
 
 #[tauri::command]
-pub async fn stop_task_board_activity_stream() -> Result<(), String> {
-    task_board_activity_stream_generation().fetch_add(1, Ordering::SeqCst);
+pub async fn stop_task_board_activity_stream(stream_id: u64) -> Result<(), String> {
+    stop_task_board_activity_stream_id(stream_id);
     Ok(())
 }
 
@@ -357,7 +370,6 @@ pub async fn pin_task_board_session(
 ) -> Result<TaskBoardState, String> {
     let (provider_id, session_id) = normalize_ref(&provider_id, &session_id)?;
     mutate_task_board_state(|state| {
-        remove_session_ref(&mut state.hidden, &provider_id, &session_id);
         upsert_session_ref(&mut state.pinned, &provider_id, &session_id);
     })
 }
@@ -370,18 +382,6 @@ pub async fn unpin_task_board_session(
     let (provider_id, session_id) = normalize_ref(&provider_id, &session_id)?;
     mutate_task_board_state(|state| {
         remove_session_ref(&mut state.pinned, &provider_id, &session_id);
-    })
-}
-
-#[tauri::command]
-pub async fn hide_task_board_session(
-    provider_id: String,
-    session_id: String,
-) -> Result<TaskBoardState, String> {
-    let (provider_id, session_id) = normalize_ref(&provider_id, &session_id)?;
-    mutate_task_board_state(|state| {
-        remove_session_ref(&mut state.pinned, &provider_id, &session_id);
-        upsert_session_ref(&mut state.hidden, &provider_id, &session_id);
     })
 }
 
@@ -400,13 +400,10 @@ mod tests {
     }
 
     #[test]
-    fn pinning_removes_hidden_entry() {
+    fn pinning_adds_session_ref() {
         let mut state = TaskBoardState::default();
-        upsert_session_ref(&mut state.hidden, "codex", "thread-a");
-        remove_session_ref(&mut state.hidden, "codex", "thread-a");
         upsert_session_ref(&mut state.pinned, "codex", "thread-a");
 
-        assert!(state.hidden.is_empty());
         assert_eq!(state.pinned.len(), 1);
         assert_eq!(state.pinned[0].provider_id, "codex");
         assert_eq!(state.pinned[0].session_id, "thread-a");
@@ -436,5 +433,21 @@ mod tests {
             event.activity.expect("activity").last_assistant_message,
             "working"
         );
+    }
+
+    #[test]
+    fn stale_task_board_activity_stream_stop_does_not_stop_new_stream() {
+        let first_stream_id = begin_task_board_activity_stream();
+        assert!(task_board_activity_stream_is_active(first_stream_id));
+
+        let second_stream_id = begin_task_board_activity_stream();
+        assert!(!task_board_activity_stream_is_active(first_stream_id));
+        assert!(task_board_activity_stream_is_active(second_stream_id));
+
+        stop_task_board_activity_stream_id(first_stream_id);
+        assert!(task_board_activity_stream_is_active(second_stream_id));
+
+        stop_task_board_activity_stream_id(second_stream_id);
+        assert!(!task_board_activity_stream_is_active(second_stream_id));
     }
 }
