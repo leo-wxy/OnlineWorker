@@ -631,4 +631,4 @@ Planning status:
 - The reference decision is explicit: Claude references CodeIsland's global Claude hook pattern; Codemaker references OpenCode-compatible hook/listener behavior; OpenCode itself is not an implementation target.
 - The modification scope is explicit: implementation code should stay in provider plugin directories, with planning docs and focused tests as the expected non-plugin changes.
 - 16-01 planning docs were committed on branch `codex/phase-16-provider-event-ingress`.
-- 16-02 starts with Claude plugin external hook ingress before Codemaker listener work.
+- 16-02 still names the unfinished Claude hook-ingress item, but the current Phase 16 branch already contains a separate Codemaker source slice under `codemaker/` with focused approval/question/bus tests. Claude hook ingress remains the next unfinished source item.
