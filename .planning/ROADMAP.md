@@ -603,14 +603,19 @@ Planning status:
 **Requirements**: TBD
 **Depends on:** Phase 14 Unified Message Event Bus, Claude provider plugin, Codemaker provider plugin
 **Scope Fence:** Phase 16 is plugin-scoped. Claude plugin owns Claude hook lifecycle and payload mapping. Codemaker plugin owns Codemaker external listener lifecycle and payload mapping, using OpenCode-compatible hook/listener behavior only as a reference. OpenCode is not implemented as a provider. Core/message bus only receives normalized events; TaskBoard only consumes bus projection.
-**Plans:** 1 planned
+**Plans:** 2 planned
 
 Plans:
-- [ ] 16-01: Define plugin-scoped external event ingress
+- [x] 16-01: Define plugin-scoped external event ingress
   - [x] Create Phase 16 context with trigger, reference code, and strict core/plugin boundary.
   - [x] Create Phase 16 plan covering Claude plugin ingress, Codemaker plugin ingress, source validation, and packaged validation gates.
-  - [ ] Commit Phase 16 planning docs on the Phase 16 branch.
-  - [ ] Start implementation only after the reference code and modification scope are accepted.
+  - [x] Commit Phase 16 planning docs on the Phase 16 branch.
+  - [x] Start implementation only after the reference code and modification scope are accepted.
+- [ ] 16-02: Add Claude plugin external hook ingress
+  - [ ] Define Claude-plugin-owned global `~/.claude/settings.json` merge, marker, dedupe, and remove-only-own behavior.
+  - [ ] Map Claude lifecycle hooks into existing normalized provider events.
+  - [ ] Keep implementation scoped to `OnlineWorker/plugins/providers/builtin/claude/` plus focused tests.
+  - [ ] Source-verify with automated tests and a user-assisted external Claude session.
 
 Success Criteria (what must be TRUE):
   1. Claude external session ingress is owned by `OnlineWorker/plugins/providers/builtin/claude/`.
@@ -625,3 +630,5 @@ Planning status:
 - Phase 16 was added on 2026-06-06 after Phase 14 UAT showed that external Claude and Codemaker sessions could be active while the bus received no provider events.
 - The reference decision is explicit: Claude references CodeIsland's global Claude hook pattern; Codemaker references OpenCode-compatible hook/listener behavior; OpenCode itself is not an implementation target.
 - The modification scope is explicit: implementation code should stay in provider plugin directories, with planning docs and focused tests as the expected non-plugin changes.
+- 16-01 planning docs were committed on branch `codex/phase-16-provider-event-ingress`.
+- 16-02 starts with Claude plugin external hook ingress before Codemaker listener work.
