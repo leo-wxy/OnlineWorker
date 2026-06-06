@@ -612,9 +612,9 @@ Plans:
   - [x] Commit Phase 16 planning docs on the Phase 16 branch.
   - [x] Start implementation only after the reference code and modification scope are accepted.
 - [ ] 16-02: Add Claude plugin external hook ingress
-  - [ ] Define Claude-plugin-owned global `~/.claude/settings.json` merge, marker, dedupe, and remove-only-own behavior.
-  - [ ] Map Claude lifecycle hooks into existing normalized provider events.
-  - [ ] Keep implementation scoped to `OnlineWorker/plugins/providers/builtin/claude/` plus focused tests.
+  - [x] Define Claude-plugin-owned global `~/.claude/settings.json` merge, marker, dedupe, and remove-only-own behavior.
+  - [x] Map Claude lifecycle hooks into existing normalized provider events.
+  - [x] Keep implementation scoped to `OnlineWorker/plugins/providers/builtin/claude/` plus focused tests.
   - [ ] Source-verify with automated tests and a user-assisted external Claude session.
 
 Success Criteria (what must be TRUE):
@@ -631,4 +631,4 @@ Planning status:
 - The reference decision is explicit: Claude references CodeIsland's global Claude hook pattern; Codemaker references OpenCode-compatible hook/listener behavior; OpenCode itself is not an implementation target.
 - The modification scope is explicit: implementation code should stay in provider plugin directories, with planning docs and focused tests as the expected non-plugin changes.
 - 16-01 planning docs were committed on branch `codex/phase-16-provider-event-ingress`.
-- 16-02 still names the unfinished Claude hook-ingress item, but the current Phase 16 branch already contains a separate Codemaker source slice under `codemaker/` with focused approval/question/bus tests. Claude hook ingress remains the next unfinished source item.
+- 16-02 no longer blocks on Claude implementation code: the current Phase 16 branch contains both the Codemaker source slice under `codemaker/` and the Claude source slice under `plugins/providers/builtin/claude/`, with automated source regression passing. The remaining unfinished source item is user-assisted live validation for external sessions before packaged validation.
