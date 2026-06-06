@@ -22,6 +22,7 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 13: Claude Provider Auth Runtime Hardening** - Replace the current fragile Claude runtime/auth fallback with an explicit, durable provider readiness contract. Telegram/provider sends now fail fast with visible diagnostics when Claude auth is unavailable, Dashboard/status paths surface the same reason before user traffic, active-process environment scanning is removed from the normal readiness path, and Claude can opt into user-configured multi-launch-method readiness through a generic Settings UI shown for providers that declare `capabilities.launch_methods`. Source verification, fast packaged build/install/restart verification, installed Raven launch-method readiness, owner-bridge healthy status, and user UAT are complete.
 - [ ] **Phase 14: Unified Message Event Bus** - Establish a single OnlineWorker message/event bus so Telegram, App sessions, TaskBoard, notifications, approvals, questions, and future surfaces consume the same normalized event stream instead of each owning separate message-handling logic. 14-01 through 14-04 are source verified; fast packaged build/install/restart verification passed after the 14-04 TaskBoard first-paint fix.
 - [ ] **Phase 15: Bus-Driven Rendering And Approval Command Boundary** - Follow up Phase 14 by migrating heavy first-party renderers onto the bus once the event schema is stable: App Session detail live updates and Telegram send/edit/topic rendering become bus-driven consumers, and approval/question events are re-evaluated for a command boundary instead of remaining observational only.
+- [ ] **Phase 16: Provider External Event Ingress** - Add provider-plugin-owned external event ingress for Claude and Codemaker so externally launched sessions can enter the Phase 14 message bus. Claude references CodeIsland's global hook pattern; Codemaker references OpenCode-compatible hook/listener behavior; OpenCode is not implemented as a provider. Implementation code is scoped to provider plugin directories unless a later plan explicitly approves a narrow exception.
 
 ## Phase Details
 
@@ -595,3 +596,32 @@ Success Criteria (what must be TRUE):
 Planning status:
 - Phase 15 was added on 2026-06-05 during Phase 14 design review so deferred migration tasks would not be lost.
 - Phase 15 explicitly carries App Session detail live rendering migration, Telegram rendering migration, and the approval/question command boundary review that Phase 14 intentionally leaves out.
+
+### Phase 16: Provider External Event Ingress
+
+**Goal:** Let externally launched Claude and Codemaker sessions enter the existing Phase 14 message bus through provider-plugin-owned listeners, without adding provider-specific hook/listener logic to core or TaskBoard.
+**Requirements**: TBD
+**Depends on:** Phase 14 Unified Message Event Bus, Claude provider plugin, Codemaker provider plugin
+**Scope Fence:** Phase 16 is plugin-scoped. Claude plugin owns Claude hook lifecycle and payload mapping. Codemaker plugin owns Codemaker external listener lifecycle and payload mapping, using OpenCode-compatible hook/listener behavior only as a reference. OpenCode is not implemented as a provider. Core/message bus only receives normalized events; TaskBoard only consumes bus projection.
+**Plans:** 1 planned
+
+Plans:
+- [ ] 16-01: Define plugin-scoped external event ingress
+  - [x] Create Phase 16 context with trigger, reference code, and strict core/plugin boundary.
+  - [x] Create Phase 16 plan covering Claude plugin ingress, Codemaker plugin ingress, source validation, and packaged validation gates.
+  - [ ] Commit Phase 16 planning docs on the Phase 16 branch.
+  - [ ] Start implementation only after the reference code and modification scope are accepted.
+
+Success Criteria (what must be TRUE):
+  1. Claude external session ingress is owned by `OnlineWorker/plugins/providers/builtin/claude/`.
+  2. Codemaker external session ingress is owned by `codemaker/`.
+  3. OpenCode is used only as Codemaker's hook/listener reference mechanism; Phase 16 does not add an OpenCode provider or product surface.
+  4. Core/message bus does not manage hooks/plugins, parse provider-private payloads, scan provider-private files, or add provider-specific branches.
+  5. TaskBoard does not perform provider-private discovery and continues to consume bus projection only.
+  6. Hook/listener install/update/uninstall is marker-based, idempotent, and remove-only-own.
+  7. Source-level live validation proves Claude and Codemaker external sessions enter the bus before packaged validation begins.
+
+Planning status:
+- Phase 16 was added on 2026-06-06 after Phase 14 UAT showed that external Claude and Codemaker sessions could be active while the bus received no provider events.
+- The reference decision is explicit: Claude references CodeIsland's global Claude hook pattern; Codemaker references OpenCode-compatible hook/listener behavior; OpenCode itself is not an implementation target.
+- The modification scope is explicit: implementation code should stay in provider plugin directories, with planning docs and focused tests as the expected non-plugin changes.
