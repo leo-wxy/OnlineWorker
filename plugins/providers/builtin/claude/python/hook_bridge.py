@@ -14,7 +14,9 @@ from typing import Any
 CLAUDE_HOOK_SOCKET_FILENAME = "claude_hook_bridge.sock"
 CLAUDE_HOOK_SETTINGS_FILENAME = "claude_hook_settings.json"
 CLAUDE_BLOCKING_HOOK_TIMEOUT_SECONDS = 86400
+CLAUDE_NON_BLOCKING_HOOK_TIMEOUT_SECONDS = 5
 CLAUDE_PRETOOL_APPROVAL_MATCHER = "Bash|Edit|Write|AskUserQuestion|ExitPlanMode"
+ONLINEWORKER_CLAUDE_HOOK_MARKER = "onlineworker_claude_external_ingress_v1"
 
 
 def claude_hook_socket_path(data_dir: str | None) -> str | None:
@@ -52,6 +54,280 @@ def build_claude_hook_command(data_dir: str) -> str:
     return " ".join(shlex.quote(str(item)) for item in argv)
 
 
+def default_claude_settings_path(settings_path: str | None = None) -> str:
+    target = settings_path or "~/.claude/settings.json"
+    return os.path.abspath(os.path.expanduser(target))
+
+
+def _onlineworker_hook_specs(*, include_lifecycle: bool) -> list[dict[str, Any]]:
+    specs = [
+        {
+            "event": "PreToolUse",
+            "matcher": CLAUDE_PRETOOL_APPROVAL_MATCHER,
+            "timeout": CLAUDE_BLOCKING_HOOK_TIMEOUT_SECONDS,
+        },
+        {
+            "event": "PermissionRequest",
+            "matcher": "",
+            "timeout": CLAUDE_BLOCKING_HOOK_TIMEOUT_SECONDS,
+        },
+        {
+            "event": "Notification",
+            "matcher": "",
+            "timeout": CLAUDE_BLOCKING_HOOK_TIMEOUT_SECONDS,
+        },
+    ]
+    if include_lifecycle:
+        specs.extend(
+            [
+                {
+                    "event": "PostToolUse",
+                    "matcher": "",
+                    "timeout": CLAUDE_NON_BLOCKING_HOOK_TIMEOUT_SECONDS,
+                },
+                {
+                    "event": "SessionStart",
+                    "matcher": "",
+                    "timeout": CLAUDE_NON_BLOCKING_HOOK_TIMEOUT_SECONDS,
+                },
+                {
+                    "event": "Stop",
+                    "matcher": "",
+                    "timeout": CLAUDE_NON_BLOCKING_HOOK_TIMEOUT_SECONDS,
+                },
+                {
+                    "event": "SessionEnd",
+                    "matcher": "",
+                    "timeout": CLAUDE_NON_BLOCKING_HOOK_TIMEOUT_SECONDS,
+                },
+                {
+                    "event": "UserPromptSubmit",
+                    "matcher": "",
+                    "timeout": CLAUDE_NON_BLOCKING_HOOK_TIMEOUT_SECONDS,
+                },
+            ]
+        )
+    return specs
+
+
+def _build_onlineworker_hook_entry(
+    command: str,
+    *,
+    matcher: str,
+    timeout: int,
+    include_marker: bool,
+) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "matcher": matcher,
+        "hooks": [
+            {
+                "type": "command",
+                "command": command,
+                "timeout": timeout,
+            }
+        ],
+    }
+    if include_marker:
+        entry["onlineworkerMarker"] = ONLINEWORKER_CLAUDE_HOOK_MARKER
+    return entry
+
+
+def build_onlineworker_claude_hook_settings(
+    command: str,
+    *,
+    include_lifecycle: bool,
+    include_marker: bool,
+) -> dict[str, Any]:
+    hooks: dict[str, list[dict[str, Any]]] = {}
+    for spec in _onlineworker_hook_specs(include_lifecycle=include_lifecycle):
+        hooks[spec["event"]] = [
+            _build_onlineworker_hook_entry(
+                command,
+                matcher=str(spec.get("matcher") or ""),
+                timeout=int(spec.get("timeout") or 0),
+                include_marker=include_marker,
+            )
+        ]
+    return {"hooks": hooks}
+
+
+def _is_onlineworker_marker_entry(entry: Any) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    return str(entry.get("onlineworkerMarker") or "").strip() == ONLINEWORKER_CLAUDE_HOOK_MARKER
+
+
+def _load_claude_settings_payload(settings_path: str) -> tuple[dict[str, Any] | None, str]:
+    if not os.path.exists(settings_path):
+        return {}, ""
+    try:
+        with open(settings_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except json.JSONDecodeError as exc:
+        return None, f"Claude settings JSON 无法解析：{exc}"
+    except Exception as exc:
+        return None, f"读取 Claude settings 失败：{exc}"
+    if not isinstance(payload, dict):
+        return None, "Claude settings 根对象不是 JSON object"
+    return payload, ""
+
+
+def _persist_claude_settings_payload(settings_path: str, payload: dict[str, Any]) -> None:
+    parent = os.path.dirname(settings_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(settings_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+
+def install_onlineworker_claude_hooks(
+    data_dir: str,
+    *,
+    settings_path: str | None = None,
+) -> dict[str, Any]:
+    resolved_settings_path = default_claude_settings_path(settings_path)
+    existed_before = os.path.exists(resolved_settings_path)
+    payload, error = _load_claude_settings_payload(resolved_settings_path)
+    if payload is None:
+        return {
+            "state": "install_failed",
+            "settingsPath": resolved_settings_path,
+            "detail": error,
+            "installedEvents": [],
+            "changed": False,
+        }
+
+    hooks = payload.get("hooks")
+    if hooks is None:
+        hooks = {}
+        payload["hooks"] = hooks
+    if not isinstance(hooks, dict):
+        return {
+            "state": "install_failed",
+            "settingsPath": resolved_settings_path,
+            "detail": "Claude settings 的 hooks 字段不是 object",
+            "installedEvents": [],
+            "changed": False,
+        }
+
+    command = build_claude_hook_command(data_dir)
+    desired_payload = build_onlineworker_claude_hook_settings(
+        command,
+        include_lifecycle=True,
+        include_marker=True,
+    )
+    desired_hooks = desired_payload["hooks"]
+    changed = False
+    installed_events: list[str] = []
+    for event_name, desired_entries in desired_hooks.items():
+        current_entries = hooks.get(event_name)
+        if current_entries is None:
+            current_entries = []
+        if not isinstance(current_entries, list):
+            return {
+                "state": "install_failed",
+                "settingsPath": resolved_settings_path,
+                "detail": f"Claude settings hooks.{event_name} 不是数组",
+                "installedEvents": installed_events,
+                "changed": changed,
+            }
+        filtered_entries = [
+            entry for entry in current_entries if not _is_onlineworker_marker_entry(entry)
+        ]
+        merged_entries = [*filtered_entries, *desired_entries]
+        if current_entries != merged_entries:
+            hooks[event_name] = merged_entries
+            changed = True
+        installed_events.append(event_name)
+
+    if changed or not existed_before:
+        _persist_claude_settings_payload(resolved_settings_path, payload)
+    return {
+        "state": "installed",
+        "settingsPath": resolved_settings_path,
+        "detail": "",
+        "installedEvents": installed_events,
+        "changed": changed or not existed_before,
+    }
+
+
+def uninstall_onlineworker_claude_hooks(
+    *,
+    settings_path: str | None = None,
+) -> dict[str, Any]:
+    resolved_settings_path = default_claude_settings_path(settings_path)
+    payload, error = _load_claude_settings_payload(resolved_settings_path)
+    if payload is None:
+        return {
+            "state": "install_failed",
+            "settingsPath": resolved_settings_path,
+            "detail": error,
+            "removedEvents": [],
+            "changed": False,
+        }
+    if not payload:
+        return {
+            "state": "disabled",
+            "settingsPath": resolved_settings_path,
+            "detail": "",
+            "removedEvents": [],
+            "changed": False,
+        }
+
+    hooks = payload.get("hooks")
+    if hooks is None:
+        return {
+            "state": "disabled",
+            "settingsPath": resolved_settings_path,
+            "detail": "",
+            "removedEvents": [],
+            "changed": False,
+        }
+    if not isinstance(hooks, dict):
+        return {
+            "state": "install_failed",
+            "settingsPath": resolved_settings_path,
+            "detail": "Claude settings 的 hooks 字段不是 object",
+            "removedEvents": [],
+            "changed": False,
+        }
+
+    changed = False
+    removed_events: list[str] = []
+    for event_name, current_entries in list(hooks.items()):
+        if not isinstance(current_entries, list):
+            return {
+                "state": "install_failed",
+                "settingsPath": resolved_settings_path,
+                "detail": f"Claude settings hooks.{event_name} 不是数组",
+                "removedEvents": removed_events,
+                "changed": changed,
+            }
+        filtered_entries = [
+            entry for entry in current_entries if not _is_onlineworker_marker_entry(entry)
+        ]
+        if len(filtered_entries) != len(current_entries):
+            removed_events.append(event_name)
+            changed = True
+            if filtered_entries:
+                hooks[event_name] = filtered_entries
+            else:
+                hooks.pop(event_name, None)
+
+    if changed:
+        if not hooks:
+            payload.pop("hooks", None)
+        _persist_claude_settings_payload(resolved_settings_path, payload)
+    return {
+        "state": "disabled",
+        "settingsPath": resolved_settings_path,
+        "detail": "",
+        "removedEvents": removed_events,
+        "changed": changed,
+    }
+
+
 def write_claude_hook_settings(data_dir: str) -> str:
     os.makedirs(data_dir, exist_ok=True)
     settings_path = claude_hook_settings_path(data_dir)
@@ -59,33 +335,11 @@ def write_claude_hook_settings(data_dir: str) -> str:
         raise RuntimeError("缺少 data_dir，无法写入 Claude hook settings")
 
     command = build_claude_hook_command(data_dir)
-    hook_entry = {
-        "matcher": "",
-        "hooks": [
-            {
-                "type": "command",
-                "command": command,
-                "timeout": CLAUDE_BLOCKING_HOOK_TIMEOUT_SECONDS,
-            }
-        ],
-    }
-    pretool_entry = {
-        "matcher": CLAUDE_PRETOOL_APPROVAL_MATCHER,
-        "hooks": [
-            {
-                "type": "command",
-                "command": command,
-                "timeout": CLAUDE_BLOCKING_HOOK_TIMEOUT_SECONDS,
-            }
-        ],
-    }
-    payload = {
-        "hooks": {
-            "PreToolUse": [pretool_entry],
-            "PermissionRequest": [hook_entry],
-            "Notification": [hook_entry],
-        }
-    }
+    payload = build_onlineworker_claude_hook_settings(
+        command,
+        include_lifecycle=False,
+        include_marker=False,
+    )
     with open(settings_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
     return settings_path

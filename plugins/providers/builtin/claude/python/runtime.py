@@ -34,6 +34,24 @@ def _list_value(value) -> list:
     return value if isinstance(value, list) else []
 
 
+def _format_external_hook_status_line(status: dict | None) -> str:
+    data = status if isinstance(status, dict) else {}
+    state = str(data.get("state") or "").strip()
+    detail = str(data.get("detail") or "").strip()
+    if state == "installed":
+        return "• Claude hook ingress：✅ 已安装"
+    if state == "install_failed":
+        suffix = f"：{detail}" if detail else ""
+        return f"• Claude hook ingress：⚠️ 安装失败{suffix}"
+    if state == "callback_unreachable":
+        suffix = f"：{detail}" if detail else ""
+        return f"• Claude hook ingress：⚠️ 回调不可用{suffix}"
+    if state == "degraded_fallback":
+        suffix = f"：{detail}" if detail else ""
+        return f"• Claude hook ingress：⚠️ 已退化{suffix}"
+    return ""
+
+
 def parse_approval_request(
     payload: dict | None,
     *,
@@ -188,6 +206,11 @@ async def start_runtime(manager, bot, tool_cfg) -> None:
     data_dir = manager.state.config.data_dir if manager.state.config is not None else None
     if data_dir:
         adapter.configure_hook_bridge(data_dir)
+        install_external_hook_ingress = getattr(adapter, "install_external_hook_ingress", None)
+        if callable(install_external_hook_ingress):
+            result = install_external_hook_ingress()
+            if inspect.isawaitable(result):
+                await result
     else:
         logger.info("[claude] 缺少 data_dir，跳过 hook bridge 配置")
     manager.state.set_adapter("claude", adapter)
@@ -312,14 +335,22 @@ async def sync_existing_topics_after_startup(manager, bot) -> None:
 async def build_status_lines(state) -> list[str]:
     adapter = state.get_adapter("claude")
     if adapter is not None and adapter.connected:
+        lines: list[str]
         readiness = getattr(adapter, "readiness", None)
         if isinstance(readiness, dict) and readiness.get("ready") is False:
             detail = str(readiness.get("detail") or "").strip()
             suffix = f"：{detail}" if detail else ""
-            return [f"• claude CLI：⚠️ 已连接，但不可用{suffix}"]
-        if getattr(adapter, "auth_ready", None) is False:
-            return ["• claude CLI：⚠️ 已连接，但不可用：Claude CLI is not logged in."]
-        return ["• claude CLI：✅ 已连接"]
+            lines = [f"• claude CLI：⚠️ 已连接，但不可用{suffix}"]
+        elif getattr(adapter, "auth_ready", None) is False:
+            lines = ["• claude CLI：⚠️ 已连接，但不可用：Claude CLI is not logged in."]
+        else:
+            lines = ["• claude CLI：✅ 已连接"]
+        hook_line = _format_external_hook_status_line(
+            getattr(adapter, "external_hook_status", None)
+        )
+        if hook_line:
+            lines.append(hook_line)
+        return lines
     if adapter is not None:
         return ["• claude CLI：❌ 已断开"]
     return []

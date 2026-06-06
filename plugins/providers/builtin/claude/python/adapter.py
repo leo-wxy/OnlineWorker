@@ -16,6 +16,8 @@ from typing import Any, Awaitable, Callable
 from plugins.providers.builtin.claude.python.hook_bridge import (
     claude_hook_settings_path,
     claude_hook_socket_path,
+    install_onlineworker_claude_hooks,
+    uninstall_onlineworker_claude_hooks,
     write_claude_hook_settings,
 )
 from plugins.providers.builtin.claude.python.storage_runtime import (
@@ -23,6 +25,7 @@ from plugins.providers.builtin.claude.python.storage_runtime import (
     _find_claude_project_session_file,
     _iter_claude_project_rows,
     _parse_claude_timestamp,
+    _read_claude_project_turns,
     list_claude_threads_by_cwd,
 )
 
@@ -143,6 +146,23 @@ def _hook_event_name(payload: dict[str, Any]) -> str:
     return str(payload.get("hook_event_name") or "").strip()
 
 
+def _hook_transcript_path(payload: dict[str, Any]) -> str:
+    return str(payload.get("transcript_path") or payload.get("transcriptPath") or "").strip()
+
+
+def _hook_user_prompt(payload: dict[str, Any]) -> str:
+    return str(
+        payload.get("user_prompt")
+        or payload.get("userPrompt")
+        or payload.get("prompt")
+        or ""
+    ).strip()
+
+
+def _hook_reason(payload: dict[str, Any]) -> str:
+    return str(payload.get("reason") or "").strip()
+
+
 def _hook_session_id(payload: dict[str, Any]) -> str:
     return str(payload.get("session_id") or payload.get("sessionId") or "").strip()
 
@@ -165,6 +185,27 @@ def _hook_is_ask_user_question(payload: dict[str, Any]) -> bool:
 
 def _hook_is_tool_approval_request(payload: dict[str, Any]) -> bool:
     return _hook_event_name(payload) in {"PermissionRequest", "PreToolUse"} and _normalize_hook_tool_name(payload) in _PRETOOL_PERMISSION_TOOLS - {"AskUserQuestion"}
+
+
+def _hook_is_lifecycle_event(payload: dict[str, Any]) -> bool:
+    return _hook_event_name(payload) in {
+        "PostToolUse",
+        "SessionStart",
+        "SessionEnd",
+        "Stop",
+        "UserPromptSubmit",
+    }
+
+
+def _hook_failure_text(payload: dict[str, Any]) -> str:
+    for key in ("error", "error_message", "failure", "failure_reason"):
+        text = str(payload.get(key) or "").strip()
+        if text:
+            return text
+    status = str(payload.get("status") or "").strip().lower()
+    if status in {"error", "failed"}:
+        return str(payload.get("message") or payload.get("reason") or status).strip()
+    return ""
 
 
 def _hook_extract_option_rows(raw_options: Any) -> list[dict[str, str]]:
@@ -753,9 +794,12 @@ class ClaudeAdapter:
         self._hook_data_dir: str | None = None
         self._hook_socket_path: str | None = None
         self._hook_settings_path: str | None = None
+        self._global_hook_settings_path: str | None = None
         self._pending_hook_requests: dict[str, dict[str, Any]] = {}
         self._pending_hook_questions: dict[str, dict[str, Any]] = {}
         self._session_tool_allowlist: set[tuple[str, str]] = set()
+        self._external_hook_status: dict[str, Any] = {"state": "disabled", "detail": ""}
+        self._external_hook_sessions: dict[str, dict[str, Any]] = {}
 
     @property
     def connected(self) -> bool:
@@ -830,8 +874,57 @@ class ClaudeAdapter:
     def hook_settings_path(self) -> str | None:
         return self._hook_settings_path
 
-    def configure_hook_bridge(self, data_dir: str) -> None:
+    @property
+    def external_hook_status(self) -> dict[str, Any]:
+        return dict(self._external_hook_status)
+
+    def _set_external_hook_status(self, state: str, detail: str = "", **extra: Any) -> None:
+        status = {
+            "state": str(state or "").strip() or "disabled",
+            "detail": str(detail or "").strip(),
+        }
+        status.update(extra)
+        self._external_hook_status = status
+
+    def configure_hook_bridge(
+        self,
+        data_dir: str,
+        *,
+        global_settings_path: str | None = None,
+    ) -> None:
         self._hook_data_dir = data_dir
+        if global_settings_path is not None:
+            self._global_hook_settings_path = global_settings_path
+
+    async def install_external_hook_ingress(self) -> dict[str, Any]:
+        if not self._hook_data_dir:
+            self._set_external_hook_status("disabled", "缺少 data_dir，未安装 Claude external hook ingress")
+            return dict(self._external_hook_status)
+        result = install_onlineworker_claude_hooks(
+            self._hook_data_dir,
+            settings_path=self._global_hook_settings_path,
+        )
+        self._set_external_hook_status(
+            result.get("state") or "disabled",
+            str(result.get("detail") or ""),
+            settingsPath=result.get("settingsPath") or "",
+            installedEvents=list(result.get("installedEvents") or []),
+            changed=bool(result.get("changed")),
+        )
+        return dict(self._external_hook_status)
+
+    async def uninstall_external_hook_ingress(self) -> dict[str, Any]:
+        result = uninstall_onlineworker_claude_hooks(
+            settings_path=self._global_hook_settings_path,
+        )
+        self._set_external_hook_status(
+            result.get("state") or "disabled",
+            str(result.get("detail") or ""),
+            settingsPath=result.get("settingsPath") or "",
+            removedEvents=list(result.get("removedEvents") or []),
+            changed=bool(result.get("changed")),
+        )
+        return dict(self._external_hook_status)
 
     async def _ensure_hook_bridge_started(self) -> None:
         if self._hook_server is not None:
@@ -872,6 +965,7 @@ class ClaudeAdapter:
                 future.set_result(_build_question_hook_response(payload, [], [], []))
         self._pending_hook_questions.clear()
         self._session_tool_allowlist.clear()
+        self._external_hook_sessions.clear()
 
         if self._hook_server is not None:
             self._hook_server.close()
@@ -901,11 +995,17 @@ class ClaudeAdapter:
                     payload = {}
                 if isinstance(payload, dict):
                     response = await self.handle_hook_payload(payload)
-            writer.write(json.dumps(response or {}, ensure_ascii=False).encode("utf-8"))
-            await writer.drain()
+            try:
+                writer.write(json.dumps(response or {}, ensure_ascii=False).encode("utf-8"))
+                await writer.drain()
+            except (BrokenPipeError, ConnectionResetError):
+                logger.debug("[claude-hook-bridge] hook client disconnected before response flush")
         finally:
             writer.close()
-            await writer.wait_closed()
+            try:
+                await writer.wait_closed()
+            except (BrokenPipeError, ConnectionResetError):
+                logger.debug("[claude-hook-bridge] hook client disconnected during close")
 
     def _resolve_hook_workspace_id(self, payload: dict[str, Any]) -> str:
         session_id = _hook_session_id(payload)
@@ -923,12 +1023,198 @@ class ClaudeAdapter:
         return ""
 
     async def handle_hook_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if _hook_is_lifecycle_event(payload):
+            return await self._handle_lifecycle_hook_payload(payload)
         if _hook_is_ask_user_question(payload):
             return await self._handle_ask_user_question_payload(payload)
         if _hook_is_tool_approval_request(payload):
             return await self._handle_permission_request_payload(payload)
         if _hook_is_notification_question(payload):
             return await self._handle_notification_question_payload(payload)
+        return {}
+
+    def _external_hook_session_state(self, session_id: str) -> dict[str, Any]:
+        return self._external_hook_sessions.setdefault(session_id, {})
+
+    def _is_managed_hook_session(self, session_id: str) -> bool:
+        return session_id in self._active_processes
+
+    def _resolve_hook_transcript_file(self, payload: dict[str, Any]) -> str:
+        transcript_path = _hook_transcript_path(payload)
+        if transcript_path and os.path.exists(transcript_path):
+            return transcript_path
+        session_id = _hook_session_id(payload)
+        if not session_id:
+            return ""
+        session_file = _find_claude_project_session_file(session_id)
+        return session_file or ""
+
+    def _read_hook_final_assistant_text(self, payload: dict[str, Any]) -> str:
+        transcript_file = self._resolve_hook_transcript_file(payload)
+        if not transcript_file:
+            return ""
+        turns = _read_claude_project_turns(transcript_file)
+        for turn in reversed(turns):
+            if str(turn.get("role") or "").strip() != "assistant":
+                continue
+            text = str(turn.get("text") or "").strip()
+            if text:
+                return text
+        return ""
+
+    async def _emit_hook_session_created(
+        self,
+        workspace_id: str,
+        session_id: str,
+        *,
+        title: str = "",
+    ) -> None:
+        params: dict[str, Any] = {"threadId": session_id}
+        if title:
+            params["title"] = title
+        await self._emit_event(workspace_id, "session.created", params)
+
+    async def _handle_lifecycle_hook_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        event_name = _hook_event_name(payload)
+        if event_name == "PostToolUse":
+            return {}
+
+        session_id = _hook_session_id(payload)
+        if not session_id:
+            self._set_external_hook_status("degraded_fallback", "Claude lifecycle hook 缺少 session_id")
+            return {}
+        if self._is_managed_hook_session(session_id):
+            return {}
+        if not self._event_callbacks:
+            self._set_external_hook_status("callback_unreachable", "Claude lifecycle hook 没有可用的事件回调")
+            return {}
+
+        workspace_id = self._resolve_hook_workspace_id(payload)
+        if not workspace_id:
+            detail = f"未匹配 Claude workspace：{_hook_cwd(payload) or session_id}"
+            self._set_external_hook_status("degraded_fallback", detail)
+            return {}
+        async with self._send_lock_for_thread(session_id):
+            self._thread_workspace_map[session_id] = workspace_id
+            state = self._external_hook_session_state(session_id)
+            state["workspace_id"] = workspace_id
+            transcript_file = self._resolve_hook_transcript_file(payload)
+            if transcript_file:
+                state["transcript_path"] = transcript_file
+
+            if event_name == "SessionStart":
+                if not state.get("session_created_emitted"):
+                    await self._emit_hook_session_created(workspace_id, session_id)
+                    state["session_created_emitted"] = True
+                self._set_external_hook_status("installed")
+                return {}
+
+            if event_name == "UserPromptSubmit":
+                prompt_text = _hook_user_prompt(payload)
+                if not state.get("session_created_emitted"):
+                    await self._emit_hook_session_created(
+                        workspace_id,
+                        session_id,
+                        title=prompt_text[:120],
+                    )
+                    state["session_created_emitted"] = True
+                if (
+                    state.get("turn_open")
+                    and state.get("last_prompt") == prompt_text
+                    and state.get("transcript_path") == transcript_file
+                ):
+                    return {}
+                turn_id = str(uuid.uuid4())
+                state["turn_id"] = turn_id
+                state["turn_open"] = True
+                state["last_prompt"] = prompt_text
+                state.pop("terminal_emitted_turn_id", None)
+                if prompt_text:
+                    await self._emit_event(
+                        workspace_id,
+                        "message.user.submitted",
+                        {
+                            "threadId": session_id,
+                            "text": prompt_text,
+                        },
+                    )
+                await self._emit_event(
+                    workspace_id,
+                    "turn/started",
+                    {
+                        "threadId": session_id,
+                        "turn": {
+                            "id": turn_id,
+                            "threadId": session_id,
+                        },
+                    },
+                )
+                self._set_external_hook_status("installed")
+                return {}
+
+            if event_name in {"Stop", "SessionEnd"}:
+                turn_id = str(state.get("turn_id") or "").strip() or str(uuid.uuid4())
+                if (
+                    not state.get("turn_open")
+                    and str(state.get("terminal_emitted_turn_id") or "").strip() == turn_id
+                ):
+                    return {}
+                failure_text = _hook_failure_text(payload)
+                if failure_text:
+                    state["turn_open"] = False
+                    state["terminal_emitted_turn_id"] = turn_id
+                    await self._emit_event(
+                        workspace_id,
+                        "turn.failed",
+                        {
+                            "threadId": session_id,
+                            "turnId": turn_id,
+                            "error": failure_text,
+                            "reason": failure_text,
+                        },
+                    )
+                    self._set_external_hook_status("degraded_fallback", failure_text)
+                    return {}
+
+                final_text = self._read_hook_final_assistant_text(payload)
+                if final_text:
+                    await self._emit_event(
+                        workspace_id,
+                        "item/completed",
+                        {
+                            "threadId": session_id,
+                            "turnId": turn_id,
+                            "item": {
+                                "type": "agentMessage",
+                                "text": final_text,
+                                "phase": "final_answer",
+                                "threadId": session_id,
+                                "turn": {"id": turn_id},
+                            },
+                        },
+                    )
+                else:
+                    detail = f"{event_name} 未读取到 assistant final，已退化为仅补发 turn.completed"
+                    self._set_external_hook_status("degraded_fallback", detail)
+                await self._emit_event(
+                    workspace_id,
+                    "turn/completed",
+                    {
+                        "threadId": session_id,
+                        "turn": {
+                            "id": turn_id,
+                            "threadId": session_id,
+                            "status": "completed",
+                        },
+                    },
+                )
+                state["turn_id"] = turn_id
+                state["turn_open"] = False
+                state["terminal_emitted_turn_id"] = turn_id
+                if final_text:
+                    self._set_external_hook_status("installed")
+                return {}
+
         return {}
 
     def _session_tool_allow_key(self, payload: dict[str, Any]) -> tuple[str, str] | None:
