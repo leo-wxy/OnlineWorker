@@ -577,14 +577,21 @@ Planning status:
 **Requirements**: TBD
 **Depends on:** Phase 14 Unified Message Event Bus, Phase 11 Telegram route storage, Phase 12 Codex managed app-server approval host
 **Scope Fence:** This phase migrates heavy first-party rendering surfaces and designs the approval/question command boundary. It should not add a third-party plugin API, external broker, persistent event audit log, or change Codex approval source-of-truth semantics without a dedicated plan.
-**Plans:** 1 planned
+**Plans:** 4 planned
 
 Plans:
-- [ ] 15-01: Migrate heavy bus consumers and define command boundary
-  - [ ] Migrate App Session detail live rendering from provider-specific session stream/polling behavior toward canonical bus events while preserving history merge, streaming delta/final behavior, scroll ergonomics, and error states.
-  - [ ] Migrate Telegram send/edit/topic rendering toward a bus-derived edge consumer while preserving Phase 11 route fail-closed behavior and Phase 12 Codex approval ownership.
-  - [ ] Decide whether approval/question remains event-only or gains an explicit command boundary. If command handling is added, keep commands separate from immutable lifecycle events.
-  - [ ] Add regression coverage for App live rendering, Telegram streaming/topic routing, approval/question authority, and duplicate/dedupe behavior.
+- [ ] 15-01: Define heavy-consumer migration and command-boundary umbrella
+  - [ ] Keep the overall Phase 15 scope, execution order, and verification contract explicit.
+  - [ ] Decompose App Session, Telegram, and approval/question authority into narrower plans before implementation.
+- [ ] 15-02: Migrate App Session detail to a bus-derived live model
+  - [ ] Replace provider-specific live rendering semantics with canonical bus events while preserving history merge, streaming delta/final behavior, scroll ergonomics, and error states.
+  - [ ] Keep provider history reads only as initial/historical data.
+- [ ] 15-03: Migrate Telegram rendering to a bus-derived edge consumer
+  - [ ] Drive Telegram streaming/final/edit/topic rendering from canonical events while preserving Phase 11 route fail-closed behavior and Phase 12 approval ownership.
+  - [ ] Keep Telegram-specific ids, parse mode, reply markup, and callback metadata at the Telegram edge.
+- [ ] 15-04: Define approval/question command boundary
+  - [ ] Decide whether approval/question remains event-only or gains an explicit command boundary.
+  - [ ] If command handling is added, keep commands separate from immutable lifecycle events and preserve mirrored-only observational semantics.
 
 Success Criteria (what must be TRUE):
   1. App Session detail view can render live user/assistant/turn state from bus-derived events without regressing existing provider session history behavior.
@@ -596,6 +603,7 @@ Success Criteria (what must be TRUE):
 Planning status:
 - Phase 15 was added on 2026-06-05 during Phase 14 design review so deferred migration tasks would not be lost.
 - Phase 15 explicitly carries App Session detail live rendering migration, Telegram rendering migration, and the approval/question command boundary review that Phase 14 intentionally leaves out.
+- Phase 15 was decomposed on 2026-06-08 into `15-02` App Session live-model migration, `15-03` Telegram edge migration, and `15-04` approval/question command-boundary work so execution can proceed in smaller verified slices.
 
 ### Phase 16: Provider External Event Ingress
 
