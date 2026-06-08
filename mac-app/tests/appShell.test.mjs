@@ -257,11 +257,8 @@ test("notification tab exposes split app list and plugin-defined configuration",
   assert.equal((panel.match(/notifications\.enableChannel/g) ?? []).length, 1);
   assert.match(i18nTypes, /notifications:\s*\{/);
   assert.match(zh, /通知渠道/);
-  assert.match(zh, /文件助手/);
-  assert.match(zh, /私聊/);
-  assert.match(zh, /群聊/);
-  assert.match(zh, /接收人/);
-  assert.match(zh, /通过 POPO 发送简短任务通知。/);
+  assert.match(zh, /通知渠道/);
+  assert.match(zh, /通过独立 Telegram Bot 发送简短任务通知。/);
   assert.match(en, /Notification channels/);
   assert.match(panel, /ChannelIcon/);
   assert.match(panel, /settingsFields/);
@@ -296,8 +293,11 @@ test("task board listens to activity stream without fallback polling", () => {
   assert.match(taskBoard, /onClick=\{\(\) => void refresh\(\)\}/);
   assert.match(taskBoard, /start_task_board_activity_stream/);
   assert.match(taskBoard, /function upsertSessionActivity/);
+  assert.match(taskBoard, /function removeSessionActivity/);
   assert.match(taskBoard, /const activity = event\.activity;/);
   assert.match(taskBoard, /setSessionActivities\(\(current\) => upsertSessionActivity\(current, activity\)\)/);
+  assert.match(taskBoard, /event\.kind === "remove"/);
+  assert.match(taskBoard, /setSessionActivities\(\(current\) => removeSessionActivity\(current, event\.providerId!, event\.sessionId!\)\)/);
   assert.match(taskBoard, /refresh\(\{ includeActivities: true \}\)/);
   assert.match(taskBoard, /setLoading\(false\);/);
   assert.equal(taskBoard.includes("window.setInterval(() => {\n      void refresh();"), false);
@@ -343,7 +343,8 @@ test("task board hydrates previews for pinned idle sessions", () => {
   assert.match(taskBoard, /const PINNED_PREVIEW_HYDRATION_LIMIT = 12/);
   assert.match(taskBoard, /taskBoardState\.pinned\.map/);
   assert.match(taskBoard, /\.slice\(0, PINNED_PREVIEW_HYDRATION_LIMIT\)/);
-  assert.match(taskBoard, /readSessionLastMessage\(session\)/);
+  assert.match(taskBoard, /readSessionLastMessageWithTimeout\(session\)/);
   assert.match(taskBoard, /raw:\s*\{\s*\.\.\.\(session\.raw \?\? \{\}\),\s*lastMessage,/);
-  assert.match(taskBoard, /setSessions\(await hydratePinnedSessionPreviews\(sessionResults\.flat\(\), nextTaskBoardState\)\)/);
+  assert.match(taskBoard, /void hydratePinnedSessionPreviews\(flatSessions, nextTaskBoardState\)/);
+  assert.match(taskBoard, /setSessions\(hydratedSessions\)/);
 });

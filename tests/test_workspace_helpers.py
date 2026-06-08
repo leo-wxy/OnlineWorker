@@ -16,8 +16,8 @@ from core.storage import WorkspaceInfo
 def test_normalize_workspace_topic_label_handles_empty_root_and_path():
     assert normalize_workspace_topic_label("") == "workspace"
     assert normalize_workspace_topic_label("/") == "root"
-    assert normalize_workspace_topic_label("/Users/wxy/Projects/onlineWorker/") == "onlineWorker"
-    assert normalize_workspace_topic_label("onlineWorker") == "onlineWorker"
+    assert normalize_workspace_topic_label("/Users/example/Projects/sample-workspace/") == "sample-workspace"
+    assert normalize_workspace_topic_label("sample-workspace") == "sample-workspace"
 
 
 def test_make_thread_topic_name_collapses_preview_and_limits_length():
@@ -33,7 +33,7 @@ def test_make_thread_topic_name_collapses_preview_and_limits_length():
 
 
 def test_make_thread_open_token_and_callback_data_are_stable():
-    ws_id = "codex:/Users/wxy/Projects/onlineWorker"
+    ws_id = "codex:/Users/example/Projects/sample-workspace"
     thread_id = "019e64b9-d732-7002-9d3a-f07329d41649"
 
     assert make_thread_open_token(thread_id) == make_thread_open_token(thread_id)
@@ -47,16 +47,16 @@ def test_make_thread_open_token_and_callback_data_are_stable():
 
 def test_get_workspace_callback_identity_prefers_daemon_then_storage_key():
     ws = WorkspaceInfo(
-        name="onlineWorker",
-        path="/Users/wxy/Projects/onlineWorker",
+        name="sample-workspace",
+        path="/Users/example/Projects/sample-workspace",
         tool="codex",
-        daemon_workspace_id="codex:onlineWorker",
+        daemon_workspace_id="codex:sample-workspace",
     )
-    assert get_workspace_callback_identity("storage-key", ws) == "codex:onlineWorker"
+    assert get_workspace_callback_identity("storage-key", ws) == "codex:sample-workspace"
 
     ws.daemon_workspace_id = None
     assert get_workspace_callback_identity("storage-key", ws) == "storage-key"
-    assert get_workspace_callback_identity("", ws) == "codex:onlineWorker"
+    assert get_workspace_callback_identity("", ws) == "codex:sample-workspace"
 
 
 def test_normalize_history_turn_timestamp_handles_numeric_and_iso_values():

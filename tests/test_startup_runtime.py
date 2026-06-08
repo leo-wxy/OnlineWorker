@@ -435,8 +435,8 @@ async def test_start_claude_defers_cli_touching_work_until_send():
 
     adapter.connect.assert_awaited_once()
     adapter.configure_hook_bridge.assert_called_once_with("/tmp/onlineworker-claude-test")
+    adapter.start_hook_bridge.assert_awaited_once_with("/tmp/onlineworker-claude-test")
     adapter.install_external_hook_ingress.assert_awaited_once()
-    adapter.start_hook_bridge.assert_not_awaited()
     adapter.refresh_auth_status.assert_not_awaited()
     setup_mock.assert_awaited_once()
     assert state.get_adapter("claude") is adapter

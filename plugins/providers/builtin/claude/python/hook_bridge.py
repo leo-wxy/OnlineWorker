@@ -350,13 +350,7 @@ def default_claude_hook_response(payload: dict[str, Any] | None) -> dict[str, An
     event_name = str(payload.get("hook_event_name") or "").strip()
     tool_name = str(payload.get("tool_name") or "").strip()
 
-    if event_name == "PreToolUse" and tool_name in {
-        "AskUserQuestion",
-        "Bash",
-        "Edit",
-        "Write",
-        "ExitPlanMode",
-    }:
+    if event_name == "PreToolUse" and tool_name == "AskUserQuestion":
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",

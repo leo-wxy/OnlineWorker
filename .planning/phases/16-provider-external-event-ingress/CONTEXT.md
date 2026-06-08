@@ -10,8 +10,8 @@ Observed product behavior:
 - Codex sessions entered the Phase 14 message bus.
 - Claude sessions could be actively running while TaskBoard showed only a title
   or stale content.
-- Codemaker sessions could be actively running while no corresponding running
-  card appeared until late or after completion.
+- A distribution-provided provider plugin could have active external sessions
+  while no corresponding running card appeared until late or after completion.
 - Switching back to the TaskBoard tab could make running cards disappear when no
   fresh bus event was available.
 
@@ -39,26 +39,79 @@ Allowed in core:
 Not allowed in core:
 
 - Claude hook lifecycle control.
-- Codemaker/OpenCode plugin lifecycle control.
+- Distribution-provider/OpenCode-compatible plugin lifecycle control.
 - Provider-private hook payload parsing.
 - Provider-private session file, SQLite, JSONL, SSE, or config discovery.
-- `if provider == "claude"` or `if provider == "codemaker"` recovery logic.
+- provider-specific recovery branches for external ingress.
 
 TaskBoard also stays provider-neutral. It consumes the message bus projection and
 must not inspect provider-private files, sockets, databases, hook payloads, or
-Codemaker/OpenCode config.
+provider/OpenCode-compatible config.
+
+### Topic And Telegram Boundary
+
+`topic` and Telegram routing are terminal delivery concerns only.
+
+Main-chain behavior must stay valid without any topic binding:
+
+- provider runtime execution
+- local approval/question handling
+- normalized provider event publication
+- message bus projection
+- TaskBoard rendering
+
+Allowed topic/TG behavior:
+
+- Mirror already-existing state or events to Telegram when a route exists.
+- Accept Telegram replies or approval decisions when a route exists.
+- Fail independently with logging when the route is missing, stale, or invalid.
+
+Not allowed:
+
+- block CLI/provider execution because topic lookup failed
+- block approval/question main-chain handling because topic lookup failed
+- block normalized event publication or TaskBoard updates because topic lookup
+  failed
+- declare the provider/session flow failed only because Telegram mirroring
+  could not happen
+
+Missing topic may break Telegram mirroring. It must not break the main chain.
+
+### User-Visible Message Dedupe Boundary
+
+The same assistant output may exist in more than one transport or log shape,
+for example:
+
+- `event_msg` / `agent_message`
+- `response_item` / `message`
+
+These are alternate representations of the same underlying assistant output,
+not permission to render two visible messages.
+
+User-visible consumers must deduplicate equivalent assistant content before
+rendering or replay. A second transport representation of the same content must
+update or confirm the existing message, not create another visible reply.
+
+Main-source rule:
+
+- each provider/session/turn has exactly one user-visible main message source
+- mirror, polling, hook fallback, transcript replay, and alternate raw record
+  shapes are fallback/observation only
+- fallback layers may confirm or recover main-chain state, but they must not
+  emit a second visible message in parallel with the main chain
 
 ## Reference Code
 
-### CodeIsland For Claude Hook Shape
+### Claude Hook Shape Reference
 
-CodeIsland is the local reference for Claude external session listening.
+Local Claude hook integrations are the reference for Claude external session
+listening.
 
 Local evidence:
 
-- `~/.codeisland/codeisland-hook.sh` forwards Claude hook stdin to a native
-  bridge or Unix socket fallback.
-- `~/.claude/settings.json` contains CodeIsland hooks on `SessionStart`,
+- a local hook command can forward Claude hook stdin to a native bridge or Unix
+  socket fallback.
+- `~/.claude/settings.json` can contain third-party hooks on `SessionStart`,
   `UserPromptSubmit`, `Stop`, `SessionEnd`, `PostToolUse`, `PreToolUse`,
   `PermissionRequest`, and `Notification`.
 - Multiple hook listeners coexist in the same global Claude settings file.
@@ -86,30 +139,32 @@ Current limitation:
 - It does not yet map external-session lifecycle events such as `SessionStart`,
   `UserPromptSubmit`, `Stop`, and `SessionEnd` into normalized provider events.
 
-### OpenCode As Codemaker Reference Only
+### OpenCode-Compatible Listener Reference Only
 
-OpenCode is a reference for Codemaker because Codemaker is based on OpenCode.
-Phase 16 does not implement OpenCode as a provider.
+OpenCode-compatible listener behavior is a reference for compatible
+distribution-provided provider plugins. Phase 16 does not implement OpenCode as
+a provider.
 
 Reference evidence:
 
 - The local OpenCode plugin type definition exposes
   `event?: (input: { event }) => Promise<void>`.
-- OpenCode-style plugin events are the model for how Codemaker should listen to
-  external session/message/step activity.
+- OpenCode-style plugin events are the model for how compatible provider
+  plugins can listen to external session/message/step activity.
 
-Phase 16 uses OpenCode only to understand Codemaker-compatible hook/listener
-patterns. It must not add an OpenCode provider, public OpenCode integration, or
-core OpenCode compatibility layer.
+Phase 16 uses OpenCode only to understand compatible hook/listener patterns. It
+must not add an OpenCode provider, public OpenCode integration, or core
+OpenCode compatibility layer.
 
-### Existing Codemaker Plugin
+### Distribution-Provided Provider Plugin
 
-Current Codemaker provider plugin already has event mapping:
+The distribution-provided provider plugin already has event mapping in its own
+package outside the upstream OnlineWorker source tree:
 
-- `codemaker/python/event_mapper.py`
-- `codemaker/python/adapter.py`
-- `codemaker/python/runtime.py`
-- `codemaker/python/provider.py`
+- provider-local event mapper
+- provider-local adapter
+- provider-local runtime
+- provider-local descriptor
 
 Current useful behavior:
 
@@ -122,9 +177,9 @@ Current useful behavior:
 Current limitation:
 
 - `/global/event` follows the serve instance OnlineWorker is connected to. It is
-  useful for OnlineWorker-owned Codemaker runtime, but it can miss user-started
-  external Codemaker sessions.
-- Phase 16 should add Codemaker plugin-owned external listening by referencing
+  useful for OnlineWorker-owned provider runtime, but it can miss user-started
+  external provider sessions.
+- Phase 16 should add provider-plugin-owned external listening by referencing
   OpenCode-compatible hook/listener behavior, not by adding core scans.
 
 ## Modification Scope
@@ -137,10 +192,10 @@ Claude implementation scope:
 OnlineWorker/plugins/providers/builtin/claude/
 ```
 
-Codemaker implementation scope:
+Distribution-provided provider implementation scope:
 
 ```text
-codemaker/
+distribution package outside OnlineWorker/
 ```
 
 New implementation files, if needed, must stay inside those plugin directories.
@@ -150,7 +205,7 @@ as:
 - `external_ingress.py`
 - `global_hook_settings.py`
 - `hook_event_mapper.py`
-- `codemaker_event_listener.py`
+- `provider_event_listener.py`
 - `opencode_compatible_events.py`
 
 ### Allowed Documentation Scope
@@ -170,8 +225,8 @@ Likely test files:
 
 - `OnlineWorker/tests/test_claude_adapter.py`
 - `OnlineWorker/tests/test_claude_external_ingress.py`
-- `tests/test_codemaker_provider_defaults.py`
-- `tests/test_codemaker_external_ingress.py`
+- distribution-owned provider default tests
+- distribution-owned provider external ingress tests
 - existing standard bus/owner-bridge tests only when asserting normalized event
   delivery
 
@@ -206,16 +261,19 @@ Claude global hook
   -> TaskBoard projection
 ```
 
-Codemaker:
+Distribution-provided provider:
 
 ```text
-Codemaker external listener
-  -> Codemaker provider plugin event ingress
-  -> existing Codemaker event mapper or plugin-local equivalent
+provider external listener
+  -> provider plugin event ingress
+  -> existing provider event mapper or plugin-local equivalent
   -> existing app-server-event
   -> Phase 14 message bus
   -> TaskBoard projection
 ```
+
+Telegram/topic mirroring, when enabled, is downstream of this chain. It may
+observe and mirror the result, but it must not gate or redefine the chain.
 
 OpenCode:
 
@@ -241,7 +299,8 @@ Phase 16 does not include:
 ## Success Direction
 
 Phase 16 is successful when the provider plugins, not core, can explain how
-externally launched Claude and Codemaker sessions enter the existing message bus.
+externally launched Claude and distribution-provided provider sessions enter
+the existing message bus.
 
 The design should remain:
 

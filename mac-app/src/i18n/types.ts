@@ -517,10 +517,15 @@ export interface AppTexts {
     statusPinned: string;
     pin: string;
     unpin: string;
+    approve: string;
+    deny: string;
+    clearSelection: string;
+    selectedApprovals: (count: number) => string;
     openSession: string;
     pinToBoard: string;
     pinSucceeded: string;
     pinFailed: (error: string) => string;
+    approvalReplyFailed: (error: string) => string;
     eventLabel: (event: string) => string;
     nativeDataUnavailable: string;
     failedToLoad: (error: string) => string;

@@ -174,6 +174,92 @@ def publish_approval_answered(
     return _publish(state, event)
 
 
+def publish_approval_requested(
+    state: Any,
+    approval: Any,
+    *,
+    workspace_id: str = "",
+    workspace_path: str = "",
+    source: str = "app_server",
+) -> bool:
+    provider_id = _clean(getattr(approval, "tool_type", "") or getattr(approval, "tool_name", ""))
+    resolved_workspace_id = _clean(workspace_id or getattr(approval, "workspace_id", ""))
+    thread_id = _clean(getattr(approval, "thread_id", ""))
+    raw_request_id = getattr(approval, "request_id", "")
+    request_id = _clean(raw_request_id)
+    approval_source = _clean(getattr(approval, "approval_source", ""))
+    command = _clean(getattr(approval, "command", "") or getattr(approval, "cmd", ""))
+    reason = _clean(getattr(approval, "reason", "") or getattr(approval, "justification", ""))
+    summary_parts = []
+    if command:
+        summary_parts.append(command)
+    if reason:
+        summary_parts.append(reason)
+    event = create_message_event(
+        "approval.requested",
+        provider_id=provider_id,
+        workspace_id=resolved_workspace_id,
+        workspace_path=_clean(workspace_path) or _workspace_path_from_id(resolved_workspace_id),
+        session_id=thread_id,
+        source=_clean(source) or "app_server",
+        payload={
+            "requestId": request_id,
+            "rawRequestId": raw_request_id,
+            "approvalSource": approval_source,
+            "command": command,
+            "reason": reason,
+            "summary": " · ".join(summary_parts),
+        },
+        dedupe_key=":".join(
+            part
+            for part in (
+                "approval.requested",
+                provider_id,
+                resolved_workspace_id,
+                thread_id,
+                request_id,
+                approval_source,
+            )
+            if part
+        ),
+    )
+    return _publish(state, event)
+
+
+def publish_session_archived(
+    state: Any,
+    *,
+    provider_id: str,
+    workspace_id: str,
+    workspace_path: str = "",
+    session_id: str,
+    source: str = "desktop_app",
+) -> bool:
+    cleaned_provider_id = _clean(provider_id)
+    cleaned_workspace_id = _clean(workspace_id)
+    cleaned_session_id = _clean(session_id)
+    event = create_message_event(
+        "session.archived",
+        provider_id=cleaned_provider_id,
+        workspace_id=cleaned_workspace_id,
+        workspace_path=_clean(workspace_path) or _workspace_path_from_id(cleaned_workspace_id),
+        session_id=cleaned_session_id,
+        source=_clean(source) or "desktop_app",
+        payload={},
+        dedupe_key=":".join(
+            part
+            for part in (
+                "session.archived",
+                cleaned_provider_id,
+                cleaned_workspace_id,
+                cleaned_session_id,
+            )
+            if part
+        ),
+    )
+    return _publish(state, event)
+
+
 def publish_question_answered(
     state: Any,
     pending_question: Any,

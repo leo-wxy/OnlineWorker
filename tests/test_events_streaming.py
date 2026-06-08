@@ -1187,7 +1187,7 @@ async def test_final_answer_item_completed_sends_task_notification_and_dedupes_l
     ws.threads["tid-123"] = ThreadInfo(
         thread_id="tid-123",
         topic_id=3794,
-        preview="POPO 通知验收",
+        preview="任务通知验收",
         archived=False,
     )
     storage = AppStorage(workspaces={"codex:onlineWorker": ws})
@@ -1238,8 +1238,8 @@ async def test_final_answer_item_completed_sends_task_notification_and_dedupes_l
     assert event.status == "completed"
     assert event.agent_name == "Codex"
     assert event.agent_id == "codex"
-    assert event.task_name == "POPO 通知验收"
-    assert event.task_summary == "POPO 通知验收"
+    assert event.task_name == "任务通知验收"
+    assert event.task_summary == "任务通知验收"
     assert event.task_id == "turn-new"
     assert event.message == "完成摘要：最终回复已经发到 TG"
 

@@ -43,6 +43,7 @@ class ProviderPendingApprovalDecision:
     event: asyncio.Event = field(default_factory=asyncio.Event)
     decision: str = ""
     message: str = ""
+    requires_adapter_reply: bool = False
 
 
 @dataclass

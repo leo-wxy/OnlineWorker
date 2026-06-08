@@ -102,6 +102,14 @@ def message_event_from_session_event(event: SessionEvent) -> MessageEvent:
         public_payload["requestId"] = request_id
     if kind == "approval.requested":
         command = _text(payload.get("command"))
+        approval_source = _text(payload.get("approval_source") or event.raw_method)
+        prompt = _text(payload.get("prompt") or payload.get("user_prompt") or payload.get("userPrompt"))
+        if approval_source:
+            public_payload["approvalSource"] = approval_source
+        if command:
+            public_payload["command"] = command
+        if prompt:
+            public_payload["prompt"] = prompt
         if command:
             public_payload["message"] = f"需要处理授权请求：{command[:180]}"
         else:

@@ -5,6 +5,7 @@ import inspect
 import json
 import logging
 import os
+import time
 from types import SimpleNamespace
 from typing import Optional
 
@@ -14,12 +15,17 @@ from core.storage import ThreadInfo, WorkspaceInfo, save_storage
 from core.user_messages.contracts import UserMessageSendRequest
 from core.user_messages.gateway import prepare_user_message_text
 from core.messages.publishing import (
+    publish_session_archived,
+    publish_approval_answered,
     publish_user_message_accepted,
     publish_user_message_submitted,
 )
 
 
 OWNER_BRIDGE_SOCKET_FILENAME = "provider_owner_bridge.sock"
+OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS = 1.5
+OWNER_BRIDGE_USAGE_TIMEOUT_SECONDS = 1.5
+OWNER_BRIDGE_SLOW_REQUEST_WARNING_SECONDS = 0.25
 logger = logging.getLogger(__name__)
 
 
@@ -144,6 +150,70 @@ def _resolve_workspace_and_thread_for_mirror(state, provider_id: str, thread_id:
     return ws, thread
 
 
+def _build_provider_approval_reply(provider, approval, action: str) -> tuple[str, dict]:
+    interactions = getattr(provider, "interactions", None) if provider is not None else None
+    build_reply = getattr(interactions, "build_approval_reply", None) if interactions is not None else None
+    if callable(build_reply):
+        return build_reply(approval, action)
+
+    if action == "exec_deny":
+        return "❌ 已拒绝", {"decision": "decline"}
+    if action == "exec_allow_always":
+        amendment_decision = getattr(approval, "amendment_decision", {}) or {}
+        if amendment_decision:
+            return "✅ 已总是允许", amendment_decision
+        return "✅ 已总是允许", {"decision": "acceptForSession"}
+    return "✅ 已允许", {"decision": "accept"}
+
+
+def _resolve_raw_approval_request_id(
+    state,
+    provider_id: str,
+    request_id: str,
+    *,
+    thread_id: str = "",
+    workspace_id: str = "",
+):
+    request_id_text = str(request_id or "").strip()
+    if not request_id_text:
+        return request_id
+
+    pending_approvals = getattr(state, "pending_approvals", {}) or {}
+    for approval in pending_approvals.values():
+        if str(getattr(approval, "request_id", "")).strip() != request_id_text:
+            continue
+        approval_provider = str(
+            getattr(approval, "tool_type", "") or getattr(approval, "tool_name", "")
+        ).strip()
+        if approval_provider and approval_provider != provider_id:
+            continue
+        approval_thread = str(getattr(approval, "thread_id", "") or "").strip()
+        if thread_id and approval_thread and approval_thread != thread_id:
+            continue
+        approval_workspace = str(getattr(approval, "workspace_id", "") or "").strip()
+        if workspace_id and approval_workspace and approval_workspace != workspace_id:
+            continue
+        return getattr(approval, "request_id")
+
+    bus = getattr(state, "message_bus", None)
+    recent_events = getattr(bus, "recent_events", None)
+    if callable(recent_events):
+        for event in reversed(recent_events()):
+            if str(event.get("kind") or "") != "approval.requested":
+                continue
+            if str(event.get("provider_id") or "") != provider_id:
+                continue
+            if thread_id and str(event.get("session_id") or "") != thread_id:
+                continue
+            if workspace_id and str(event.get("workspace_id") or "") != workspace_id:
+                continue
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            if str(payload.get("requestId") or "").strip() == request_id_text:
+                return payload.get("rawRequestId", request_id)
+
+    return request_id
+
+
 def _new_thread_source(provider_id: str) -> str:
     provider = get_provider(provider_id)
     thread_hooks = getattr(provider, "thread_hooks", None) if provider is not None else None
@@ -171,6 +241,52 @@ def _new_thread_info(thread_id: str, *, source: str = "app"):
         is_active=True,
         source=source,
     )
+
+
+async def _run_sync_with_timeout(
+    label: str,
+    func,
+    *args,
+    timeout: float,
+    **kwargs,
+):
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(func, *args, **kwargs),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError as exc:
+        raise TimeoutError(f"{label} timed out after {int(timeout * 1000)}ms") from exc
+
+
+def _session_archived_in_storage(state, provider_id: str, session_id: str) -> bool:
+    storage = getattr(state, "storage", None)
+    if storage is None:
+        return False
+    matched = False
+    for ws in storage.workspaces.values():
+        if getattr(ws, "tool", "") != provider_id:
+            continue
+        thread = ws.threads.get(session_id)
+        if thread is None:
+            continue
+        matched = True
+        if not bool(getattr(thread, "archived", False)):
+            return False
+    return matched
+
+
+def _filter_visible_session_activities(state, activities: list[dict], limit: int) -> list[dict]:
+    visible = [
+        activity
+        for activity in activities
+        if not _session_archived_in_storage(
+            state,
+            str(activity.get("providerId") or "").strip(),
+            str(activity.get("sessionId") or "").strip(),
+        )
+    ]
+    return visible[:limit]
 
 
 def _runtime_health_from_lines(lines: list[str], adapter) -> str:
@@ -316,12 +432,14 @@ class ProviderOwnerBridge:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
+        started_at = time.perf_counter()
+        request_type = "unknown"
         try:
             raw = await reader.readline()
             if not raw:
                 return
             request = json.loads(raw.decode("utf-8"))
-            request_type = request.get("type")
+            request_type = str(request.get("type") or "unknown")
             if request_type == "send_message":
                 response = await self._handle_send_message(request)
             elif request_type == "list_sessions":
@@ -339,6 +457,8 @@ class ProviderOwnerBridge:
             elif request_type == "session_activity_stream":
                 await self._handle_session_activity_stream(reader, writer, request)
                 return
+            elif request_type == "reply_approval":
+                response = await self._handle_reply_approval(request)
             elif request_type == "mirror_approval":
                 response = await self._handle_mirror_approval(request)
             else:
@@ -357,6 +477,13 @@ class ProviderOwnerBridge:
                 await writer.wait_closed()
             except (BrokenPipeError, ConnectionResetError):
                 logger.debug("[provider-owner-bridge] 客户端已断开，跳过关闭等待")
+            elapsed = time.perf_counter() - started_at
+            if elapsed >= OWNER_BRIDGE_SLOW_REQUEST_WARNING_SECONDS:
+                logger.warning(
+                    "[provider-owner-bridge] 慢请求 type=%s elapsed_ms=%d",
+                    request_type,
+                    int(elapsed * 1000),
+                )
 
     async def _handle_list_sessions(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
@@ -381,7 +508,11 @@ class ProviderOwnerBridge:
         sessions = []
         seen: set[tuple[str, str]] = set()
         try:
-            workspaces = facts.scan_workspaces() or []
+            workspaces = await _run_sync_with_timeout(
+                f"{provider_id}.scan_workspaces",
+                facts.scan_workspaces,
+                timeout=OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS,
+            ) or []
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -395,7 +526,12 @@ class ProviderOwnerBridge:
                 continue
 
             try:
-                active_ids = facts.query_active_thread_ids(workspace_path)
+                active_ids = await _run_sync_with_timeout(
+                    f"{provider_id}.query_active_thread_ids({workspace_path})",
+                    facts.query_active_thread_ids,
+                    workspace_path,
+                    timeout=OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS,
+                )
             except Exception:
                 active_ids = set()
             normalized_active_ids = {
@@ -403,7 +539,13 @@ class ProviderOwnerBridge:
             }
 
             try:
-                threads = facts.list_threads(workspace_path, limit=limit) or []
+                threads = await _run_sync_with_timeout(
+                    f"{provider_id}.list_threads({workspace_path})",
+                    facts.list_threads,
+                    workspace_path,
+                    limit=limit,
+                    timeout=OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS,
+                ) or []
             except Exception as exc:
                 return {"ok": False, "error": str(exc)}
 
@@ -471,7 +613,11 @@ class ProviderOwnerBridge:
             return {"ok": True, "activities": []}
         return {
             "ok": True,
-            "activities": bus.session_activities()[:limit],
+            "activities": _filter_visible_session_activities(
+                self.state,
+                bus.session_activities(),
+                limit,
+            ),
         }
 
     async def _handle_session_activity_stream(
@@ -526,8 +672,32 @@ class ProviderOwnerBridge:
             nonlocal snapshot_sent
             if not getattr(event, "provider_id", "") or not getattr(event, "session_id", ""):
                 return
+            if event.kind == "session.archived":
+                payload = {
+                    "ok": True,
+                    "kind": "remove",
+                    "providerId": event.provider_id,
+                    "sessionId": event.session_id,
+                }
+                if not snapshot_sent:
+                    queued_payloads.append(payload)
+                    return
+                schedule_payload(payload)
+                return
             activity = bus.session_activity(event.provider_id, event.session_id)
             if activity is None:
+                return
+            if _session_archived_in_storage(self.state, event.provider_id, event.session_id):
+                payload = {
+                    "ok": True,
+                    "kind": "remove",
+                    "providerId": event.provider_id,
+                    "sessionId": event.session_id,
+                }
+                if not snapshot_sent:
+                    queued_payloads.append(payload)
+                    return
+                schedule_payload(payload)
                 return
             payload = {
                 "ok": True,
@@ -549,7 +719,11 @@ class ProviderOwnerBridge:
                 {
                     "ok": True,
                     "kind": "snapshot",
-                    "activities": bus.session_activities()[:limit],
+                    "activities": _filter_visible_session_activities(
+                        self.state,
+                        bus.session_activities(),
+                        limit,
+                    ),
                 }
             )
             snapshot_sent = True
@@ -620,6 +794,14 @@ class ProviderOwnerBridge:
                 thread_info.archived = False
                 thread_info.is_active = True
                 return {"ok": False, "error": f"真实归档成功，但保存本地归档状态失败: {exc}"}
+        publish_session_archived(
+            self.state,
+            provider_id=provider_id,
+            workspace_id=workspace_id,
+            workspace_path=ws_info.path,
+            session_id=thread_id,
+            source="desktop_app",
+        )
         return {
             "ok": True,
             "provider_id": provider_id,
@@ -647,7 +829,13 @@ class ProviderOwnerBridge:
             return {"ok": False, "error": f"Provider '{provider_id}' 不支持用量读取"}
 
         try:
-            raw_summary = get_summary(start_date, end_date)
+            raw_summary = await _run_sync_with_timeout(
+                f"{provider_id}.get_summary",
+                get_summary,
+                start_date,
+                end_date,
+                timeout=OWNER_BRIDGE_USAGE_TIMEOUT_SECONDS,
+            )
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -680,9 +868,12 @@ class ProviderOwnerBridge:
             return {"ok": False, "error": f"Provider '{provider_id}' 不支持会话读取"}
 
         try:
-            turns = facts.read_thread_history(
+            turns = await _run_sync_with_timeout(
+                f"{provider_id}.read_thread_history({session_id})",
+                facts.read_thread_history,
                 session_id,
                 limit=limit,
+                timeout=OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS,
             )
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -736,6 +927,112 @@ class ProviderOwnerBridge:
             str(request.get("source") or ""),
         )
         return {"ok": True, "ignored": True, "reason": "approval_via_app_server_only"}
+
+    async def _handle_reply_approval(self, request: dict) -> dict:
+        provider_id = str(request.get("provider_id") or "").strip()
+        workspace_id = str(request.get("workspace_id") or "").strip()
+        thread_id = str(request.get("session_id") or request.get("thread_id") or "").strip()
+        request_id = str(request.get("request_id") or "").strip()
+        action = str(request.get("action") or "").strip()
+        workspace_dir = str(request.get("workspace_dir") or request.get("workspace_path") or "").strip()
+        approval_source = str(request.get("approval_source") or "app_server").strip() or "app_server"
+        command = str(request.get("command") or "").strip()
+        reason = str(request.get("reason") or request.get("attention_reason") or "").strip()
+
+        if not provider_id:
+            return {"ok": False, "error": "缺少 provider_id"}
+        if not request_id:
+            return {"ok": False, "error": "缺少 request_id"}
+        if action not in {"exec_allow", "exec_deny", "exec_allow_always"}:
+            return {"ok": False, "error": f"unsupported approval action: {action}"}
+
+        if not workspace_id and (workspace_dir or thread_id):
+            ws_info, _thread_info = _resolve_workspace_and_thread(
+                self.state,
+                provider_id,
+                thread_id,
+                workspace_dir,
+            )
+            workspace_id = (
+                getattr(ws_info, "daemon_workspace_id", "") or _workspace_key(provider_id, workspace_dir)
+                if ws_info is not None
+                else workspace_id
+            )
+
+        approval = SimpleNamespace(
+            request_id=request_id,
+            workspace_id=workspace_id,
+            thread_id=thread_id,
+            cmd=command,
+            justification=reason,
+            tool_name=provider_id,
+            tool_type=provider_id,
+            amendment_decision=request.get("amendment_decision") or {},
+            approval_source=approval_source,
+        )
+
+        runtime = self.state.get_provider_runtime(provider_id)
+        pending_decision = runtime.pending_approval_decisions.get(request_id)
+        rejected_message = "App 已拒绝" if action == "exec_deny" else ""
+        if pending_decision is not None and not pending_decision.requires_adapter_reply:
+            self.state.resolve_pending_approval_decision(
+                provider_id,
+                request_id,
+                action,
+                message=rejected_message,
+            )
+            publish_approval_answered(
+                self.state,
+                approval,
+                action=action,
+                source="desktop_app",
+            )
+            return {
+                "ok": True,
+                "mode": "pending-decision",
+                "provider_id": provider_id,
+                "request_id": request_id,
+                "action": action,
+            }
+
+        provider = get_provider(provider_id, getattr(self.state, "config", None))
+        if provider is None:
+            return {"ok": False, "error": f"Provider '{provider_id}' 未启用"}
+        if not workspace_id:
+            return {"ok": False, "error": "缺少 workspace_id，无法回复授权"}
+
+        adapter = self.state.get_adapter(provider_id)
+        if adapter is None or not getattr(adapter, "connected", False):
+            adapter = self.state.get_adapter_for_workspace(workspace_id)
+        if adapter is None or not getattr(adapter, "connected", False):
+            return {"ok": False, "error": f"{provider_id} adapter 未连接"}
+        reply_server_request = getattr(adapter, "reply_server_request", None)
+        if not callable(reply_server_request):
+            return {"ok": False, "error": f"{provider_id} adapter 不支持 reply_server_request"}
+
+        label, reply_body = _build_provider_approval_reply(provider, approval, action)
+        raw_request_id = _resolve_raw_approval_request_id(
+            self.state,
+            provider_id,
+            request_id,
+            thread_id=thread_id,
+            workspace_id=workspace_id,
+        )
+        await reply_server_request(workspace_id, raw_request_id, reply_body)
+        publish_approval_answered(
+            self.state,
+            approval,
+            action=action,
+            source="desktop_app",
+        )
+        return {
+            "ok": True,
+            "mode": "adapter",
+            "provider_id": provider_id,
+            "request_id": request_id,
+            "action": action,
+            "label": label,
+        }
 
     async def _handle_send_message(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
@@ -921,6 +1218,13 @@ class ProviderOwnerBridge:
         except Exception as exc:
             rollback_thread_remap()
             return {"ok": False, "error": str(exc)}
+
+        if thread_info.thread_id != original_thread_id and getattr(self.state, "storage", None) is not None:
+            try:
+                save_storage(self.state.storage)
+            except Exception as exc:
+                rollback_thread_remap()
+                return {"ok": False, "error": f"发送成功，但保存 remapped thread 失败: {exc}"}
 
         publish_user_message_accepted(
             self.state,

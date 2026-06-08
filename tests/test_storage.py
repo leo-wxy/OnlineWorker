@@ -447,7 +447,7 @@ def test_read_thread_history_normalizes_codex_image_wrapper_and_deduplicates_use
             "payload": {
                 "type": "user_message",
                 "message": "图片里面主要是什么内容",
-                "local_images": ["/Users/wxy/Projects/onlineWorker/docs/screenshots/setup.png"],
+                "local_images": ["/Users/example/Projects/sample-workspace/docs/screenshots/setup.png"],
             },
         },
         {

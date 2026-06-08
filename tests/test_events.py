@@ -5,10 +5,12 @@
 - _resolve_topic_id：topic_id 解析逻辑
 - _extract_thread_id：thread_id 提取逻辑
 """
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from config import Config, ToolConfig
+from core.messages import MessageEventBus
 from core.state import AppState
 from core.provider_runtime_state import ProviderWatchState
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
@@ -98,6 +100,7 @@ class TestTelegramMessageContract:
 @pytest.mark.asyncio
 async def test_send_app_server_approval_creates_pending_approval(monkeypatch):
     state = AppState(storage=AppStorage())
+    state.message_bus = MessageEventBus()
     bot = MagicMock()
     bot.edit_message_reply_markup = AsyncMock()
     send_mock = AsyncMock(return_value=MagicMock(message_id=88))
@@ -122,6 +125,11 @@ async def test_send_app_server_approval_creates_pending_approval(monkeypatch):
 
     assert state.pending_approvals[88].request_id == "req-1"
     assert state.pending_approvals[88].approval_source == "item/commandExecution/requestApproval"
+    activity = state.message_bus.session_activity("codex", "tid-cli")
+    assert activity is not None
+    assert activity["status"] == "needs_attention"
+    assert activity["requestId"] == "req-1"
+    assert activity["approvalSource"] == "item/commandExecution/requestApproval"
     bot.edit_message_reply_markup.assert_awaited_once()
 
 
@@ -270,7 +278,7 @@ def make_state_with_owner(
 
 
 @pytest.mark.asyncio
-async def test_server_request_approval_unknown_thread_notifies_owner_dm():
+async def test_server_request_approval_unknown_thread_is_discarded():
     state = make_state_with_owner()
     bot = MagicMock()
     bot.send_message = AsyncMock()
@@ -287,10 +295,8 @@ async def test_server_request_approval_unknown_thread_notifies_owner_dm():
         42,
     )
 
-    bot.send_message.assert_called_once()
-    call_kwargs = bot.send_message.call_args[1]
-    assert call_kwargs["chat_id"] == 12345
-    assert "missing-thread" in call_kwargs["text"]
+    bot.send_message.assert_not_called()
+    bot.edit_message_reply_markup.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -351,7 +357,7 @@ async def test_server_request_exec_command_approval_targets_conversation_id(monk
         {
             "conversationId": "tid-cli",
             "command": ["/bin/zsh", "-lc", "ps -axo pid,command"],
-            "cwd": "/Users/wxy/Projects/onlineworker-combined",
+            "cwd": "/Users/example/Projects/sample-repo",
             "reason": "inspect processes",
         },
         "approval-legacy",
@@ -387,11 +393,11 @@ async def test_server_request_permissions_approval_targets_thread_topic(monkeypa
         "item/permissions/requestApproval",
         {
             "threadId": "tid-cli",
-            "cwd": "/Users/wxy/Projects/onlineworker-combined",
+            "cwd": "/Users/example/Projects/sample-repo",
             "reason": "need Downloads write access",
             "permissions": {
                 "network": None,
-                "fileSystem": {"additionalRoots": ["/Users/wxy/Downloads"]},
+                "fileSystem": {"additionalRoots": ["/Users/example/Downloads"]},
             },
         },
         "approval-permissions",
@@ -404,12 +410,12 @@ async def test_server_request_permissions_approval_targets_thread_topic(monkeypa
     assert pending.thread_id == "tid-cli"
     assert pending.approval_source == "item/permissions/requestApproval"
     assert pending.amendment_decision == {
-        "permissions": {"fileSystem": {"additionalRoots": ["/Users/wxy/Downloads"]}}
+        "permissions": {"fileSystem": {"additionalRoots": ["/Users/example/Downloads"]}}
     }
 
 
 @pytest.mark.asyncio
-async def test_server_request_approval_notifies_owner_for_unroutable_request():
+async def test_server_request_approval_discards_unroutable_request():
     state = make_state_with_owner()
     adapter = MagicMock()
     adapter.reply_server_request = AsyncMock()
@@ -430,7 +436,7 @@ async def test_server_request_approval_notifies_owner_for_unroutable_request():
         "approval-1",
     )
 
-    bot.send_message.assert_awaited_once()
+    bot.send_message.assert_not_called()
     adapter.reply_server_request.assert_not_awaited()
 
 
@@ -472,9 +478,18 @@ async def test_server_request_approval_revives_stale_archived_thread_when_source
 
 
 @pytest.mark.asyncio
-async def test_event_approval_missing_topic_notifies_owner_dm():
+async def test_event_approval_missing_topic_is_retained_for_local_reply():
     state = make_state_with_owner(
         threads={"tid-001": ThreadInfo(thread_id="tid-001", topic_id=None, archived=False)}
+    )
+    state.storage.workspaces["proj"].tool = "claude"
+    state.storage.workspaces["proj"].daemon_workspace_id = "claude:/proj"
+    state.set_adapter(
+        "claude",
+        SimpleNamespace(
+            connected=True,
+            reply_server_request=AsyncMock(),
+        ),
     )
     bot = MagicMock()
     bot.send_message = AsyncMock()
@@ -497,12 +512,51 @@ async def test_event_approval_missing_topic_notifies_owner_dm():
         },
     )
 
-    bot.send_message.assert_called_once()
-    call_kwargs = bot.send_message.call_args[1]
-    assert call_kwargs["chat_id"] == 12345
-    assert "tid-001" in call_kwargs["text"]
-    assert "无法路由" in call_kwargs["text"]
+    bot.send_message.assert_not_called()
     bot.edit_message_reply_markup.assert_not_called()
+    pending = state.get_provider_runtime("claude").pending_approval_decisions.get("req-001")
+    assert pending is not None
+    assert pending.request_id == "req-001"
+    assert pending.requires_adapter_reply is True
+
+
+@pytest.mark.asyncio
+async def test_server_request_approval_missing_topic_is_retained_for_local_reply():
+    state = make_state_with_owner(
+        threads={"tid-001": ThreadInfo(thread_id="tid-001", topic_id=None, archived=False)}
+    )
+    state.storage.workspaces["proj"].tool = "claude"
+    state.storage.workspaces["proj"].daemon_workspace_id = "claude:/proj"
+    state.set_adapter(
+        "claude",
+        SimpleNamespace(
+            connected=True,
+            reply_server_request=AsyncMock(),
+        ),
+    )
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    bot.edit_message_reply_markup = AsyncMock()
+
+    handler = make_server_request_handler(state, bot, -100123456789)
+    await handler(
+        "item/commandExecution/requestApproval",
+        {
+            "threadId": "tid-001",
+            "command": "touch /tmp/from-hook",
+            "reason": "need permission",
+            "_workspaceId": "claude:/proj",
+            "_provider": "claude",
+        },
+        "approval-1",
+    )
+
+    bot.send_message.assert_not_called()
+    bot.edit_message_reply_markup.assert_not_called()
+    pending = state.get_provider_runtime("claude").pending_approval_decisions.get("approval-1")
+    assert pending is not None
+    assert pending.request_id == "approval-1"
+    assert pending.requires_adapter_reply is True
 
 
 @pytest.mark.asyncio

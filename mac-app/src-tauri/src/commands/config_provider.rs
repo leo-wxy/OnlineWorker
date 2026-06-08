@@ -2228,9 +2228,9 @@ providers:
       - id: native
         label: Native Claude
         bin: "claude"
-      - id: raven
-        label: Raven Claude
-        bin: "/Users/example/.nvm/versions/node/v20.20.1/bin/raven cc"
+      - id: launcher
+        label: Launcher Claude
+        bin: "/Users/example/bin/claude-launcher claude"
 "#;
 
         let providers = provider_metadata_from_raw(raw, None).expect("metadata");
@@ -2243,10 +2243,10 @@ providers:
         assert_eq!(claude.launch_methods[0].id, "native");
         assert_eq!(claude.launch_methods[0].label, "Native Claude");
         assert_eq!(claude.launch_methods[0].bin, "claude");
-        assert_eq!(claude.launch_methods[1].id, "raven");
+        assert_eq!(claude.launch_methods[1].id, "launcher");
         assert_eq!(
             claude.launch_methods[1].bin,
-            "/Users/example/.nvm/versions/node/v20.20.1/bin/raven cc"
+            "/Users/example/bin/claude-launcher claude"
         );
     }
 
@@ -2273,9 +2273,9 @@ providers:
                     bin: "claude".to_string(),
                 },
                 ProviderLaunchMethodConfig {
-                    id: "raven".to_string(),
-                    label: "Raven Claude".to_string(),
-                    bin: "/Users/example/.nvm/versions/node/v20.20.1/bin/raven cc".to_string(),
+                    id: "launcher".to_string(),
+                    label: "Launcher Claude".to_string(),
+                    bin: "/Users/example/bin/claude-launcher claude".to_string(),
                 },
             ]),
         );
@@ -2287,10 +2287,10 @@ providers:
         assert_eq!(launch_methods.len(), 2);
         assert_eq!(launch_methods[0].id, "native");
         assert_eq!(launch_methods[0].bin, "claude");
-        assert_eq!(launch_methods[1].id, "raven");
+        assert_eq!(launch_methods[1].id, "launcher");
         assert_eq!(
             launch_methods[1].bin,
-            "/Users/example/.nvm/versions/node/v20.20.1/bin/raven cc"
+            "/Users/example/bin/claude-launcher claude"
         );
     }
 

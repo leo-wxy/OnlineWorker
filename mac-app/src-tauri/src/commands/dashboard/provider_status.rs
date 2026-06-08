@@ -191,7 +191,9 @@ fn normalize_live_transport(value: Option<String>) -> Option<String> {
     value.and_then(|raw| {
         let trimmed = raw.trim().to_lowercase();
         match trimmed.as_str() {
-            "owner_bridge" | "shared_ws" | "shared_unix" | "stdio" | "ws" | "unix" | "http" => Some(trimmed),
+            "owner_bridge" | "shared_ws" | "shared_unix" | "stdio" | "ws" | "unix" | "http" => {
+                Some(trimmed)
+            }
             _ => None,
         }
     })

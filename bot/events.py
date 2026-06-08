@@ -48,6 +48,7 @@ from core.notifications.result_summary import (
     short_notification_title as _short_notification_title,
 )
 from core.messages.publishing import (
+    publish_approval_requested,
     publish_notification_activity,
     publish_session_message_event,
 )
@@ -245,6 +246,12 @@ async def send_approval_to_telegram(
             amendment_decision=info.amendment_decision,
             tool_type=info.tool_type,
             approval_source=info.approval_source,
+        )
+        publish_approval_requested(
+            state,
+            state.pending_approvals[msg_id],
+            workspace_id=workspace_id,
+            source="telegram",
         )
         keyboard = build_approval_keyboard(msg_id)
         await bot.edit_message_reply_markup(
@@ -528,56 +535,85 @@ def _provider_for_server_request_method(
     return ""
 
 
-async def _notify_owner_about_unroutable_approval(
-    state: AppState,
-    bot: Bot,
+def _log_discarded_unroutable_approval(
     info: ApprovalInfo,
     *,
     route_error: str,
     ws_daemon_id: str,
 ) -> None:
-    owner_chat_id = state.config.allowed_user_id if state.config else None
-    if owner_chat_id is None:
-        logger.error(
-            "[approval_target] 无法通知 owner：allowed_user_id 缺失 error=%s thread=%s ws=%s",
-            route_error,
-            info.thread_id or "N/A",
-            ws_daemon_id or "N/A",
-        )
-        return
+    logger.warning(
+        "[approval_target] 丢弃未绑定 topic 的审批请求 error=%s tool=%s thread=%s ws=%s cmd=%s",
+        route_error,
+        info.tool_type or "unknown",
+        info.thread_id or "N/A",
+        ws_daemon_id or "N/A",
+        (info.command or "")[:200],
+    )
 
-    lines = [
-        "⚠️ 沙盒权限请求无法路由到对应 Thread Topic，已改为仅通知 owner。",
-        f"原因：{route_error}",
-        f"工具：{info.tool_type}",
-    ]
-    if info.thread_id:
-        lines.append(f"Thread: {info.thread_id}")
-    if ws_daemon_id:
-        lines.append(f"Workspace: {ws_daemon_id}")
-    if info.command:
-        lines.append(f"命令：{info.command[:200]}")
-    if info.reason:
-        lines.append(f"理由：{info.reason[:300]}")
 
-    try:
-        await bot.send_message(chat_id=owner_chat_id, text="\n".join(lines))
-        logger.info(
-            "[approval_target] 已通知 owner chat=%s error=%s thread=%s ws=%s",
-            owner_chat_id,
-            route_error,
-            info.thread_id or "N/A",
-            ws_daemon_id or "N/A",
-        )
-    except Exception as e:
-        logger.error(
-            "[approval_target] 通知 owner 失败 chat=%s error=%s thread=%s ws=%s send_error=%s",
-            owner_chat_id,
-            route_error,
-            info.thread_id or "N/A",
-            ws_daemon_id or "N/A",
-            e,
-        )
+def _approval_is_locally_actionable(
+    state: AppState,
+    info: ApprovalInfo,
+    *,
+    workspace_id: str,
+) -> bool:
+    provider_id = str(info.tool_type or "").strip() or str(info.tool_name or "").strip()
+    request_id = str(info.request_id or "").strip()
+    if not provider_id or not request_id:
+        return False
+
+    adapter = state.get_adapter(provider_id)
+    if adapter is None or not getattr(adapter, "connected", False):
+        adapter = state.get_adapter_for_workspace(workspace_id)
+    if adapter is None or not getattr(adapter, "connected", False):
+        return False
+
+    reply_server_request = getattr(adapter, "reply_server_request", None)
+    return callable(reply_server_request)
+
+
+def _retain_locally_actionable_approval(
+    state: AppState,
+    info: ApprovalInfo,
+    *,
+    workspace_id: str,
+    route_error: str,
+) -> bool:
+    provider_id = str(info.tool_type or "").strip() or str(info.tool_name or "").strip()
+    request_id = str(info.request_id or "").strip()
+    if not provider_id or not request_id:
+        return False
+    if not _approval_is_locally_actionable(state, info, workspace_id=workspace_id):
+        return False
+
+    pending = state.ensure_pending_approval_decision(provider_id, request_id)
+    pending.requires_adapter_reply = True
+    publish_approval_requested(
+        state,
+        PendingApproval(
+            request_id=info.request_id,
+            workspace_id=workspace_id,
+            thread_id=info.thread_id or "",
+            cmd=info.command,
+            justification=info.reason,
+            tool_name=info.tool_name,
+            proposed_amendment=info.proposed_amendment,
+            amendment_decision=info.amendment_decision,
+            tool_type=info.tool_type,
+            approval_source=info.approval_source,
+        ),
+        workspace_id=workspace_id,
+        source="local_retained",
+    )
+    logger.info(
+        "[approval_target] 保留本地可回复审批 error=%s tool=%s thread=%s ws=%s request_id=%s",
+        route_error,
+        provider_id,
+        info.thread_id or "N/A",
+        workspace_id or "N/A",
+        request_id,
+    )
+    return True
 
 
 def _resolve_topic_id(
@@ -1213,9 +1249,14 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 thread_id or "N/A",
                 ctx.ws_daemon_id or "N/A",
             )
-            await _notify_owner_about_unroutable_approval(
+            if _retain_locally_actionable_approval(
                 state,
-                bot,
+                info,
+                workspace_id=workspace_id,
+                route_error=route_error,
+            ):
+                return
+            _log_discarded_unroutable_approval(
                 info,
                 route_error=route_error,
                 ws_daemon_id=ctx.ws_daemon_id,
@@ -1950,9 +1991,14 @@ def make_server_request_handler(state: AppState, bot: Bot, group_chat_id: int):
                 thread_id or "N/A",
                 workspace_id or "N/A",
             )
-            await _notify_owner_about_unroutable_approval(
+            if _retain_locally_actionable_approval(
                 state,
-                bot,
+                info,
+                workspace_id=workspace_id,
+                route_error=route_error,
+            ):
+                return
+            _log_discarded_unroutable_approval(
                 info,
                 route_error=route_error,
                 ws_daemon_id=workspace_id,

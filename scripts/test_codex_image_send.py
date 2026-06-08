@@ -15,7 +15,7 @@ from typing import Any
 
 
 DEFAULT_THREAD_ID = "019dbcd9-8d2b-7dc1-85ad-75dff569617e"
-DEFAULT_CWD = "/Users/wxy"
+DEFAULT_CWD = "/Users/example"
 DEFAULT_TEXT = "图片里面主要是什么内容"
 DEFAULT_LOG_PATH = os.path.expanduser("~/Library/Application Support/OnlineWorker/onlineworker.log")
 DEFAULT_SOCKET_PATH = os.path.expanduser("~/Library/Application Support/OnlineWorker/codex_owner_bridge.sock")

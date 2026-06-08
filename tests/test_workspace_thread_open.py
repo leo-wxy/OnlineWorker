@@ -30,11 +30,11 @@ def test_make_thread_topic_name_uses_path_basename_for_workspace_label():
     assert (
         _make_thread_topic_name(
             "external",
-            "/Users/wxy/Projects/claude-code-plugin",
+            "/Users/example/Projects/sample-plugin",
             None,
             "ses_29dc367eeffeoDSvql4qBCz2A2",
         )
-        == "[external/claude-code-plugin] New session"
+        == "[external/sample-plugin] New session"
     )
 
 

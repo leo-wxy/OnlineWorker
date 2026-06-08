@@ -35,6 +35,15 @@ rules needed to work safely in this codebase.
 8. Any operation touching non-repository paths must be read-only unless the user
    explicitly asks for that exact write. A general request like "clean up smoke"
    is not permission to delete or move external files.
+9. Provider live/session ingestion must have exactly one user-visible main
+   message source per provider/session/turn. Mirror, polling, hook fallback,
+   transcript replay, or alternate raw record formats are fallback-only; they
+   must not run in parallel with the authoritative live chain for the same
+   visible message.
+10. Topic or external IM routing is terminal-only. Missing `topic_id`, missing
+    thread binding, or failed outbound routing must never block provider CLI
+    execution, app-server live events, session projections, or Task Board
+    updates. Only the outbound IM leg may fail.
 
 ## Provider Approval Control
 

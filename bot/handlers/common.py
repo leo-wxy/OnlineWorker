@@ -219,6 +219,7 @@ def is_codex_unmaterialized_error(error: object) -> bool:
     return (
         "not materialized yet" in text
         or "no rollout found for thread id" in text
+        or "thread not found:" in text
     )
 
 

@@ -25,6 +25,10 @@ use super::provider_bridge_common::{
 use super::session_state::load_local_thread_overlays;
 
 static PROVIDER_SESSION_STREAM_GENERATION: OnceLock<Arc<AtomicU64>> = OnceLock::new();
+const PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(1200);
+const PROVIDER_SESSION_BRIDGE_LIST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+const PROVIDER_SESSION_BRIDGE_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -82,6 +86,29 @@ fn infer_attachment_kind(name: &str, mime_type: Option<&str>) -> String {
     "file".to_string()
 }
 
+fn connect_owner_bridge_socket(
+    data_dir: &Path,
+    timeout: std::time::Duration,
+) -> Result<UnixStream, String> {
+    let socket_path = provider_owner_bridge_socket_path(data_dir);
+    if !socket_path.exists() {
+        return Err(format!(
+            "provider owner bridge not ready: {}",
+            socket_path.display()
+        ));
+    }
+
+    let socket = UnixStream::connect(&socket_path)
+        .map_err(|e| format!("connect provider owner bridge failed: {e}"))?;
+    socket
+        .set_read_timeout(Some(timeout))
+        .map_err(|e| format!("set provider owner bridge read timeout failed: {e}"))?;
+    socket
+        .set_write_timeout(Some(timeout))
+        .map_err(|e| format!("set provider owner bridge write timeout failed: {e}"))?;
+    Ok(socket)
+}
+
 fn send_provider_session_message_via_owner_bridge(
     data_dir: &Path,
     provider_id: &str,
@@ -90,13 +117,14 @@ fn send_provider_session_message_via_owner_bridge(
     attachments: &[ComposerAttachment],
     workspace_dir: Option<&str>,
 ) -> Result<bool, String> {
-    let socket_path = provider_owner_bridge_socket_path(data_dir);
-    if !socket_path.exists() {
-        return Ok(false);
-    }
-
-    let mut socket = UnixStream::connect(&socket_path)
-        .map_err(|e| format!("connect provider owner bridge failed: {e}"))?;
+    let mut socket =
+        match connect_owner_bridge_socket(data_dir, PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT) {
+            Ok(socket) => socket,
+            Err(error) if error.starts_with("provider owner bridge not ready: ") => {
+                return Ok(false)
+            }
+            Err(error) => return Err(error),
+        };
 
     let mut payload = serde_json::json!({
         "type": "send_message",
@@ -150,16 +178,25 @@ fn read_provider_session_via_owner_bridge(
     workspace_dir: Option<&str>,
     limit: usize,
 ) -> Result<Value, String> {
-    let socket_path = provider_owner_bridge_socket_path(data_dir);
-    if !socket_path.exists() {
-        return Err(format!(
-            "provider owner bridge not ready: {}",
-            socket_path.display()
-        ));
-    }
+    read_provider_session_via_owner_bridge_with_timeout(
+        data_dir,
+        provider_id,
+        session_id,
+        workspace_dir,
+        limit,
+        PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT,
+    )
+}
 
-    let mut socket = UnixStream::connect(&socket_path)
-        .map_err(|e| format!("connect provider owner bridge failed: {e}"))?;
+fn read_provider_session_via_owner_bridge_with_timeout(
+    data_dir: &Path,
+    provider_id: &str,
+    session_id: &str,
+    workspace_dir: Option<&str>,
+    limit: usize,
+    timeout: std::time::Duration,
+) -> Result<Value, String> {
+    let mut socket = connect_owner_bridge_socket(data_dir, timeout)?;
 
     let mut payload = serde_json::json!({
         "type": "read_session",
@@ -209,16 +246,21 @@ fn list_provider_sessions_via_owner_bridge(
     provider_id: &str,
     limit: usize,
 ) -> Result<Value, String> {
-    let socket_path = provider_owner_bridge_socket_path(data_dir);
-    if !socket_path.exists() {
-        return Err(format!(
-            "provider owner bridge not ready: {}",
-            socket_path.display()
-        ));
-    }
+    list_provider_sessions_via_owner_bridge_with_timeout(
+        data_dir,
+        provider_id,
+        limit,
+        PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT,
+    )
+}
 
-    let mut socket = UnixStream::connect(&socket_path)
-        .map_err(|e| format!("connect provider owner bridge failed: {e}"))?;
+fn list_provider_sessions_via_owner_bridge_with_timeout(
+    data_dir: &Path,
+    provider_id: &str,
+    limit: usize,
+    timeout: std::time::Duration,
+) -> Result<Value, String> {
+    let mut socket = connect_owner_bridge_socket(data_dir, timeout)?;
 
     let payload = serde_json::json!({
         "type": "list_sessions",
@@ -262,16 +304,7 @@ fn archive_provider_session_via_owner_bridge(
     session_id: &str,
     workspace_dir: Option<&str>,
 ) -> Result<Value, String> {
-    let socket_path = provider_owner_bridge_socket_path(data_dir);
-    if !socket_path.exists() {
-        return Err(format!(
-            "provider owner bridge not ready: {}",
-            socket_path.display()
-        ));
-    }
-
-    let mut socket = UnixStream::connect(&socket_path)
-        .map_err(|e| format!("connect provider owner bridge failed: {e}"))?;
+    let mut socket = connect_owner_bridge_socket(data_dir, PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT)?;
 
     let mut payload = serde_json::json!({
         "type": "archive_session",
@@ -365,6 +398,7 @@ async fn run_provider_session_bridge(
     operation: &str,
     session_id: Option<&str>,
     workspace_dir: Option<&str>,
+    timeout: Option<std::time::Duration>,
 ) -> Result<Value, String> {
     let data_dir = ensure_data_dir()?;
     let sidecar = app
@@ -398,10 +432,18 @@ async fn run_provider_session_bridge(
         sidecar = sidecar.env(&key, value);
     }
 
-    let output = sidecar
-        .output()
-        .await
-        .map_err(|error| format!("provider session bridge failed: {}", error))?;
+    let output = match timeout {
+        Some(timeout) => tokio::time::timeout(timeout, sidecar.output())
+            .await
+            .map_err(|_| {
+                format!(
+                    "provider session bridge timed out after {}ms",
+                    timeout.as_millis()
+                )
+            })?,
+        None => sidecar.output().await,
+    }
+    .map_err(|error| format!("provider session bridge failed: {}", error))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -426,7 +468,15 @@ async fn run_provider_session_archive_bridge(
     session_id: &str,
     workspace_dir: Option<&str>,
 ) -> Result<Value, String> {
-    run_provider_session_bridge(app, provider_id, "archive", Some(session_id), workspace_dir).await
+    run_provider_session_bridge(
+        app,
+        provider_id,
+        "archive",
+        Some(session_id),
+        workspace_dir,
+        None,
+    )
+    .await
 }
 
 fn session_state_path(data_dir: &Path) -> std::path::PathBuf {
@@ -643,7 +693,15 @@ pub async fn list_provider_sessions(app: AppHandle, provider_id: String) -> Resu
                 match list_provider_sessions_via_owner_bridge(&data_dir, &provider.id, 100) {
                     Ok(value) => Ok(value),
                     Err(_) => {
-                        run_provider_session_bridge(&app, &provider.id, "list", None, None).await
+                        run_provider_session_bridge(
+                            &app,
+                            &provider.id,
+                            "list",
+                            None,
+                            None,
+                            Some(PROVIDER_SESSION_BRIDGE_LIST_TIMEOUT),
+                        )
+                        .await
                     }
                 }?;
             Ok(overlay_provider_sessions(&data_dir, &provider.id, sessions))
@@ -676,6 +734,7 @@ pub async fn read_provider_session(
                     "read",
                     Some(&session_id),
                     workspace_dir.as_deref(),
+                    Some(PROVIDER_SESSION_BRIDGE_READ_TIMEOUT),
                 )
                 .await
             }
@@ -945,9 +1004,11 @@ pub async fn stop_provider_session_stream(
 #[cfg(test)]
 mod tests {
     use super::{
-        archive_provider_session_via_owner_bridge, owner_bridge_archive_error_allows_sidecar,
-        persist_provider_session_archived_state, provider_session_read_uses_owner_bridge,
-        provider_session_send_uses_owner_bridge, send_provider_session_message_via_owner_bridge,
+        archive_provider_session_via_owner_bridge,
+        list_provider_sessions_via_owner_bridge_with_timeout,
+        owner_bridge_archive_error_allows_sidecar, persist_provider_session_archived_state,
+        provider_session_read_uses_owner_bridge, provider_session_send_uses_owner_bridge,
+        send_provider_session_message_via_owner_bridge,
         send_provider_session_message_via_owner_bridge_with_retry, ComposerAttachment,
     };
     use crate::commands::config_provider::provider_metadata_from_raw;
@@ -1031,9 +1092,9 @@ mod tests {
 
         let envs = provider_bridge_env(&dir);
 
-        assert!(envs.iter().any(|(key, value)| {
-            key == "PYINSTALLER_RESET_ENVIRONMENT" && value == "1"
-        }));
+        assert!(envs
+            .iter()
+            .any(|(key, value)| { key == "PYINSTALLER_RESET_ENVIRONMENT" && value == "1" }));
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -1263,6 +1324,41 @@ mod tests {
                 }
             ])
         );
+
+        server.join().expect("join owner bridge server");
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn owner_bridge_list_provider_sessions_times_out() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("ow-pobr-list-timeout-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let socket_path = provider_owner_bridge_socket_path(&temp_dir);
+        let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
+
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("accept owner bridge socket");
+            let mut request = String::new();
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            reader
+                .read_line(&mut request)
+                .expect("read owner bridge request");
+            let payload: serde_json::Value =
+                serde_json::from_str(request.trim()).expect("parse owner bridge request");
+            assert_eq!(payload["type"], "list_sessions");
+            thread::sleep(Duration::from_millis(200));
+        });
+
+        let error = list_provider_sessions_via_owner_bridge_with_timeout(
+            &temp_dir,
+            "overlay-tool",
+            100,
+            Duration::from_millis(50),
+        )
+        .expect_err("list should time out");
+        assert!(error.contains("read provider owner bridge response failed"));
 
         server.join().expect("join owner bridge server");
         let _ = fs::remove_dir_all(&temp_dir);

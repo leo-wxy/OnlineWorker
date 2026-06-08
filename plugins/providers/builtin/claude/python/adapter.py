@@ -52,9 +52,8 @@ STALE_CLAUDE_BASE_URLS = {
 }
 MIN_SUPPORTED_HOOK_NODE_MAJOR = 20
 CLAUDE_STREAM_BUFFER_LIMIT = 10 * 1024 * 1024
-_PRETOOL_PERMISSION_TOOLS = frozenset(
-    {"Bash", "Edit", "Write", "AskUserQuestion", "ExitPlanMode"}
-)
+_PRETOOL_APPROVAL_TOOLS = frozenset({"Bash", "Edit", "Write", "ExitPlanMode"})
+_PERMISSION_REQUEST_TOOLS = frozenset({"Bash", "Edit", "Write", "ExitPlanMode"})
 CLAUDE_REASON_DETAILS = {
     "ok": "Claude provider is ready.",
     "loggedOut": "Claude CLI is not logged in.",
@@ -184,7 +183,13 @@ def _hook_is_ask_user_question(payload: dict[str, Any]) -> bool:
 
 
 def _hook_is_tool_approval_request(payload: dict[str, Any]) -> bool:
-    return _hook_event_name(payload) in {"PermissionRequest", "PreToolUse"} and _normalize_hook_tool_name(payload) in _PRETOOL_PERMISSION_TOOLS - {"AskUserQuestion"}
+    event_name = _hook_event_name(payload)
+    tool_name = _normalize_hook_tool_name(payload)
+    if event_name == "PreToolUse":
+        return tool_name in _PRETOOL_APPROVAL_TOOLS
+    if event_name == "PermissionRequest":
+        return tool_name in _PERMISSION_REQUEST_TOOLS
+    return False
 
 
 def _hook_is_lifecycle_event(payload: dict[str, Any]) -> bool:
@@ -1236,6 +1241,12 @@ class ClaudeAdapter:
         workspace_id = self._resolve_hook_workspace_id(payload)
         thread_id = _hook_session_id(payload)
         command, reason = _hook_permission_display(payload)
+        prompt_text = ""
+        if thread_id:
+            session_state = self._external_hook_sessions.get(thread_id) or {}
+            prompt_text = str(session_state.get("last_prompt") or "").strip()
+        if not prompt_text:
+            prompt_text = _hook_user_prompt(payload)
         future = asyncio.get_running_loop().create_future()
         self._pending_hook_requests[request_id] = {
             "future": future,
@@ -1253,6 +1264,7 @@ class ClaudeAdapter:
                     "_provider": "claude",
                     "_claude_permission": True,
                     "toolName": _normalize_hook_tool_name(payload),
+                    "prompt": prompt_text,
                 },
             )
             return await future

@@ -206,6 +206,11 @@ async def start_runtime(manager, bot, tool_cfg) -> None:
     data_dir = manager.state.config.data_dir if manager.state.config is not None else None
     if data_dir:
         adapter.configure_hook_bridge(data_dir)
+        start_hook_bridge = getattr(adapter, "start_hook_bridge", None)
+        if callable(start_hook_bridge):
+            result = start_hook_bridge(data_dir)
+            if inspect.isawaitable(result):
+                await result
         install_external_hook_ingress = getattr(adapter, "install_external_hook_ingress", None)
         if callable(install_external_hook_ingress):
             result = install_external_hook_ingress()

@@ -845,7 +845,7 @@ async def test_claude_adapter_selects_first_ready_configured_launch_method(monke
         claude_bin="claude",
         launch_methods=[
             {"id": "native", "label": "Native Claude", "bin": "claude"},
-            {"id": "raven", "label": "Raven Claude", "bin": "raven cc"},
+            {"id": "launcher", "label": "Launcher Claude", "bin": "launcher claude"},
         ],
     )
     await adapter.connect()
@@ -881,18 +881,18 @@ async def test_claude_adapter_selects_first_ready_configured_launch_method(monke
     result = await adapter.send_user_message("claude:onlineWorker", "ses-1", "继续")
 
     assert readiness["ready"] is True
-    assert readiness["launchMethod"]["id"] == "raven"
+    assert readiness["launchMethod"]["id"] == "launcher"
     assert readiness["methods"][0]["id"] == "native"
     assert readiness["methods"][0]["ready"] is False
-    assert readiness["methods"][1]["id"] == "raven"
+    assert readiness["methods"][1]["id"] == "launcher"
     assert readiness["methods"][1]["selected"] is True
-    assert adapter._claude_command_prefix == ["raven", "cc"]
+    assert adapter._claude_command_prefix == ["launcher", "claude"]
     assert result["status"] == "completed"
     assert create_process.await_args_list[0].args[:3] == ("claude", "auth", "status")
-    assert create_process.await_args_list[1].args[:4] == ("raven", "cc", "auth", "status")
+    assert create_process.await_args_list[1].args[:4] == ("launcher", "claude", "auth", "status")
     assert create_process.await_args_list[2].args[:3] == ("claude", "auth", "status")
-    assert create_process.await_args_list[3].args[:4] == ("raven", "cc", "auth", "status")
-    assert create_process.await_args_list[4].args[:3] == ("raven", "cc", "-p")
+    assert create_process.await_args_list[3].args[:4] == ("launcher", "claude", "auth", "status")
+    assert create_process.await_args_list[4].args[:3] == ("launcher", "claude", "-p")
 
 
 @pytest.mark.asyncio
@@ -1130,7 +1130,7 @@ def test_claude_adapter_build_env_includes_common_cli_path_for_launch_wrappers(m
 
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
 
-    env = ClaudeAdapter(claude_bin="/Users/example/.nvm/versions/node/v20.20.1/bin/raven cc")._build_claude_env()
+    env = ClaudeAdapter(claude_bin="/Users/example/bin/claude-launcher claude")._build_claude_env()
     path_entries = env["PATH"].split(os.pathsep)
 
     assert "/opt/homebrew/bin" in path_entries
@@ -1272,7 +1272,7 @@ async def test_claude_adapter_permission_request_roundtrip_via_hook_payload():
     adapter.on_event(on_event)
 
     payload = {
-        "hook_event_name": "PreToolUse",
+        "hook_event_name": "PermissionRequest",
         "session_id": "ses-1",
         "cwd": "/Users/example/Projects/onlineWorker",
         "tool_name": "Bash",
@@ -1294,6 +1294,7 @@ async def test_claude_adapter_permission_request_roundtrip_via_hook_payload():
     assert event_params["command"] == "pwd"
     assert event_params["reason"] == "检查当前目录"
     assert event_params["_provider"] == "claude"
+    assert event_params["prompt"] == ""
 
     request_id = event_params["request_id"]
     await adapter.reply_server_request(
@@ -1305,8 +1306,10 @@ async def test_claude_adapter_permission_request_roundtrip_via_hook_payload():
 
     assert response == {
         "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
+            "hookEventName": "PermissionRequest",
+            "decision": {
+                "behavior": "allow",
+            },
         }
     }
 
@@ -1327,7 +1330,7 @@ async def test_claude_adapter_pretool_allow_always_applies_session_tool_allowlis
     adapter.on_event(on_event)
 
     payload = {
-        "hook_event_name": "PreToolUse",
+        "hook_event_name": "PermissionRequest",
         "session_id": "ses-1",
         "cwd": "/Users/example/Projects/onlineWorker",
         "tool_name": "Bash",
@@ -1350,19 +1353,82 @@ async def test_claude_adapter_pretool_allow_always_applies_session_tool_allowlis
 
     assert response == {
         "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
+            "hookEventName": "PermissionRequest",
+            "decision": {
+                "behavior": "allow",
+                "updatedPermissions": [
+                    {
+                        "type": "addRules",
+                        "rules": [{"toolName": "Bash", "ruleContent": "*"}],
+                        "behavior": "allow",
+                        "destination": "session",
+                    }
+                ],
+            },
         }
     }
 
     auto_allowed = await adapter.handle_hook_payload(payload)
     assert auto_allowed == {
         "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
+            "hookEventName": "PermissionRequest",
+            "decision": {
+                "behavior": "allow",
+            },
         }
     }
     assert len(events) == 1
+
+
+@pytest.mark.asyncio
+async def test_claude_adapter_permission_request_includes_last_prompt_from_hook_session(tmp_path):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    adapter = ClaudeAdapter(claude_bin="claude")
+    await adapter.connect()
+    adapter.register_workspace_cwd("claude:onlineWorker", str(tmp_path))
+
+    events = []
+
+    async def on_event(method, params):
+        events.append((method, params))
+
+    adapter.on_event(on_event)
+
+    await adapter.handle_hook_payload(
+        {
+            "hook_event_name": "UserPromptSubmit",
+            "session_id": "ses-1",
+            "cwd": str(tmp_path),
+            "user_prompt": "engine实现情况如何？",
+            "transcript_path": str(tmp_path / "ses-1.jsonl"),
+        }
+    )
+    events.clear()
+
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "session_id": "ses-1",
+        "cwd": str(tmp_path),
+        "tool_name": "Bash",
+        "tool_input": {
+            "command": "pwd",
+            "description": "检查当前目录",
+        },
+    }
+
+    response_task = asyncio.create_task(adapter.handle_hook_payload(payload))
+    await asyncio.sleep(0)
+
+    event_params = events[0][1]["message"]["params"]
+    assert event_params["prompt"] == "engine实现情况如何？"
+
+    await adapter.reply_server_request(
+        "claude:onlineWorker",
+        event_params["request_id"],
+        {"behavior": "allow"},
+    )
+    await response_task
 
 
 @pytest.mark.asyncio

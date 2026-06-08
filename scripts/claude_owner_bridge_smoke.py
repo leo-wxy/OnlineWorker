@@ -5,10 +5,17 @@ import argparse
 import json
 import os
 import socket
+import sys
 import time
 import uuid
 from pathlib import Path
 from typing import Any
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from cleanup_smoke_sessions import cleanup_smoke_session
 
 
 DEFAULT_DATA_DIR = Path.home() / "Library/Application Support/OnlineWorker"
@@ -53,57 +60,87 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
     session_id = str(uuid.uuid4())
     marker = f"{args.marker_prefix}{session_id.split('-', 1)[0]}"
     text = f"Reply exactly: {marker}"
+    cleanup_preview = "onlineworker claude owner bridge smoke"
+    cleanup_result: dict[str, Any] | None = None
+    smoke_error: Exception | None = None
 
-    send_payload = {
-        "type": "send_message",
-        "provider_id": args.provider,
-        "thread_id": session_id,
-        "workspace_dir": workspace,
-        "text": text,
-    }
-    send_response = _request(socket_path, send_payload, args.timeout)
-    if send_response.get("ok") is not True:
-        raise RuntimeError(f"send_message failed: {json.dumps(send_response, ensure_ascii=False)}")
-
-    deadline = time.monotonic() + args.read_timeout
-    last_read: dict[str, Any] | None = None
-    while True:
-        read_payload = {
-            "type": "read_session",
+    try:
+        send_payload = {
+            "type": "send_message",
             "provider_id": args.provider,
-            "session_id": session_id,
-            "limit": 10,
+            "thread_id": session_id,
+            "workspace_dir": workspace,
+            "text": text,
         }
-        last_read = _request(socket_path, read_payload, min(args.timeout, 20))
-        if last_read.get("ok") is True and _contains_assistant_marker(
-            list(last_read.get("session") or []),
-            marker,
-        ):
-            return {
-                "ok": True,
-                "provider_id": args.provider,
-                "thread_id": session_id,
-                "workspace": workspace,
-                "marker": marker,
-                "send_response": send_response,
-                "read_response": last_read,
-            }
-        if time.monotonic() >= deadline:
-            break
-        time.sleep(args.poll_interval)
+        send_response = _request(socket_path, send_payload, args.timeout)
+        if send_response.get("ok") is not True:
+            raise RuntimeError(f"send_message failed: {json.dumps(send_response, ensure_ascii=False)}")
 
-    raise RuntimeError(
-        "assistant marker not found: "
-        + json.dumps(
-            {
-                "thread_id": session_id,
-                "marker": marker,
-                "send_response": send_response,
-                "last_read_response": last_read,
-            },
-            ensure_ascii=False,
+        deadline = time.monotonic() + args.read_timeout
+        last_read: dict[str, Any] | None = None
+        while True:
+            read_payload = {
+                "type": "read_session",
+                "provider_id": args.provider,
+                "session_id": session_id,
+                "limit": 10,
+            }
+            last_read = _request(socket_path, read_payload, min(args.timeout, 20))
+            if last_read.get("ok") is True and _contains_assistant_marker(
+                list(last_read.get("session") or []),
+                marker,
+            ):
+                result = {
+                    "ok": True,
+                    "provider_id": args.provider,
+                    "thread_id": session_id,
+                    "workspace": workspace,
+                    "marker": marker,
+                    "send_response": send_response,
+                    "read_response": last_read,
+                }
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    "assistant marker not found: "
+                    + json.dumps(
+                        {
+                            "thread_id": session_id,
+                            "marker": marker,
+                            "send_response": send_response,
+                            "last_read_response": last_read,
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            time.sleep(args.poll_interval)
+    except Exception as exc:
+        smoke_error = exc
+        result = None
+    cleanup_error: Exception | None = None
+    try:
+        cleanup_result = cleanup_smoke_session(
+            provider_id=args.provider,
+            session_id=session_id,
+            workspace_dir=workspace,
+            preview=cleanup_preview,
+            data_dir=DEFAULT_DATA_DIR,
+            socket_path=socket_path,
+            prefer_real_archive=True,
         )
-    )
+    except Exception as exc:
+        cleanup_error = exc
+
+    if smoke_error is not None and cleanup_error is not None:
+        raise RuntimeError(f"{smoke_error}; smoke cleanup failed: {cleanup_error}") from smoke_error
+    if smoke_error is not None:
+        raise smoke_error
+    if cleanup_error is not None:
+        raise RuntimeError(f"smoke cleanup failed: {cleanup_error}") from cleanup_error
+
+    assert result is not None
+    result["cleanup"] = cleanup_result
+    return result
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -10,6 +10,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLUGIN_STAGING_ROOT="$PROJECT_ROOT/mac-app/src-tauri/provider-plugins"
+NOTIFICATION_PLUGIN_STAGING_ROOT="$PROJECT_ROOT/mac-app/src-tauri/notification-plugins"
 BUNDLE_ROOT="$PROJECT_ROOT/mac-app/src-tauri/target/release/bundle"
 
 cleanup_previous_bundle_outputs() {
@@ -48,6 +49,31 @@ stage_provider_plugins() {
 			exit 1
 		fi
 		cp -R "$source" "$PLUGIN_STAGING_ROOT/$(basename "$source")"
+	done
+}
+
+stage_notification_plugins() {
+	mkdir -p "$NOTIFICATION_PLUGIN_STAGING_ROOT"
+	find "$NOTIFICATION_PLUGIN_STAGING_ROOT" -mindepth 1 -maxdepth 1 ! -name '.gitkeep' -exec rm -rf {} +
+
+	local raw_sources="${ONLINEWORKER_NOTIFICATION_PLUGIN_SOURCE_DIRS:-}"
+	if [ -z "$raw_sources" ]; then
+		return
+	fi
+
+	local source
+	IFS=':' read -r -a plugin_sources <<< "$raw_sources"
+	for source in "${plugin_sources[@]}"; do
+		source="${source## }"
+		source="${source%% }"
+		if [ -z "$source" ]; then
+			continue
+		fi
+		if [ ! -e "$source" ]; then
+			echo "ERROR: notification plugin source not found: $source"
+			exit 1
+		fi
+		cp -R "$source" "$NOTIFICATION_PLUGIN_STAGING_ROOT/$(basename "$source")"
 	done
 }
 
@@ -128,6 +154,7 @@ echo "=== Step 3/3: Tauri build ==="
 ensure_pnpm
 hash -r
 stage_provider_plugins
+stage_notification_plugins
 cd "$PROJECT_ROOT/mac-app"
 if [ ! -x "$PROJECT_ROOT/mac-app/node_modules/.bin/tauri" ]; then
 	echo "=== Installing mac-app dependencies ==="

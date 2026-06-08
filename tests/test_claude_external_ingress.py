@@ -59,7 +59,7 @@ def test_install_and_uninstall_onlineworker_claude_hooks_preserve_unrelated_entr
                     "hooks": [
                         {
                             "type": "command",
-                            "command": "~/.codeisland/codeisland-hook.sh",
+                            "command": "/usr/local/bin/legacy-claude-hook.sh",
                             "timeout": 5,
                         }
                     ],
@@ -71,7 +71,7 @@ def test_install_and_uninstall_onlineworker_claude_hooks_preserve_unrelated_entr
                     "hooks": [
                         {
                             "type": "command",
-                            "command": "'/Applications/Muxy.app/Contents/Resources/Muxy_Muxy.bundle/muxy-claude-hook.sh' notification",
+                            "command": "'/Applications/LegacyHelper.app/Contents/Resources/LegacyHelper.bundle/legacy-claude-hook.sh' notification",
                             "timeout": 10,
                         }
                     ],
@@ -179,7 +179,7 @@ async def test_claude_adapter_user_prompt_submit_accepts_prompt_alias(tmp_path: 
             "hook_event_name": "UserPromptSubmit",
             "session_id": "ses-prompt",
             "cwd": str(tmp_path),
-            "prompt": "走 raven cc",
+            "prompt": "走备用启动器",
             "transcript_path": str(tmp_path / "ses-prompt.jsonl"),
         }
     )
@@ -190,7 +190,7 @@ async def test_claude_adapter_user_prompt_submit_accepts_prompt_alias(tmp_path: 
         "message.user.submitted",
         "turn/started",
     ]
-    assert events[1][1]["message"]["params"]["text"] == "走 raven cc"
+    assert events[1][1]["message"]["params"]["text"] == "走备用启动器"
 
 
 @pytest.mark.asyncio

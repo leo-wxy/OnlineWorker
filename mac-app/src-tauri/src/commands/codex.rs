@@ -917,6 +917,29 @@ fn extract_codex_event_user_message(payload: &Value) -> Option<String> {
     }
 }
 
+fn codex_stream_event_signature(event: &CodexThreadStreamEvent) -> Option<(String, String)> {
+    let turn = event.turn.as_ref()?;
+    let role = turn.role.trim();
+    let content = turn.content.trim();
+    if role.is_empty() || content.is_empty() {
+        return None;
+    }
+    Some((role.to_string(), content.to_string()))
+}
+
+fn is_adjacent_duplicate_codex_stream_event(
+    previous_signature: &Option<(String, String)>,
+    event: &CodexThreadStreamEvent,
+) -> bool {
+    let Some(current_signature) = codex_stream_event_signature(event) else {
+        return false;
+    };
+    previous_signature
+        .as_ref()
+        .map(|previous| previous == &current_signature)
+        .unwrap_or(false)
+}
+
 fn build_codex_stream_turn_event(
     kind: &str,
     semantic_kind: Option<&str>,
@@ -1335,6 +1358,7 @@ pub async fn start_codex_thread_stream(
         }
 
         let mut current_cursor = cursor;
+        let mut last_visible_signature: Option<(String, String)> = None;
         while generation.load(Ordering::SeqCst) == my_generation {
             let mut line = String::new();
             match reader.read_line(&mut line) {
@@ -1344,6 +1368,10 @@ pub async fn start_codex_thread_stream(
                 Ok(bytes) => {
                     current_cursor.offset += bytes as u64;
                     for event in parse_codex_stream_events(&line, current_cursor) {
+                        if is_adjacent_duplicate_codex_stream_event(&last_visible_signature, &event) {
+                            continue;
+                        }
+                        last_visible_signature = codex_stream_event_signature(&event);
                         let _ = channel.send(event);
                     }
                 }
@@ -1479,17 +1507,16 @@ mod tests {
                 .expect("write response");
         });
 
-        let error =
-            send_codex_thread_message_via_owner_bridge(
-                &temp_dir,
-                "tid-1",
-                "hello",
-                &[],
-                None,
-                None,
-                None,
-            )
-                .expect_err("owner bridge should return error");
+        let error = send_codex_thread_message_via_owner_bridge(
+            &temp_dir,
+            "tid-1",
+            "hello",
+            &[],
+            None,
+            None,
+            None,
+        )
+        .expect_err("owner bridge should return error");
 
         assert!(error.contains("owner adapter unavailable"));
 
@@ -2519,7 +2546,7 @@ mod tests {
             concat!(
                 "{\"timestamp\":\"2026-04-13T10:00:00.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"# AGENTS.md instructions for /Users/example/Projects/onlineWorker\\n\\n<INSTRUCTIONS>\\n# Global Agent Instructions\\n\\n- 默认使用中文回答\\n</INSTRUCTIONS>\"}]}}\n",
                 "{\"timestamp\":\"2026-04-13T10:00:01.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<environment_context>\\n  <cwd>/Users/example/Projects/onlineWorker</cwd>\\n</environment_context>\"}]}}\n",
-                "{\"timestamp\":\"2026-04-13T10:00:02.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<skill>\\n<name>ask</name>\\n<path>/Users/example/.git-ai/skills/ask/SKILL.md</path>\\n</skill>\"}]}}\n",
+                "{\"timestamp\":\"2026-04-13T10:00:02.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<skill>\\n<name>ask</name>\\n<path>/Users/example/.codex/skills/ask/SKILL.md</path>\\n</skill>\"}]}}\n",
                 "{\"timestamp\":\"2026-04-13T10:00:03.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"继续处理 phase17\"}]}}\n",
                 "{\"timestamp\":\"2026-04-13T10:00:04.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"我先定位问题。\"}]}}\n"
             ),
@@ -2661,6 +2688,27 @@ mod tests {
             Some("请顺手看图\n[Attached image] failure.png")
         );
         assert_eq!(events[0].cursor.offset, 176);
+    }
+
+    #[test]
+    fn codex_stream_adjacent_duplicate_signature_matches_same_role_and_content() {
+        let first = parse_codex_stream_events(
+            "{\"timestamp\":\"2026-04-13T10:00:03.000Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"我先排查链路。\",\"phase\":\"commentary\"}}",
+            CodexThreadCursor { offset: 144 },
+        )
+        .into_iter()
+        .next()
+        .expect("first event");
+        let second = parse_codex_stream_events(
+            "{\"timestamp\":\"2026-04-13T10:00:04.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"commentary\",\"content\":[{\"type\":\"output_text\",\"text\":\"我先排查链路。\"}]}}",
+            CodexThreadCursor { offset: 168 },
+        )
+        .into_iter()
+        .next()
+        .expect("second event");
+
+        let signature = super::codex_stream_event_signature(&first);
+        assert!(super::is_adjacent_duplicate_codex_stream_event(&signature, &second));
     }
 
     #[test]

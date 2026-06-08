@@ -15,7 +15,15 @@ from core.storage import AppStorage, ThreadInfo, WorkspaceInfo
 GROUP_CHAT_ID = -100123456789
 
 
-def _append_response_item(path: Path, *, role: str, phase: str, text: str, timestamp: str) -> None:
+def _append_response_item(
+    path: Path,
+    *,
+    role: str,
+    phase: str,
+    text: str,
+    timestamp: str,
+    turn_id: str = "",
+) -> None:
     record = {
         "timestamp": timestamp,
         "type": "response_item",
@@ -25,6 +33,8 @@ def _append_response_item(path: Path, *, role: str, phase: str, text: str, times
             "content": [{"type": "output_text", "text": text}],
         },
     }
+    if turn_id:
+        record["payload"]["turn_id"] = turn_id
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -225,6 +235,7 @@ async def test_sync_watched_thread_once_emits_commentary_and_final_events(tmp_pa
         phase="commentary",
         text="处理中",
         timestamp="2026-04-06T10:00:01Z",
+        turn_id="turn-live",
     )
     _append_response_item(
         session_file,
@@ -232,6 +243,7 @@ async def test_sync_watched_thread_once_emits_commentary_and_final_events(tmp_pa
         phase="final_answer",
         text="最终回复",
         timestamp="2026-04-06T10:00:10Z",
+        turn_id="turn-live",
     )
 
     watch_codex_thread(state, ws, "tid-1", ttl_seconds=120)
@@ -251,6 +263,10 @@ async def test_sync_watched_thread_once_emits_commentary_and_final_events(tmp_pa
 
     assert "tid-1" not in state.streaming_turns
     assert codex_state.get_runtime(state).last_synced_assistant["tid-1"] == "2026-04-06T10:00:10Z\n最终回复"
+    run = codex_state.get_current_run(state, "tid-1")
+    assert run is not None
+    assert run.turn_id == "turn-live"
+    assert run.final_reply_synced_to_tg is True
     assert bot.send_message.await_count >= 2
     sent_texts = [call.kwargs["text"] for call in bot.send_message.await_args_list]
     assert "⏳ 思考中..." in sent_texts
@@ -261,7 +277,78 @@ async def test_sync_watched_thread_once_emits_commentary_and_final_events(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_sync_codex_tui_realtime_once_in_app_mode_auto_watches_bound_thread_without_replaying_old_commentary(tmp_path):
+async def test_sync_watched_thread_once_marks_final_turn_to_skip_delayed_duplicate(tmp_path):
+    from bot.events import make_event_handler
+    from plugins.providers.builtin.codex.python.tui_realtime_mirror import (
+        sync_watched_thread_once,
+        watch_codex_thread,
+    )
+
+    state, ws, session_file, sessions_dir = _make_state(tmp_path)
+    bot = SimpleNamespace(
+        send_message=AsyncMock(return_value=SimpleNamespace(message_id=5001)),
+        delete_message=AsyncMock(),
+        edit_message_text=AsyncMock(),
+    )
+
+    _append_response_item(
+        session_file,
+        role="assistant",
+        phase="final_answer",
+        text="最终回复",
+        timestamp="2026-04-06T10:00:10Z",
+        turn_id="turn-live",
+    )
+
+    watch_codex_thread(state, ws, "tid-1", ttl_seconds=120)
+    watch = codex_state.get_runtime(state).watched_threads["tid-1"]
+    watch.session_file = str(session_file)
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID)
+    await sync_watched_thread_once(
+        state,
+        handler,
+        "tid-1",
+        watch,
+        sessions_dir=str(sessions_dir),
+    )
+
+    initial_send_count = bot.send_message.await_count
+    initial_edit_count = bot.edit_message_text.await_count
+    assert initial_send_count == 1
+    assert initial_edit_count == 1
+    run = codex_state.get_current_run(state, "tid-1")
+    assert run is not None
+    assert run.turn_id == "turn-live"
+    assert run.final_reply_synced_to_tg is True
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "item/completed",
+                "params": {
+                    "threadId": "tid-1",
+                    "turnId": "turn-live",
+                    "item": {
+                        "type": "agentMessage",
+                        "threadId": "tid-1",
+                        "phase": "final_answer",
+                        "text": "最终回复",
+                        "turn": {"id": "turn-live", "threadId": "tid-1"},
+                    },
+                },
+            },
+        },
+    )
+
+    assert bot.send_message.await_count == initial_send_count
+    assert bot.edit_message_text.await_count == initial_edit_count
+
+
+@pytest.mark.asyncio
+async def test_sync_codex_tui_realtime_once_in_app_mode_does_not_auto_watch_bound_thread(tmp_path):
     from plugins.providers.builtin.codex.python.tui_realtime_mirror import sync_codex_tui_realtime_once
 
     state, _ws, session_file, sessions_dir = _make_state(tmp_path)
@@ -282,32 +369,12 @@ async def test_sync_codex_tui_realtime_once_in_app_mode_auto_watches_bound_threa
         sessions_dir=str(sessions_dir),
     )
 
-    assert "tid-1" in codex_state.get_runtime(state).watched_threads
+    assert "tid-1" not in codex_state.get_runtime(state).watched_threads
     handler.assert_not_awaited()
-
-    watch = codex_state.get_runtime(state).watched_threads["tid-1"]
-    assert watch.last_offset == session_file.stat().st_size
-
-    _append_response_item(
-        session_file,
-        role="assistant",
-        phase="commentary",
-        text="新过程",
-        timestamp="2026-04-06T10:00:02Z",
-    )
-
-    await sync_codex_tui_realtime_once(
-        state,
-        handler,
-        sessions_dir=str(sessions_dir),
-    )
-
-    methods = [call.args[1]["message"]["method"] for call in handler.await_args_list]
-    assert methods == ["turn/started", "item/agentMessage/delta"]
 
 
 @pytest.mark.asyncio
-async def test_sync_codex_tui_realtime_once_does_not_replay_active_thread_bootstrap_commentary(tmp_path):
+async def test_sync_codex_tui_realtime_once_does_not_auto_watch_active_thread_bootstrap_commentary_in_app_mode(tmp_path):
     from plugins.providers.builtin.codex.python.tui_realtime_mirror import sync_codex_tui_realtime_once
 
     state, ws, session_file, sessions_dir = _make_state(tmp_path)
@@ -336,41 +403,19 @@ async def test_sync_codex_tui_realtime_once_does_not_replay_active_thread_bootst
         sessions_dir=str(sessions_dir),
     )
 
-    watch = codex_state.get_runtime(state).watched_threads["tid-1"]
-    assert watch.last_offset == session_file.stat().st_size
-    assert watch.last_commentary_text == "最近旧过程也不应重放"
+    assert "tid-1" not in codex_state.get_runtime(state).watched_threads
     handler.assert_not_awaited()
-
-    _append_response_item(
-        session_file,
-        role="assistant",
-        phase="commentary",
-        text="新过程需要同步",
-        timestamp="2026-04-06T10:00:03Z",
-    )
-    watch.next_poll_at = 0.0
-
-    await sync_codex_tui_realtime_once(
-        state,
-        handler,
-        sessions_dir=str(sessions_dir),
-    )
-
-    payloads = [call.args[1] for call in handler.await_args_list]
-    methods = [payload["message"]["method"] for payload in payloads]
-    assert methods == ["turn/started", "item/completed"]
-    assert payloads[1]["message"]["params"]["item"]["text"] == "新过程需要同步"
 
 
 @pytest.mark.asyncio
-async def test_sync_codex_tui_realtime_once_does_not_replay_active_thread_bootstrap_final_answer(tmp_path):
+async def test_sync_codex_tui_realtime_once_does_not_auto_watch_active_thread_bootstrap_final_answer_in_app_mode(tmp_path):
     from plugins.providers.builtin.codex.python.tui_realtime_mirror import sync_codex_tui_realtime_once
 
     state, ws, session_file, sessions_dir = _make_state(tmp_path)
     state.config = _make_app_mode_config()
     ws.threads["tid-1"].is_active = True
     handler = AsyncMock()
-    final_text = "# 命令结果\n\n```bash\n/Users/wxy/Projects/onlineWorker\nWed May  6 16:42:05 CST 2026\n```"
+    final_text = "# 命令结果\n\n```bash\n/Users/example/Projects/sample-workspace\nWed May  6 16:42:05 CST 2026\n```"
 
     _append_response_item(
         session_file,
@@ -393,29 +438,8 @@ async def test_sync_codex_tui_realtime_once_does_not_replay_active_thread_bootst
         sessions_dir=str(sessions_dir),
     )
 
-    watch = codex_state.get_runtime(state).watched_threads["tid-1"]
-    assert watch.last_offset == session_file.stat().st_size
-    assert watch.last_final_text == final_text
-    assert codex_state.get_runtime(state).last_synced_assistant["tid-1"] == f"2026-05-06T08:42:05Z\n{final_text}"
+    assert "tid-1" not in codex_state.get_runtime(state).watched_threads
     handler.assert_not_awaited()
-
-    _append_response_item(
-        session_file,
-        role="assistant",
-        phase="commentary",
-        text="新过程",
-        timestamp="2026-05-06T08:43:00Z",
-    )
-    watch.next_poll_at = 0.0
-
-    await sync_codex_tui_realtime_once(
-        state,
-        handler,
-        sessions_dir=str(sessions_dir),
-    )
-
-    methods = [call.args[1]["message"]["method"] for call in handler.await_args_list]
-    assert methods == ["turn/started", "item/agentMessage/delta"]
 
 
 @pytest.mark.asyncio

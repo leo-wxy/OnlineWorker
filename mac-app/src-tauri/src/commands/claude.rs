@@ -1,6 +1,6 @@
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use super::config::data_dir;
 use super::provider_sessions::ComposerAttachment;
+use super::session_state::{load_local_thread_overlays, LocalThreadOverlay};
 
 const CLAUDE_SESSION_PREVIEW_TURNS: usize = 50;
 const CLAUDE_CONTINUATION_CONTEXT_CHAR_LIMIT: usize = 12_000;
@@ -568,6 +569,51 @@ fn list_claude_sessions_from_paths(
     Ok(candidates.into_iter().map(|item| item.session).collect())
 }
 
+fn overlay_claude_sessions(
+    mut sessions: Vec<ClaudeSession>,
+    overlays: &HashMap<String, LocalThreadOverlay>,
+) -> Vec<ClaudeSession> {
+    if overlays.is_empty() {
+        return sessions;
+    }
+
+    let mut existing_ids = HashSet::new();
+    for session in &mut sessions {
+        existing_ids.insert(session.id.clone());
+        if let Some(overlay) = overlays.get(&session.id) {
+            session.archived = overlay.archived;
+            if !overlay.workspace_path.is_empty() {
+                session.directory = overlay.workspace_path.clone();
+            }
+            if session.title.trim().is_empty() {
+                if let Some(preview) = overlay.preview.as_deref() {
+                    let trimmed = preview.trim();
+                    if !trimmed.is_empty() {
+                        session.title = trimmed.to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    let mut archived_only = overlays
+        .iter()
+        .filter(|(session_id, overlay)| overlay.archived && !existing_ids.contains(*session_id))
+        .map(|(session_id, overlay)| ClaudeSession {
+            id: session_id.clone(),
+            title: overlay
+                .preview
+                .clone()
+                .unwrap_or_else(|| session_id.clone()),
+            directory: overlay.workspace_path.clone(),
+            archived: true,
+        })
+        .collect::<Vec<_>>();
+    archived_only.sort_by(|left, right| left.id.cmp(&right.id));
+    sessions.extend(archived_only);
+    sessions
+}
+
 fn read_claude_session_from_paths(
     session_id: &str,
     projects_dir: &Path,
@@ -747,7 +793,10 @@ pub fn list_claude_sessions() -> Result<Vec<ClaudeSession>, String> {
     let projects_dir =
         default_claude_projects_dir().ok_or("claude projects directory not found")?;
     let history_path = default_claude_history_path();
-    list_claude_sessions_from_paths(&projects_dir, history_path.as_deref())
+    let sessions = list_claude_sessions_from_paths(&projects_dir, history_path.as_deref())?;
+    let overlays =
+        load_local_thread_overlays(&data_dir().join("onlineworker_state.json"), "claude");
+    Ok(overlay_claude_sessions(sessions, &overlays))
 }
 
 #[tauri::command]
@@ -1665,10 +1714,13 @@ mod tests {
         build_claude_session_send_plan, collect_claude_runtime_env_from_pairs,
         is_app_owned_claude_session_in_dir, is_claude_prompt_too_long_text,
         list_claude_sessions_from_paths, mark_app_owned_claude_session_in_dir,
-        read_claude_command_prefix_from_config_raw, read_claude_session_from_paths,
-        resolve_claude_send_context, ClaudeSession, ClaudeSessionSendPlan, ClaudeTurn,
+        overlay_claude_sessions, read_claude_command_prefix_from_config_raw,
+        read_claude_session_from_paths, resolve_claude_send_context, ClaudeSession,
+        ClaudeSessionSendPlan, ClaudeTurn,
     };
+    use crate::commands::session_state::LocalThreadOverlay;
     use serde_json::json;
+    use std::collections::HashMap;
     use std::fs;
     use std::path::Path;
 
@@ -1763,6 +1815,53 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn overlay_claude_sessions_applies_local_archived_state() {
+        let sessions = vec![ClaudeSession {
+            id: "ses-live".into(),
+            title: "继续处理问题".into(),
+            directory: "/tmp/live".into(),
+            archived: false,
+        }];
+        let mut overlays = HashMap::new();
+        overlays.insert(
+            "ses-live".into(),
+            LocalThreadOverlay {
+                workspace_path: "/tmp/archived".into(),
+                archived: true,
+                preview: Some("已归档 smoke".into()),
+            },
+        );
+        overlays.insert(
+            "ses-overlay-only".into(),
+            LocalThreadOverlay {
+                workspace_path: "/tmp/overlay-only".into(),
+                archived: true,
+                preview: Some("overlay only".into()),
+            },
+        );
+
+        let overlaid = overlay_claude_sessions(sessions, &overlays);
+
+        assert_eq!(
+            overlaid,
+            vec![
+                ClaudeSession {
+                    id: "ses-live".into(),
+                    title: "继续处理问题".into(),
+                    directory: "/tmp/archived".into(),
+                    archived: true,
+                },
+                ClaudeSession {
+                    id: "ses-overlay-only".into(),
+                    title: "overlay only".into(),
+                    directory: "/tmp/overlay-only".into(),
+                    archived: true,
+                },
+            ]
+        );
     }
 
     #[test]

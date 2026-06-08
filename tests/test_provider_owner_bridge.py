@@ -1,7 +1,8 @@
 import json
 import os
+import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -202,6 +203,213 @@ async def test_provider_owner_bridge_activity_stream_does_not_drop_startup_event
 
         writer.close()
         await writer.wait_closed()
+    finally:
+        server.close()
+        await server.wait_closed()
+        try:
+            os.remove(socket_path)
+        except FileNotFoundError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_filters_archived_session_activities(tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(
+        storage=AppStorage(
+            workspaces={
+                "external:/tmp/project": WorkspaceInfo(
+                    name="project",
+                    path="/tmp/project",
+                    tool="external",
+                    daemon_workspace_id="external:/tmp/project",
+                    threads={
+                        "ses-archived": ThreadInfo(
+                            thread_id="ses-archived",
+                            archived=True,
+                            is_active=False,
+                            source="app",
+                        )
+                    },
+                )
+            }
+        )
+    )
+    state.message_bus = MessageEventBus()
+    state.message_bus.publish(
+        create_message_event(
+            "turn.started",
+            provider_id="external",
+            workspace_id="external:/tmp/project",
+            workspace_path="/tmp/project",
+            session_id="ses-archived",
+            created_at=10,
+        )
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_session_activities({"limit": 20})
+
+    assert response == {"ok": True, "activities": []}
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_activity_stream_emits_remove_for_archived_session(tmp_path):
+    import asyncio
+
+    from core.messages.publishing import publish_session_archived
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(
+        storage=AppStorage(
+            workspaces={
+                "external:/tmp/project": WorkspaceInfo(
+                    name="project",
+                    path="/tmp/project",
+                    tool="external",
+                    daemon_workspace_id="external:/tmp/project",
+                    threads={
+                        "ses-archived": ThreadInfo(
+                            thread_id="ses-archived",
+                            archived=False,
+                            is_active=True,
+                            source="app",
+                        )
+                    },
+                )
+            }
+        )
+    )
+    state.message_bus = MessageEventBus()
+    state.message_bus.publish(
+        create_message_event(
+            "turn.started",
+            provider_id="external",
+            workspace_id="external:/tmp/project",
+            workspace_path="/tmp/project",
+            session_id="ses-archived",
+            created_at=10,
+        )
+    )
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+
+    socket_path = f"/tmp/ow-bridge-archive-remove-{os.getpid()}.sock"
+    try:
+        os.remove(socket_path)
+    except FileNotFoundError:
+        pass
+    server = await asyncio.start_unix_server(bridge._handle_client, path=socket_path)
+    try:
+        reader, writer = await asyncio.open_unix_connection(socket_path)
+        writer.write(b'{"type":"session_activity_stream","limit":20}\n')
+        await writer.drain()
+
+        snapshot = json.loads((await reader.readline()).decode("utf-8"))
+        assert snapshot["kind"] == "snapshot"
+        assert snapshot["activities"][0]["sessionId"] == "ses-archived"
+
+        state.storage.workspaces["external:/tmp/project"].threads["ses-archived"].archived = True
+        assert publish_session_archived(
+            state,
+            provider_id="external",
+            workspace_id="external:/tmp/project",
+            workspace_path="/tmp/project",
+            session_id="ses-archived",
+        ) is True
+
+        update = json.loads((await reader.readline()).decode("utf-8"))
+        assert update["kind"] == "remove"
+        assert update["providerId"] == "external"
+        assert update["sessionId"] == "ses-archived"
+
+        writer.close()
+        await writer.wait_closed()
+    finally:
+        server.close()
+        await server.wait_closed()
+        try:
+            os.remove(socket_path)
+        except FileNotFoundError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_session_activities_not_blocked_by_slow_list_sessions(
+    monkeypatch,
+    tmp_path,
+):
+    import asyncio
+
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    class Facts:
+        @staticmethod
+        def scan_workspaces(sessions_dir=None):
+            return [{"path": "/tmp/slow-workspace"}]
+
+        @staticmethod
+        def query_active_thread_ids(workspace_path):
+            return {"tid-1"}
+
+        @staticmethod
+        def list_threads(workspace_path, limit=100):
+            time.sleep(0.2)
+            return [{"id": "tid-1", "preview": "Slow thread", "updatedAt": 10}]
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(facts=Facts) if name == "overlay-tool" else None,
+    )
+    monkeypatch.setattr("core.provider_owner_bridge.OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS", 1.0)
+
+    state = AppState(storage=AppStorage())
+    state.message_bus = MessageEventBus()
+    state.message_bus.publish(
+        create_message_event(
+            "message.user.accepted",
+            provider_id="codex",
+            workspace_id="codex:/tmp/project",
+            workspace_path="/tmp/project",
+            session_id="thread-a",
+            payload={"text": "initial task"},
+            created_at=10,
+        )
+    )
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+
+    socket_path = f"/tmp/ow-bridge-concurrent-{os.getpid()}.sock"
+    try:
+        os.remove(socket_path)
+    except FileNotFoundError:
+        pass
+    server = await asyncio.start_unix_server(bridge._handle_client, path=socket_path)
+    try:
+        list_reader, list_writer = await asyncio.open_unix_connection(socket_path)
+        list_writer.write(b'{"type":"list_sessions","provider_id":"overlay-tool","limit":20}\n')
+        await list_writer.drain()
+
+        await asyncio.sleep(0.02)
+
+        started = time.perf_counter()
+        activity_reader, activity_writer = await asyncio.open_unix_connection(socket_path)
+        activity_writer.write(b'{"type":"session_activities","limit":20}\n')
+        await activity_writer.drain()
+        activity_response = json.loads((await activity_reader.readline()).decode("utf-8"))
+        elapsed = time.perf_counter() - started
+
+        assert activity_response["ok"] is True
+        assert activity_response["activities"][0]["lastUserMessage"] == "initial task"
+        assert elapsed < 0.12
+
+        list_response = json.loads((await list_reader.readline()).decode("utf-8"))
+        assert list_response["ok"] is True
+        assert list_response["sessions"][0]["id"] == "tid-1"
+
+        activity_writer.close()
+        list_writer.close()
+        await activity_writer.wait_closed()
+        await list_writer.wait_closed()
     finally:
         server.close()
         await server.wait_closed()
@@ -664,6 +872,77 @@ async def test_provider_owner_bridge_rolls_back_remapped_thread_when_send_errors
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_returns_and_persists_remapped_thread(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    class _FakeAdapter:
+        connected = True
+
+        def register_workspace_cwd(self, workspace_id: str, cwd: str) -> None:
+            pass
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="codex:onlineWorker",
+        threads={
+            "synthetic-thread": ThreadInfo(
+                thread_id="synthetic-thread",
+                source="app",
+                preview="new app thread",
+            )
+        },
+    )
+    storage.workspaces["codex:onlineWorker"] = ws
+    state = AppState(storage=storage)
+    state.set_adapter("codex", _FakeAdapter())
+
+    async def prepare_send(state_obj, current_adapter, ws_info, thread_info, **kwargs):
+        ws_info.threads.pop(thread_info.thread_id)
+        thread_info.thread_id = "real-thread"
+        thread_info.source = "app"
+        ws_info.threads[thread_info.thread_id] = thread_info
+        return True
+
+    send = AsyncMock(return_value={"threadId": "real-thread", "turnId": "turn-1"})
+    save_mock = MagicMock()
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            message_hooks=SimpleNamespace(
+                ensure_connected=AsyncMock(return_value=state.get_adapter(name)),
+                prepare_send=prepare_send,
+                send=send,
+            )
+        )
+        if name == "codex"
+        else None,
+    )
+    monkeypatch.setattr("core.provider_owner_bridge.save_storage", lambda current_storage: save_mock(current_storage))
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_send_message(
+        {
+            "provider_id": "codex",
+            "thread_id": "synthetic-thread",
+            "text": "hello",
+            "workspace_dir": "/Users/example/Projects/onlineWorker",
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["thread_id"] == "real-thread"
+    assert response["requested_thread_id"] == "synthetic-thread"
+    assert response["remapped"] is True
+    assert set(ws.threads) == {"real-thread"}
+    assert ws.threads["real-thread"].preview == "new app thread"
+    save_mock.assert_called_once_with(storage)
+    send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_prefers_existing_workspace_thread_binding(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
@@ -947,6 +1226,67 @@ async def test_provider_owner_bridge_lists_sessions_via_provider_facts(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_list_sessions_times_out_slow_facts(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(storage=AppStorage())
+
+    class Facts:
+        @staticmethod
+        def scan_workspaces(sessions_dir=None):
+            time.sleep(0.05)
+            return [{"path": "/tmp/alpha"}]
+
+    monkeypatch.setattr("core.provider_owner_bridge.OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(facts=Facts) if name == "overlay-tool" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_list_sessions(
+        {
+            "provider_id": "overlay-tool",
+            "limit": 20,
+        }
+    )
+
+    assert response["ok"] is False
+    assert "overlay-tool.scan_workspaces timed out after 10ms" in response["error"]
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_read_session_times_out_slow_facts(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(storage=AppStorage())
+
+    class Facts:
+        @staticmethod
+        def read_thread_history(session_id, limit=20):
+            time.sleep(0.05)
+            return [{"role": "assistant", "text": "slow"}]
+
+    monkeypatch.setattr("core.provider_owner_bridge.OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(facts=Facts) if name == "overlay-tool" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_read_session(
+        {
+            "provider_id": "overlay-tool",
+            "session_id": "tid-slow",
+            "limit": 20,
+        }
+    )
+
+    assert response["ok"] is False
+    assert "overlay-tool.read_thread_history(tid-slow) timed out after 10ms" in response["error"]
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_archives_session_via_real_thread_hook(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
@@ -1203,3 +1543,253 @@ async def test_provider_owner_bridge_ignores_legacy_mirror_approval(tmp_path):
 
     assert response == {"ok": True, "ignored": True, "reason": "approval_via_app_server_only"}
     assert state.pending_approvals == {}
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_replies_approval_via_pending_decision(tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(storage=AppStorage())
+    state.message_bus = MessageEventBus()
+    state.message_bus.publish(
+        create_message_event(
+            "approval.requested",
+            provider_id="codex",
+            workspace_id="codex:/tmp/project",
+            workspace_path="/tmp/project",
+            session_id="thread-a",
+            payload={
+                "message": "需要处理授权请求：mkdir /tmp/demo",
+                "requestId": "req-1",
+                "approvalSource": "remote_proxy",
+            },
+            created_at=10,
+        )
+    )
+    pending = state.ensure_pending_approval_decision("codex", "req-1")
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_reply_approval(
+        {
+            "type": "reply_approval",
+            "provider_id": "codex",
+            "workspace_id": "codex:/tmp/project",
+            "session_id": "thread-a",
+            "request_id": "req-1",
+            "action": "exec_allow",
+            "approval_source": "remote_proxy",
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["mode"] == "pending-decision"
+    assert pending.event.is_set() is True
+    assert pending.decision == "exec_allow"
+    activity = state.message_bus.session_activity("codex", "thread-a")
+    assert activity["status"] == "running"
+    assert activity["attentionKind"] == ""
+    events = state.message_bus.recent_events()
+    assert events[-1]["kind"] == "approval.answered"
+    assert events[-1]["source"] == "desktop_app"
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_replies_approval_via_connected_adapter(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    adapter = SimpleNamespace(
+        connected=True,
+        reply_server_request=AsyncMock(),
+    )
+    state = AppState(storage=AppStorage())
+    state.message_bus = MessageEventBus()
+    state.set_adapter("claude", adapter)
+    state.message_bus.publish(
+        create_message_event(
+            "approval.requested",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            workspace_path="/tmp/project",
+            session_id="thread-a",
+            payload={
+                "message": "需要处理授权请求：mkdir /tmp/demo",
+                "requestId": "req-2",
+                "approvalSource": "item/commandExecution/requestApproval",
+            },
+            created_at=10,
+        )
+    )
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            interactions=SimpleNamespace(
+                build_approval_reply=lambda approval, action: (
+                    "✅ 已允许",
+                    {"behavior": "allow", "source": approval.approval_source, "decision": action},
+                )
+            )
+        )
+        if name == "claude"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_reply_approval(
+        {
+            "type": "reply_approval",
+            "provider_id": "claude",
+            "workspace_id": "claude:/tmp/project",
+            "workspace_dir": "/tmp/project",
+            "session_id": "thread-a",
+            "request_id": "req-2",
+            "action": "exec_allow",
+            "approval_source": "item/commandExecution/requestApproval",
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["mode"] == "adapter"
+    adapter.reply_server_request.assert_awaited_once_with(
+        "claude:/tmp/project",
+        "req-2",
+        {"behavior": "allow", "source": "item/commandExecution/requestApproval", "decision": "exec_allow"},
+    )
+    activity = state.message_bus.session_activity("claude", "thread-a")
+    assert activity["status"] == "running"
+    assert activity["attentionKind"] == ""
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_preserves_numeric_approval_request_id(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    adapter = SimpleNamespace(
+        connected=True,
+        reply_server_request=AsyncMock(),
+    )
+    state = AppState(storage=AppStorage())
+    state.message_bus = MessageEventBus()
+    state.set_adapter("codex", adapter)
+    state.message_bus.publish(
+        create_message_event(
+            "approval.requested",
+            provider_id="codex",
+            workspace_id="codex:/tmp/project",
+            workspace_path="/tmp/project",
+            session_id="thread-a",
+            payload={
+                "message": "需要处理授权请求：touch /tmp/demo",
+                "requestId": "3",
+                "rawRequestId": 3,
+                "approvalSource": "item/commandExecution/requestApproval",
+            },
+            created_at=10,
+        )
+    )
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            interactions=SimpleNamespace(
+                build_approval_reply=lambda _approval, _action: (
+                    "✅ 已允许",
+                    {"decision": "accept"},
+                )
+            )
+        )
+        if name == "codex"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_reply_approval(
+        {
+            "type": "reply_approval",
+            "provider_id": "codex",
+            "workspace_id": "codex:/tmp/project",
+            "workspace_dir": "/tmp/project",
+            "session_id": "thread-a",
+            "request_id": "3",
+            "action": "exec_allow",
+            "approval_source": "item/commandExecution/requestApproval",
+        }
+    )
+
+    assert response["ok"] is True
+    adapter.reply_server_request.assert_awaited_once_with(
+        "codex:/tmp/project",
+        3,
+        {"decision": "accept"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_replies_locally_retained_approval_via_pending_decision(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    adapter = SimpleNamespace(
+        connected=True,
+        reply_server_request=AsyncMock(),
+    )
+    state = AppState(storage=AppStorage())
+    state.message_bus = MessageEventBus()
+    state.set_adapter("claude", adapter)
+    state.message_bus.publish(
+        create_message_event(
+            "approval.requested",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            workspace_path="/tmp/project",
+            session_id="thread-a",
+            payload={
+                "message": "需要处理授权请求：echo hi",
+                "requestId": "req-local-1",
+                "approvalSource": "app_server",
+            },
+            created_at=10,
+        )
+    )
+    pending = state.ensure_pending_approval_decision("claude", "req-local-1")
+    pending.requires_adapter_reply = True
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            interactions=SimpleNamespace(
+                build_approval_reply=lambda approval, action: (
+                    "✅ 已允许",
+                    {"behavior": "allow"},
+                )
+            )
+        )
+        if name == "claude"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_reply_approval(
+        {
+            "type": "reply_approval",
+            "provider_id": "claude",
+            "workspace_id": "claude:/tmp/project",
+            "workspace_dir": "/tmp/project",
+            "session_id": "thread-a",
+            "request_id": "req-local-1",
+            "action": "exec_allow",
+            "approval_source": "app_server",
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["mode"] == "adapter"
+    adapter.reply_server_request.assert_awaited_once_with(
+        "claude:/tmp/project",
+        "req-local-1",
+        {"behavior": "allow"},
+    )
+    assert pending.event.is_set() is False
+    assert pending.decision == ""
+    activity = state.message_bus.session_activity("claude", "thread-a")
+    assert activity["status"] == "running"
+    assert activity["attentionKind"] == ""

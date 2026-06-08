@@ -133,9 +133,9 @@ providers:
       - id: native
         label: Native Claude
         bin: claude
-      - id: raven
-        label: Raven Claude
-        bin: /Users/example/.nvm/versions/node/v20.20.1/bin/raven cc
+      - id: launcher
+        label: Launcher Claude
+        bin: /Users/example/bin/claude-launcher claude
 """,
         encoding="utf-8",
     )
@@ -152,9 +152,9 @@ providers:
     assert launch_methods == [
         {"id": "native", "label": "Native Claude", "bin": "claude"},
         {
-            "id": "raven",
-            "label": "Raven Claude",
-            "bin": "/Users/example/.nvm/versions/node/v20.20.1/bin/raven cc",
+            "id": "launcher",
+            "label": "Launcher Claude",
+            "bin": "/Users/example/bin/claude-launcher claude",
         },
     ]
 
@@ -176,17 +176,17 @@ def test_claude_readiness_smoke_script_reports_configured_launch_methods(tmp_pat
         encoding="utf-8",
     )
     native.chmod(0o755)
-    raven = tmp_path / "raven"
-    raven.write_text(
+    launcher = tmp_path / "launcher"
+    launcher.write_text(
         "#!/bin/sh\n"
-        "if [ \"$1\" = \"cc\" ] && [ \"$2\" = \"auth\" ] && [ \"$3\" = \"status\" ]; then\n"
+        "if [ \"$1\" = \"claude\" ] && [ \"$2\" = \"auth\" ] && [ \"$3\" = \"status\" ]; then\n"
         "  printf '%s\\n' '{\"loggedIn\":true,\"authMethod\":\"oauth_token\",\"apiProvider\":\"firstParty\"}'\n"
         "  exit 0\n"
         "fi\n"
         "exit 64\n",
         encoding="utf-8",
     )
-    raven.chmod(0o755)
+    launcher.chmod(0o755)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         f"""
@@ -198,9 +198,9 @@ providers:
       - id: native
         label: Native Claude
         bin: "{native}"
-      - id: raven
-        label: Raven Claude
-        bin: "{raven} cc"
+      - id: launcher
+        label: Launcher Claude
+        bin: "{launcher} claude"
 """,
         encoding="utf-8",
     )
@@ -221,12 +221,12 @@ providers:
 
     payload = json.loads(result.stdout)
     assert payload["readiness"]["ready"] is True
-    assert payload["readiness"]["launchMethod"]["id"] == "raven"
+    assert payload["readiness"]["launchMethod"]["id"] == "launcher"
     methods = {method["id"]: method for method in payload["methods"]}
     assert methods["native"]["selected"] is False
     assert methods["native"]["ready"] is False
-    assert methods["raven"]["selected"] is True
-    assert methods["raven"]["ready"] is True
+    assert methods["launcher"]["selected"] is True
+    assert methods["launcher"]["ready"] is True
     assert "ANTHROPIC_AUTH_TOKEN" not in result.stdout
 
 

@@ -790,10 +790,10 @@ async def test_codex_permissions_approval_uses_permission_response(state, mock_c
         request_id="req_permissions",
         workspace_id="codex:test",
         thread_id="tid_permissions",
-        cmd='request permissions: {"fileSystem": {"additionalRoots": ["/Users/wxy/Downloads"]}}',
+        cmd='request permissions: {"fileSystem": {"additionalRoots": ["/Users/example/Downloads"]}}',
         justification="need Downloads write access",
         amendment_decision={
-            "permissions": {"fileSystem": {"additionalRoots": ["/Users/wxy/Downloads"]}}
+            "permissions": {"fileSystem": {"additionalRoots": ["/Users/example/Downloads"]}}
         },
         tool_type="codex",
         approval_source="item/permissions/requestApproval",
@@ -809,7 +809,7 @@ async def test_codex_permissions_approval_uses_permission_response(state, mock_c
         "codex:test",
         "req_permissions",
         {
-            "permissions": {"fileSystem": {"additionalRoots": ["/Users/wxy/Downloads"]}},
+            "permissions": {"fileSystem": {"additionalRoots": ["/Users/example/Downloads"]}},
             "scope": "turn",
         },
     )

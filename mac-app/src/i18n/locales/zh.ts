@@ -462,7 +462,7 @@ export const zhTexts: AppTexts = {
       externalCliCodexAliasTitle: "固定 Unix proxy alias",
       externalCliCodexAliasDescription: "用于连接 OnlineWorker 管理的 remote proxy，保留 CLI 原生授权弹窗并同步到 TG。",
       launchMethodCommands: "启动命令候选",
-      launchMethodCommandsPlaceholder: "claude\n/Users/me/.nvm/versions/node/v20.20.1/bin/raven cc",
+      launchMethodCommandsPlaceholder: "claude\n~/bin/claude-launcher claude",
       launchMethodCommandsHint: "每行一个候选命令。运行时由 provider 按顺序测试并选中第一个可用命令；第一行会同步为 provider 的主 bin。",
       externalCliLauncherWrapsClaude: "启动后进入 Claude CLI",
       externalCliSave: "保存 CLI 配置",
@@ -500,35 +500,16 @@ export const zhTexts: AppTexts = {
           bot_token: "Bot Token",
           recipient_user_id: "接收用户 ID",
         },
-        popo: {
-          target_type: "接收方式",
-          receiver: "接收人",
-          popo_cli_path: "popo-cli 路径",
-        },
       },
       fieldDescriptions: {
         telegram: {
           bot_token: "用于发送通知的 Telegram Bot Token。",
           recipient_user_id: "接收通知消息的 Telegram 用户 ID。",
         },
-        popo: {
-          target_type: "选择发送到文件助手、POPO 私聊或 POPO 群聊。",
-          receiver: "私聊填写 POPO 账号，群聊填写群 tid；文件助手无需填写。",
-          popo_cli_path: "可选的 popo-cli 可执行文件路径。默认从 PATH 中查找。",
-        },
       },
-      optionLabels: {
-        popo: {
-          target_type: {
-            filehelper: "文件助手",
-            p2p: "私聊",
-            team: "群聊",
-          },
-        },
-      },
+      optionLabels: {},
       channelDescriptions: {
         telegram: "通过独立 Telegram Bot 发送简短任务通知。",
-        popo: "通过 POPO 发送简短任务通知。",
       },
     },
     ai: {
@@ -662,10 +643,15 @@ export const zhTexts: AppTexts = {
       statusPinned: "关注中",
       pin: "关注",
       unpin: "取消关注",
+      approve: "允许",
+      deny: "拒绝",
+      clearSelection: "清空选择",
+      selectedApprovals: (count: number) => `已选择 ${count} 个授权请求`,
       openSession: "打开 Session",
       pinToBoard: "加入任务看板",
       pinSucceeded: "已加入任务看板。",
       pinFailed: (error: string) => `加入任务看板失败：${error}`,
+      approvalReplyFailed: (error: string) => `处理授权请求失败：${error}`,
       eventLabel: (event: string) => `事件：${event}`,
       nativeDataUnavailable: "当前预览环境无法访问本地任务数据源，请在桌面 App 中查看真实任务。",
       failedToLoad: (error: string) => `加载任务看板失败：${error}`,

@@ -35,7 +35,8 @@
     "resources": [
       "provider-plugins",
       "icons/tray-template.png",
-      "icons/tray-template@2x.png"
+      "icons/tray-template@2x.png",
+      "notification-plugins"
     ],
     "icon": [
       "icons/32x32.png",

@@ -19,10 +19,10 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 10: Codebase Structure Refinement** - Audit and restructure oversized classes/modules and misplaced responsibilities without changing product behavior. Completed staged refactor slices for Tauri config/dashboard helpers, Python workspace helpers, and frontend Dashboard state/presentation.
 - [x] **Phase 11: Telegram Topic SQLite Storage Migration** - Make Telegram topics independent durable records in a single SQLite table, migrate existing JSON topic ids once, and route all topic lookups through SQLite so runtime JSON saves cannot erase topic bindings. Full regression, Dashboard Telegram polling visibility, packaged build, and installed-app verification are complete.
 - [x] **Phase 12: Codex Managed App-Server Approval Host** - Follow the Paseo/Happy/Codex IDE host-client model: OnlineWorker-managed Codex sessions own the app-server request/response channel, Telegram is the remote approval UI for those sessions, and existing Desktop/VS Code/ordinary CLI sessions stay native and mirror-only. 12-02 implements `unix://` support and the installed fixed OnlineWorker Unix remote proxy; fixed-session shared CLI + TG authorization convergence has been user-accepted through `codex_remote_proxy.sock`.
-- [x] **Phase 13: Claude Provider Auth Runtime Hardening** - Replace the current fragile Claude runtime/auth fallback with an explicit, durable provider readiness contract. Telegram/provider sends now fail fast with visible diagnostics when Claude auth is unavailable, Dashboard/status paths surface the same reason before user traffic, active-process environment scanning is removed from the normal readiness path, and Claude can opt into user-configured multi-launch-method readiness through a generic Settings UI shown for providers that declare `capabilities.launch_methods`. Source verification, fast packaged build/install/restart verification, installed Raven launch-method readiness, owner-bridge healthy status, and user UAT are complete.
-- [ ] **Phase 14: Unified Message Event Bus** - Establish a single OnlineWorker message/event bus so Telegram, App sessions, TaskBoard, notifications, approvals, questions, and future surfaces consume the same normalized event stream instead of each owning separate message-handling logic. 14-01 through 14-04 are source verified; fast packaged build/install/restart verification passed after the 14-04 TaskBoard first-paint fix.
+- [x] **Phase 13: Claude Provider Auth Runtime Hardening** - Replace the current fragile Claude runtime/auth fallback with an explicit, durable provider readiness contract. Telegram/provider sends now fail fast with visible diagnostics when Claude auth is unavailable, Dashboard/status paths surface the same reason before user traffic, active-process environment scanning is removed from the normal readiness path, and Claude can opt into user-configured multi-launch-method readiness through a generic Settings UI shown for providers that declare `capabilities.launch_methods`. Source verification, fast packaged build/install/restart verification, installed configured launch-method readiness, owner-bridge healthy status, and user UAT are complete.
+- [x] **Phase 14: Unified Message Event Bus** - Establish a single OnlineWorker message/event bus so Telegram, App sessions, TaskBoard, notifications, approvals, questions, and future surfaces consume the same normalized event stream instead of each owning separate message-handling logic. 14-01 through 14-04 are source verified; fast packaged build/install/restart verification passed after the 14-04 TaskBoard first-paint fix, and the Phase 16 external-ingress follow-up closed the remaining TaskBoard visibility gap.
 - [ ] **Phase 15: Bus-Driven Rendering And Approval Command Boundary** - Follow up Phase 14 by migrating heavy first-party renderers onto the bus once the event schema is stable: App Session detail live updates and Telegram send/edit/topic rendering become bus-driven consumers, and approval/question events are re-evaluated for a command boundary instead of remaining observational only.
-- [ ] **Phase 16: Provider External Event Ingress** - Add provider-plugin-owned external event ingress for Claude and Codemaker so externally launched sessions can enter the Phase 14 message bus. Claude references CodeIsland's global hook pattern; Codemaker references OpenCode-compatible hook/listener behavior; OpenCode is not implemented as a provider. Implementation code is scoped to provider plugin directories unless a later plan explicitly approves a narrow exception.
+- [x] **Phase 16: Provider External Event Ingress** - Add provider-plugin-owned external event ingress for Claude and distribution-provided provider plugins so externally launched sessions can enter the Phase 14 message bus. Claude uses a marker-based global hook merge; OpenCode-compatible listener behavior is reference-only for compatible provider plugins, not a new product surface. Implementation remains scoped to provider plugin directories plus focused tests and generic bus projection fixes.
 
 ## Phase Details
 
@@ -477,7 +477,7 @@ Latest source and live diagnostic verification:
 - `cd mac-app/src-tauri && cargo test config_provider --lib` -> `35 passed`.
 - `git -C OnlineWorker diff --check` -> passed.
 - `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --claude-bin claude` -> sanitized live readiness reported `ready=false`, `reason=loggedOut`, `authMethod=none`, `source=cliAuth`; `configured_cli` was selected and unavailable, while `ow_claude_wrapper` was detected but not considered available for provider send.
-- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --config /tmp/onlineworker-claude-launch-methods-smoke.yaml` -> with explicit candidates `native=claude` and `raven=/Users/wxy/.nvm/versions/node/v20.20.1/bin/raven cc`, smoke selected `raven`, reported `readiness.ready=true`, and kept `path_claude` logged out.
+- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --config /tmp/onlineworker-claude-launch-methods-smoke.yaml` -> with explicit native and configured fallback candidates, smoke selected the configured fallback, reported `readiness.ready=true`, and kept `path_claude` logged out.
 - `cd mac-app && ./node_modules/.bin/vite build` was attempted but blocked by a local Rollup native optional dependency code-signature failure for `@rollup/rollup-darwin-arm64`; this was not a TypeScript/code failure.
 - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml dashboard --quiet` -> `26 passed`.
 - `node --test mac-app/tests/dashboardProviderStatus.test.mjs mac-app/tests/appShell.test.mjs` -> `13 passed`.
@@ -487,12 +487,12 @@ Latest source and live diagnostic verification:
 
 Packaged verification:
 - `bash build.sh` -> passed, produced `OnlineWorker_1.4.0_aarch64.dmg`.
-- `bash verify-packaged-fast.sh` -> passed, installed `/Applications/OnlineWorker.app`, launched app/bot processes, and verified bundled codemaker/popo private plugins.
+- `bash verify-packaged-fast.sh` -> passed, installed `/Applications/OnlineWorker.app`, launched app/bot processes, and verified distribution-bundled provider and notification plugins.
 - Installed owner-bridge readiness smoke reported Claude degraded with `Claude CLI is not logged in`.
 
 Final Phase 13 packaged and user verification:
-- `bash verify-packaged-fast.sh` -> `Combined fast packaged verification complete (97s)`, DMG sha256 `2b28968e55530ce616ea5545ddcdb9591811cb2e25d16cb15d8f3414ddf17d2f`, installed `/Applications/OnlineWorker.app`, launched app/bot processes, and verified bundled codemaker/popo private plugins.
-- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --owner-bridge-status --data-dir "$HOME/Library/Application Support/OnlineWorker" --timeout 12` -> configured bin `/Users/wxy/.nvm/versions/node/v20.20.1/bin/raven cc`, `readiness.ready=true`, `authMethod=oauth_token`, `apiProvider=firstParty`, `launchMethod.id=primary`, owner bridge `health=healthy`, detail `• claude CLI：✅ 已连接`.
+- `bash verify-packaged-fast.sh` -> `Combined fast packaged verification complete (97s)`, DMG sha256 `2b28968e55530ce616ea5545ddcdb9591811cb2e25d16cb15d8f3414ddf17d2f`, installed `/Applications/OnlineWorker.app`, launched app/bot processes, and verified distribution-bundled provider and notification plugins.
+- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --owner-bridge-status --data-dir "$HOME/Library/Application Support/OnlineWorker" --timeout 12` -> configured launch command ready, `readiness.ready=true`, `authMethod=oauth_token`, `apiProvider=firstParty`, `launchMethod.id=primary`, owner bridge `health=healthy`, detail `• claude CLI：✅ 已连接`.
 - User accepted installed-app UAT on 2026-06-04.
 
 ### Phase 14: Unified Message Event Bus
@@ -569,7 +569,7 @@ Planning status:
 - 14-03 source verification passed on 2026-06-05. Completed notification summary fallback logic now lives under the bus consumer boundary, old completed-summary helper names were removed, and TaskBoard hidden/remove-from-board state/action were removed.
 - 14-04 source verification passed on 2026-06-05. TaskBoard initial refresh now includes activity projection, stream events clear loading, and running cards use activity/user/title preview fallback so active sessions do not render as empty lanes or blank cards while metadata hydration is still in progress.
 - Product decisions from the 2026-06-05 Phase 14 review: App Session detail live rendering and Telegram rendering remain follow-up work; approval/question bus events remain observational in Phase 14; persistent event audit logs and public plugin event APIs are excluded from Phase 14; TaskBoard uses pin/unpin only.
-- Fast packaged build/install/restart verification passed on 2026-06-05 after the 14-04 UI follow-up. `verify-packaged-fast.sh` rebuilt `OnlineWorker_1.5.0_aarch64.dmg` with sha256 `42708ebfcea5c4b0df4d22128d90a93c6c94680ac0cbcd45ed661a535fce463c`, installed `/Applications/OnlineWorker.app`, launched app/bot processes, and verified bundled `codemaker` provider plus `popo` notification plugins.
+- Fast packaged build/install/restart verification passed on 2026-06-05 after the 14-04 UI follow-up. `verify-packaged-fast.sh` rebuilt `OnlineWorker_1.5.0_aarch64.dmg` with sha256 `42708ebfcea5c4b0df4d22128d90a93c6c94680ac0cbcd45ed661a535fce463c`, installed `/Applications/OnlineWorker.app`, launched app/bot processes, and verified distribution-bundled provider and notification plugins.
 
 ### Phase 15: Bus-Driven Rendering And Approval Command Boundary
 
@@ -599,36 +599,36 @@ Planning status:
 
 ### Phase 16: Provider External Event Ingress
 
-**Goal:** Let externally launched Claude and Codemaker sessions enter the existing Phase 14 message bus through provider-plugin-owned listeners, without adding provider-specific hook/listener logic to core or TaskBoard.
+**Goal:** Let externally launched Claude and distribution-provided provider sessions enter the existing Phase 14 message bus through provider-plugin-owned listeners, without adding provider-specific hook/listener logic to core or TaskBoard.
 **Requirements**: TBD
-**Depends on:** Phase 14 Unified Message Event Bus, Claude provider plugin, Codemaker provider plugin
-**Scope Fence:** Phase 16 is plugin-scoped. Claude plugin owns Claude hook lifecycle and payload mapping. Codemaker plugin owns Codemaker external listener lifecycle and payload mapping, using OpenCode-compatible hook/listener behavior only as a reference. OpenCode is not implemented as a provider. Core/message bus only receives normalized events; TaskBoard only consumes bus projection.
+**Depends on:** Phase 14 Unified Message Event Bus, Claude provider plugin, provider plugin packaging boundary
+**Scope Fence:** Phase 16 is plugin-scoped. Claude plugin owns Claude hook lifecycle and payload mapping. Distribution-provided provider plugins own their own external listener lifecycle and payload mapping, using OpenCode-compatible hook/listener behavior only as a reference where applicable. OpenCode is not implemented as a provider. Core/message bus only receives normalized events; TaskBoard only consumes bus projection.
 **Plans:** 2 planned
 
 Plans:
 - [x] 16-01: Define plugin-scoped external event ingress
   - [x] Create Phase 16 context with trigger, reference code, and strict core/plugin boundary.
-  - [x] Create Phase 16 plan covering Claude plugin ingress, Codemaker plugin ingress, source validation, and packaged validation gates.
+  - [x] Create Phase 16 plan covering Claude plugin ingress, distribution-provider plugin ingress, source validation, and packaged validation gates.
   - [x] Commit Phase 16 planning docs on the Phase 16 branch.
   - [x] Start implementation only after the reference code and modification scope are accepted.
-- [ ] 16-02: Add Claude plugin external hook ingress
+- [x] 16-02: Add Claude plugin external hook ingress
   - [x] Define Claude-plugin-owned global `~/.claude/settings.json` merge, marker, dedupe, and remove-only-own behavior.
   - [x] Map Claude lifecycle hooks into existing normalized provider events.
   - [x] Keep implementation scoped to `OnlineWorker/plugins/providers/builtin/claude/` plus focused tests.
-  - [ ] Source-verify with automated tests and a user-assisted external Claude session.
+  - [x] Source-verify with automated tests and user-assisted external provider sessions.
 
 Success Criteria (what must be TRUE):
   1. Claude external session ingress is owned by `OnlineWorker/plugins/providers/builtin/claude/`.
-  2. Codemaker external session ingress is owned by `codemaker/`.
-  3. OpenCode is used only as Codemaker's hook/listener reference mechanism; Phase 16 does not add an OpenCode provider or product surface.
+  2. Distribution-provided provider plugin ingress is owned by the distribution package, not OnlineWorker core.
+  3. OpenCode-compatible behavior is used only as a hook/listener reference mechanism; Phase 16 does not add an OpenCode provider or product surface.
   4. Core/message bus does not manage hooks/plugins, parse provider-private payloads, scan provider-private files, or add provider-specific branches.
   5. TaskBoard does not perform provider-private discovery and continues to consume bus projection only.
   6. Hook/listener install/update/uninstall is marker-based, idempotent, and remove-only-own.
-  7. Source-level live validation proves Claude and Codemaker external sessions enter the bus before packaged validation begins.
+  7. Installed-app validation proves Claude, Codex, and distribution-provided provider sessions enter the bus and refresh TaskBoard state through the same projection.
 
 Planning status:
-- Phase 16 was added on 2026-06-06 after Phase 14 UAT showed that external Claude and Codemaker sessions could be active while the bus received no provider events.
-- The reference decision is explicit: Claude references CodeIsland's global Claude hook pattern; Codemaker references OpenCode-compatible hook/listener behavior; OpenCode itself is not an implementation target.
+- Phase 16 was added on 2026-06-06 after Phase 14 UAT showed that external provider sessions could be active while the bus received no provider events.
+- The reference decision is explicit: Claude uses marker-based global hook integration; OpenCode-compatible listener behavior is only a reference for compatible provider plugins; OpenCode itself is not an implementation target.
 - The modification scope is explicit: implementation code should stay in provider plugin directories, with planning docs and focused tests as the expected non-plugin changes.
 - 16-01 planning docs were committed on branch `codex/phase-16-provider-event-ingress`.
-- 16-02 no longer blocks on Claude implementation code: the current Phase 16 branch contains both the Codemaker source slice under `codemaker/` and the Claude source slice under `plugins/providers/builtin/claude/`, with automated source regression passing. The remaining unfinished source item is user-assisted live validation for external sessions before packaged validation.
+- 16-02 is complete: automated source regression passed, installed-app live validation covered Claude, Codex, and the distribution-provided provider flow, TaskBoard attention/running/completed updates, approval buttons, and final message refresh. A follow-up raw approval request id fix was added for Codex app-server approval decisions and revalidated in the installed app.

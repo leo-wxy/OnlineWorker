@@ -243,25 +243,25 @@ async def test_codex_owner_bridge_persists_workspace_for_successful_external_sen
     response = await bridge._handle_send_message({
         "thread_id": "tid-cli",
         "text": "hello",
-        "cwd": "/Users/wxy",
+        "cwd": "/Users/example",
     })
 
     assert response["ok"] is True
     assert state.storage is not None
-    ws = state.storage.workspaces.get("codex:/Users/wxy")
+    ws = state.storage.workspaces.get("codex:/Users/example")
     assert ws is not None
     assert ws.tool == "codex"
-    assert ws.path == "/Users/wxy"
-    assert ws.daemon_workspace_id == "codex:/Users/wxy"
+    assert ws.path == "/Users/example"
+    assert ws.daemon_workspace_id == "codex:/Users/example"
 
 
 @pytest.mark.asyncio
 async def test_codex_owner_bridge_remaps_external_thread_when_send_hits_unmaterialized_error(tmp_path):
     ws = WorkspaceInfo(
         name="wxy",
-        path="/Users/wxy",
+        path="/Users/example",
         tool="codex",
-        daemon_workspace_id="codex:/Users/wxy",
+        daemon_workspace_id="codex:/Users/example",
         threads={
             "tid-cli": ThreadInfo(
                 thread_id="tid-cli",
@@ -271,7 +271,7 @@ async def test_codex_owner_bridge_remaps_external_thread_when_send_hits_unmateri
             )
         },
     )
-    state = AppState(storage=AppStorage(workspaces={"codex:/Users/wxy": ws}))
+    state = AppState(storage=AppStorage(workspaces={"codex:/Users/example": ws}))
     adapter = _FakeAdapter()
     adapter.fail_send_for["tid-cli"] = RuntimeError("no rollout found for thread id tid-cli")
     adapter.start_thread_result = {"id": "tid-app"}
@@ -281,11 +281,11 @@ async def test_codex_owner_bridge_remaps_external_thread_when_send_hits_unmateri
     response = await bridge._handle_send_message({
         "thread_id": "tid-cli",
         "text": "hello with image",
-        "cwd": "/Users/wxy",
+        "cwd": "/Users/example",
         "attachments": [
             {
                 "kind": "image",
-                "path": "/Users/wxy/Pictures/demo.png",
+                "path": "/Users/example/Pictures/demo.png",
                 "name": "demo.png",
             }
         ],
@@ -296,18 +296,18 @@ async def test_codex_owner_bridge_remaps_external_thread_when_send_hits_unmateri
     assert response["thread_id"] == "tid-app"
     assert response["created_new_thread"] is True
     assert adapter.calls == [
-        ("resume", "codex:/Users/wxy", "tid-cli"),
-        ("start", "codex:/Users/wxy"),
-        ("resume", "codex:/Users/wxy", "tid-app"),
+        ("resume", "codex:/Users/example", "tid-cli"),
+        ("start", "codex:/Users/example"),
+        ("resume", "codex:/Users/example", "tid-app"),
         (
             "send",
-            "codex:/Users/wxy",
+            "codex:/Users/example",
             "tid-app",
             "hello with image",
             [
                 {
                     "kind": "image",
-                    "path": "/Users/wxy/Pictures/demo.png",
+                    "path": "/Users/example/Pictures/demo.png",
                     "name": "demo.png",
                 }
             ],
@@ -317,7 +317,7 @@ async def test_codex_owner_bridge_remaps_external_thread_when_send_hits_unmateri
     assert ws.threads["tid-cli"].source == "cli"
     assert ws.threads["tid-app"].source == "app"
     assert ws.threads["tid-app"].preview == "who are you"
-    assert adapter._thread_workspace_map["tid-app"] == "codex:/Users/wxy"
+    assert adapter._thread_workspace_map["tid-app"] == "codex:/Users/example"
 
 
 @pytest.mark.asyncio

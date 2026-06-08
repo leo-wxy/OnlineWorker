@@ -75,7 +75,7 @@ def test_codex_parse_approval_request_supports_legacy_exec_command_shape():
         {
             "conversationId": "thread-legacy",
             "command": ["/bin/zsh", "-lc", "ps -axo pid,command"],
-            "cwd": "/Users/wxy/Projects/onlineworker-combined",
+            "cwd": "/Users/example/Projects/sample-repo",
             "reason": "inspect processes",
         },
         request_id=178,
@@ -95,11 +95,11 @@ def test_codex_parse_approval_request_supports_permissions_shape():
     request = parse_approval_request(
         {
             "threadId": "thread-permissions",
-            "cwd": "/Users/wxy/Projects/onlineworker-combined",
+            "cwd": "/Users/example/Projects/sample-repo",
             "reason": "need Downloads write access",
             "permissions": {
                 "network": None,
-                "fileSystem": {"additionalRoots": ["/Users/wxy/Downloads"]},
+                "fileSystem": {"additionalRoots": ["/Users/example/Downloads"]},
             },
         },
         request_id=179,
@@ -110,11 +110,11 @@ def test_codex_parse_approval_request_supports_permissions_shape():
     assert request.request_id == 179
     assert request.thread_id == "thread-permissions"
     assert request.command == (
-        'request permissions: {"fileSystem": {"additionalRoots": ["/Users/wxy/Downloads"]}}'
+        'request permissions: {"fileSystem": {"additionalRoots": ["/Users/example/Downloads"]}}'
     )
     assert request.reason == "need Downloads write access"
     assert request.amendment_decision == {
-        "permissions": {"fileSystem": {"additionalRoots": ["/Users/wxy/Downloads"]}}
+        "permissions": {"fileSystem": {"additionalRoots": ["/Users/example/Downloads"]}}
     }
     assert request.approval_source == "item/permissions/requestApproval"
 

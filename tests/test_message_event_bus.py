@@ -8,6 +8,7 @@ from core.messages.publishing import (
     publish_approval_answered,
     publish_notification_activity,
     publish_question_answered,
+    publish_session_archived,
     publish_user_message_accepted,
     publish_user_message_submitted,
 )
@@ -57,6 +58,55 @@ def test_message_event_bus_publishes_in_order_and_updates_projection():
     assert activity["lastUserMessage"] == "implement feature"
     assert activity["lastFinalMessage"] == "done"
     assert activity["lastEventKind"] == "message.assistant.final"
+
+
+def test_completed_projection_ignores_late_user_accepted_status_regression():
+    bus = MessageEventBus()
+    session_id = "thread-a"
+
+    bus.publish(
+        create_message_event(
+            "message.user.accepted",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            workspace_path="/tmp/project",
+            session_id=session_id,
+            source="app",
+            payload={"text": "write a file and reply OK"},
+            created_at=10,
+        )
+    )
+    bus.publish(
+        create_message_event(
+            "message.assistant.final",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            workspace_path="/tmp/project",
+            session_id=session_id,
+            turn_id="turn-a",
+            source="provider_event",
+            payload={"text": "OK"},
+            created_at=20,
+        )
+    )
+    bus.publish(
+        create_message_event(
+            "message.user.accepted",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            workspace_path="/tmp/project",
+            session_id=session_id,
+            source="late_sync",
+            payload={"text": "write a file and reply OK"},
+            created_at=30,
+        )
+    )
+
+    activity = bus.session_activity("claude", session_id)
+    assert activity["status"] == "completed"
+    assert activity["lastUserMessage"] == "write a file and reply OK"
+    assert activity["lastFinalMessage"] == "OK"
+    assert activity["lastEventKind"] == "message.user.accepted"
 
 
 def test_message_event_bus_dedupes_by_key_before_projection_update():
@@ -283,6 +333,73 @@ def test_approval_and_question_answers_clear_attention_projection():
     activity = state.message_bus.session_activity("codex", "thread-a")
     assert activity["status"] == "running"
     assert activity["attentionReason"] == ""
+    assert activity["attentionKind"] == ""
+    assert activity["requestId"] == ""
+    assert activity["approvalSource"] == ""
+
+
+def test_approval_answer_keeps_attention_summary_until_new_progress_arrives():
+    state = SimpleNamespace(message_bus=MessageEventBus())
+    state.message_bus.publish(
+        create_message_event(
+            "approval.requested",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            session_id="thread-a",
+            payload={
+                "message": "需要处理授权请求：Check if ncmusbaudio is built in top-level CMakeLists",
+                "requestId": "req-1",
+            },
+            created_at=10,
+        )
+    )
+
+    approval = SimpleNamespace(
+        tool_type="claude",
+        workspace_id="claude:/tmp/project",
+        thread_id="thread-a",
+        request_id="req-1",
+    )
+    assert publish_approval_answered(state, approval, action="exec_allow", message_id=123) is True
+
+    activity = state.message_bus.session_activity("claude", "thread-a")
+    assert activity["status"] == "running"
+    assert activity["attentionReason"] == ""
+    assert activity["lastAssistantMessage"] == (
+        "需要处理授权请求：Check if ncmusbaudio is built in top-level CMakeLists"
+    )
+
+
+def test_approval_roundtrip_preserves_prompt_context_when_hook_supplies_it():
+    state = SimpleNamespace(message_bus=MessageEventBus())
+    state.message_bus.publish(
+        create_message_event(
+            "approval.requested",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            session_id="thread-a",
+            payload={
+                "message": "需要处理授权请求：pwd",
+                "prompt": "engine实现情况如何？",
+                "requestId": "req-1",
+            },
+            created_at=10,
+        )
+    )
+
+    approval = SimpleNamespace(
+        tool_type="claude",
+        workspace_id="claude:/tmp/project",
+        thread_id="thread-a",
+        request_id="req-1",
+    )
+    assert publish_approval_answered(state, approval, action="exec_allow", message_id=123) is True
+
+    activity = state.message_bus.session_activity("claude", "thread-a")
+    assert activity["status"] == "running"
+    assert activity["lastUserMessage"] == "engine实现情况如何？"
+    assert activity["lastAssistantMessage"] == ""
+    assert activity["title"] == "engine实现情况如何？"
 
 
 def test_session_event_bridge_maps_final_reply_and_attention_requests():
@@ -339,8 +456,58 @@ def test_session_event_bridge_maps_final_reply_and_attention_requests():
     assert final_event.payload["semanticKind"] == "turn_completed"
     assert approval_event.kind == "approval.requested"
     assert approval_event.payload["message"] == "需要处理授权请求：mkdir /tmp/demo"
+    assert approval_event.payload["requestId"] == "req-1"
+    assert approval_event.payload["approvalSource"] == "item/commandExecution/requestApproval"
     assert question_event.kind == "question.requested"
     assert question_event.payload["message"] == "Choose model"
+
+
+def test_approval_projection_exposes_request_identity_for_task_board_actions():
+    state = SimpleNamespace(message_bus=MessageEventBus())
+    state.message_bus.publish(
+        create_message_event(
+            "approval.requested",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            session_id="thread-a",
+            payload={
+                "message": "需要处理授权请求：mkdir /tmp/demo",
+                "requestId": "req-42",
+                "approvalSource": "item/commandExecution/requestApproval",
+            },
+            created_at=10,
+        )
+    )
+
+    activity = state.message_bus.session_activity("claude", "thread-a")
+    assert activity["status"] == "needs_attention"
+    assert activity["attentionKind"] == "approval"
+    assert activity["requestId"] == "req-42"
+    assert activity["approvalSource"] == "item/commandExecution/requestApproval"
+
+
+def test_session_archived_removes_activity_projection():
+    state = SimpleNamespace(message_bus=MessageEventBus())
+    state.message_bus.publish(
+        create_message_event(
+            "turn.started",
+            provider_id="external",
+            workspace_id="external:/tmp/project",
+            workspace_path="/tmp/project",
+            session_id="ses-archived",
+            created_at=10,
+        )
+    )
+
+    assert state.message_bus.session_activity("external", "ses-archived") is not None
+    assert publish_session_archived(
+        state,
+        provider_id="external",
+        workspace_id="external:/tmp/project",
+        workspace_path="/tmp/project",
+        session_id="ses-archived",
+    ) is True
+    assert state.message_bus.session_activity("external", "ses-archived") is None
 
 
 def test_notification_activity_publish_helpers_are_visible_on_bus():

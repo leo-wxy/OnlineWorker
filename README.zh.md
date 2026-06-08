@@ -174,13 +174,13 @@ unix://~/Library/Application Support/OnlineWorker/codex_remote_proxy.sock
 默认 app-server socket。推荐本机 alias：
 
 ```bash
-alias codexR='/opt/homebrew/bin/codex --remote "unix:///Users/wxy/Library/Application Support/OnlineWorker/codex_remote_proxy.sock" --cd "$(pwd)"'
+alias codexR='/opt/homebrew/bin/codex --remote "unix://$HOME/Library/Application Support/OnlineWorker/codex_remote_proxy.sock" --cd "$(pwd)"'
 ```
 
 固定 session 诊断时建议显式 resume，避免创建额外 session：
 
 ```bash
-/opt/homebrew/bin/codex resume --remote "unix:///Users/wxy/Library/Application Support/OnlineWorker/codex_remote_proxy.sock" --cd "$(pwd)" <session-id>
+/opt/homebrew/bin/codex resume --remote "unix://$HOME/Library/Application Support/OnlineWorker/codex_remote_proxy.sock" --cd "$(pwd)" <session-id>
 ```
 
 `--remote unix://` 会连接 Codex 默认 socket

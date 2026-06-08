@@ -11,6 +11,8 @@ use super::config::ensure_data_dir;
 use super::provider_bridge_common::provider_owner_bridge_socket_path;
 
 const TASK_BOARD_STATE_FILE: &str = "task_board_state.json";
+const TASK_BOARD_OWNER_BRIDGE_REQUEST_TIMEOUT: Duration = Duration::from_millis(1200);
+const TASK_BOARD_APPROVAL_REPLY_TIMEOUT: Duration = Duration::from_secs(3);
 static TASK_BOARD_ACTIVITY_STREAM_NEXT_ID: AtomicU64 = AtomicU64::new(0);
 static TASK_BOARD_ACTIVITY_STREAM_ACTIVE_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -39,6 +41,12 @@ pub struct TaskBoardSessionActivity {
     pub title: String,
     pub status: String,
     pub attention_reason: String,
+    #[serde(default)]
+    pub attention_kind: String,
+    #[serde(default)]
+    pub request_id: String,
+    #[serde(default)]
+    pub approval_source: String,
     pub last_user_message: String,
     pub last_assistant_message: String,
     pub last_final_message: String,
@@ -55,6 +63,13 @@ struct SessionActivitiesResponse {
     error: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ReplyApprovalResponse {
+    ok: bool,
+    #[serde(default)]
+    error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskBoardActivityStreamEvent {
@@ -63,6 +78,10 @@ pub struct TaskBoardActivityStreamEvent {
     pub activities: Vec<TaskBoardSessionActivity>,
     #[serde(default)]
     pub activity: Option<TaskBoardSessionActivity>,
+    #[serde(default)]
+    pub provider_id: String,
+    #[serde(default)]
+    pub session_id: String,
     #[serde(default)]
     pub error: Option<String>,
 }
@@ -77,6 +96,10 @@ struct RawTaskBoardActivityStreamEvent {
     activities: Vec<TaskBoardSessionActivity>,
     #[serde(default)]
     activity: Option<TaskBoardSessionActivity>,
+    #[serde(default, rename = "providerId")]
+    provider_id: String,
+    #[serde(default, rename = "sessionId")]
+    session_id: String,
     #[serde(default)]
     error: Option<String>,
 }
@@ -92,6 +115,55 @@ impl Default for TaskBoardState {
 
 fn task_board_state_path() -> Result<PathBuf, String> {
     Ok(ensure_data_dir()?.join(TASK_BOARD_STATE_FILE))
+}
+
+fn connect_owner_bridge_socket(
+    socket_path: &Path,
+    timeout: Duration,
+) -> Result<UnixStream, String> {
+    let socket = UnixStream::connect(socket_path)
+        .map_err(|e| format!("connect provider owner bridge failed: {e}"))?;
+    socket
+        .set_read_timeout(Some(timeout))
+        .map_err(|e| format!("set provider owner bridge read timeout failed: {e}"))?;
+    socket
+        .set_write_timeout(Some(timeout))
+        .map_err(|e| format!("set provider owner bridge write timeout failed: {e}"))?;
+    Ok(socket)
+}
+
+fn read_task_board_session_activities_from_socket_path_with_timeout(
+    socket_path: &Path,
+    timeout: Duration,
+) -> Result<Vec<TaskBoardSessionActivity>, String> {
+    let mut socket = connect_owner_bridge_socket(socket_path, timeout)?;
+    let payload = serde_json::json!({
+        "type": "session_activities",
+        "limit": 200,
+    });
+    let raw_request = format!("{}\n", payload);
+    socket
+        .write_all(raw_request.as_bytes())
+        .map_err(|e| format!("write provider owner bridge request failed: {e}"))?;
+    socket
+        .shutdown(Shutdown::Write)
+        .map_err(|e| format!("shutdown provider owner bridge write failed: {e}"))?;
+
+    let mut response_line = String::new();
+    let mut reader = BufReader::new(socket);
+    reader
+        .read_line(&mut response_line)
+        .map_err(|e| format!("read provider owner bridge response failed: {e}"))?;
+
+    let response = serde_json::from_str::<SessionActivitiesResponse>(response_line.trim())
+        .map_err(|e| format!("parse provider owner bridge response failed: {e}"))?;
+    if response.ok {
+        Ok(response.activities)
+    } else {
+        Err(response
+            .error
+            .unwrap_or_else(|| "provider owner bridge request failed".to_string()))
+    }
 }
 
 fn now_epoch_seconds() -> i64 {
@@ -145,14 +217,16 @@ pub fn load_task_board_state_from_path(path: &Path) -> TaskBoardState {
 
 fn save_task_board_state_to_path(path: &Path, state: &TaskBoardState) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("create task board state dir failed: {e}"))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("create task board state dir failed: {e}"))?;
     }
     let payload = serde_json::to_string_pretty(state)
         .map_err(|e| format!("serialize task board state failed: {e}"))?;
     let tmp_path = path.with_extension("json.tmp");
     std::fs::write(&tmp_path, payload)
         .map_err(|e| format!("write task board state tmp failed: {e}"))?;
-    std::fs::rename(&tmp_path, path).map_err(|e| format!("replace task board state failed: {e}"))?;
+    std::fs::rename(&tmp_path, path)
+        .map_err(|e| format!("replace task board state failed: {e}"))?;
     Ok(())
 }
 
@@ -180,12 +254,46 @@ pub async fn get_task_board_session_activities() -> Result<Vec<TaskBoardSessionA
     if !socket_path.exists() {
         return Ok(Vec::new());
     }
+    read_task_board_session_activities_from_socket_path_with_timeout(
+        &socket_path,
+        TASK_BOARD_OWNER_BRIDGE_REQUEST_TIMEOUT,
+    )
+}
 
-    let mut socket = UnixStream::connect(&socket_path)
-        .map_err(|e| format!("connect provider owner bridge failed: {e}"))?;
+#[tauri::command]
+pub async fn reply_task_board_approval(
+    provider_id: String,
+    workspace_id: String,
+    workspace_path: String,
+    session_id: String,
+    request_id: String,
+    action: String,
+    approval_source: Option<String>,
+    command: Option<String>,
+    reason: Option<String>,
+) -> Result<(), String> {
+    let data_dir = ensure_data_dir()?;
+    let socket_path = provider_owner_bridge_socket_path(&data_dir);
+    if !socket_path.exists() {
+        return Err(format!(
+            "provider owner bridge not ready: {}",
+            socket_path.display()
+        ));
+    }
+
+    let mut socket = connect_owner_bridge_socket(&socket_path, TASK_BOARD_APPROVAL_REPLY_TIMEOUT)?;
     let payload = serde_json::json!({
-        "type": "session_activities",
-        "limit": 200,
+        "type": "reply_approval",
+        "provider_id": provider_id,
+        "workspace_id": workspace_id,
+        "workspace_dir": workspace_path,
+        "workspace_path": workspace_path,
+        "session_id": session_id,
+        "request_id": request_id,
+        "action": action,
+        "approval_source": approval_source.unwrap_or_default(),
+        "command": command.unwrap_or_default(),
+        "reason": reason.unwrap_or_default(),
     });
     let raw_request = format!("{}\n", payload);
     socket
@@ -201,14 +309,14 @@ pub async fn get_task_board_session_activities() -> Result<Vec<TaskBoardSessionA
         .read_line(&mut response_line)
         .map_err(|e| format!("read provider owner bridge response failed: {e}"))?;
 
-    let response = serde_json::from_str::<SessionActivitiesResponse>(response_line.trim())
+    let response = serde_json::from_str::<ReplyApprovalResponse>(response_line.trim())
         .map_err(|e| format!("parse provider owner bridge response failed: {e}"))?;
     if response.ok {
-        Ok(response.activities)
+        Ok(())
     } else {
         Err(response
             .error
-            .unwrap_or_else(|| "provider owner bridge request failed".to_string()))
+            .unwrap_or_else(|| "provider owner bridge approval reply failed".to_string()))
     }
 }
 
@@ -238,6 +346,8 @@ fn parse_task_board_activity_stream_event(line: &str) -> Option<TaskBoardActivit
             kind: "snapshot".to_string(),
             activities: raw.activities,
             activity: None,
+            provider_id: String::new(),
+            session_id: String::new(),
             error: None,
         });
     }
@@ -246,6 +356,18 @@ fn parse_task_board_activity_stream_event(line: &str) -> Option<TaskBoardActivit
             kind: "activity".to_string(),
             activities: Vec::new(),
             activity: raw.activity,
+            provider_id: String::new(),
+            session_id: String::new(),
+            error: None,
+        });
+    }
+    if raw.ok && raw.kind == "remove" {
+        return Some(TaskBoardActivityStreamEvent {
+            kind: "remove".to_string(),
+            activities: Vec::new(),
+            activity: None,
+            provider_id: raw.provider_id,
+            session_id: raw.session_id,
             error: None,
         });
     }
@@ -253,6 +375,8 @@ fn parse_task_board_activity_stream_event(line: &str) -> Option<TaskBoardActivit
         kind: "error".to_string(),
         activities: Vec::new(),
         activity: None,
+        provider_id: String::new(),
+        session_id: String::new(),
         error: raw
             .error
             .or_else(|| Some("provider owner bridge stream failed".to_string())),
@@ -275,6 +399,8 @@ pub async fn start_task_board_activity_stream(
                     kind: "error".to_string(),
                     activities: Vec::new(),
                     activity: None,
+                    provider_id: String::new(),
+                    session_id: String::new(),
                     error: Some(format!(
                         "provider owner bridge not ready: {}",
                         socket_path.display()
@@ -291,6 +417,8 @@ pub async fn start_task_board_activity_stream(
                         kind: "error".to_string(),
                         activities: Vec::new(),
                         activity: None,
+                        provider_id: String::new(),
+                        session_id: String::new(),
                         error: Some(format!("connect provider owner bridge failed: {error}")),
                     });
                     std::thread::sleep(reconnect_delay);
@@ -308,6 +436,8 @@ pub async fn start_task_board_activity_stream(
                     kind: "error".to_string(),
                     activities: Vec::new(),
                     activity: None,
+                    provider_id: String::new(),
+                    session_id: String::new(),
                     error: Some(format!(
                         "write provider owner bridge stream request failed: {error}"
                     )),
@@ -339,6 +469,8 @@ pub async fn start_task_board_activity_stream(
                             kind: "error".to_string(),
                             activities: Vec::new(),
                             activity: None,
+                            provider_id: String::new(),
+                            session_id: String::new(),
                             error: Some(format!(
                                 "read provider owner bridge stream failed: {error}"
                             )),
@@ -388,6 +520,11 @@ pub async fn unpin_task_board_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::io::BufRead;
+    use std::io::BufReader;
+    use std::os::unix::net::UnixListener;
+    use std::thread;
 
     #[test]
     fn missing_task_board_state_returns_default() {
@@ -436,6 +573,34 @@ mod tests {
     }
 
     #[test]
+    fn parses_task_board_activity_stream_activity_with_approval_metadata() {
+        let event = parse_task_board_activity_stream_event(
+            r#"{"ok":true,"kind":"activity","activity":{"providerId":"claude","workspaceId":"claude:/tmp/project","workspacePath":"/tmp/project","sessionId":"thread-a","title":"Run tests","status":"needs_attention","attentionReason":"需要处理授权请求","attentionKind":"approval","requestId":"req-1","approvalSource":"item/commandExecution/requestApproval","lastUserMessage":"Run tests","lastAssistantMessage":"","lastFinalMessage":"","lastEventKind":"approval.requested","updatedAt":20.0}}"#,
+        )
+        .expect("event");
+
+        let activity = event.activity.expect("activity");
+        assert_eq!(activity.attention_kind, "approval");
+        assert_eq!(activity.request_id, "req-1");
+        assert_eq!(
+            activity.approval_source,
+            "item/commandExecution/requestApproval"
+        );
+    }
+
+    #[test]
+    fn parses_task_board_activity_stream_remove() {
+        let event = parse_task_board_activity_stream_event(
+            r#"{"ok":true,"kind":"remove","providerId":"external","sessionId":"ses-archived"}"#,
+        )
+        .expect("event");
+
+        assert_eq!(event.kind, "remove");
+        assert_eq!(event.provider_id, "external");
+        assert_eq!(event.session_id, "ses-archived");
+    }
+
+    #[test]
     fn stale_task_board_activity_stream_stop_does_not_stop_new_stream() {
         let first_stream_id = begin_task_board_activity_stream();
         assert!(task_board_activity_stream_is_active(first_stream_id));
@@ -449,5 +614,38 @@ mod tests {
 
         stop_task_board_activity_stream_id(second_stream_id);
         assert!(!task_board_activity_stream_is_active(second_stream_id));
+    }
+
+    #[test]
+    fn task_board_session_activities_owner_bridge_timeout_returns_error() {
+        let temp_dir =
+            std::path::PathBuf::from(format!("/tmp/owtb-timeout-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let socket_path = temp_dir.join("provider_owner_bridge.sock");
+        let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
+
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("accept owner bridge socket");
+            let mut request = String::new();
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            reader
+                .read_line(&mut request)
+                .expect("read owner bridge request");
+            let payload: serde_json::Value =
+                serde_json::from_str(request.trim()).expect("parse owner bridge request");
+            assert_eq!(payload["type"], "session_activities");
+            thread::sleep(Duration::from_millis(200));
+        });
+
+        let error = read_task_board_session_activities_from_socket_path_with_timeout(
+            &socket_path,
+            Duration::from_millis(50),
+        )
+        .expect_err("request should time out");
+        assert!(error.contains("read provider owner bridge response failed"));
+
+        server.join().expect("join owner bridge server");
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }

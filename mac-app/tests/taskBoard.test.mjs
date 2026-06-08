@@ -50,6 +50,31 @@ test("buildTaskBoardModel puts dashboard active session in running column", () =
   assert.equal(board.running[0].preview, "active work");
 });
 
+test("buildTaskBoardModel ignores stale session-list running flags without live activity", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "thread-completed",
+        type: "claude",
+        title: "Write a file and reply OK",
+        raw: {
+          running: true,
+          status: "running",
+          lastMessage: "OK",
+          updatedAt: nowEpochMs - 60_000,
+        },
+      }),
+    ],
+    providerLabels: { claude: "Claude" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.counts.running, 0);
+  assert.equal(board.counts.needsAttention, 0);
+  assert.equal(board.counts.pinnedIdle, 0);
+});
+
 test("buildTaskBoardModel separates archived sessions", () => {
   const board = buildTaskBoardModel({
     sessions: [
@@ -205,8 +230,8 @@ test("buildTaskBoardModel uses activity title as running preview fallback withou
     sessionActivities: [
       {
         providerId: "codex",
-        workspaceId: "codex:/Users/wxy/Projects/onlineWorker",
-        workspacePath: "/Users/wxy/Projects/onlineWorker",
+        workspaceId: "codex:/Users/example/Projects/sample-workspace",
+        workspacePath: "/Users/example/Projects/sample-workspace",
         sessionId: "thread-a",
         title: "切换 codex/phase-14-message-event-bus 这个分支",
         status: "running",
@@ -240,8 +265,8 @@ test("buildTaskBoardModel shows latest user message when activity has no assista
     sessionActivities: [
       {
         providerId: "codex",
-        workspaceId: "codex:/Users/wxy/Projects/onlineWorker",
-        workspacePath: "/Users/wxy/Projects/onlineWorker",
+        workspaceId: "codex:/Users/example/Projects/sample-workspace",
+        workspacePath: "/Users/example/Projects/sample-workspace",
         sessionId: "thread-a",
         title: "切换 codex/phase-14-message-event-bus 这个分支",
         status: "running",
@@ -263,6 +288,31 @@ test("buildTaskBoardModel shows latest user message when activity has no assista
   assert.equal(board.running[0].statusReason, "");
 });
 
+test("buildTaskBoardModel keeps running preview even when it matches the title", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "thread-a",
+        title: "继续 /Users/example/Projects/sample-repo 的任务",
+        raw: { status: "running", updatedAt: nowEpochMs - 30_000 },
+      }),
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: {
+      recentActivity: {
+        activeSessionId: "thread-a",
+        activeSessionTool: "codex",
+        highlightedThreadPreview: "继续 /Users/example/Projects/sample-repo 的任务",
+      },
+      generatedAtEpoch: Math.floor(nowEpochMs / 1000),
+    },
+    nowEpochMs,
+  });
+
+  assert.equal(board.running[0].title, "继续 /Users/example/Projects/sample-repo 的任务");
+  assert.equal(board.running[0].preview, "继续 /Users/example/Projects/sample-repo 的任务");
+});
+
 test("buildTaskBoardModel replaces uuid activity title with session title", () => {
   const board = buildTaskBoardModel({
     sessions: [
@@ -275,8 +325,8 @@ test("buildTaskBoardModel replaces uuid activity title with session title", () =
     sessionActivities: [
       {
         providerId: "codex",
-        workspaceId: "codex:/Users/wxy/Projects/onlineWorker",
-        workspacePath: "/Users/wxy/Projects/onlineWorker",
+        workspaceId: "codex:/Users/example/Projects/sample-workspace",
+        workspacePath: "/Users/example/Projects/sample-workspace",
         sessionId: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
         title: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
         status: "running",
@@ -309,8 +359,8 @@ test("buildTaskBoardModel renders session title above live assistant summary", (
     sessionActivities: [
       {
         providerId: "codex",
-        workspaceId: "codex:/Users/wxy/Projects/onlineWorker",
-        workspacePath: "/Users/wxy/Projects/onlineWorker",
+        workspaceId: "codex:/Users/example/Projects/sample-workspace",
+        workspacePath: "/Users/example/Projects/sample-workspace",
         sessionId: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
         title: "我正在通过事件流更新 TaskBoard。",
         status: "running",
@@ -343,8 +393,8 @@ test("buildTaskBoardModel trims assistant process preface from live preview", ()
     sessionActivities: [
       {
         providerId: "codex",
-        workspaceId: "codex:/Users/wxy/Projects/onlineWorker",
-        workspacePath: "/Users/wxy/Projects/onlineWorker",
+        workspaceId: "codex:/Users/example/Projects/sample-workspace",
+        workspacePath: "/Users/example/Projects/sample-workspace",
         sessionId: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
         title: "",
         status: "running",
@@ -380,8 +430,8 @@ test("buildTaskBoardModel trims hook discussion preface from live preview", () =
     sessionActivities: [
       {
         providerId: "codex",
-        workspaceId: "codex:/Users/wxy/Projects/onlineWorker",
-        workspacePath: "/Users/wxy/Projects/onlineWorker",
+        workspaceId: "codex:/Users/example/Projects/sample-workspace",
+        workspacePath: "/Users/example/Projects/sample-workspace",
         sessionId: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
         title: "",
         status: "running",
@@ -411,8 +461,8 @@ test("buildTaskBoardModel does not use assistant text as title without session m
     sessionActivities: [
       {
         providerId: "codex",
-        workspaceId: "codex:/Users/wxy/Projects/onlineWorker",
-        workspacePath: "/Users/wxy/Projects/onlineWorker",
+        workspaceId: "codex:/Users/example/Projects/sample-workspace",
+        workspacePath: "/Users/example/Projects/sample-workspace",
         sessionId: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
         title: "",
         status: "running",

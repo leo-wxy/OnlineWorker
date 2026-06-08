@@ -104,16 +104,17 @@ def seed_codex_watch_baseline(
 
 
 def _should_auto_watch_bound_codex_threads(state: AppState) -> bool:
+    # App/shared live modes already have an authoritative app-server event
+    # chain. Auto-watching every bound thread from session files there creates a
+    # second visible-message source. Keep file auto-watch only for local-owner
+    # TUI mode, where session-file mirror is the main source.
     cfg = state.config
     if cfg is None:
         return False
     tool_cfg = cfg.get_tool("codex")
     if not tool_cfg or tool_cfg.name != "codex":
         return False
-    if str(getattr(tool_cfg, "control_mode", "") or "app").strip().lower() != "app":
-        return False
-    live_transport = str(getattr(tool_cfg, "live_transport", "") or "").strip().lower()
-    return live_transport != "shared_ws"
+    return str(getattr(tool_cfg, "control_mode", "") or "").strip().lower() == "tui"
 
 
 def _synced_final_text_signature(state: AppState, thread_id: str) -> str:
@@ -280,7 +281,7 @@ async def _mark_watch_idle_or_complete(handler, watch: ProviderWatchState, threa
     _mark_watch_idle(watch, now)
     if not watch.turn_started_sent or watch.idle_polls < COMMENTARY_IDLE_COMPLETION_POLLS:
         return
-    await _emit_turn_completed(handler, watch.workspace_id, thread_id)
+    await _emit_turn_completed(handler, watch.workspace_id, thread_id, "")
     watch.turn_started_sent = False
     watch.active_until = now + FINAL_GRACE_TTL_SECONDS
     logger.info("[tui-mirror] commentary idle completed thread=%s", thread_id)
@@ -425,6 +426,7 @@ async def sync_watched_thread_once(
                 watch,
                 thread_id,
                 item["text"],
+                item["turn_id"],
             )
         elif item["phase"] == "final_answer":
             saw_activity = True
@@ -435,6 +437,7 @@ async def sync_watched_thread_once(
                 thread_id,
                 item["text"],
                 item["timestamp"],
+                item["turn_id"],
             )
 
     if saw_activity:
@@ -453,6 +456,7 @@ def _parse_response_item(line: str) -> Optional[dict]:
         return None
 
     payload = obj.get("payload", {})
+    turn_id = str(payload.get("turn_id") or payload.get("turnId") or "").strip()
     text = ""
     content_items = payload.get("content")
     if not isinstance(content_items, list):
@@ -468,21 +472,34 @@ def _parse_response_item(line: str) -> Optional[dict]:
         "phase": payload.get("phase", ""),
         "text": text,
         "timestamp": obj.get("timestamp", ""),
+        "turn_id": turn_id,
     }
 
 
-async def _apply_commentary_update(handler, watch: ProviderWatchState, thread_id: str, new_text: str) -> None:
+async def _apply_commentary_update(
+    handler,
+    watch: ProviderWatchState,
+    thread_id: str,
+    new_text: str,
+    turn_id: str,
+) -> None:
     if not watch.turn_started_sent:
-        await _emit_turn_started(handler, watch.workspace_id, thread_id)
+        await _emit_turn_started(handler, watch.workspace_id, thread_id, turn_id)
         watch.turn_started_sent = True
 
     old_text = watch.last_commentary_text
     if new_text.startswith(old_text):
         delta = new_text[len(old_text):]
         if delta:
-            await _emit_delta(handler, watch.workspace_id, thread_id, delta)
+            await _emit_delta(handler, watch.workspace_id, thread_id, delta, turn_id)
     else:
-        await _emit_item_completed_commentary(handler, watch.workspace_id, thread_id, new_text)
+        await _emit_item_completed_commentary(
+            handler,
+            watch.workspace_id,
+            thread_id,
+            new_text,
+            turn_id,
+        )
     watch.last_commentary_text = new_text
 
 
@@ -493,6 +510,7 @@ async def _apply_final_update(
     thread_id: str,
     new_text: str,
     timestamp: str,
+    turn_id: str,
 ) -> None:
     normalized = (new_text or "").strip()
     runtime = codex_state.get_runtime(state)
@@ -506,12 +524,12 @@ async def _apply_final_update(
         return
 
     if not watch.turn_started_sent:
-        await _emit_turn_started(handler, watch.workspace_id, thread_id)
+        await _emit_turn_started(handler, watch.workspace_id, thread_id, turn_id)
         watch.turn_started_sent = True
 
     if normalized != watch.last_final_text:
-        await _emit_item_completed_final(handler, watch.workspace_id, thread_id, new_text)
-        await _emit_turn_completed(handler, watch.workspace_id, thread_id)
+        await _emit_item_completed_final(handler, watch.workspace_id, thread_id, new_text, turn_id)
+        await _emit_turn_completed(handler, watch.workspace_id, thread_id, turn_id)
         if timestamp and normalized:
             runtime.last_synced_assistant[thread_id] = f"{timestamp}\n{normalized}"
         watch.last_final_text = normalized
@@ -519,7 +537,11 @@ async def _apply_final_update(
         watch.active_until = time.monotonic() + FINAL_GRACE_TTL_SECONDS
 
 
-async def _emit_turn_started(handler, workspace_id: str, thread_id: str) -> None:
+async def _emit_turn_started(handler, workspace_id: str, thread_id: str, turn_id: str) -> None:
+    turn_payload = {"source": "tui-mirror"}
+    if turn_id:
+        turn_payload["id"] = turn_id
+        turn_payload["threadId"] = thread_id
     await handler(
         "app-server-event",
         {
@@ -528,14 +550,15 @@ async def _emit_turn_started(handler, workspace_id: str, thread_id: str) -> None
                 "method": "turn/started",
                 "params": {
                     "threadId": thread_id,
-                    "turn": {"source": "tui-mirror"},
+                    "turnId": turn_id,
+                    "turn": turn_payload,
                 },
             },
         },
     )
 
 
-async def _emit_delta(handler, workspace_id: str, thread_id: str, delta: str) -> None:
+async def _emit_delta(handler, workspace_id: str, thread_id: str, delta: str, turn_id: str) -> None:
     await handler(
         "app-server-event",
         {
@@ -544,6 +567,7 @@ async def _emit_delta(handler, workspace_id: str, thread_id: str, delta: str) ->
                 "method": "item/agentMessage/delta",
                 "params": {
                     "threadId": thread_id,
+                    "turnId": turn_id,
                     "delta": delta,
                 },
             },
@@ -551,7 +575,13 @@ async def _emit_delta(handler, workspace_id: str, thread_id: str, delta: str) ->
     )
 
 
-async def _emit_item_completed_commentary(handler, workspace_id: str, thread_id: str, text: str) -> None:
+async def _emit_item_completed_commentary(
+    handler,
+    workspace_id: str,
+    thread_id: str,
+    text: str,
+    turn_id: str,
+) -> None:
     await handler(
         "app-server-event",
         {
@@ -560,9 +590,11 @@ async def _emit_item_completed_commentary(handler, workspace_id: str, thread_id:
                 "method": "item/completed",
                 "params": {
                     "threadId": thread_id,
+                    "turnId": turn_id,
                     "item": {
                         "type": "agentMessage",
                         "threadId": thread_id,
+                        "turn": {"id": turn_id, "threadId": thread_id} if turn_id else {},
                         "phase": "commentary",
                         "text": text,
                     },
@@ -572,7 +604,13 @@ async def _emit_item_completed_commentary(handler, workspace_id: str, thread_id:
     )
 
 
-async def _emit_item_completed_final(handler, workspace_id: str, thread_id: str, text: str) -> None:
+async def _emit_item_completed_final(
+    handler,
+    workspace_id: str,
+    thread_id: str,
+    text: str,
+    turn_id: str,
+) -> None:
     await handler(
         "app-server-event",
         {
@@ -581,9 +619,11 @@ async def _emit_item_completed_final(handler, workspace_id: str, thread_id: str,
                 "method": "item/completed",
                 "params": {
                     "threadId": thread_id,
+                    "turnId": turn_id,
                     "item": {
                         "type": "agentMessage",
                         "threadId": thread_id,
+                        "turn": {"id": turn_id, "threadId": thread_id} if turn_id else {},
                         "phase": "final_answer",
                         "text": text,
                     },
@@ -593,7 +633,11 @@ async def _emit_item_completed_final(handler, workspace_id: str, thread_id: str,
     )
 
 
-async def _emit_turn_completed(handler, workspace_id: str, thread_id: str) -> None:
+async def _emit_turn_completed(handler, workspace_id: str, thread_id: str, turn_id: str) -> None:
+    turn_payload = {"status": "completed", "source": "tui-mirror"}
+    if turn_id:
+        turn_payload["id"] = turn_id
+        turn_payload["threadId"] = thread_id
     await handler(
         "app-server-event",
         {
@@ -602,7 +646,8 @@ async def _emit_turn_completed(handler, workspace_id: str, thread_id: str) -> No
                 "method": "turn/completed",
                 "params": {
                     "threadId": thread_id,
-                    "turn": {"status": "completed", "source": "tui-mirror"},
+                    "turnId": turn_id,
+                    "turn": turn_payload,
                 },
             },
         },

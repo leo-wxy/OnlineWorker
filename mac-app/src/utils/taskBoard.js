@@ -43,19 +43,38 @@ function providerLabelFor(providerLabels, providerId) {
   return providerLabels[providerId] || providerId;
 }
 
-function sessionTitle(session) {
-  return session.title || session.id;
-}
-
 function isUuidLike(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
     normalizedString(value),
   );
 }
 
+function isLowSignalTitleText(value) {
+  const text = normalizedString(value).toLowerCase();
+  if (!text) {
+    return true;
+  }
+  if (text.length <= 2) {
+    return true;
+  }
+  return ["ok", "done", "yes", "no", "test", "ping"].includes(text);
+}
+
 function isPlaceholderTitle(title, sessionId) {
   const text = normalizedString(title);
-  return !text || text === normalizedString(sessionId) || isUuidLike(text);
+  return !text || text === normalizedString(sessionId) || isUuidLike(text) || isLowSignalTitleText(text);
+}
+
+function sessionTitle(session) {
+  const title = normalizedString(session.title);
+  if (!isPlaceholderTitle(title, session.id)) {
+    return title;
+  }
+  const preview = sessionPreview(session);
+  if (preview && !isPlaceholderTitle(preview, session.id)) {
+    return preview.slice(0, 160);
+  }
+  return title || session.id;
 }
 
 function shortSessionLabel(sessionId) {
@@ -145,7 +164,7 @@ function previewText(value) {
 
 function meaningfulPreview(preview, title, fallback) {
   const text = normalizedString(preview);
-  if (text && text !== normalizedString(title)) {
+  if (text) {
     return text;
   }
   return normalizedString(fallback) || null;
@@ -298,9 +317,14 @@ export function buildTaskBoardModel({
       workspace: normalizedString(activity.workspacePath) ||
         normalizedString(activity.workspaceId) ||
         normalizedString(session?.workspace),
+      workspaceId: normalizedString(activity.workspaceId),
+      workspacePath: normalizedString(activity.workspacePath),
       preview,
       archived: Boolean(session?.archived),
       needsAttention,
+      attentionKind: normalizedString(activity.attentionKind).toLowerCase(),
+      requestId: normalizedString(activity.requestId),
+      approvalSource: normalizedString(activity.approvalSource),
       running,
       pinned,
       statusReason: activityStatusReason(activity, fallbackReason),
@@ -322,7 +346,7 @@ export function buildTaskBoardModel({
       return;
     }
     const needsAttention = hasNeedsAttentionSignal(raw);
-    const running = !needsAttention && (isActive || hasRunningSignal(raw));
+    const running = !needsAttention && isActive;
     const pinned = pinnedKeys.has(key);
     const title = sessionTitle(session);
     const fallbackReason = needsAttention
@@ -346,9 +370,14 @@ export function buildTaskBoardModel({
       providerLabel: providerLabelFor(providerLabels, session.type),
       title,
       workspace: session.workspace,
+      workspaceId: "",
+      workspacePath: session.workspace,
       preview,
       archived: session.archived,
       needsAttention,
+      attentionKind: "",
+      requestId: "",
+      approvalSource: "",
       running,
       pinned,
       statusReason: needsAttention ? fallbackReason : "",
@@ -371,9 +400,14 @@ export function buildTaskBoardModel({
       providerLabel: providerLabelFor(providerLabels, providerId),
       title: recentActivity?.highlightedThreadPreview || activeSessionId,
       workspace: activeWorkspacePath || recentActivity?.activeWorkspaceName || "",
+      workspaceId: "",
+      workspacePath: activeWorkspacePath || "",
       preview: recentActivity?.highlightedThreadPreview || null,
       archived: false,
       needsAttention: false,
+      attentionKind: "",
+      requestId: "",
+      approvalSource: "",
       running: true,
       pinned: pinnedKeys.has(key),
       statusReason: "正在执行",

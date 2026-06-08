@@ -25,7 +25,7 @@ function supportsLaunchMethods(provider: ProviderMetadata | undefined) {
 
 const CIVILITY_MODE_SEALED = true;
 const CODEX_REMOTE_PROXY_ALIAS =
-  "alias codexR='/opt/homebrew/bin/codex --remote \"unix:///Users/wxy/Library/Application Support/OnlineWorker/codex_remote_proxy.sock\" --cd \"$(pwd)\"'";
+  "alias codexR='/opt/homebrew/bin/codex --remote \"unix://$HOME/Library/Application Support/OnlineWorker/codex_remote_proxy.sock\" --cd \"$(pwd)\"'";
 
 interface ProviderCliDraft {
   bin: string;

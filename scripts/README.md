@@ -21,7 +21,7 @@
 - `ow-codex`：Codex CLI remote proxy 包装脚本。文明模式当前已暂停，脚本仍保留为内部开发入口；验证 CLI 原生弹窗与 TG 同步授权时优先使用 OnlineWorker 主进程暴露的 Unix proxy socket：
 
   ```bash
-  alias codexR='/opt/homebrew/bin/codex --remote "unix:///Users/wxy/Library/Application Support/OnlineWorker/codex_remote_proxy.sock" --cd "$(pwd)"'
+  alias codexR='/opt/homebrew/bin/codex --remote "unix://$HOME/Library/Application Support/OnlineWorker/codex_remote_proxy.sock" --cd "$(pwd)"'
   ```
 
   不要用 `--remote unix://` 验证 OnlineWorker 审批链路；它连接的是 Codex 默认 socket，会绕过 OnlineWorker proxy。
@@ -46,12 +46,12 @@
     claude:
       bin: "claude"
       launch_methods:
-        - id: native
-          label: Native Claude
-          bin: "claude"
-        - id: raven
-          label: Raven Claude
-          bin: "/Users/me/.nvm/versions/node/v20.20.1/bin/raven cc"
+      - id: native
+        label: Native Claude
+        bin: "claude"
+      - id: launcher
+        label: Launcher Claude
+        bin: "~/bin/claude-launcher claude"
   ```
 
 - `claude_hook_smoke.py`：Claude hook smoke 脚本，已有 `tests/test_claude_hook_smoke.py` 保护。默认复用当前 Python 解释器；如需指定 bridge 解释器，可设置 `ONLINEWORKER_BRIDGE_PYTHON=/path/to/python`。

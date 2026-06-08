@@ -157,13 +157,13 @@ mod tests {
     fn codex_tui_host_script_uses_packaged_sidecar_entrypoint() {
         let script = build_codex_tui_host_script(
             Path::new("/Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot"),
-            Path::new("/Users/wxy/Library/Application Support/OnlineWorker"),
-            "/Users/wxy/Projects/onlineworker-combined",
+            Path::new("/Users/example/Library/Application Support/OnlineWorker"),
+            "/Users/example/Projects/sample-repo",
             "tid-1",
         );
 
         assert!(script.contains("--codex-tui-host"));
-        assert!(script.contains("--codex-tui-cd '/Users/wxy/Projects/onlineworker-combined'"));
+        assert!(script.contains("--codex-tui-cd '/Users/example/Projects/sample-repo'"));
         assert!(script.contains("--codex-tui-target 'tid-1'"));
         assert!(script.contains("--codex-tui-extra-arg=--no-alt-screen"));
     }

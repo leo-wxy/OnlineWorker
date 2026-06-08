@@ -202,3 +202,50 @@ async def test_prepare_send_rejects_external_busy_claude_thread():
 
     adapter.start_thread.assert_not_awaited()
     adapter.resume_thread.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_start_runtime_starts_hook_bridge_before_install(monkeypatch):
+    from config import Config, ToolConfig
+    from core.lifecycle import LifecycleManager
+
+    storage = AppStorage()
+    state = AppState(storage=storage)
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=2,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="claude",
+                enabled=True,
+                codex_bin="claude",
+                protocol="stdio",
+            ),
+        ],
+        data_dir="/tmp/onlineworker-claude-test",
+        delete_archived_topics=True,
+    )
+    manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
+    tool_cfg = cfg.get_tool("claude")
+    assert tool_cfg is not None
+
+    adapter = MagicMock()
+    adapter.connect = AsyncMock()
+    adapter.configure_hook_bridge = MagicMock()
+    adapter.start_hook_bridge = AsyncMock()
+    adapter.install_external_hook_ingress = AsyncMock(return_value={"state": "installed"})
+
+    async def fake_setup_connection(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(claude_runtime, "ClaudeAdapter", MagicMock(return_value=adapter))
+    monkeypatch.setattr(claude_runtime, "setup_connection", fake_setup_connection)
+
+    await claude_runtime.start_runtime(manager, bot=MagicMock(), tool_cfg=tool_cfg)
+
+    adapter.connect.assert_awaited_once()
+    adapter.configure_hook_bridge.assert_called_once_with("/tmp/onlineworker-claude-test")
+    adapter.start_hook_bridge.assert_awaited_once_with("/tmp/onlineworker-claude-test")
+    adapter.install_external_hook_ingress.assert_awaited_once()

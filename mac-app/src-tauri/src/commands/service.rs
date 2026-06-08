@@ -857,7 +857,7 @@ fn expand_home_path(value: &str) -> String {
 }
 
 /// Check if a CLI command is installed.
-/// Accepts command lines such as `/path/to/raven cc`; only the executable token
+/// Accepts command lines such as `/path/to/claude-launcher claude`; only the executable token
 /// is checked. .app bundles have minimal PATH, so we set a rich PATH for `which`.
 #[tauri::command]
 pub async fn check_cli(bin: String) -> Result<bool, String> {
@@ -915,13 +915,12 @@ fn probe_http_health(url: &str) -> Result<bool, String> {
 mod tests {
     use super::should_ignore_sidecar_output_event;
     use super::{
-        apply_manual_stop_policy, apply_service_start_policy,
-        bot_sidecar_env, cleanup_owner_bridge_socket_files_in_dir, cleanup_process_matchers,
-        command_program_token, compute_service_status, managed_bot_cleanup_pids_from_rows,
-        overlay_env_spec, overlay_env_spec_from_app_env, pid_parent_pairs_from_output,
-        pids_from_bot_process_rows, pids_from_output, probe_http_health, process_tree_pids,
-        read_env_key, select_primary_pid, should_attempt_background_service_recovery, BotState,
-        ManagedProcessCleanupPolicy,
+        apply_manual_stop_policy, apply_service_start_policy, bot_sidecar_env,
+        cleanup_owner_bridge_socket_files_in_dir, cleanup_process_matchers, command_program_token,
+        compute_service_status, managed_bot_cleanup_pids_from_rows, overlay_env_spec,
+        overlay_env_spec_from_app_env, pid_parent_pairs_from_output, pids_from_bot_process_rows,
+        pids_from_output, probe_http_health, process_tree_pids, read_env_key, select_primary_pid,
+        should_attempt_background_service_recovery, BotState, ManagedProcessCleanupPolicy,
     };
     use std::collections::HashMap;
     use std::fs;
@@ -935,12 +934,12 @@ mod tests {
     #[test]
     fn command_program_token_accepts_command_lines_with_arguments() {
         assert_eq!(
-            command_program_token("/Users/wxy/.nvm/versions/node/v20.20.1/bin/raven cc"),
-            "/Users/wxy/.nvm/versions/node/v20.20.1/bin/raven"
+            command_program_token("/Users/example/bin/claude-launcher claude"),
+            "/Users/example/bin/claude-launcher"
         );
         assert_eq!(
-            command_program_token("\"/some path/bin/raven\" cc"),
-            "/some path/bin/raven"
+            command_program_token("\"/some path/bin/claude-launcher\" claude"),
+            "/some path/bin/claude-launcher"
         );
     }
 
@@ -1186,17 +1185,15 @@ mod tests {
 
     #[test]
     fn bot_sidecar_env_resets_pyinstaller_parent_state() {
-        let dir = std::env::temp_dir().join(format!(
-            "onlineworker-sidecar-env-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("onlineworker-sidecar-env-{}", std::process::id()));
         let _ = fs::create_dir_all(&dir);
 
         let envs = bot_sidecar_env(&dir);
 
-        assert!(envs.iter().any(|(key, value)| {
-            key == "PYINSTALLER_RESET_ENVIRONMENT" && value == "1"
-        }));
+        assert!(envs
+            .iter()
+            .any(|(key, value)| { key == "PYINSTALLER_RESET_ENVIRONMENT" && value == "1" }));
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -1268,23 +1265,23 @@ mod tests {
 
     #[test]
     fn pids_from_bot_process_rows_matches_data_dir_with_spaces() {
-        let data_dir = Path::new("/Users/wxy/Library/Application Support/OnlineWorker");
-        let rows = b" 123 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/wxy/Library/Application Support/OnlineWorker\n 456 /usr/bin/python3 -c sleep onlineworker-bot --data-dir /Users/wxy/Library/Application Support/OnlineWorker\n";
+        let data_dir = Path::new("/Users/example/Library/Application Support/OnlineWorker");
+        let rows = b" 123 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker\n 456 /usr/bin/python3 -c sleep onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker\n";
 
         assert_eq!(pids_from_bot_process_rows(rows, data_dir), vec![123]);
     }
 
     #[test]
     fn managed_bot_cleanup_pids_exclude_cli_wrappers_for_same_data_dir() {
-        let data_dir = Path::new("/Users/wxy/Library/Application Support/OnlineWorker");
+        let data_dir = Path::new("/Users/example/Library/Application Support/OnlineWorker");
         let rows = b"\
- 101 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/wxy/Library/Application Support/OnlineWorker
- 102 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/wxy/Library/Application Support/OnlineWorker --ow-codex
- 103 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/wxy/Library/Application Support/OnlineWorker --ow-claude
- 104 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --ow-claude --data-dir /Users/wxy/Library/Application Support/OnlineWorker
- 105 /usr/bin/python3 /repo/main.py --data-dir /Users/wxy/Library/Application Support/OnlineWorker
- 106 /usr/bin/python3 /repo/main.py --data-dir /Users/wxy/Library/Application Support/OnlineWorker --ow-codex
- 107 /usr/bin/python3 /repo/main.py --ow-claude --data-dir /Users/wxy/Library/Application Support/OnlineWorker
+ 101 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker
+ 102 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-codex
+ 103 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-claude
+ 104 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --ow-claude --data-dir /Users/example/Library/Application Support/OnlineWorker
+ 105 /usr/bin/python3 /repo/main.py --data-dir /Users/example/Library/Application Support/OnlineWorker
+ 106 /usr/bin/python3 /repo/main.py --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-codex
+ 107 /usr/bin/python3 /repo/main.py --ow-claude --data-dir /Users/example/Library/Application Support/OnlineWorker
 ";
 
         assert_eq!(

@@ -10,8 +10,8 @@ use std::{env, path::Path};
 use tauri::Manager;
 use tokio::sync::Mutex;
 
-use commands::attachment_cache::{clear_attachment_cache, get_attachment_cache_stats};
 use commands::ai_config::test_ai_service_connection;
+use commands::attachment_cache::{clear_attachment_cache, get_attachment_cache_stats};
 use commands::claude::{list_claude_sessions, read_claude_session, send_claude_session_message};
 use commands::codex::{
     list_codex_threads, read_codex_thread, read_codex_thread_state, read_codex_thread_updates,
@@ -22,29 +22,30 @@ use commands::command_registry::{
     set_command_telegram_enabled,
 };
 use commands::config::{
-    check_first_run, create_default_config, get_ai_config, get_notification_channels, get_provider_metadata,
-    list_env_keys, read_config, read_env, read_env_field, read_env_raw,
-    read_provider_runtime_policies_from_disk, reveal_env_field, set_notification_channel_config,
-    set_notification_channel_enabled, set_ai_config, set_provider_cli_config, set_provider_flags,
-    set_provider_message_hook_enabled, write_config, write_env, write_env_field,
+    check_first_run, create_default_config, get_ai_config, get_notification_channels,
+    get_provider_metadata, list_env_keys, read_config, read_env, read_env_field, read_env_raw,
+    read_provider_runtime_policies_from_disk, reveal_env_field, set_ai_config,
+    set_notification_channel_config, set_notification_channel_enabled, set_provider_cli_config,
+    set_provider_flags, set_provider_message_hook_enabled, write_config, write_env,
+    write_env_field,
 };
 use commands::dashboard::get_dashboard_state;
 use commands::logs::{get_log_file_path, start_log_tail, stop_log_tail};
 use commands::provider_sessions::{
-    archive_provider_session, list_provider_sessions, read_provider_session, send_provider_session_message,
-    stage_session_composer_attachments, start_provider_session_stream,
-    stop_provider_session_stream,
+    archive_provider_session, list_provider_sessions, read_provider_session,
+    send_provider_session_message, stage_session_composer_attachments,
+    start_provider_session_stream, stop_provider_session_stream,
 };
 use commands::provider_usage::get_provider_usage_summary;
-use commands::task_board_state::{
-    get_task_board_session_activities, get_task_board_state,
-    pin_task_board_session, start_task_board_activity_stream, stop_task_board_activity_stream,
-    unpin_task_board_session,
-};
 use commands::service::{
     check_cli, check_http_health, service_restart, service_start, service_status, service_stop,
     shutdown_managed_processes_for_app_exit, snapshot_service_status, start_service_internal,
     BotState, ServiceStatus,
+};
+use commands::task_board_state::{
+    get_task_board_session_activities, get_task_board_state, pin_task_board_session,
+    reply_task_board_approval, start_task_board_activity_stream, stop_task_board_activity_stream,
+    unpin_task_board_session,
 };
 use commands::telegram::{test_bot_permissions, test_bot_token, test_group_access};
 use commands::terminal::{open_codex_tui_host_terminal, open_terminal};
@@ -300,6 +301,7 @@ pub fn run() {
             get_task_board_session_activities,
             get_task_board_state,
             pin_task_board_session,
+            reply_task_board_approval,
             start_task_board_activity_stream,
             stop_task_board_activity_stream,
             unpin_task_board_session,

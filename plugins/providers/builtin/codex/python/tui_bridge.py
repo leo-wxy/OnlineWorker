@@ -539,9 +539,12 @@ async def send_message_via_tui_bridge(
 ) -> int:
     history_before = read_thread_history(thread_id, limit=50)
     baseline_assistant_len = len([item for item in history_before if _is_final_answer(item)])
-    seed_codex_watch_baseline(state, ws, thread_id)
+    should_watch_session_file = is_codex_local_owner_mode(state, ws)
+    if should_watch_session_file:
+        seed_codex_watch_baseline(state, ws, thread_id)
     await send_message_via_tui_host(state, ws, thread_id, text)
-    watch_codex_thread(state, ws, thread_id)
+    if should_watch_session_file:
+        watch_codex_thread(state, ws, thread_id)
     return baseline_assistant_len
 
 
@@ -559,14 +562,15 @@ async def enqueue_codex_tui_message(
     async with lock:
         await codex_state.get_tui_thread_idle_event(state, thread_id).wait()
         baseline_len = await send_message_via_tui_bridge(state, ws, thread_id, text)
-        schedule_codex_final_reply(
-            state,
-            bot,
-            group_chat_id,
-            topic_id,
-            thread_id,
-            baseline_len=baseline_len,
-        )
+        if is_codex_local_owner_mode(state, ws):
+            schedule_codex_final_reply(
+                state,
+                bot,
+                group_chat_id,
+                topic_id,
+                thread_id,
+                baseline_len=baseline_len,
+            )
         return baseline_len
 
 

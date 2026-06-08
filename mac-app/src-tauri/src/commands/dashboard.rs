@@ -585,7 +585,7 @@ mod tests {
             std::process::id()
         ));
         fs::create_dir_all(&temp_dir).expect("create temp dir");
-        let cli = temp_dir.join("raven");
+        let cli = temp_dir.join("launcher");
         fs::write(&cli, "#!/bin/sh\nexit 0\n").expect("write cli");
         let mut permissions = fs::metadata(&cli).expect("cli metadata").permissions();
         permissions.set_mode(0o755);

@@ -848,6 +848,43 @@ def can_route_cli_approval_to_tui_host(state, thread_id: str) -> bool:
         return False
     return str(status.get("active_thread_id") or "").strip() == thread_id
 
+
+def _codex_thread_has_source_record(workspace_path: str, thread_id: str) -> bool:
+    if not workspace_path or not thread_id:
+        return False
+    try:
+        active_ids = storage_runtime.query_codex_active_thread_ids(workspace_path)
+    except Exception:
+        logger.debug("[codex] 查询源端 active thread 失败", exc_info=True)
+        active_ids = set()
+    if thread_id in active_ids:
+        return True
+    return storage_runtime.find_session_file(thread_id) is not None
+
+
+def _extract_started_thread_id(result: object) -> str:
+    thread_id = result.get("id") if isinstance(result, dict) else None
+    if not thread_id and isinstance(result, dict):
+        thread = result.get("thread", {})
+        if isinstance(thread, dict):
+            thread_id = thread.get("id")
+    if not thread_id:
+        raise RuntimeError(f"Codex start_thread 返回无效 thread id：{result}")
+    return str(thread_id)
+
+
+def _replace_thread_binding(ws_info, thread_info, new_thread_id: str) -> None:
+    old_thread_id = str(getattr(thread_info, "thread_id", "") or "")
+    if not new_thread_id or new_thread_id == old_thread_id:
+        return
+    if old_thread_id:
+        ws_info.threads.pop(old_thread_id, None)
+    thread_info.thread_id = new_thread_id
+    thread_info.source = "app"
+    thread_info.is_active = True
+    ws_info.threads[new_thread_id] = thread_info
+
+
 async def mirror_approval_policy(state, request: dict, ws_info, thread_info) -> dict:
     thread_id = str(request.get("thread_id") or "").strip()
     return build_mirror_approval_policy(
@@ -861,6 +898,18 @@ async def try_route_owner_bridge_send(state, ws_info, thread_info, *, text: str)
     if not text:
         return False
     thread_id = str(getattr(thread_info, "thread_id", "") or "").strip()
+    if str(getattr(thread_info, "source", "") or "").strip().lower() == "app":
+        logger.info(
+            "[codex-owner-bridge] app source thread 改走 app-server send thread=%s",
+            thread_id[:12],
+        )
+        return False
+    if not _codex_thread_has_source_record(str(getattr(ws_info, "path", "") or ""), thread_id):
+        logger.info(
+            "[codex-owner-bridge] thread 尚未在 Codex 源端物化，改走 app-server send thread=%s",
+            thread_id[:12],
+        )
+        return False
     from plugins.providers.builtin.codex.python.tui_bridge import (
         ensure_codex_tui_host_bound,
     )
@@ -903,9 +952,14 @@ async def prepare_send(
         await adapter.resume_thread(workspace_id, thread_info.thread_id)
     except Exception as e:
         if is_codex_unmaterialized_error(e):
+            original_thread_id = thread_info.thread_id
+            result = await adapter.start_thread(workspace_id)
+            new_thread_id = _extract_started_thread_id(result)
+            _replace_thread_binding(ws_info, thread_info, new_thread_id)
             logger.info(
-                "[provider-message] codex thread 尚未 materialize，直接发送首条消息 thread=%s",
-                thread_info.thread_id[:8],
+                "[provider-message] codex thread 尚未 materialize，已创建源端 thread old=%s new=%s",
+                original_thread_id[:8],
+                new_thread_id[:8],
             )
         else:
             raise

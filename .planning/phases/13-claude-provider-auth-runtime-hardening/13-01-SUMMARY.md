@@ -47,9 +47,8 @@
 - Logged-out Claude does not spawn the normal `claude -p` subprocess.
 - A user can explicitly configure fallback launch commands from the provider
   card when that provider declares `capabilities.launch_methods`. The current
-  machine verified `claude` as logged out and
-  `/Users/wxy/.nvm/versions/node/v20.20.1/bin/raven cc` as ready when supplied
-  as an explicit configured candidate.
+  machine verified `claude` as logged out and a user-supplied fallback command
+  as ready when supplied as an explicit configured candidate.
 - The surfaced message is non-secret:
 
 ```text
@@ -116,13 +115,13 @@ current machine using a temporary config file under `/tmp`:
 
 ```bash
 /Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --config /tmp/onlineworker-claude-launch-methods-smoke.yaml
-# configured_launch_methods=[native, raven]
+# configured_launch_methods=[native, fallback]
 # methods.native.ready=false
 # methods.native.reason=loggedOut
-# methods.raven.ready=true
-# methods.raven.selected=true
+# methods.fallback.ready=true
+# methods.fallback.selected=true
 # readiness.ready=true
-# readiness.launchMethod.id=raven
+# readiness.launchMethod.id=fallback
 ```
 
 Production build now passes in the packaged flow:
@@ -145,9 +144,9 @@ bash verify-packaged-fast.sh
 # installed onlineworker-app sha256: 30c8498c20c51315db7f58be0df6517566f08bdb61c2ef4781f5e3d03a7ff1cd
 # running: /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-app
 # running: /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir ~/Library/Application Support/OnlineWorker
-# bundled private plugins verified:
-#   /Applications/OnlineWorker.app/Contents/Resources/provider-plugins/codemaker/plugin.yaml
-#   /Applications/OnlineWorker.app/Contents/Resources/notification-plugins/popo/plugin.yaml
+# bundled distribution plugins verified:
+#   /Applications/OnlineWorker.app/Contents/Resources/provider-plugins/<provider>/plugin.yaml
+#   /Applications/OnlineWorker.app/Contents/Resources/notification-plugins/<notification>/plugin.yaml
 ```
 
 Installed runtime log check:
@@ -156,7 +155,7 @@ Installed runtime log check:
   `httpx.ConnectError`, then OnlineWorker auto-restarted after 5 seconds.
 - The second bootstrap succeeded with Telegram `getMe` returning `HTTP/1.1 200 OK`.
 - Startup then launched `provider_owner_bridge.sock`, Codex remote Unix proxy,
-  and `codemaker serve`; codemaker health check passed.
+  and the bundled provider runtime; provider health check passed.
 
 Installed Claude readiness/status smoke passed:
 
@@ -178,17 +177,17 @@ bash verify-packaged-fast.sh
 # installed version: 1.4.0
 # running: /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-app
 # running: /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir ~/Library/Application Support/OnlineWorker
-# bundled private plugins verified:
-#   /Applications/OnlineWorker.app/Contents/Resources/provider-plugins/codemaker/plugin.yaml
-#   /Applications/OnlineWorker.app/Contents/Resources/notification-plugins/popo/plugin.yaml
+# bundled distribution plugins verified:
+#   /Applications/OnlineWorker.app/Contents/Resources/provider-plugins/<provider>/plugin.yaml
+#   /Applications/OnlineWorker.app/Contents/Resources/notification-plugins/<notification>/plugin.yaml
 ```
 
 Installed readiness smoke after the final package confirmed the configured
-Raven launch method and owner bridge status:
+launch method and owner bridge status:
 
 ```bash
 /Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --owner-bridge-status --data-dir "$HOME/Library/Application Support/OnlineWorker" --timeout 12
-# configured_bin=/Users/wxy/.nvm/versions/node/v20.20.1/bin/raven cc
+# configured_bin=<user-configured launch command>
 # readiness.ready=true
 # readiness.authMethod=oauth_token
 # readiness.apiProvider=firstParty
@@ -205,7 +204,7 @@ User acceptance:
 - The final accepted configuration kept the user-supplied launch candidates:
 
 ```text
-/Users/wxy/.nvm/versions/node/v20.20.1/bin/raven cc
+<user-configured launch command>
 claude
 ```
 

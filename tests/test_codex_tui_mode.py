@@ -2599,7 +2599,23 @@ async def test_send_message_via_tui_bridge_baseline_counts_only_final_answers():
 async def test_send_message_via_tui_bridge_seeds_and_refreshes_watch_state():
     from plugins.providers.builtin.codex.python.tui_bridge import send_message_via_tui_bridge
 
-    state = AppState(storage=AppStorage())
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="stdio",
+                control_mode="tui",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    state = AppState(storage=AppStorage(), config=cfg)
     ws = WorkspaceInfo(
         name="onlineWorker",
         path="/Users/example/Projects/onlineWorker",
@@ -2641,7 +2657,23 @@ async def test_send_message_via_tui_bridge_uses_local_tui_host_client():
     )
     ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
     storage.workspaces["codex:onlineWorker"] = ws
-    state = AppState(storage=storage)
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="stdio",
+                control_mode="tui",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    state = AppState(storage=storage, config=cfg)
 
     with patch(
         "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
@@ -2660,6 +2692,58 @@ async def test_send_message_via_tui_bridge_uses_local_tui_host_client():
     host_mock.assert_awaited_once_with(state, ws, "tid-1", "你好")
     seed_mock.assert_called_once_with(state, ws, "tid-1")
     watch_mock.assert_called_once_with(state, ws, "tid-1")
+
+
+@pytest.mark.asyncio
+async def test_send_message_via_tui_bridge_in_app_mode_does_not_seed_or_watch_session_file():
+    from plugins.providers.builtin.codex.python.tui_bridge import send_message_via_tui_bridge
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=50,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
+    storage.workspaces["codex:onlineWorker"] = ws
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="ws",
+                app_server_port=4722,
+                control_mode="app",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    state = AppState(storage=storage, config=cfg)
+
+    with patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
+        return_value=[],
+    ), patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.seed_codex_watch_baseline",
+    ) as seed_mock, patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.watch_codex_thread",
+    ) as watch_mock, patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.send_message_via_tui_host",
+        new=AsyncMock(),
+    ) as host_mock:
+        baseline = await send_message_via_tui_bridge(state, ws, "tid-1", "你好")
+
+    assert baseline == 0
+    host_mock.assert_awaited_once_with(state, ws, "tid-1", "你好")
+    seed_mock.assert_not_called()
+    watch_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -2913,6 +2997,8 @@ async def test_try_route_owner_bridge_send_auto_starts_tui_host_for_app_ws_mode(
     monkeypatch.setattr(tui_bridge, "_read_live_host_status", lambda state_obj: None)
     proxy_mock = AsyncMock(return_value="ws://127.0.0.1:58123")
     monkeypatch.setattr(tui_bridge, "ensure_codex_remote_message_proxy", proxy_mock)
+    monkeypatch.setattr(runtime.storage_runtime, "query_codex_active_thread_ids", lambda _path: {"tid-1"})
+    monkeypatch.setattr(runtime.storage_runtime, "find_session_file", lambda _thread_id: None)
     monkeypatch.setattr(
         "plugins.providers.builtin.codex.python.tui_host_client.send_message_to_codex_tui_host",
         send_mock,
@@ -2987,6 +3073,8 @@ async def test_try_route_owner_bridge_send_auto_starts_tui_host_for_app_stdio_ow
     send_mock = AsyncMock(return_value={"ok": True})
     monkeypatch.setattr(tui_bridge, "CodexTuiHost", FakeCodexTuiHost)
     monkeypatch.setattr(tui_bridge, "_read_live_host_status", lambda state_obj: None)
+    monkeypatch.setattr(runtime.storage_runtime, "query_codex_active_thread_ids", lambda _path: {"tid-1"})
+    monkeypatch.setattr(runtime.storage_runtime, "find_session_file", lambda _thread_id: None)
     monkeypatch.setattr(
         "plugins.providers.builtin.codex.python.tui_host_client.send_message_to_codex_tui_host",
         send_mock,
@@ -2998,6 +3086,116 @@ async def test_try_route_owner_bridge_send_auto_starts_tui_host_for_app_stdio_ow
     assert started["thread_id"] == "tid-1"
     assert started["start_called"] is True
     send_mock.assert_awaited_once_with(state, ws, "tid-1", "你好", topic_id=100)
+
+
+@pytest.mark.asyncio
+async def test_try_route_owner_bridge_send_skips_tui_host_for_unmaterialized_thread(
+    tmp_path,
+    monkeypatch,
+):
+    from plugins.providers.builtin.codex.python import runtime
+    from plugins.providers.builtin.codex.python import tui_bridge
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path=str(tmp_path / "repo"),
+        tool="codex",
+        topic_id=50,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    thread = ThreadInfo(thread_id="tid-app", topic_id=None, archived=False, source="app")
+    ws.threads["tid-app"] = thread
+    storage.workspaces["codex:onlineWorker"] = ws
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        data_dir=str(tmp_path / "data"),
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="stdio",
+                live_transport="owner_bridge",
+                control_mode="app",
+            )
+        ],
+    )
+    state = AppState(storage=storage, config=cfg)
+
+    monkeypatch.setattr(runtime.storage_runtime, "query_codex_active_thread_ids", lambda _path: set())
+    monkeypatch.setattr(runtime.storage_runtime, "find_session_file", lambda _thread_id: None)
+    ensure_mock = AsyncMock(return_value=True)
+    send_mock = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(tui_bridge, "ensure_codex_tui_host_bound", ensure_mock)
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_host_client.send_message_to_codex_tui_host",
+        send_mock,
+    )
+
+    result = await runtime.try_route_owner_bridge_send(state, ws, thread, text="你好")
+
+    assert result is False
+    ensure_mock.assert_not_awaited()
+    send_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_try_route_owner_bridge_send_skips_tui_host_for_app_source_thread(
+    tmp_path,
+    monkeypatch,
+):
+    from plugins.providers.builtin.codex.python import runtime
+    from plugins.providers.builtin.codex.python import tui_bridge
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path=str(tmp_path / "repo"),
+        tool="codex",
+        topic_id=50,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    thread = ThreadInfo(thread_id="tid-app", topic_id=None, archived=False, source="app")
+    ws.threads["tid-app"] = thread
+    storage.workspaces["codex:onlineWorker"] = ws
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        data_dir=str(tmp_path / "data"),
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="stdio",
+                live_transport="owner_bridge",
+                control_mode="app",
+            )
+        ],
+    )
+    state = AppState(storage=storage, config=cfg)
+
+    monkeypatch.setattr(runtime.storage_runtime, "query_codex_active_thread_ids", lambda _path: {"tid-app"})
+    monkeypatch.setattr(runtime.storage_runtime, "find_session_file", lambda _thread_id: object())
+    ensure_mock = AsyncMock(return_value=True)
+    send_mock = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(tui_bridge, "ensure_codex_tui_host_bound", ensure_mock)
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_host_client.send_message_to_codex_tui_host",
+        send_mock,
+    )
+
+    result = await runtime.try_route_owner_bridge_send(state, ws, thread, text="你好")
+
+    assert result is False
+    ensure_mock.assert_not_awaited()
+    send_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -3016,7 +3214,7 @@ async def test_try_route_owner_bridge_send_raises_when_tui_host_binding_did_not_
         topic_id=50,
         daemon_workspace_id="codex:onlineWorker",
     )
-    thread = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False, source="app")
+    thread = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False, source="cli")
     ws.threads["tid-1"] = thread
     storage.workspaces["codex:onlineWorker"] = ws
     cfg = Config(
@@ -3040,6 +3238,8 @@ async def test_try_route_owner_bridge_send_raises_when_tui_host_binding_did_not_
 
     ensure_mock = AsyncMock(return_value=False)
     send_mock = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(runtime.storage_runtime, "query_codex_active_thread_ids", lambda _path: {"tid-1"})
+    monkeypatch.setattr(runtime.storage_runtime, "find_session_file", lambda _thread_id: None)
     monkeypatch.setattr(tui_bridge, "ensure_codex_tui_host_bound", ensure_mock)
     monkeypatch.setattr(runtime, "can_route_cli_approval_to_tui_host", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(
@@ -3145,7 +3345,23 @@ async def test_send_message_via_tui_bridge_propagates_local_host_error():
     )
     ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
     storage.workspaces["codex:onlineWorker"] = ws
-    state = AppState(storage=storage)
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="stdio",
+                control_mode="tui",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    state = AppState(storage=storage, config=cfg)
 
     with patch(
         "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
@@ -3211,7 +3427,23 @@ async def test_enqueue_codex_tui_message_serializes_same_thread_sends():
     )
     ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
     storage.workspaces["codex:onlineWorker"] = ws
-    state = AppState(storage=storage)
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="stdio",
+                control_mode="tui",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    state = AppState(storage=storage, config=cfg)
     bot = MagicMock()
 
     events: list[str] = []
@@ -3263,7 +3495,23 @@ async def test_enqueue_codex_tui_message_waits_until_thread_turn_completed():
     )
     ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
     storage.workspaces["codex:onlineWorker"] = ws
-    state = AppState(storage=storage)
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="stdio",
+                control_mode="tui",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    state = AppState(storage=storage, config=cfg)
     codex_state.mark_tui_turn_started(state, "tid-1")
 
     bot = MagicMock()
@@ -3296,6 +3544,56 @@ async def test_enqueue_codex_tui_message_waits_until_thread_turn_completed():
 
     send_mock.assert_awaited_once_with(state, ws, "tid-1", "later")
     schedule_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_enqueue_codex_tui_message_in_app_mode_skips_final_reply_polling():
+    from plugins.providers.builtin.codex.python.tui_bridge import enqueue_codex_tui_message
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=50,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
+    storage.workspaces["codex:onlineWorker"] = ws
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="ws",
+                app_server_port=4722,
+                control_mode="app",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    state = AppState(storage=storage, config=cfg)
+    bot = MagicMock()
+
+    with patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.send_message_via_tui_bridge",
+        new=AsyncMock(return_value=0),
+    ) as send_mock, patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.get_persistent_codex_adapter",
+        return_value=MagicMock(connected=True),
+    ), patch(
+        "plugins.providers.builtin.codex.python.tui_bridge.schedule_codex_final_reply",
+    ) as schedule_mock:
+        baseline = await enqueue_codex_tui_message(state, ws, bot, GROUP_CHAT_ID, 100, "tid-1", "hello")
+
+    assert baseline == 0
+    send_mock.assert_awaited_once_with(state, ws, "tid-1", "hello")
+    schedule_mock.assert_not_called()
 
 
 @pytest.mark.asyncio

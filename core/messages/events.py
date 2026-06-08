@@ -88,6 +88,9 @@ class SessionActivity:
     title: str = ""
     status: str = "idle"
     attention_reason: str = ""
+    attention_kind: str = ""
+    request_id: str = ""
+    approval_source: str = ""
     last_user_message: str = ""
     last_assistant_message: str = ""
     last_final_message: str = ""
@@ -103,6 +106,9 @@ class SessionActivity:
             "title": self.title,
             "status": self.status,
             "attentionReason": self.attention_reason,
+            "attentionKind": self.attention_kind,
+            "requestId": self.request_id,
+            "approvalSource": self.approval_source,
             "lastUserMessage": self.last_user_message,
             "lastAssistantMessage": self.last_assistant_message,
             "lastFinalMessage": self.last_final_message,

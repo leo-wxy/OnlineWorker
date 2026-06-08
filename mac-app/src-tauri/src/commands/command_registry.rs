@@ -441,8 +441,6 @@ fn skill_roots() -> Vec<(PathBuf, CommandBackend)> {
             CommandBackend::provider("claude"),
         ),
         (home.join(".agents/skills"), CommandBackend::Shared),
-        (home.join(".git-ai/skills"), CommandBackend::Shared),
-        (home.join(".raven/skills"), CommandBackend::Shared),
     ]
 }
 

@@ -43,7 +43,7 @@ noise:
 
 title:
   rules:
-    - pattern: "通知|POPO|popo|任务摘要|短标题|通知文案"
+    - pattern: "通知|任务摘要|短标题|通知文案"
       title: "优化任务通知"
     - pattern: "token_usage|ccusage|usage|用量"
       title: "修复用量统计"

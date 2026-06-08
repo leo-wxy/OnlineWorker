@@ -20,6 +20,9 @@ export interface TaskBoardSessionActivity {
   title: string;
   status: string;
   attentionReason: string;
+  attentionKind: string;
+  requestId: string;
+  approvalSource: string;
   lastUserMessage: string;
   lastAssistantMessage: string;
   lastFinalMessage: string;
@@ -34,9 +37,14 @@ export interface TaskBoardTask {
   providerLabel: string;
   title: string;
   workspace: string;
+  workspaceId: string;
+  workspacePath: string;
   preview: string | null;
   archived: boolean;
   needsAttention: boolean;
+  attentionKind: string;
+  requestId: string;
+  approvalSource: string;
   running: boolean;
   pinned: boolean;
   statusReason: string;

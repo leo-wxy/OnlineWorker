@@ -13,6 +13,12 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from cleanup_smoke_sessions import cleanup_smoke_session
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MAIN_PY = REPO_ROOT / "main.py"
@@ -55,6 +61,17 @@ def _resolve_bridge_python() -> str:
     if override:
         return override
     return str(Path(sys.executable))
+
+
+def _cleanup_claude_smoke_session(session_id: str, preview: str) -> dict[str, Any]:
+    return cleanup_smoke_session(
+        provider_id="claude",
+        session_id=session_id,
+        workspace_dir=str(REPO_ROOT),
+        preview=preview,
+        data_dir=Path.home() / "Library/Application Support/OnlineWorker",
+        prefer_real_archive=False,
+    )
 
 
 def _insert_cli_options_before_prompt(argv: list[str], extra: list[str]) -> list[str]:
@@ -185,6 +202,9 @@ async def run_permission_write_downloads(args: argparse.Namespace) -> int:
 
     approvals: list[dict[str, Any]] = []
     run_results: list[dict[str, Any]] = []
+    cleanup_result: dict[str, Any] | None = None
+    cleanup_error: Exception | None = None
+    run_error: Exception | None = None
 
     adapter = ClaudeAdapter(claude_bin=resolve_claude_bin(args.claude_bin))
 
@@ -222,6 +242,7 @@ async def run_permission_write_downloads(args: argparse.Namespace) -> int:
     adapter.register_workspace_cwd(workspace_id, str(REPO_ROOT))
     adapter.on_event(on_event)
 
+    result: dict[str, Any] | None = None
     try:
         for step in plan["runs"]:
             run_result = await _run_single_claude_prompt(
@@ -271,14 +292,33 @@ async def run_permission_write_downloads(args: argparse.Namespace) -> int:
             "expected_approvals": int(plan["expected_approvals"]),
             "allow_always": bool(args.allow_always),
         }
-        _print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0
+    except Exception as exc:
+        run_error = exc
     finally:
         await adapter.disconnect()
         shutil.rmtree(data_dir, ignore_errors=True)
         if not args.keep_file:
             for step in plan["runs"]:
                 step["target"].unlink(missing_ok=True)
+        try:
+            cleanup_result = _cleanup_claude_smoke_session(
+                session_id,
+                "onlineworker claude hook smoke approval",
+            )
+        except Exception as exc:
+            cleanup_error = exc
+
+    if run_error is not None and cleanup_error is not None:
+        raise RuntimeError(f"{run_error}; smoke cleanup failed: {cleanup_error}") from run_error
+    if run_error is not None:
+        raise run_error
+    if cleanup_error is not None:
+        raise RuntimeError(f"smoke cleanup failed: {cleanup_error}") from cleanup_error
+
+    assert result is not None
+    result["cleanup"] = cleanup_result
+    _print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
 
 
 async def run_multiselect_bridge(args: argparse.Namespace) -> int:
@@ -305,6 +345,9 @@ async def run_multiselect_bridge(args: argparse.Namespace) -> int:
 
     adapter = ClaudeAdapter(claude_bin=resolve_claude_bin(args.claude_bin))
     asked_events: list[dict[str, Any]] = []
+    cleanup_result: dict[str, Any] | None = None
+    cleanup_error: Exception | None = None
+    run_error: Exception | None = None
 
     async def on_event(method: str, params: dict[str, Any]) -> None:
         if method != "app-server-event":
@@ -327,42 +370,62 @@ async def run_multiselect_bridge(args: argparse.Namespace) -> int:
     adapter.register_workspace_cwd(workspace_id, str(REPO_ROOT))
     adapter.on_event(on_event)
 
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "session_id": session_id,
-        "cwd": str(REPO_ROOT),
-        "tool_name": "AskUserQuestion",
-        "tool_input": {
-            "questions": questions,
-        },
-    }
-    response = await _bridge_roundtrip(data_dir, payload)
-
-    await adapter.disconnect()
-    shutil.rmtree(data_dir, ignore_errors=True)
-
-    if len(asked_events) != 1:
-        raise RuntimeError(f"question/asked 事件数量异常：{len(asked_events)}")
-
-    expected = {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
-            "updatedInput": {
+    response: dict[str, Any] | None = None
+    try:
+        payload = {
+            "hook_event_name": "PreToolUse",
+            "session_id": session_id,
+            "cwd": str(REPO_ROOT),
+            "tool_name": "AskUserQuestion",
+            "tool_input": {
                 "questions": questions,
-                "answers": {
-                    question_text: ",".join(answers),
-                },
             },
         }
-    }
-    if response != expected:
-        raise RuntimeError(
-            "多选 bridge 返回不符合预期："
-            f"\nexpected={json.dumps(expected, ensure_ascii=False)}"
-            f"\nactual={json.dumps(response, ensure_ascii=False)}"
-        )
+        response = await _bridge_roundtrip(data_dir, payload)
 
+        if len(asked_events) != 1:
+            raise RuntimeError(f"question/asked 事件数量异常：{len(asked_events)}")
+
+        expected = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "updatedInput": {
+                    "questions": questions,
+                    "answers": {
+                        question_text: ",".join(answers),
+                    },
+                },
+            }
+        }
+        if response != expected:
+            raise RuntimeError(
+                "多选 bridge 返回不符合预期："
+                f"\nexpected={json.dumps(expected, ensure_ascii=False)}"
+                f"\nactual={json.dumps(response, ensure_ascii=False)}"
+            )
+    except Exception as exc:
+        run_error = exc
+    finally:
+        await adapter.disconnect()
+        shutil.rmtree(data_dir, ignore_errors=True)
+        try:
+            cleanup_result = _cleanup_claude_smoke_session(
+                session_id,
+                "onlineworker claude hook smoke ask",
+            )
+        except Exception as exc:
+            cleanup_error = exc
+
+    if run_error is not None and cleanup_error is not None:
+        raise RuntimeError(f"{run_error}; smoke cleanup failed: {cleanup_error}") from run_error
+    if run_error is not None:
+        raise run_error
+    if cleanup_error is not None:
+        raise RuntimeError(f"smoke cleanup failed: {cleanup_error}") from cleanup_error
+
+    assert response is not None
+    response["cleanup"] = cleanup_result
     _print(json.dumps(response, ensure_ascii=False, indent=2))
     return 0
 

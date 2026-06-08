@@ -10,8 +10,8 @@ use super::config_provider::{
     set_notification_channel_enabled_in_document, set_provider_cli_config_in_document,
     set_provider_flags_in_document, set_provider_message_hook_enabled_in_document,
     visible_provider_ids_from_raw, AiConfigMetadata, AiScenarioConfigEntry, AiServiceConfigEntry,
-    NotificationChannelMetadata, ProviderExternalCliConfig, ProviderLaunchMethodConfig, ProviderMetadata,
-    ProviderRuntimePolicy,
+    NotificationChannelMetadata, ProviderExternalCliConfig, ProviderLaunchMethodConfig,
+    ProviderMetadata, ProviderRuntimePolicy,
 };
 
 pub(crate) const DEFAULT_APP_NAME: &str = "OnlineWorker";

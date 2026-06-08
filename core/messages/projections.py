@@ -52,6 +52,27 @@ def _activity_title(activity: SessionActivity) -> str:
     return ""
 
 
+def _clear_attention(activity: SessionActivity) -> None:
+    activity.attention_reason = ""
+    activity.attention_kind = ""
+    activity.request_id = ""
+    activity.approval_source = ""
+
+
+def _preserve_attention_preview(activity: SessionActivity) -> None:
+    if _compact(activity.last_assistant_message):
+        return
+    if _compact(activity.last_user_message):
+        return
+    summary = _compact(activity.attention_reason)
+    if summary:
+        activity.last_assistant_message = summary[:500]
+
+
+def _is_terminal(activity: SessionActivity) -> bool:
+    return activity.status in {COMPLETED_STATUS, FAILED_STATUS}
+
+
 class SessionActivityProjection:
     def __init__(self) -> None:
         self._activities: dict[str, SessionActivity] = {}
@@ -61,6 +82,10 @@ class SessionActivityProjection:
             return
 
         key = f"{event.provider_id}:{event.session_id}"
+        if event.kind == "session.archived":
+            self._activities.pop(key, None)
+            return
+
         activity = self._activities.get(key)
         if activity is None:
             activity = SessionActivity(
@@ -75,6 +100,10 @@ class SessionActivityProjection:
             activity.workspace_path = event.workspace_path
 
         payload = event.payload or {}
+        request_id = _compact(payload.get("requestId") or payload.get("request_id"))
+        approval_source = _compact(
+            payload.get("approvalSource") or payload.get("approval_source") or payload.get("rawMethod")
+        )
         title = _compact(payload.get("title") or payload.get("taskSummary") or payload.get("preview"))
         if title and title != event.session_id:
             activity.title = title[:160]
@@ -92,37 +121,56 @@ class SessionActivityProjection:
                 activity.last_user_message = summary
                 if _is_placeholder_title(activity.title, event.session_id):
                     activity.title = summary[:160]
-            activity.status = RUNNING_STATUS
-            activity.attention_reason = ""
+            if not _is_terminal(activity):
+                activity.status = RUNNING_STATUS
+                _clear_attention(activity)
         elif event.kind in {"turn.started", "message.assistant.delta"}:
             if event.kind == "message.assistant.delta" and summary:
                 activity.last_assistant_message = summary
             activity.status = RUNNING_STATUS
+            _clear_attention(activity)
         elif event.kind == "message.assistant.final":
             if summary:
                 activity.last_assistant_message = summary
                 activity.last_final_message = summary
             activity.status = COMPLETED_STATUS
-            activity.attention_reason = ""
+            _clear_attention(activity)
         elif event.kind == "turn.completed":
             if activity.status != NEEDS_ATTENTION_STATUS:
                 activity.status = COMPLETED_STATUS
-                activity.attention_reason = ""
+                _clear_attention(activity)
         elif event.kind == "turn.failed":
             activity.status = FAILED_STATUS
             activity.attention_reason = summary or "任务失败"
+            activity.attention_kind = "failure"
+            activity.request_id = ""
+            activity.approval_source = ""
         elif event.kind == "approval.requested":
+            prompt = _compact(payload.get("prompt") or payload.get("user_prompt") or payload.get("userPrompt"))
+            if prompt:
+                activity.last_user_message = prompt[:500]
+                if _is_placeholder_title(activity.title, event.session_id):
+                    activity.title = prompt[:160]
             activity.status = NEEDS_ATTENTION_STATUS
             activity.attention_reason = summary or "需要处理授权请求"
+            activity.attention_kind = "approval"
+            activity.request_id = request_id
+            activity.approval_source = approval_source
         elif event.kind == "approval.answered":
-            activity.status = RUNNING_STATUS
-            activity.attention_reason = ""
+            _preserve_attention_preview(activity)
+            if not _is_terminal(activity):
+                activity.status = RUNNING_STATUS
+                _clear_attention(activity)
         elif event.kind == "question.requested":
             activity.status = NEEDS_ATTENTION_STATUS
             activity.attention_reason = summary or "需要回答问题"
+            activity.attention_kind = "question"
+            activity.request_id = ""
+            activity.approval_source = ""
         elif event.kind == "question.answered":
-            activity.status = RUNNING_STATUS
-            activity.attention_reason = ""
+            if not _is_terminal(activity):
+                activity.status = RUNNING_STATUS
+                _clear_attention(activity)
 
         activity.last_event_kind = event.kind
         activity.updated_at = max(activity.updated_at, event.created_at)
