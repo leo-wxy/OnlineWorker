@@ -34,6 +34,7 @@
     "targets": "dmg",
     "resources": [
       "provider-plugins",
+      "hook-relays",
       "icons/tray-template.png",
       "icons/tray-template@2x.png",
       "notification-plugins"

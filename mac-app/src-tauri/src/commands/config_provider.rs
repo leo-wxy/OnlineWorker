@@ -326,6 +326,21 @@ pub(crate) struct ProviderCapabilitiesEntry {
     pub(crate) control_modes: Vec<String>,
     #[serde(default, alias = "message_rewrite")]
     pub(crate) message_rewrite: ProviderMessageRewriteCapabilities,
+    #[serde(default, alias = "session_access")]
+    pub(crate) session_access: ProviderSessionAccessCapabilities,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderSessionAccessCapabilities {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) list: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) read: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) send: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) stream: String,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
@@ -1101,12 +1116,35 @@ fn merge_provider_capabilities(
                 capabilities.message_rewrite,
                 default_capabilities.message_rewrite,
             );
+            capabilities.session_access = merge_provider_session_access(
+                capabilities.session_access,
+                default_capabilities.session_access,
+            );
             Some(capabilities)
         }
         (Some(capabilities), None) => Some(capabilities),
         (None, Some(default_capabilities)) => Some(default_capabilities),
         (None, None) => None,
     }
+}
+
+fn merge_provider_session_access(
+    mut access: ProviderSessionAccessCapabilities,
+    default_access: ProviderSessionAccessCapabilities,
+) -> ProviderSessionAccessCapabilities {
+    if access.list.trim().is_empty() {
+        access.list = default_access.list;
+    }
+    if access.read.trim().is_empty() {
+        access.read = default_access.read;
+    }
+    if access.send.trim().is_empty() {
+        access.send = default_access.send;
+    }
+    if access.stream.trim().is_empty() {
+        access.stream = default_access.stream;
+    }
+    access
 }
 
 fn merge_provider_message_rewrite(
@@ -1631,7 +1669,7 @@ mod tests {
         set_provider_flags_in_document, set_provider_message_hook_enabled_in_document,
         set_test_process_env_override, AiScenarioConfigEntry, AiServiceConfigEntry,
         ProviderCapabilitiesEntry, ProviderExternalCliConfig, ProviderLaunchMethodConfig,
-        NOTIFICATION_OVERLAY_ENV,
+        ProviderSessionAccessCapabilities, NOTIFICATION_OVERLAY_ENV,
     };
 
     #[test]
@@ -2576,6 +2614,12 @@ providers:
                     external_cli: Some("remote_proxy".to_string()),
                     wrapper: Some("ow-codex".to_string()),
                 },
+                session_access: ProviderSessionAccessCapabilities {
+                    list: "codex_threads".to_string(),
+                    read: "owner_bridge".to_string(),
+                    send: "codex_app_server".to_string(),
+                    stream: "codex_thread_jsonl".to_string(),
+                },
             }
         );
         assert_eq!(
@@ -2597,6 +2641,12 @@ providers:
                     telegram: true,
                     external_cli: Some("http_proxy".to_string()),
                     wrapper: Some("ow-claude".to_string()),
+                },
+                session_access: ProviderSessionAccessCapabilities {
+                    list: "claude_projects".to_string(),
+                    read: "claude_project".to_string(),
+                    send: "owner_bridge".to_string(),
+                    stream: "none".to_string(),
                 },
             }
         );
@@ -2648,6 +2698,8 @@ providers:
             codex.capabilities.message_rewrite.wrapper.as_deref(),
             Some("ow-codex")
         );
+        assert_eq!(codex.capabilities.session_access.read, "owner_bridge");
+        assert_eq!(codex.capabilities.session_access.send, "codex_app_server");
     }
 
     #[test]

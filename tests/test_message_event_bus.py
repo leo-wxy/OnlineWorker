@@ -402,6 +402,99 @@ def test_approval_roundtrip_preserves_prompt_context_when_hook_supplies_it():
     assert activity["title"] == "engine实现情况如何？"
 
 
+def test_tool_item_projection_refreshes_running_activity_and_clears_attention():
+    state = SimpleNamespace(message_bus=MessageEventBus())
+    state.message_bus.publish(
+        create_message_event(
+            "approval.requested",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            session_id="thread-a",
+            payload={
+                "message": "需要处理授权请求：echo ok",
+                "requestId": "req-42",
+                "mirroredOnly": True,
+            },
+            created_at=10,
+        )
+    )
+    state.message_bus.publish(
+        create_message_event(
+            "shell.command.completed",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            session_id="thread-a",
+            payload={
+                "text": "$ echo ok",
+                "mirroredOnly": True,
+            },
+            created_at=20,
+        )
+    )
+
+    activity = state.message_bus.session_activity("claude", "thread-a")
+    assert activity["status"] == "running"
+    assert activity["attentionKind"] == ""
+    assert activity["requestId"] == ""
+    assert activity["mirroredOnly"] is False
+    assert activity["lastAssistantMessage"] == "$ echo ok"
+
+
+def test_new_user_input_clears_previous_live_summary_until_new_progress_arrives():
+    state = SimpleNamespace(message_bus=MessageEventBus())
+    state.message_bus.publish(
+        create_message_event(
+            "message.user.accepted",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            session_id="thread-a",
+            payload={"text": "第一轮问题"},
+            created_at=10,
+        )
+    )
+    state.message_bus.publish(
+        create_message_event(
+            "message.assistant.delta",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            session_id="thread-a",
+            payload={"delta": "第一轮回答"},
+            created_at=20,
+        )
+    )
+    state.message_bus.publish(
+        create_message_event(
+            "message.user.accepted",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            session_id="thread-a",
+            payload={"text": "第二轮问题"},
+            created_at=30,
+        )
+    )
+
+    activity = state.message_bus.session_activity("claude", "thread-a")
+    assert activity["status"] == "running"
+    assert activity["lastUserMessage"] == "第二轮问题"
+    assert activity["lastAssistantMessage"] == ""
+    assert activity["lastFinalMessage"] == ""
+
+    state.message_bus.publish(
+        create_message_event(
+            "item.started",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            session_id="thread-a",
+            payload={"text": "$ rg module_source"},
+            created_at=40,
+        )
+    )
+
+    activity = state.message_bus.session_activity("claude", "thread-a")
+    assert activity["lastUserMessage"] == "第二轮问题"
+    assert activity["lastAssistantMessage"] == "$ rg module_source"
+
+
 def test_session_event_bridge_maps_final_reply_and_attention_requests():
     final_event = message_event_from_session_event(
         SessionEvent(
@@ -484,6 +577,35 @@ def test_approval_projection_exposes_request_identity_for_task_board_actions():
     assert activity["attentionKind"] == "approval"
     assert activity["requestId"] == "req-42"
     assert activity["approvalSource"] == "item/commandExecution/requestApproval"
+    assert activity["mirroredOnly"] is False
+
+
+def test_mirrored_approval_projection_is_marked_for_attention_without_app_control():
+    state = SimpleNamespace(message_bus=MessageEventBus())
+    state.message_bus.publish(
+        create_message_event(
+            "approval.requested",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            session_id="thread-a",
+            payload={
+                "message": "需要处理授权请求：git remote get-url origin",
+                "requestId": "req-42",
+                "approvalSource": "item/commandExecution/requestApproval",
+                "mirroredOnly": True,
+                "prompt": "engine实现情况如何？",
+            },
+            created_at=10,
+        )
+    )
+
+    activity = state.message_bus.session_activity("claude", "thread-a")
+    assert activity["status"] == "needs_attention"
+    assert activity["attentionKind"] == "approval"
+    assert activity["requestId"] == "req-42"
+    assert activity["mirroredOnly"] is True
+    assert activity["title"] == "engine实现情况如何？"
+    assert activity["attentionReason"] == "需要处理授权请求：git remote get-url origin"
 
 
 def test_session_archived_removes_activity_projection():

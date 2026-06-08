@@ -18,7 +18,8 @@ test("app shell wires a collapsible narrow sidebar state", () => {
   assert.match(app, /ow-brand-card mb-5 flex min-h-16 items-center/);
   assert.match(app, /ow-sidebar-toggle flex w-full items-center/);
   assert.match(app, /!sidebarCollapsed && <span>\{t\.app\.sidebar\.collapse\}<\/span>/);
-  assert.match(app, /!sidebarCollapsed && t\.app\.tabs\[key\]/);
+  assert.match(app, /!sidebarCollapsed && \(/);
+  assert.match(app, /<span className="truncate">\{t\.app\.tabs\[key\]\}<\/span>/);
 });
 
 test("app shell removes the visual drag strip while keeping drag regions", () => {
@@ -53,7 +54,11 @@ test("app shell exposes first-class task, usage, ai, and notification tabs in na
   assert.match(app, /activeTab === "usage"/);
   assert.match(app, /activeTab === "ai"/);
   assert.match(app, /activeTab === "notifications"/);
-  assert.match(app, /<TaskBoard /);
+  assert.match(app, /<TaskBoard[\s\S]*sessionActivities=\{taskBoardActivities\}/);
+  assert.match(app, /sessionActivities=\{taskBoardActivities\}/);
+  assert.match(app, /taskAttentionCount > 0/);
+  assert.match(app, /status === "needs_attention"/);
+  assert.equal(app.includes("attentionKind.length > 0"), false);
   assert.match(app, /<UsageBrowser \/>/);
   assert.match(app, /<AiSettingsPanel \/>/);
   assert.match(app, /<NotificationSettingsPanel \/>/);
@@ -286,25 +291,28 @@ test("dashboard renders provider icons from provider metadata", () => {
 });
 
 test("task board listens to activity stream without fallback polling", () => {
+  const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
   const taskBoard = readFileSync(join(root, "src", "pages", "TaskBoard.tsx"), "utf8");
   const lib = readFileSync(join(root, "src-tauri", "src", "lib.rs"), "utf8");
   const taskBoardState = readFileSync(join(root, "src-tauri", "src", "commands", "task_board_state.rs"), "utf8");
 
   assert.match(taskBoard, /onClick=\{\(\) => void refresh\(\)\}/);
-  assert.match(taskBoard, /start_task_board_activity_stream/);
+  assert.match(app, /start_task_board_activity_stream/);
   assert.match(taskBoard, /function upsertSessionActivity/);
   assert.match(taskBoard, /function removeSessionActivity/);
+  assert.match(taskBoard, /sharedSessionActivities !== undefined/);
+  assert.match(taskBoard, /onSessionActivitiesChange\?/);
   assert.match(taskBoard, /const activity = event\.activity;/);
-  assert.match(taskBoard, /setSessionActivities\(\(current\) => upsertSessionActivity\(current, activity\)\)/);
+  assert.match(taskBoard, /setLocalSessionActivities\(\(current\) => upsertSessionActivity\(current, activity\)\)/);
   assert.match(taskBoard, /event\.kind === "remove"/);
-  assert.match(taskBoard, /setSessionActivities\(\(current\) => removeSessionActivity\(current, event\.providerId!, event\.sessionId!\)\)/);
+  assert.match(taskBoard, /setLocalSessionActivities\(\(current\) => removeSessionActivity\(current, event\.providerId!, event\.sessionId!\)\)/);
   assert.match(taskBoard, /refresh\(\{ includeActivities: true \}\)/);
   assert.match(taskBoard, /setLoading\(false\);/);
   assert.equal(taskBoard.includes("window.setInterval(() => {\n      void refresh();"), false);
   assert.match(taskBoard, /setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 30_000\)/);
-  assert.match(taskBoard, /let activeStreamId: number \| null = null/);
-  assert.match(taskBoard, /invoke<number>\("start_task_board_activity_stream", \{ channel \}\)/);
-  assert.match(taskBoard, /invoke\("stop_task_board_activity_stream", \{ streamId: activeStreamId \}\)/);
+  assert.match(app, /let activeStreamId: number \| null = null/);
+  assert.match(app, /invoke<number>\("start_task_board_activity_stream", \{ channel \}\)/);
+  assert.match(app, /invoke\("stop_task_board_activity_stream", \{ streamId: activeStreamId \}\)/);
   assert.match(taskBoardState, /session_activity_stream/);
   assert.match(taskBoardState, /fn begin_task_board_activity_stream\(\) -> u64/);
   assert.match(taskBoardState, /fn stop_task_board_activity_stream_id\(stream_id: u64\)/);
@@ -312,6 +320,17 @@ test("task board listens to activity stream without fallback polling", () => {
   assert.match(taskBoardState, /std::thread::sleep\(reconnect_delay\)/);
   assert.match(lib, /start_task_board_activity_stream/);
   assert.match(lib, /stop_task_board_activity_stream/);
+});
+
+test("task board does not render approval buttons for external mirrored CLI approvals", () => {
+  const taskBoard = readFileSync(join(root, "src", "pages", "TaskBoard.tsx"), "utf8");
+  const taskModelTypes = readFileSync(join(root, "src", "utils", "taskBoard.d.ts"), "utf8");
+  const taskModel = readFileSync(join(root, "src", "utils", "taskBoard.js"), "utf8");
+
+  assert.match(taskBoard, /!task\.mirroredOnly/);
+  assert.match(taskModelTypes, /mirroredOnly\?: boolean;/);
+  assert.match(taskModelTypes, /mirroredOnly: boolean;/);
+  assert.match(taskModel, /mirroredOnly: activity\.mirroredOnly === true/);
 });
 
 test("task board clamps activity preview without covering card footer", () => {

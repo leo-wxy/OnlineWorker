@@ -35,6 +35,8 @@ export interface TaskBoardOpenSessionTarget {
 
 interface Props {
   onOpenSession: (target: TaskBoardOpenSessionTarget) => void;
+  sessionActivities?: TaskBoardSessionActivity[];
+  onSessionActivitiesChange?: (activities: TaskBoardSessionActivity[]) => void;
 }
 
 const DEFAULT_TASK_BOARD_STATE: TaskBoardState = {
@@ -394,7 +396,7 @@ function statusLabel(task: TaskBoardTask, texts: ReturnType<typeof useI18n>["t"]
 }
 
 function isApprovalTask(task: TaskBoardTask) {
-  return task.needsAttention && task.attentionKind === "approval" && Boolean(task.requestId);
+  return task.needsAttention && !task.mirroredOnly && task.attentionKind === "approval" && Boolean(task.requestId);
 }
 
 function TaskCard({
@@ -628,12 +630,16 @@ function BoardLane({
   );
 }
 
-export function TaskBoard({ onOpenSession }: Props) {
+export function TaskBoard({
+  onOpenSession,
+  sessionActivities: sharedSessionActivities,
+  onSessionActivitiesChange,
+}: Props) {
   const { t } = useI18n();
   const [providers, setProviders] = useState<ProviderMetadata[]>([]);
   const [dashboardState, setDashboardState] = useState<DashboardState | null>(null);
   const [taskBoardState, setTaskBoardState] = useState<TaskBoardState>(DEFAULT_TASK_BOARD_STATE);
-  const [sessionActivities, setSessionActivities] = useState<TaskBoardSessionActivity[]>([]);
+  const [localSessionActivities, setLocalSessionActivities] = useState<TaskBoardSessionActivity[]>([]);
   const [sessions, setSessions] = useState<UnifiedSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -675,7 +681,11 @@ export function TaskBoard({ onOpenSession }: Props) {
       setDashboardState(nextDashboard);
       setTaskBoardState(nextTaskBoardState);
       if (nextSessionActivities !== null) {
-        setSessionActivities(nextSessionActivities);
+        if (onSessionActivitiesChange) {
+          onSessionActivitiesChange(nextSessionActivities);
+        } else {
+          setLocalSessionActivities(nextSessionActivities);
+        }
       }
       setNowMs(Date.now());
       setError(null);
@@ -716,32 +726,35 @@ export function TaskBoard({ onOpenSession }: Props) {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [t.sessions.workspaceFallback]);
+  }, [onSessionActivitiesChange, t.sessions.workspaceFallback]);
 
   useEffect(() => {
     void refresh({ includeActivities: true });
   }, [refresh]);
 
   useEffect(() => {
+    if (sharedSessionActivities !== undefined) {
+      return;
+    }
     const channel = new Channel<TaskBoardActivityStreamEvent>();
     let activeStreamId: number | null = null;
     let disposed = false;
     channel.onmessage = (event) => {
       if (event.kind === "snapshot") {
-        setSessionActivities(event.activities ?? []);
+        setLocalSessionActivities(event.activities ?? []);
         setNowMs(Date.now());
         setLoading(false);
         return;
       }
       if (event.kind === "activity" && event.activity) {
         const activity = event.activity;
-        setSessionActivities((current) => upsertSessionActivity(current, activity));
+        setLocalSessionActivities((current) => upsertSessionActivity(current, activity));
         setNowMs(Date.now());
         setLoading(false);
         return;
       }
       if (event.kind === "remove" && event.providerId && event.sessionId) {
-        setSessionActivities((current) => removeSessionActivity(current, event.providerId!, event.sessionId!));
+        setLocalSessionActivities((current) => removeSessionActivity(current, event.providerId!, event.sessionId!));
         setNowMs(Date.now());
         setLoading(false);
         return;
@@ -774,7 +787,7 @@ export function TaskBoard({ onOpenSession }: Props) {
         console.warn("Failed to stop task board activity stream", streamError);
       });
     };
-  }, []);
+  }, [sharedSessionActivities]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
@@ -815,13 +828,13 @@ export function TaskBoard({ onOpenSession }: Props) {
   const board = useMemo(
     () => buildTaskBoardModel({
       sessions,
-      sessionActivities,
+      sessionActivities: sharedSessionActivities ?? localSessionActivities,
       dashboardState,
       taskBoardState,
       providerLabels,
       nowEpochMs: nowMs,
     }),
-    [dashboardState, nowMs, providerLabels, sessionActivities, sessions, taskBoardState],
+    [dashboardState, nowMs, providerLabels, sharedSessionActivities, localSessionActivities, sessions, taskBoardState],
   );
   const selectableApprovalTasks = useMemo(
     () => board.needsAttention.filter(isApprovalTask),

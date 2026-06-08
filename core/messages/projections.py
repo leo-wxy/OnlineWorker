@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from core.messages.events import MessageEvent, SessionActivity
 
 
@@ -8,6 +10,11 @@ RUNNING_STATUS = "running"
 COMPLETED_STATUS = "completed"
 FAILED_STATUS = "failed"
 IDLE_STATUS = "idle"
+UUID_TITLE_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+TRUNCATED_UUID_TITLE_RE = re.compile(r"^[0-9a-f]{8}(?:-[0-9a-f]{1,4}){1,4}$", re.IGNORECASE)
 
 
 def _compact(value) -> str:
@@ -25,6 +32,7 @@ def _summary_from_payload(event: MessageEvent) -> str:
         "delta",
         "summary",
         "preview",
+        "command",
         "reason",
         "error",
     ):
@@ -39,13 +47,18 @@ def _summary_from_payload(event: MessageEvent) -> str:
 
 def _is_placeholder_title(title: str, session_id: str) -> bool:
     value = _compact(title)
-    return not value or value == _compact(session_id)
+    return (
+        not value
+        or value == _compact(session_id)
+        or UUID_TITLE_RE.match(value) is not None
+        or TRUNCATED_UUID_TITLE_RE.match(value) is not None
+    )
 
 
 def _activity_title(activity: SessionActivity) -> str:
     if not _is_placeholder_title(activity.title, activity.session_id):
         return activity.title
-    for value in (activity.last_user_message, activity.attention_reason):
+    for value in (activity.last_user_message,):
         summary = _compact(value)
         if summary:
             return summary[:160]
@@ -57,6 +70,7 @@ def _clear_attention(activity: SessionActivity) -> None:
     activity.attention_kind = ""
     activity.request_id = ""
     activity.approval_source = ""
+    activity.mirrored_only = False
 
 
 def _preserve_attention_preview(activity: SessionActivity) -> None:
@@ -67,6 +81,11 @@ def _preserve_attention_preview(activity: SessionActivity) -> None:
     summary = _compact(activity.attention_reason)
     if summary:
         activity.last_assistant_message = summary[:500]
+
+
+def _reset_live_summary_for_new_input(activity: SessionActivity) -> None:
+    activity.last_assistant_message = ""
+    activity.last_final_message = ""
 
 
 def _is_terminal(activity: SessionActivity) -> bool:
@@ -116,16 +135,25 @@ class SessionActivityProjection:
                 activity.last_user_message = summary
                 if _is_placeholder_title(activity.title, event.session_id):
                     activity.title = summary[:160]
+                if not _is_terminal(activity):
+                    _reset_live_summary_for_new_input(activity)
         elif event.kind == "message.user.accepted":
             if summary:
                 activity.last_user_message = summary
                 if _is_placeholder_title(activity.title, event.session_id):
                     activity.title = summary[:160]
             if not _is_terminal(activity):
+                _reset_live_summary_for_new_input(activity)
                 activity.status = RUNNING_STATUS
                 _clear_attention(activity)
-        elif event.kind in {"turn.started", "message.assistant.delta"}:
-            if event.kind == "message.assistant.delta" and summary:
+        elif event.kind in {
+            "turn.started",
+            "message.assistant.delta",
+            "item.started",
+            "item.completed",
+            "shell.command.completed",
+        }:
+            if event.kind != "turn.started" and summary:
                 activity.last_assistant_message = summary
             activity.status = RUNNING_STATUS
             _clear_attention(activity)
@@ -145,6 +173,7 @@ class SessionActivityProjection:
             activity.attention_kind = "failure"
             activity.request_id = ""
             activity.approval_source = ""
+            activity.mirrored_only = False
         elif event.kind == "approval.requested":
             prompt = _compact(payload.get("prompt") or payload.get("user_prompt") or payload.get("userPrompt"))
             if prompt:
@@ -156,6 +185,7 @@ class SessionActivityProjection:
             activity.attention_kind = "approval"
             activity.request_id = request_id
             activity.approval_source = approval_source
+            activity.mirrored_only = payload.get("mirroredOnly") is True
         elif event.kind == "approval.answered":
             _preserve_attention_preview(activity)
             if not _is_terminal(activity):
@@ -167,6 +197,7 @@ class SessionActivityProjection:
             activity.attention_kind = "question"
             activity.request_id = ""
             activity.approval_source = ""
+            activity.mirrored_only = payload.get("mirroredOnly") is True
         elif event.kind == "question.answered":
             if not _is_terminal(activity):
                 activity.status = RUNNING_STATUS

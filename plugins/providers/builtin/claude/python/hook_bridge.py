@@ -13,10 +13,23 @@ from typing import Any
 
 CLAUDE_HOOK_SOCKET_FILENAME = "claude_hook_bridge.sock"
 CLAUDE_HOOK_SETTINGS_FILENAME = "claude_hook_settings.json"
-CLAUDE_BLOCKING_HOOK_TIMEOUT_SECONDS = 86400
+CLAUDE_MANAGED_BLOCKING_HOOK_TIMEOUT_SECONDS = 86400
 CLAUDE_NON_BLOCKING_HOOK_TIMEOUT_SECONDS = 5
-CLAUDE_PRETOOL_APPROVAL_MATCHER = "Bash|Edit|Write|AskUserQuestion|ExitPlanMode"
+CLAUDE_HOOK_RELAY_TIMEOUT_SECONDS = 4.5
+CLAUDE_EXTERNAL_PRETOOL_MIRROR_MATCHER = ""
+CLAUDE_MANAGED_PRETOOL_APPROVAL_MATCHER = "Bash|Edit|MultiEdit|Write|Read|AskUserQuestion|ExitPlanMode"
 ONLINEWORKER_CLAUDE_HOOK_MARKER = "onlineworker_claude_external_ingress_v1"
+ONLINEWORKER_MANAGED_HOOK_PAYLOAD_KEY = "_onlineworkerManagedHook"
+CLAUDE_HOOK_RELAY_RESOURCE = "claude_hook_relay.py"
+
+
+def _bundled_claude_hook_relay_path() -> str:
+    if getattr(sys, "frozen", False):
+        executable_path = Path(sys.executable).resolve()
+        resource_path = executable_path.parent.parent / "Resources" / "hook-relays" / CLAUDE_HOOK_RELAY_RESOURCE
+        if resource_path.exists():
+            return str(resource_path)
+    return str(Path(__file__).with_name(CLAUDE_HOOK_RELAY_RESOURCE).resolve())
 
 
 def claude_hook_socket_path(data_dir: str | None) -> str | None:
@@ -34,7 +47,16 @@ def claude_hook_settings_path(data_dir: str | None) -> str | None:
     return os.path.join(data_dir, CLAUDE_HOOK_SETTINGS_FILENAME)
 
 
-def build_claude_hook_command(data_dir: str) -> str:
+def build_claude_hook_command(data_dir: str, *, managed_interactions: bool = False) -> str:
+    if not managed_interactions:
+        argv = [
+            sys.executable if not getattr(sys, "frozen", False) else "/usr/bin/python3",
+            _bundled_claude_hook_relay_path(),
+            "--data-dir",
+            data_dir,
+        ]
+        return " ".join(shlex.quote(str(item)) for item in argv)
+
     if getattr(sys, "frozen", False):
         argv = [
             sys.executable,
@@ -51,6 +73,8 @@ def build_claude_hook_command(data_dir: str) -> str:
             "--data-dir",
             data_dir,
         ]
+    if managed_interactions:
+        argv.append("--claude-hook-managed")
     return " ".join(shlex.quote(str(item)) for item in argv)
 
 
@@ -59,22 +83,36 @@ def default_claude_settings_path(settings_path: str | None = None) -> str:
     return os.path.abspath(os.path.expanduser(target))
 
 
-def _onlineworker_hook_specs(*, include_lifecycle: bool) -> list[dict[str, Any]]:
+def _onlineworker_hook_specs(
+    *,
+    include_lifecycle: bool,
+    blocking_interactions: bool,
+) -> list[dict[str, Any]]:
+    interaction_timeout = (
+        CLAUDE_MANAGED_BLOCKING_HOOK_TIMEOUT_SECONDS
+        if blocking_interactions
+        else CLAUDE_NON_BLOCKING_HOOK_TIMEOUT_SECONDS
+    )
+    pretool_matcher = (
+        CLAUDE_MANAGED_PRETOOL_APPROVAL_MATCHER
+        if blocking_interactions
+        else CLAUDE_EXTERNAL_PRETOOL_MIRROR_MATCHER
+    )
     specs = [
         {
             "event": "PreToolUse",
-            "matcher": CLAUDE_PRETOOL_APPROVAL_MATCHER,
-            "timeout": CLAUDE_BLOCKING_HOOK_TIMEOUT_SECONDS,
+            "matcher": pretool_matcher,
+            "timeout": interaction_timeout,
         },
         {
             "event": "PermissionRequest",
             "matcher": "",
-            "timeout": CLAUDE_BLOCKING_HOOK_TIMEOUT_SECONDS,
+            "timeout": interaction_timeout,
         },
         {
             "event": "Notification",
             "matcher": "",
-            "timeout": CLAUDE_BLOCKING_HOOK_TIMEOUT_SECONDS,
+            "timeout": interaction_timeout,
         },
     ]
     if include_lifecycle:
@@ -137,9 +175,13 @@ def build_onlineworker_claude_hook_settings(
     *,
     include_lifecycle: bool,
     include_marker: bool,
+    blocking_interactions: bool = False,
 ) -> dict[str, Any]:
     hooks: dict[str, list[dict[str, Any]]] = {}
-    for spec in _onlineworker_hook_specs(include_lifecycle=include_lifecycle):
+    for spec in _onlineworker_hook_specs(
+        include_lifecycle=include_lifecycle,
+        blocking_interactions=blocking_interactions,
+    ):
         hooks[spec["event"]] = [
             _build_onlineworker_hook_entry(
                 command,
@@ -211,11 +253,12 @@ def install_onlineworker_claude_hooks(
             "changed": False,
         }
 
-    command = build_claude_hook_command(data_dir)
+    command = build_claude_hook_command(data_dir, managed_interactions=False)
     desired_payload = build_onlineworker_claude_hook_settings(
         command,
         include_lifecycle=True,
         include_marker=True,
+        blocking_interactions=False,
     )
     desired_hooks = desired_payload["hooks"]
     changed = False
@@ -334,11 +377,12 @@ def write_claude_hook_settings(data_dir: str) -> str:
     if settings_path is None:
         raise RuntimeError("缺少 data_dir，无法写入 Claude hook settings")
 
-    command = build_claude_hook_command(data_dir)
+    command = build_claude_hook_command(data_dir, managed_interactions=True)
     payload = build_onlineworker_claude_hook_settings(
         command,
         include_lifecycle=False,
         include_marker=False,
+        blocking_interactions=True,
     )
     with open(settings_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -346,71 +390,48 @@ def write_claude_hook_settings(data_dir: str) -> str:
 
 
 def default_claude_hook_response(payload: dict[str, Any] | None) -> dict[str, Any]:
-    payload = payload or {}
-    event_name = str(payload.get("hook_event_name") or "").strip()
-    tool_name = str(payload.get("tool_name") or "").strip()
-
-    if event_name == "PreToolUse" and tool_name == "AskUserQuestion":
-        return {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-            }
-        }
-
-    if event_name == "PermissionRequest":
-        return {
-            "hookSpecificOutput": {
-                "hookEventName": "PermissionRequest",
-                "decision": {
-                    "behavior": "deny",
-                },
-            }
-        }
-
-    if event_name == "Notification" and payload.get("question"):
-        return {
-            "hookSpecificOutput": {
-                "hookEventName": "Notification",
-            }
-        }
-
-    if tool_name == "AskUserQuestion":
-        return {
-            "hookSpecificOutput": {
-                "hookEventName": "PermissionRequest",
-                "decision": {
-                    "behavior": "deny",
-                },
-            }
-        }
-
+    del payload
     return {}
 
 
 async def relay_claude_hook_payload(
     data_dir: str | None,
     payload: dict[str, Any],
+    *,
+    managed_interactions: bool = False,
 ) -> dict[str, Any]:
     socket_path = claude_hook_socket_path(data_dir)
     if not socket_path:
         return default_claude_hook_response(payload)
 
     try:
-        reader, writer = await asyncio.open_unix_connection(socket_path)
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_unix_connection(socket_path),
+            timeout=CLAUDE_HOOK_RELAY_TIMEOUT_SECONDS,
+        )
     except Exception:
         return default_claude_hook_response(payload)
 
     try:
-        writer.write(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
-        await writer.drain()
+        relayed_payload = dict(payload)
+        if managed_interactions:
+            relayed_payload[ONLINEWORKER_MANAGED_HOOK_PAYLOAD_KEY] = True
+        writer.write(json.dumps(relayed_payload, ensure_ascii=False).encode("utf-8"))
+        await asyncio.wait_for(writer.drain(), timeout=CLAUDE_HOOK_RELAY_TIMEOUT_SECONDS)
         writer.write_eof()
-        raw = await reader.read()
+        if not managed_interactions:
+            writer.close()
+            return default_claude_hook_response(payload)
+        read_task = reader.read(1024 * 1024)
+        raw = await read_task
     except Exception:
         return default_claude_hook_response(payload)
     finally:
         writer.close()
-        await writer.wait_closed()
+        try:
+            await asyncio.wait_for(writer.wait_closed(), timeout=0.5)
+        except Exception:
+            pass
 
     if not raw:
         return {}
@@ -421,7 +442,7 @@ async def relay_claude_hook_payload(
     return decoded if isinstance(decoded, dict) else {}
 
 
-def run_claude_hook_bridge_once(data_dir: str | None) -> int:
+def run_claude_hook_bridge_once(data_dir: str | None, *, managed_interactions: bool = False) -> int:
     raw = sys.stdin.buffer.read()
     if not raw:
         return 0
@@ -438,7 +459,13 @@ def run_claude_hook_bridge_once(data_dir: str | None) -> int:
         sys.stdout.flush()
         return 0
 
-    response = asyncio.run(relay_claude_hook_payload(data_dir, payload))
+    response = asyncio.run(
+        relay_claude_hook_payload(
+            data_dir,
+            payload,
+            managed_interactions=managed_interactions,
+        )
+    )
     sys.stdout.write(json.dumps(response or {}, ensure_ascii=False))
     sys.stdout.flush()
     return 0

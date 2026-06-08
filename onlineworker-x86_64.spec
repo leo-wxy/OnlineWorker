@@ -11,6 +11,7 @@ a = Analysis(
     datas=[
         ('core/notifications/notification_summary_rules.yaml', 'core/notifications'),
         ('plugins/providers/builtin/claude/plugin.yaml', 'plugins/providers/builtin/claude'),
+        ('plugins/providers/builtin/claude/python/claude_hook_relay.py', 'plugins/providers/builtin/claude/python'),
         ('plugins/providers/builtin/codex/plugin.yaml', 'plugins/providers/builtin/codex'),
     ],
     hiddenimports=[

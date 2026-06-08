@@ -43,6 +43,11 @@ provider:
       telegram: true
       external_cli: remote_proxy
       wrapper: ow-codex
+    session_access:
+      list: codex_threads
+      read: owner_bridge
+      send: codex_app_server
+      stream: codex_thread_jsonl
   process:
     cleanup_matchers:
       - "codex.*app-server"

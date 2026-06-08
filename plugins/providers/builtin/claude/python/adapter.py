@@ -14,6 +14,7 @@ import uuid
 from typing import Any, Awaitable, Callable
 
 from plugins.providers.builtin.claude.python.hook_bridge import (
+    ONLINEWORKER_MANAGED_HOOK_PAYLOAD_KEY,
     claude_hook_settings_path,
     claude_hook_socket_path,
     install_onlineworker_claude_hooks,
@@ -52,8 +53,8 @@ STALE_CLAUDE_BASE_URLS = {
 }
 MIN_SUPPORTED_HOOK_NODE_MAJOR = 20
 CLAUDE_STREAM_BUFFER_LIMIT = 10 * 1024 * 1024
-_PRETOOL_APPROVAL_TOOLS = frozenset({"Bash", "Edit", "Write", "ExitPlanMode"})
-_PERMISSION_REQUEST_TOOLS = frozenset({"Bash", "Edit", "Write", "ExitPlanMode"})
+_PRETOOL_APPROVAL_TOOLS = frozenset({"Bash", "Edit", "MultiEdit", "Write", "Read", "ExitPlanMode"})
+_PERMISSION_REQUEST_TOOLS = frozenset({"Bash", "Edit", "MultiEdit", "Write", "Read", "ExitPlanMode"})
 CLAUDE_REASON_DETAILS = {
     "ok": "Claude provider is ready.",
     "loggedOut": "Claude CLI is not logged in.",
@@ -192,6 +193,14 @@ def _hook_is_tool_approval_request(payload: dict[str, Any]) -> bool:
     return False
 
 
+def _hook_is_interactive_request(payload: dict[str, Any]) -> bool:
+    return (
+        _hook_is_ask_user_question(payload)
+        or _hook_is_tool_approval_request(payload)
+        or _hook_is_notification_question(payload)
+    )
+
+
 def _hook_is_lifecycle_event(payload: dict[str, Any]) -> bool:
     return _hook_event_name(payload) in {
         "PostToolUse",
@@ -240,7 +249,24 @@ def _hook_permission_display(payload: dict[str, Any]) -> tuple[str, str]:
         reason = str(tool_input.get("description") or "").strip() or command
         return command, reason
 
-    if tool_name in {"Edit", "Write"}:
+    if tool_name == "Read":
+        file_path = str(tool_input.get("file_path") or tool_input.get("path") or "").strip()
+        offset = tool_input.get("offset")
+        limit = tool_input.get("limit")
+        line_suffix = ""
+        try:
+            start = int(offset) if offset is not None else None
+            count = int(limit) if limit is not None else None
+        except (TypeError, ValueError):
+            start = None
+            count = None
+        if start is not None and count is not None and count > 0:
+            line_suffix = f" · lines {start}-{start + count - 1}"
+        command = f"Read({file_path}{line_suffix})" if file_path else "Read"
+        reason = str(tool_input.get("description") or "").strip() or command
+        return command, reason
+
+    if tool_name in {"Edit", "MultiEdit", "Write"}:
         file_path = str(tool_input.get("file_path") or tool_input.get("path") or "").strip()
         command = file_path or tool_name
         reason = str(tool_input.get("description") or "").strip() or f"{tool_name} 请求"
@@ -251,6 +277,22 @@ def _hook_permission_display(payload: dict[str, Any]) -> tuple[str, str]:
         command = tool_name or "Claude 权限请求"
     reason = str(tool_input.get("description") or "").strip() or command
     return command, reason
+
+
+def _hook_tool_activity_display(payload: dict[str, Any]) -> str:
+    tool_name = _normalize_hook_tool_name(payload)
+    tool_input = _normalize_hook_tool_input(payload)
+    if tool_name in {"Bash", "Edit", "MultiEdit", "Write", "Read"}:
+        command, _reason = _hook_permission_display(payload)
+        if tool_name == "Bash":
+            return f"$ {command}"
+        return command
+
+    for key in ("command", "pattern", "url", "query", "file_path", "path", "description"):
+        value = str(tool_input.get(key) or "").strip()
+        if value:
+            return f"{tool_name}: {value}" if tool_name else value
+    return tool_name or "Claude tool"
 
 
 def _build_permission_hook_response(result: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
@@ -864,6 +906,15 @@ class ClaudeAdapter:
     def register_workspace_cwd(self, workspace_id: str, cwd: str) -> None:
         self._workspace_cwd_map[workspace_id] = cwd
 
+    def _fallback_external_workspace_id(self, payload: dict[str, Any]) -> str:
+        cwd = _hook_cwd(payload)
+        if cwd:
+            return f"claude:{cwd}"
+        session_id = _hook_session_id(payload)
+        if session_id:
+            return f"claude:external:{session_id}"
+        return "claude:external"
+
     def _send_lock_for_thread(self, thread_id: str) -> asyncio.Lock:
         lock = self._send_locks.get(thread_id)
         if lock is None:
@@ -991,7 +1042,7 @@ class ClaudeAdapter:
         writer: asyncio.StreamWriter,
     ) -> None:
         try:
-            raw = await reader.read()
+            raw = await reader.read(1024 * 1024)
             response: dict[str, Any] = {}
             if raw:
                 try:
@@ -999,7 +1050,19 @@ class ClaudeAdapter:
                 except Exception:
                     payload = {}
                 if isinstance(payload, dict):
-                    response = await self.handle_hook_payload(payload)
+                    managed_interactions = payload.pop(ONLINEWORKER_MANAGED_HOOK_PAYLOAD_KEY, False) is True
+                    if managed_interactions:
+                        response = await self.handle_hook_payload(
+                            payload,
+                            managed_interactions=True,
+                        )
+                    else:
+                        asyncio.create_task(
+                            self.handle_hook_payload(
+                                payload,
+                                managed_interactions=False,
+                            )
+                        )
             try:
                 writer.write(json.dumps(response or {}, ensure_ascii=False).encode("utf-8"))
                 await writer.drain()
@@ -1027,15 +1090,202 @@ class ClaudeAdapter:
                     return workspace_id
         return ""
 
-    async def handle_hook_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def handle_hook_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        managed_interactions: bool = False,
+    ) -> dict[str, Any]:
+        if not managed_interactions and _hook_event_name(payload) == "PostToolUse":
+            return await self._mirror_external_tool_hook_payload(payload, completed=True)
+        if not managed_interactions and _hook_event_name(payload) == "PreToolUse":
+            if _hook_is_interactive_request(payload):
+                return await self._mirror_external_interactive_hook_payload(payload)
+            return await self._mirror_external_tool_hook_payload(payload, completed=False)
         if _hook_is_lifecycle_event(payload):
             return await self._handle_lifecycle_hook_payload(payload)
+        if _hook_is_interactive_request(payload) and not managed_interactions:
+            return await self._mirror_external_interactive_hook_payload(payload)
         if _hook_is_ask_user_question(payload):
             return await self._handle_ask_user_question_payload(payload)
         if _hook_is_tool_approval_request(payload):
             return await self._handle_permission_request_payload(payload)
         if _hook_is_notification_question(payload):
             return await self._handle_notification_question_payload(payload)
+        return {}
+
+    def _resolve_hook_title_prompt(self, payload: dict[str, Any]) -> str:
+        prompt_text = _hook_user_prompt(payload)
+        if prompt_text:
+            return prompt_text
+
+        session_id = _hook_session_id(payload)
+        if session_id:
+            session_state = self._external_hook_sessions.get(session_id) or {}
+            prompt_text = str(session_state.get("last_prompt") or "").strip()
+            if prompt_text:
+                return prompt_text
+
+        transcript_file = self._resolve_hook_transcript_file(payload)
+        if transcript_file:
+            for turn in reversed(_read_claude_project_turns(transcript_file)):
+                if str(turn.get("role") or "").strip() != "user":
+                    continue
+                text = str(turn.get("text") or "").strip()
+                if text:
+                    return text
+        return ""
+
+    async def _mirror_external_interactive_hook_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self._event_callbacks:
+            self._set_external_hook_status("callback_unreachable", "Claude interactive hook 没有可用的事件回调")
+            return {}
+
+        workspace_id = self._resolve_hook_workspace_id(payload)
+        if not workspace_id:
+            detail = f"未匹配 Claude workspace：{_hook_cwd(payload) or _hook_session_id(payload)}"
+            self._set_external_hook_status("degraded_fallback", detail)
+            workspace_id = self._fallback_external_workspace_id(payload)
+
+        thread_id = _hook_session_id(payload)
+        if not thread_id:
+            self._set_external_hook_status("degraded_fallback", "Claude interactive hook 缺少 session_id")
+            return {}
+
+        async with self._send_lock_for_thread(thread_id):
+            self._thread_workspace_map[thread_id] = workspace_id
+            state = self._external_hook_session_state(thread_id)
+            state["workspace_id"] = workspace_id
+            prompt_text = self._resolve_hook_title_prompt(payload)
+            if prompt_text:
+                state["last_prompt"] = prompt_text
+            transcript_file = self._resolve_hook_transcript_file(payload)
+            if transcript_file:
+                state["transcript_path"] = transcript_file
+
+            if not state.get("session_created_emitted"):
+                await self._emit_hook_session_created(
+                    workspace_id,
+                    thread_id,
+                    title=prompt_text[:120],
+                )
+                state["session_created_emitted"] = True
+
+            if _hook_is_tool_approval_request(payload):
+                command, reason = _hook_permission_display(payload)
+                await self._emit_event(
+                    workspace_id,
+                    "item/commandExecution/requestApproval",
+                    {
+                        "threadId": thread_id,
+                        "command": command,
+                        "reason": reason,
+                        "request_id": str(payload.get("request_id") or payload.get("id") or uuid.uuid4()),
+                        "_provider": "claude",
+                        "_claude_permission": True,
+                        "_mirroredOnly": True,
+                        "toolName": _normalize_hook_tool_name(payload),
+                        "prompt": prompt_text,
+                    },
+                )
+            elif _hook_is_ask_user_question(payload):
+                tool_input = _normalize_hook_tool_input(payload)
+                questions = tool_input.get("questions") if isinstance(tool_input.get("questions"), list) else []
+                question_id = str(payload.get("question_id") or payload.get("request_id") or payload.get("id") or uuid.uuid4())
+                for idx, question in enumerate(questions):
+                    await self._emit_event(
+                        workspace_id,
+                        "question/asked",
+                        {
+                            "threadId": thread_id,
+                            "questionId": question_id,
+                            "header": str(question.get("header") or ""),
+                            "question": str(question.get("question") or ""),
+                            "options": _hook_extract_option_rows(question.get("options")),
+                            "multiple": bool(question.get("multiple") or question.get("multiSelect")),
+                            "custom": bool(question.get("custom", True)),
+                            "subIndex": idx,
+                            "subTotal": len(questions),
+                            "_provider": "claude",
+                            "_mirroredOnly": True,
+                            "prompt": prompt_text,
+                        },
+                    )
+            elif _hook_is_notification_question(payload):
+                await self._emit_event(
+                    workspace_id,
+                    "question/asked",
+                    {
+                        "threadId": thread_id,
+                        "questionId": str(payload.get("question_id") or payload.get("request_id") or payload.get("id") or uuid.uuid4()),
+                        "header": "",
+                        "question": str(payload.get("question") or ""),
+                        "options": _hook_extract_option_rows(payload.get("options")),
+                        "multiple": False,
+                        "custom": True,
+                        "_provider": "claude",
+                        "_mirroredOnly": True,
+                        "prompt": prompt_text,
+                    },
+                )
+            self._set_external_hook_status("installed")
+        return {}
+
+    async def _mirror_external_tool_hook_payload(self, payload: dict[str, Any], *, completed: bool) -> dict[str, Any]:
+        if not self._event_callbacks:
+            self._set_external_hook_status("callback_unreachable", "Claude tool hook 没有可用的事件回调")
+            return {}
+
+        workspace_id = self._resolve_hook_workspace_id(payload)
+        if not workspace_id:
+            detail = f"未匹配 Claude workspace：{_hook_cwd(payload) or _hook_session_id(payload)}"
+            self._set_external_hook_status("degraded_fallback", detail)
+            workspace_id = self._fallback_external_workspace_id(payload)
+
+        thread_id = _hook_session_id(payload)
+        if not thread_id:
+            self._set_external_hook_status("degraded_fallback", "Claude tool hook 缺少 session_id")
+            return {}
+
+        async with self._send_lock_for_thread(thread_id):
+            self._thread_workspace_map[thread_id] = workspace_id
+            state = self._external_hook_session_state(thread_id)
+            state["workspace_id"] = workspace_id
+            prompt_text = self._resolve_hook_title_prompt(payload)
+            if prompt_text:
+                state["last_prompt"] = prompt_text
+            transcript_file = self._resolve_hook_transcript_file(payload)
+            if transcript_file:
+                state["transcript_path"] = transcript_file
+
+            if not state.get("session_created_emitted"):
+                await self._emit_hook_session_created(
+                    workspace_id,
+                    thread_id,
+                    title=prompt_text[:120],
+                )
+                state["session_created_emitted"] = True
+
+            display = _hook_tool_activity_display(payload)
+            item = {
+                "type": "shellCommand" if _normalize_hook_tool_name(payload) == "Bash" else "toolCall",
+                "text": display,
+                "command": display,
+                "threadId": thread_id,
+                "toolName": _normalize_hook_tool_name(payload),
+            }
+            await self._emit_event(
+                workspace_id,
+                "item/completed" if completed else "item/started",
+                {
+                    "threadId": thread_id,
+                    "item": item,
+                    "_provider": "claude",
+                    "_mirroredOnly": True,
+                    "prompt": prompt_text,
+                },
+            )
+            self._set_external_hook_status("installed")
         return {}
 
     def _external_hook_session_state(self, session_id: str) -> dict[str, Any]:
@@ -1098,7 +1348,7 @@ class ClaudeAdapter:
         if not workspace_id:
             detail = f"未匹配 Claude workspace：{_hook_cwd(payload) or session_id}"
             self._set_external_hook_status("degraded_fallback", detail)
-            return {}
+            workspace_id = self._fallback_external_workspace_id(payload)
         async with self._send_lock_for_thread(session_id):
             self._thread_workspace_map[session_id] = workspace_id
             state = self._external_hook_session_state(session_id)

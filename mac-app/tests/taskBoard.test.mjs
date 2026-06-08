@@ -136,7 +136,7 @@ test("buildTaskBoardModel shows latest message for pinned idle sessions", () => 
   assert.equal(board.pinnedIdle[0].preview, "最后一条会话内容应该显示在关注中卡片里。");
 });
 
-test("buildTaskBoardModel keeps title text visible as pinned preview fallback", () => {
+test("buildTaskBoardModel suppresses pinned preview when it only repeats the title", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -161,7 +161,7 @@ test("buildTaskBoardModel keeps title text visible as pinned preview fallback", 
 
   assert.equal(board.counts.pinnedIdle, 1);
   assert.equal(board.pinnedIdle[0].title, "梳理一下当前未完成的 phase");
-  assert.equal(board.pinnedIdle[0].preview, "梳理一下当前未完成的 phase");
+  assert.equal(board.pinnedIdle[0].preview, null);
 });
 
 test("buildTaskBoardModel creates a running fallback from dashboard activity", () => {
@@ -186,7 +186,7 @@ test("buildTaskBoardModel creates a running fallback from dashboard activity", (
   assert.equal(board.running[0].workspace, "/tmp/live");
 });
 
-test("buildTaskBoardModel renders session title above activity summary", () => {
+test("buildTaskBoardModel renders approval request above previous user prompt", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -224,7 +224,57 @@ test("buildTaskBoardModel renders session title above activity summary", () => {
   assert.equal(board.needsAttention[0].recentEvent, "approval.requested");
 });
 
-test("buildTaskBoardModel uses activity title as running preview fallback without message content", () => {
+test("buildTaskBoardModel shows Claude permission command as dynamic preview", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "fe8cfb27-d4b2-4df7-9b03-000000000001",
+        type: "claude",
+        title: "fe8cfb27-d4b",
+        workspace: "ncmplayerengine",
+        raw: { status: "running", updatedAt: nowEpochMs - 1_000 },
+      }),
+    ],
+    sessionActivities: [
+      {
+        providerId: "claude",
+        workspaceId: "claude:/Users/example/Projects/ncmplayerengine",
+        workspacePath: "/Users/example/Projects/ncmplayerengine",
+        sessionId: "fe8cfb27-d4b2-4df7-9b03-000000000001",
+        title: "fe8cfb27-d4b2-4df7-9b03-000000000001",
+        status: "needs_attention",
+        attentionReason: "需要处理授权请求：git remote get-url origin 2>/dev/null",
+        attentionKind: "approval",
+        requestId: "req-1",
+        approvalSource: "item/commandExecution/requestApproval",
+        mirroredOnly: true,
+        lastUserMessage: "engine实现情况如何？",
+        lastAssistantMessage: "",
+        lastFinalMessage: "",
+        lastEventKind: "approval.requested",
+        updatedAt: Math.floor(nowEpochMs / 1000),
+      },
+    ],
+    providerLabels: { claude: "Claude" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.counts.needsAttention, 1);
+  assert.equal(board.needsAttention[0].title, "engine实现情况如何？");
+  assert.equal(board.needsAttention[0].mirroredOnly, true);
+  assert.equal(board.needsAttention[0].requestId, "req-1");
+  assert.equal(
+    board.needsAttention[0].preview,
+    "需要处理授权请求：git remote get-url origin 2>/dev/null",
+  );
+  assert.equal(
+    board.needsAttention[0].statusReason,
+    "需要处理授权请求：git remote get-url origin 2>/dev/null",
+  );
+});
+
+test("buildTaskBoardModel suppresses running preview when only the title is available", () => {
   const board = buildTaskBoardModel({
     sessions: [],
     sessionActivities: [
@@ -249,11 +299,11 @@ test("buildTaskBoardModel uses activity title as running preview fallback withou
   });
 
   assert.equal(board.running[0].title, "切换 codex/phase-14-message-event-bus 这个分支");
-  assert.equal(board.running[0].preview, "切换 codex/phase-14-message-event-bus 这个分支");
+  assert.equal(board.running[0].preview, null);
   assert.equal(board.running[0].statusReason, "");
 });
 
-test("buildTaskBoardModel shows latest user message when activity has no assistant summary", () => {
+test("buildTaskBoardModel suppresses latest user message when it repeats the title", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -284,11 +334,11 @@ test("buildTaskBoardModel shows latest user message when activity has no assista
   });
 
   assert.equal(board.running[0].title, "切换 codex/phase-14-message-event-bus 这个分支");
-  assert.equal(board.running[0].preview, "切换 codex/phase-14-message-event-bus 这个分支");
+  assert.equal(board.running[0].preview, null);
   assert.equal(board.running[0].statusReason, "");
 });
 
-test("buildTaskBoardModel keeps running preview even when it matches the title", () => {
+test("buildTaskBoardModel suppresses active session preview when it repeats the title", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -310,7 +360,7 @@ test("buildTaskBoardModel keeps running preview even when it matches the title",
   });
 
   assert.equal(board.running[0].title, "继续 /Users/example/Projects/sample-repo 的任务");
-  assert.equal(board.running[0].preview, "继续 /Users/example/Projects/sample-repo 的任务");
+  assert.equal(board.running[0].preview, null);
 });
 
 test("buildTaskBoardModel replaces uuid activity title with session title", () => {

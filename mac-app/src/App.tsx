@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -19,6 +19,7 @@ import {
   UsageBrowser,
 } from "./pages";
 import type { TaskBoardOpenSessionTarget } from "./pages";
+import type { TaskBoardSessionActivity } from "./utils/taskBoard.js";
 import { useI18n, type Locale } from "./i18n";
 import {
   isSupportedAppTab,
@@ -28,6 +29,45 @@ import {
 
 const APP_NAVIGATE_TAB_EVENT = "app:navigate-tab";
 
+interface TaskBoardActivityStreamEvent {
+  kind: "snapshot" | "activity" | "remove" | "error";
+  activities?: TaskBoardSessionActivity[];
+  activity?: TaskBoardSessionActivity | null;
+  providerId?: string;
+  sessionId?: string;
+  error?: string | null;
+}
+
+function taskActivityKey(activity: TaskBoardSessionActivity) {
+  return `${activity.providerId}:${activity.sessionId}`;
+}
+
+function upsertSessionActivity(
+  activities: TaskBoardSessionActivity[],
+  activity: TaskBoardSessionActivity,
+) {
+  const key = taskActivityKey(activity);
+  return [
+    activity,
+    ...activities.filter((item) => taskActivityKey(item) !== key),
+  ];
+}
+
+function removeSessionActivity(
+  activities: TaskBoardSessionActivity[],
+  providerId: string,
+  sessionId: string,
+) {
+  return activities.filter((item) => item.providerId !== providerId || item.sessionId !== sessionId);
+}
+
+function taskBoardAttentionCount(activities: TaskBoardSessionActivity[]) {
+  return activities.filter((activity) => {
+    const status = String(activity.status || "").trim().toLowerCase();
+    return status === "needs_attention";
+  }).length;
+}
+
 export default function App() {
   const { locale, setLocale, t } = useI18n();
   const [activeTab, setActiveTab] = useState<AppTab>("dashboard");
@@ -36,6 +76,8 @@ export default function App() {
   const [showLogs, setShowLogs] = useState(false);
   const [isFirstRun, setIsFirstRun] = useState(false);
   const [sessionOpenTarget, setSessionOpenTarget] = useState<TaskBoardOpenSessionTarget | null>(null);
+  const [taskBoardActivities, setTaskBoardActivities] = useState<TaskBoardSessionActivity[]>([]);
+  const taskAttentionCount = taskBoardAttentionCount(taskBoardActivities);
 
   // First-run detection: auto-switch to Guide tab on first launch
   useEffect(() => {
@@ -74,6 +116,60 @@ export default function App() {
       if (unlisten) {
         unlisten();
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    let activeStreamId: number | null = null;
+    let disposed = false;
+    const channel = new Channel<TaskBoardActivityStreamEvent>();
+
+    invoke<TaskBoardSessionActivity[]>("get_task_board_session_activities")
+      .then((activities) => {
+        if (!disposed) {
+          setTaskBoardActivities(activities);
+        }
+      })
+      .catch((error) => {
+        console.warn("Failed to load task board activity badge state", error);
+      });
+
+    channel.onmessage = (event) => {
+      if (event.kind === "snapshot") {
+        setTaskBoardActivities(event.activities ?? []);
+        return;
+      }
+      if (event.kind === "activity" && event.activity) {
+        setTaskBoardActivities((current) => upsertSessionActivity(current, event.activity!));
+        return;
+      }
+      if (event.kind === "remove" && event.providerId && event.sessionId) {
+        setTaskBoardActivities((current) => removeSessionActivity(current, event.providerId!, event.sessionId!));
+      }
+    };
+
+    void invoke<number>("start_task_board_activity_stream", { channel })
+      .then((streamId) => {
+        if (disposed) {
+          void invoke("stop_task_board_activity_stream", { streamId }).catch((error) => {
+            console.warn("Failed to stop task board activity badge stream", error);
+          });
+          return;
+        }
+        activeStreamId = streamId;
+      })
+      .catch((error) => {
+        console.warn("Failed to start task board activity badge stream", error);
+      });
+
+    return () => {
+      disposed = true;
+      if (activeStreamId === null) {
+        return;
+      }
+      void invoke("stop_task_board_activity_stream", { streamId: activeStreamId }).catch((error) => {
+        console.warn("Failed to stop task board activity badge stream", error);
+      });
     };
   }, []);
 
@@ -173,12 +269,29 @@ export default function App() {
                   : "text-slate-500 hover:bg-white/55 hover:text-gray-900"
               } ${sidebarCollapsed ? "justify-center" : "gap-3"}`}
             >
-              <span className={`grid h-8 w-8 place-items-center rounded-xl ${
+              <span className={`relative grid h-8 w-8 place-items-center rounded-xl ${
                 activeTab === key ? "bg-blue-50 text-blue-600" : "bg-white/60 text-slate-400"
               }`}>
                 {getTabIcon(key)}
+                {key === "tasks" && taskAttentionCount > 0 && (
+                  <span
+                    className="absolute -right-1 -top-1 grid min-h-[18px] min-w-[18px] place-items-center rounded-full border-2 border-white bg-rose-500 px-1 text-[10px] font-black leading-none text-white shadow-[0_6px_16px_rgba(244,63,94,0.35)]"
+                    aria-label={`${taskAttentionCount} sessions need attention`}
+                  >
+                    {taskAttentionCount > 9 ? "9+" : taskAttentionCount}
+                  </span>
+                )}
               </span>
-              {!sidebarCollapsed && t.app.tabs[key]}
+              {!sidebarCollapsed && (
+                <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                  <span className="truncate">{t.app.tabs[key]}</span>
+                  {key === "tasks" && taskAttentionCount > 0 && (
+                    <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black leading-none text-white shadow-[0_6px_16px_rgba(244,63,94,0.22)]">
+                      {taskAttentionCount > 99 ? "99+" : taskAttentionCount}
+                    </span>
+                  )}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -274,7 +387,11 @@ export default function App() {
           )}
           {activeTab === "tasks" && (
             <div className="flex min-h-0 flex-1 flex-col p-5 sm:p-6">
-              <TaskBoard onOpenSession={handleOpenTaskSession} />
+              <TaskBoard
+                onOpenSession={handleOpenTaskSession}
+                sessionActivities={taskBoardActivities}
+                onSessionActivitiesChange={setTaskBoardActivities}
+              />
             </div>
           )}
           {activeTab === "config" && (

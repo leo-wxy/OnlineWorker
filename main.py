@@ -239,6 +239,11 @@ def main() -> None:
         help="Run once as Claude hook bridge relay and exit",
     )
     parser.add_argument(
+        "--claude-hook-managed",
+        action="store_true",
+        help="Allow Claude hook bridge relay to wait for OnlineWorker-managed interaction decisions",
+    )
+    parser.add_argument(
         "--codex-hook-bridge",
         action="store_true",
         help="Run once as Codex hook bridge relay and exit",
@@ -283,7 +288,7 @@ def main() -> None:
     if args.claude_hook_bridge:
         from plugins.providers.builtin.claude.python.hook_bridge import run_claude_hook_bridge_once
 
-        raise SystemExit(run_claude_hook_bridge_once(data_dir))
+        raise SystemExit(run_claude_hook_bridge_once(data_dir, managed_interactions=args.claude_hook_managed))
     if args.codex_hook_bridge:
         from plugins.providers.builtin.codex.python.hook_bridge import run_codex_hook_bridge_once
 

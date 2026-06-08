@@ -19,6 +19,7 @@ use super::codex::{
     list_codex_threads, read_codex_thread_updates, send_codex_thread_message, CodexThreadCursor,
 };
 use super::config::ensure_data_dir;
+use super::config_provider::{ProviderMetadata, ProviderSessionAccessCapabilities};
 use super::provider_bridge_common::{
     provider_bridge_env, provider_owner_bridge_socket_path, require_runtime_provider,
 };
@@ -57,12 +58,48 @@ fn provider_session_stream_generation() -> Arc<AtomicU64> {
         .clone()
 }
 
-fn provider_session_read_uses_owner_bridge(runtime_id: &str) -> bool {
-    runtime_id.trim() != "claude"
+fn normalized_session_access_value(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
 }
 
-fn provider_session_send_uses_owner_bridge(runtime_id: &str) -> bool {
-    runtime_id.trim() != "codex"
+fn provider_session_access(provider: &ProviderMetadata) -> ProviderSessionAccessCapabilities {
+    provider.capabilities.session_access.clone()
+}
+
+fn provider_session_list_access(provider: &ProviderMetadata) -> String {
+    let value = normalized_session_access_value(&provider_session_access(provider).list);
+    if value.is_empty() {
+        "owner_bridge".to_string()
+    } else {
+        value
+    }
+}
+
+fn provider_session_read_access(provider: &ProviderMetadata) -> String {
+    let value = normalized_session_access_value(&provider_session_access(provider).read);
+    if value.is_empty() {
+        "owner_bridge".to_string()
+    } else {
+        value
+    }
+}
+
+fn provider_session_send_access(provider: &ProviderMetadata) -> String {
+    let value = normalized_session_access_value(&provider_session_access(provider).send);
+    if value.is_empty() {
+        "owner_bridge".to_string()
+    } else {
+        value
+    }
+}
+
+fn provider_session_stream_access(provider: &ProviderMetadata) -> String {
+    let value = normalized_session_access_value(&provider_session_access(provider).stream);
+    if value.is_empty() {
+        "none".to_string()
+    } else {
+        value
+    }
 }
 
 fn composer_attachment_staging_dir(data_dir: &Path) -> std::path::PathBuf {
@@ -682,12 +719,14 @@ fn persist_provider_session_archived_state(
 #[tauri::command]
 pub async fn list_provider_sessions(app: AppHandle, provider_id: String) -> Result<Value, String> {
     let provider = require_runtime_provider(&provider_id)?;
-    match provider.runtime_id.as_str() {
-        "codex" => serde_json::to_value(list_codex_threads()?).map_err(|error| error.to_string()),
-        "claude" => {
+    match provider_session_list_access(&provider).as_str() {
+        "codex_threads" => {
+            serde_json::to_value(list_codex_threads()?).map_err(|error| error.to_string())
+        }
+        "claude_projects" => {
             serde_json::to_value(list_claude_sessions()?).map_err(|error| error.to_string())
         }
-        _ => {
+        "owner_bridge" | "sidecar" => {
             let data_dir = ensure_data_dir()?;
             let sessions =
                 match list_provider_sessions_via_owner_bridge(&data_dir, &provider.id, 100) {
@@ -703,9 +742,13 @@ pub async fn list_provider_sessions(app: AppHandle, provider_id: String) -> Resu
                         )
                         .await
                     }
-                }?;
+            }?;
             Ok(overlay_provider_sessions(&data_dir, &provider.id, sessions))
         }
+        other => Err(format!(
+            "Provider '{}' has unsupported session list access '{}'",
+            provider.id, other
+        )),
     }
 }
 
@@ -717,31 +760,36 @@ pub async fn read_provider_session(
     workspace_dir: Option<String>,
 ) -> Result<Value, String> {
     let provider = require_runtime_provider(&provider_id)?;
-    if provider_session_read_uses_owner_bridge(provider.runtime_id.as_str()) {
-        let data_dir = ensure_data_dir()?;
-        match read_provider_session_via_owner_bridge(
-            &data_dir,
-            &provider.id,
-            &session_id,
-            workspace_dir.as_deref(),
-            20,
-        ) {
-            Ok(value) => Ok(value),
-            Err(_) => {
-                run_provider_session_bridge(
-                    &app,
-                    &provider.id,
-                    "read",
-                    Some(&session_id),
-                    workspace_dir.as_deref(),
-                    Some(PROVIDER_SESSION_BRIDGE_READ_TIMEOUT),
-                )
-                .await
+    match provider_session_read_access(&provider).as_str() {
+        "owner_bridge" | "sidecar" => {
+            let data_dir = ensure_data_dir()?;
+            match read_provider_session_via_owner_bridge(
+                &data_dir,
+                &provider.id,
+                &session_id,
+                workspace_dir.as_deref(),
+                20,
+            ) {
+                Ok(value) => Ok(value),
+                Err(_) => {
+                    run_provider_session_bridge(
+                        &app,
+                        &provider.id,
+                        "read",
+                        Some(&session_id),
+                        workspace_dir.as_deref(),
+                        Some(PROVIDER_SESSION_BRIDGE_READ_TIMEOUT),
+                    )
+                    .await
+                }
             }
         }
-    } else {
-        serde_json::to_value(read_claude_session(session_id, workspace_dir)?)
-            .map_err(|error| error.to_string())
+        "claude_project" => serde_json::to_value(read_claude_session(session_id, workspace_dir)?)
+            .map_err(|error| error.to_string()),
+        other => Err(format!(
+            "Provider '{}' has unsupported session read access '{}'",
+            provider.id, other
+        )),
     }
 }
 
@@ -756,13 +804,13 @@ pub async fn send_provider_session_message(
 ) -> Result<Value, String> {
     let provider = require_runtime_provider(&provider_id)?;
     let attachments = attachments.unwrap_or_default();
-    match provider.runtime_id.as_str() {
-        "codex" => {
+    match provider_session_send_access(&provider).as_str() {
+        "codex_app_server" => {
             send_codex_thread_message(session_id, text, attachments, workspace_dir, None, None)
                 .await?;
             Ok(Value::Null)
         }
-        runtime_id if provider_session_send_uses_owner_bridge(runtime_id) => {
+        "owner_bridge" => {
             let _ = app;
             let data_dir = ensure_data_dir()?;
             let trimmed = text.trim().to_string();
@@ -780,9 +828,14 @@ pub async fn send_provider_session_message(
             )?;
             Ok(Value::Null)
         }
+        "none" | "unsupported" => Err(format!(
+            "Provider '{}' has no session send implementation",
+            provider.id
+        )),
         _ => Err(format!(
-            "Provider runtime '{}' has no session send implementation",
-            provider.runtime_id
+            "Provider '{}' has unsupported session send access '{}'",
+            provider.id,
+            provider_session_send_access(&provider)
         )),
     }
 }
@@ -945,8 +998,8 @@ pub async fn start_provider_session_stream(
     let generation = provider_session_stream_generation();
     let my_generation = generation.fetch_add(1, Ordering::SeqCst) + 1;
 
-    match provider.runtime_id.as_str() {
-        "codex" => {
+    match provider_session_stream_access(&provider).as_str() {
+        "codex_thread_jsonl" => {
             let mut cursor = cursor
                 .and_then(|value| serde_json::from_value::<CodexThreadCursor>(value).ok())
                 .unwrap_or_default();
@@ -977,9 +1030,10 @@ pub async fn start_provider_session_stream(
             });
             Ok(())
         }
-        "claude" => Ok(()),
+        "none" => Ok(()),
         other => Err(format!(
-            "Provider runtime '{other}' has no session implementation"
+            "Provider '{}' has unsupported session stream access '{}'",
+            provider.id, other
         )),
     }
 }
@@ -992,11 +1046,11 @@ pub async fn stop_provider_session_stream(
     let provider = require_runtime_provider(&provider_id)?;
     let _ = session_id;
     provider_session_stream_generation().fetch_add(1, Ordering::SeqCst);
-    match provider.runtime_id.as_str() {
-        "codex" => Ok(()),
-        "claude" => Ok(()),
+    match provider_session_stream_access(&provider).as_str() {
+        "codex_thread_jsonl" | "none" => Ok(()),
         other => Err(format!(
-            "Provider runtime '{other}' has no session implementation"
+            "Provider '{}' has unsupported session stream access '{}'",
+            provider.id, other
         )),
     }
 }
@@ -1007,7 +1061,8 @@ mod tests {
         archive_provider_session_via_owner_bridge,
         list_provider_sessions_via_owner_bridge_with_timeout,
         owner_bridge_archive_error_allows_sidecar, persist_provider_session_archived_state,
-        provider_session_read_uses_owner_bridge, provider_session_send_uses_owner_bridge,
+        provider_session_list_access, provider_session_read_access, provider_session_send_access,
+        provider_session_stream_access,
         send_provider_session_message_via_owner_bridge,
         send_provider_session_message_via_owner_bridge_with_retry, ComposerAttachment,
     };
@@ -1026,17 +1081,26 @@ mod tests {
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn codex_provider_session_reads_use_owner_bridge() {
-        assert!(provider_session_read_uses_owner_bridge("codex"));
-        assert!(!provider_session_read_uses_owner_bridge("claude"));
-        assert!(provider_session_read_uses_owner_bridge("overlay-tool"));
-    }
+    fn provider_session_routes_are_declared_by_manifest_capabilities() {
+        let providers = provider_metadata_from_raw("", None).expect("metadata");
+        let codex = providers
+            .iter()
+            .find(|provider| provider.id == "codex")
+            .expect("codex provider");
+        let claude = providers
+            .iter()
+            .find(|provider| provider.id == "claude")
+            .expect("claude provider");
 
-    #[test]
-    fn claude_provider_session_send_uses_owner_bridge() {
-        assert!(!provider_session_send_uses_owner_bridge("codex"));
-        assert!(provider_session_send_uses_owner_bridge("claude"));
-        assert!(provider_session_send_uses_owner_bridge("overlay-tool"));
+        assert_eq!(provider_session_list_access(codex), "codex_threads");
+        assert_eq!(provider_session_read_access(codex), "owner_bridge");
+        assert_eq!(provider_session_send_access(codex), "codex_app_server");
+        assert_eq!(provider_session_stream_access(codex), "codex_thread_jsonl");
+
+        assert_eq!(provider_session_list_access(claude), "claude_projects");
+        assert_eq!(provider_session_read_access(claude), "claude_project");
+        assert_eq!(provider_session_send_access(claude), "owner_bridge");
+        assert_eq!(provider_session_stream_access(claude), "none");
     }
 
     #[test]

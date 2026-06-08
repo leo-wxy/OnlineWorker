@@ -598,6 +598,45 @@ async def test_event_approval_uses_provider_from_payload_for_claude(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_event_approval_mirrored_only_does_not_send_telegram_or_take_control(monkeypatch):
+    state = make_state_with_owner(
+        threads={"tid-001": ThreadInfo(thread_id="tid-001", topic_id=999, archived=False)}
+    )
+    state.storage.workspaces["proj"].tool = "claude"
+
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    bot.edit_message_reply_markup = AsyncMock()
+
+    approval_mock = AsyncMock()
+    monkeypatch.setattr("bot.events.send_approval_to_telegram", approval_mock)
+
+    handler = make_event_handler(state, bot, -100123456789)
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "daemon-001",
+            "message": {
+                "method": "item/commandExecution/requestApproval",
+                "id": "req-claude-1",
+                "params": {
+                    "threadId": "tid-001",
+                    "command": "git remote get-url origin",
+                    "reason": "检查 remote",
+                    "_provider": "claude",
+                    "_mirroredOnly": True,
+                },
+            },
+        },
+    )
+
+    approval_mock.assert_not_awaited()
+    bot.send_message.assert_not_called()
+    bot.edit_message_reply_markup.assert_not_called()
+    assert state.pending_approvals == {}
+
+
+@pytest.mark.asyncio
 async def test_event_approval_records_codex_interruption_on_current_run(monkeypatch):
     state = make_state_with_owner(
         threads={"tid-001": ThreadInfo(thread_id="tid-001", topic_id=999, archived=False)}

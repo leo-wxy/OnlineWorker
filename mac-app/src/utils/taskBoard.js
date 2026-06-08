@@ -49,6 +49,10 @@ function isUuidLike(value) {
   );
 }
 
+function isTruncatedUuidLike(value) {
+  return /^[0-9a-f]{8}(?:-[0-9a-f]{1,4}){1,4}$/i.test(normalizedString(value));
+}
+
 function isLowSignalTitleText(value) {
   const text = normalizedString(value).toLowerCase();
   if (!text) {
@@ -62,7 +66,13 @@ function isLowSignalTitleText(value) {
 
 function isPlaceholderTitle(title, sessionId) {
   const text = normalizedString(title);
-  return !text || text === normalizedString(sessionId) || isUuidLike(text) || isLowSignalTitleText(text);
+  return (
+    !text ||
+    text === normalizedString(sessionId) ||
+    isUuidLike(text) ||
+    isTruncatedUuidLike(text) ||
+    isLowSignalTitleText(text)
+  );
 }
 
 function sessionTitle(session) {
@@ -164,10 +174,16 @@ function previewText(value) {
 
 function meaningfulPreview(preview, title, fallback) {
   const text = normalizedString(preview);
-  if (text) {
+  if (text && text !== normalizedString(title)) {
     return text;
   }
-  return normalizedString(fallback) || null;
+  const fallbackText = normalizedString(fallback);
+  return fallbackText && fallbackText !== normalizedString(title) ? fallbackText : null;
+}
+
+function uniquePreview(preview, title) {
+  const text = normalizedString(preview);
+  return text && text !== normalizedString(title) ? text : null;
 }
 
 function activityStatusReason(activity, fallback) {
@@ -303,10 +319,12 @@ export function buildTaskBoardModel({
         : pinned
           ? "关注中"
           : "";
-    const preview =
+    const preview = uniquePreview(
       normalizedString(activityPreview(activity)) ||
-      sessionPreview(session) ||
-      activityPreviewFallback({ ...activity, sessionId }, title);
+        sessionPreview(session) ||
+        activityPreviewFallback({ ...activity, sessionId }, title),
+      title,
+    );
 
     return [{
       id: key,
@@ -325,6 +343,7 @@ export function buildTaskBoardModel({
       attentionKind: normalizedString(activity.attentionKind).toLowerCase(),
       requestId: normalizedString(activity.requestId),
       approvalSource: normalizedString(activity.approvalSource),
+      mirroredOnly: activity.mirroredOnly === true,
       running,
       pinned,
       statusReason: activityStatusReason(activity, fallbackReason),
@@ -360,7 +379,7 @@ export function buildTaskBoardModel({
       ? recentActivity?.highlightedThreadPreview || sessionPreview(session)
       : sessionPreview(session);
     const preview = pinned
-      ? normalizedString(rawPreview) || null
+      ? uniquePreview(rawPreview, title)
       : meaningfulPreview(rawPreview, title, "");
 
     tasks.push({
@@ -378,6 +397,7 @@ export function buildTaskBoardModel({
       attentionKind: "",
       requestId: "",
       approvalSource: "",
+      mirroredOnly: false,
       running,
       pinned,
       statusReason: needsAttention ? fallbackReason : "",
@@ -402,12 +422,13 @@ export function buildTaskBoardModel({
       workspace: activeWorkspacePath || recentActivity?.activeWorkspaceName || "",
       workspaceId: "",
       workspacePath: activeWorkspacePath || "",
-      preview: recentActivity?.highlightedThreadPreview || null,
+      preview: uniquePreview(recentActivity?.highlightedThreadPreview, recentActivity?.highlightedThreadPreview || activeSessionId),
       archived: false,
       needsAttention: false,
       attentionKind: "",
       requestId: "",
       approvalSource: "",
+      mirroredOnly: false,
       running: true,
       pinned: pinnedKeys.has(key),
       statusReason: "正在执行",

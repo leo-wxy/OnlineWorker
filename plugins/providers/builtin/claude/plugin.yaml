@@ -40,6 +40,11 @@ provider:
       telegram: true
       external_cli: http_proxy
       wrapper: ow-claude
+    session_access:
+      list: claude_projects
+      read: claude_project
+      send: owner_bridge
+      stream: none
   process:
     cleanup_matchers: []
   health: {}

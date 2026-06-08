@@ -1282,7 +1282,7 @@ async def test_claude_adapter_permission_request_roundtrip_via_hook_payload():
         },
     }
 
-    response_task = asyncio.create_task(adapter.handle_hook_payload(payload))
+    response_task = asyncio.create_task(adapter.handle_hook_payload(payload, managed_interactions=True))
     await asyncio.sleep(0)
 
     assert len(events) == 1
@@ -1340,7 +1340,7 @@ async def test_claude_adapter_pretool_allow_always_applies_session_tool_allowlis
         },
     }
 
-    response_task = asyncio.create_task(adapter.handle_hook_payload(payload))
+    response_task = asyncio.create_task(adapter.handle_hook_payload(payload, managed_interactions=True))
     await asyncio.sleep(0)
 
     request_id = events[0][1]["message"]["params"]["request_id"]
@@ -1368,7 +1368,7 @@ async def test_claude_adapter_pretool_allow_always_applies_session_tool_allowlis
         }
     }
 
-    auto_allowed = await adapter.handle_hook_payload(payload)
+    auto_allowed = await adapter.handle_hook_payload(payload, managed_interactions=True)
     assert auto_allowed == {
         "hookSpecificOutput": {
             "hookEventName": "PermissionRequest",
@@ -1417,7 +1417,7 @@ async def test_claude_adapter_permission_request_includes_last_prompt_from_hook_
         },
     }
 
-    response_task = asyncio.create_task(adapter.handle_hook_payload(payload))
+    response_task = asyncio.create_task(adapter.handle_hook_payload(payload, managed_interactions=True))
     await asyncio.sleep(0)
 
     event_params = events[0][1]["message"]["params"]
@@ -1466,7 +1466,7 @@ async def test_claude_adapter_ask_user_question_roundtrip_with_multiselect():
         },
     }
 
-    response_task = asyncio.create_task(adapter.handle_hook_payload(payload))
+    response_task = asyncio.create_task(adapter.handle_hook_payload(payload, managed_interactions=True))
     await asyncio.sleep(0)
 
     assert len(events) == 1
@@ -1530,10 +1530,11 @@ async def test_claude_adapter_start_hook_bridge_writes_settings_and_send_argv(tm
 
     pretool_hooks = settings["hooks"]["PreToolUse"]
     notification_hooks = settings["hooks"]["Notification"]
-    assert pretool_hooks[0]["matcher"] == "Bash|Edit|Write|AskUserQuestion|ExitPlanMode"
+    assert pretool_hooks[0]["matcher"] == "Bash|Edit|MultiEdit|Write|Read|AskUserQuestion|ExitPlanMode"
     assert pretool_hooks[0]["hooks"][0]["timeout"] == 86400
     assert notification_hooks[0]["hooks"][0]["timeout"] == 86400
     assert "--claude-hook-bridge" in pretool_hooks[0]["hooks"][0]["command"]
+    assert "--claude-hook-managed" in pretool_hooks[0]["hooks"][0]["command"]
     assert str(tmp_path) in pretool_hooks[0]["hooks"][0]["command"]
 
     argv = adapter._build_send_argv("ses-1", "继续")

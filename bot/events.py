@@ -1204,6 +1204,13 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
     async def _handle_approval(ctx: EventContext) -> None:
         """item/commandExecution/requestApproval"""
         approval_params = ctx.event_params
+        if approval_params.get("_mirroredOnly") is True:
+            logger.info(
+                "[approval_request] 外部 CLI 权限请求仅镜像到看板，不接管授权 thread=%s request=%s",
+                ctx.thread_id or approval_params.get("threadId") or "N/A",
+                approval_params.get("request_id") or ctx.msg.get("id") or "N/A",
+            )
+            return
         request_id = approval_params.get("request_id") or ctx.msg.get("id")
         thread_id = ctx.thread_id
         if not thread_id:
@@ -1280,6 +1287,13 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
 
     async def _handle_question(ctx: EventContext) -> None:
         """question/asked"""
+        if ctx.event_params.get("_mirroredOnly") is True:
+            logger.info(
+                "[question] 外部 CLI question 仅镜像到看板，不接管输入 thread=%s question=%s",
+                ctx.thread_id or ctx.event_params.get("threadId") or "N/A",
+                ctx.event_params.get("questionId") or "N/A",
+            )
+            return
         question_request = _parse_provider_question_request(
             ctx.event.provider,
             ctx.event_params,

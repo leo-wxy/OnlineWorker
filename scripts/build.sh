@@ -11,6 +11,7 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLUGIN_STAGING_ROOT="$PROJECT_ROOT/mac-app/src-tauri/provider-plugins"
 NOTIFICATION_PLUGIN_STAGING_ROOT="$PROJECT_ROOT/mac-app/src-tauri/notification-plugins"
+HOOK_RELAY_STAGING_ROOT="$PROJECT_ROOT/mac-app/src-tauri/hook-relays"
 BUNDLE_ROOT="$PROJECT_ROOT/mac-app/src-tauri/target/release/bundle"
 
 cleanup_previous_bundle_outputs() {
@@ -75,6 +76,14 @@ stage_notification_plugins() {
 		fi
 		cp -R "$source" "$NOTIFICATION_PLUGIN_STAGING_ROOT/$(basename "$source")"
 	done
+}
+
+stage_hook_relays() {
+	mkdir -p "$HOOK_RELAY_STAGING_ROOT"
+	find "$HOOK_RELAY_STAGING_ROOT" -mindepth 1 -maxdepth 1 -type f ! -name '.gitkeep' -delete
+	cp "$PROJECT_ROOT/plugins/providers/builtin/claude/python/claude_hook_relay.py" \
+		"$HOOK_RELAY_STAGING_ROOT/claude_hook_relay.py"
+	chmod +x "$HOOK_RELAY_STAGING_ROOT/claude_hook_relay.py"
 }
 
 ensure_pnpm() {
@@ -155,6 +164,7 @@ ensure_pnpm
 hash -r
 stage_provider_plugins
 stage_notification_plugins
+stage_hook_relays
 cd "$PROJECT_ROOT/mac-app"
 if [ ! -x "$PROJECT_ROOT/mac-app/node_modules/.bin/tauri" ]; then
 	echo "=== Installing mac-app dependencies ==="

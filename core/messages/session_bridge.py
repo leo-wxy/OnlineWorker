@@ -19,6 +19,7 @@ def _event_text(event: SessionEvent) -> str:
         payload.get("text")
         or payload.get("delta")
         or payload.get("message")
+        or payload.get("command")
         or payload.get("reason")
         or payload.get("error")
     )
@@ -67,7 +68,13 @@ def message_event_from_session_event(event: SessionEvent) -> MessageEvent:
     request_id = _text(payload.get("request_id"))
     item_id = _text(payload.get("item_id") or payload.get("id"))
     text = _event_text(event)
-    title = _text(payload.get("title"))
+    title = _text(
+        payload.get("title")
+        or payload.get("taskSummary")
+        or payload.get("prompt")
+        or payload.get("user_prompt")
+        or payload.get("userPrompt")
+    )
     status = _text(payload.get("status"))
     reason = _text(payload.get("reason") or semantic_payload.get("reason"))
     dedupe_parts = [
@@ -100,6 +107,8 @@ def message_event_from_session_event(event: SessionEvent) -> MessageEvent:
         public_payload["reason"] = reason
     if request_id:
         public_payload["requestId"] = request_id
+    if payload.get("_mirroredOnly") is True:
+        public_payload["mirroredOnly"] = True
     if kind == "approval.requested":
         command = _text(payload.get("command"))
         approval_source = _text(payload.get("approval_source") or event.raw_method)
@@ -116,6 +125,9 @@ def message_event_from_session_event(event: SessionEvent) -> MessageEvent:
             public_payload["message"] = "需要处理授权请求"
     if kind == "question.requested":
         question = _text(payload.get("question") or payload.get("header"))
+        prompt = _text(payload.get("prompt") or payload.get("user_prompt") or payload.get("userPrompt"))
+        if prompt:
+            public_payload["prompt"] = prompt
         public_payload["message"] = question or "需要回答问题"
 
     return create_message_event(

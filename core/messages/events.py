@@ -91,6 +91,7 @@ class SessionActivity:
     attention_kind: str = ""
     request_id: str = ""
     approval_source: str = ""
+    mirrored_only: bool = False
     last_user_message: str = ""
     last_assistant_message: str = ""
     last_final_message: str = ""
@@ -109,6 +110,7 @@ class SessionActivity:
             "attentionKind": self.attention_kind,
             "requestId": self.request_id,
             "approvalSource": self.approval_source,
+            "mirroredOnly": self.mirrored_only,
             "lastUserMessage": self.last_user_message,
             "lastAssistantMessage": self.last_assistant_message,
             "lastFinalMessage": self.last_final_message,

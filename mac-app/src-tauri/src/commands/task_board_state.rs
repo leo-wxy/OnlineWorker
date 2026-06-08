@@ -47,6 +47,8 @@ pub struct TaskBoardSessionActivity {
     pub request_id: String,
     #[serde(default)]
     pub approval_source: String,
+    #[serde(default)]
+    pub mirrored_only: bool,
     pub last_user_message: String,
     pub last_assistant_message: String,
     pub last_final_message: String,
@@ -575,7 +577,7 @@ mod tests {
     #[test]
     fn parses_task_board_activity_stream_activity_with_approval_metadata() {
         let event = parse_task_board_activity_stream_event(
-            r#"{"ok":true,"kind":"activity","activity":{"providerId":"claude","workspaceId":"claude:/tmp/project","workspacePath":"/tmp/project","sessionId":"thread-a","title":"Run tests","status":"needs_attention","attentionReason":"需要处理授权请求","attentionKind":"approval","requestId":"req-1","approvalSource":"item/commandExecution/requestApproval","lastUserMessage":"Run tests","lastAssistantMessage":"","lastFinalMessage":"","lastEventKind":"approval.requested","updatedAt":20.0}}"#,
+            r#"{"ok":true,"kind":"activity","activity":{"providerId":"claude","workspaceId":"claude:/tmp/project","workspacePath":"/tmp/project","sessionId":"thread-a","title":"Run tests","status":"needs_attention","attentionReason":"需要处理授权请求","attentionKind":"approval","requestId":"req-1","approvalSource":"item/commandExecution/requestApproval","mirroredOnly":true,"lastUserMessage":"Run tests","lastAssistantMessage":"","lastFinalMessage":"","lastEventKind":"approval.requested","updatedAt":20.0}}"#,
         )
         .expect("event");
 
@@ -586,6 +588,7 @@ mod tests {
             activity.approval_source,
             "item/commandExecution/requestApproval"
         );
+        assert!(activity.mirrored_only);
     }
 
     #[test]

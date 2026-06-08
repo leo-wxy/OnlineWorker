@@ -23,6 +23,7 @@ export interface TaskBoardSessionActivity {
   attentionKind: string;
   requestId: string;
   approvalSource: string;
+  mirroredOnly?: boolean;
   lastUserMessage: string;
   lastAssistantMessage: string;
   lastFinalMessage: string;
@@ -45,6 +46,7 @@ export interface TaskBoardTask {
   attentionKind: string;
   requestId: string;
   approvalSource: string;
+  mirroredOnly: boolean;
   running: boolean;
   pinned: boolean;
   statusReason: string;
