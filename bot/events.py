@@ -1775,12 +1775,27 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 except Exception as e:
                     logger.error(f"[streaming] edit error status 失败：{e}")
             elif not st.buffer or st.buffer.strip() == "⏳ 思考中...":
-                # 没有收到任何有效内容，把占位消息改为"✅ 已完成"，让用户知道任务执行完了
-                try:
-                    await _do_edit(thread_id, st, tg_empty_turn_completed_text())
-                    logger.info(f"[streaming] 空 buffer turn 完成，edit 为已完成 thread={thread_id[:8]} msg_id={st.message_id}")
-                except Exception as e:
-                    logger.debug(f"[streaming] edit 已完成失败 thread={thread_id[:8]}: {e}")
+                if is_tui_mirror_completion:
+                    # TUI mirror may synthesize a completion after an idle
+                    # commentary poll. If no visible content arrived, removing
+                    # the placeholder is less noisy than sending "completed".
+                    try:
+                        await bot.delete_message(
+                            chat_id=group_chat_id,
+                            message_id=st.message_id,
+                        )
+                        logger.info(
+                            f"[streaming] tui-mirror 空 turn 完成，删除占位 thread={thread_id[:8]} msg_id={st.message_id}"
+                        )
+                    except Exception as e:
+                        logger.debug(f"[streaming] 删除 tui-mirror 空占位失败 thread={thread_id[:8]}: {e}")
+                else:
+                    # 没有收到任何有效内容，把占位消息改为"✅ 已完成"，让用户知道任务执行完了
+                    try:
+                        await _do_edit(thread_id, st, tg_empty_turn_completed_text())
+                        logger.info(f"[streaming] 空 buffer turn 完成，edit 为已完成 thread={thread_id[:8]} msg_id={st.message_id}")
+                    except Exception as e:
+                        logger.debug(f"[streaming] edit 已完成失败 thread={thread_id[:8]}: {e}")
             else:
                 streamed_reply_text = _completed_reply_text_from_stream(st)
                 if not streamed_reply_text:
@@ -1788,13 +1803,18 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                     # processing placeholder instead of a user-visible final
                     # reply. Treat them like an empty completion so they do not
                     # publish bogus final text or completion notifications.
-                    try:
-                        await _do_edit(thread_id, st, tg_empty_turn_completed_text())
+                    if is_tui_mirror_completion:
                         logger.info(
-                            f"[streaming] 空 buffer turn 完成，edit 为已完成 thread={thread_id[:8]} msg_id={st.message_id}"
+                            f"[streaming] tui-mirror commentary-only turn 完成，保留当前消息 thread={thread_id[:8]} msg_id={st.message_id}"
                         )
-                    except Exception as e:
-                        logger.debug(f"[streaming] edit 已完成失败 thread={thread_id[:8]}: {e}")
+                    else:
+                        try:
+                            await _do_edit(thread_id, st, tg_empty_turn_completed_text())
+                            logger.info(
+                                f"[streaming] 空 buffer turn 完成，edit 为已完成 thread={thread_id[:8]} msg_id={st.message_id}"
+                            )
+                        except Exception as e:
+                            logger.debug(f"[streaming] edit 已完成失败 thread={thread_id[:8]}: {e}")
                 else:
                     completed_reply_text = streamed_reply_text
                     if _looks_like_markdown_final_text(streamed_reply_text):

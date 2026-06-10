@@ -1713,7 +1713,7 @@ async def test_tui_mirror_final_item_sends_summary_and_turn_completed_dedupes(mo
 
 
 @pytest.mark.asyncio
-async def test_tui_mirror_commentary_idle_completed_does_not_send_fallback_notification():
+async def test_tui_mirror_commentary_idle_completed_keeps_commentary_without_completed_message():
     ws = WorkspaceInfo(
         name="onlineWorker",
         path="/Users/example/Projects/onlineWorker",
@@ -1759,6 +1759,60 @@ async def test_tui_mirror_commentary_idle_completed_does_not_send_fallback_notif
     )
 
     assert "tid-commentary-mirror" not in state.streaming_turns
+    bot.edit_message_text.assert_not_awaited()
+    bot.delete_message.assert_not_awaited()
+    assert notifications.events == []
+
+
+@pytest.mark.asyncio
+async def test_tui_mirror_placeholder_only_completed_deletes_placeholder_without_completed_message():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-empty-placeholder"] = ThreadInfo(
+        thread_id="tid-empty-placeholder",
+        topic_id=3794,
+        preview="继续会话",
+        archived=False,
+        streaming_msg_id=5012,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    state.streaming_turns["tid-empty-placeholder"] = StreamingTurn(
+        message_id=5012,
+        topic_id=3794,
+        buffer="",
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "tid-empty-placeholder",
+                    "turn": {"status": "completed", "source": "tui-mirror"},
+                },
+            },
+        },
+    )
+
+    assert "tid-empty-placeholder" not in state.streaming_turns
+    bot.edit_message_text.assert_not_awaited()
+    bot.delete_message.assert_awaited_once_with(chat_id=GROUP_CHAT_ID, message_id=5012)
     assert notifications.events == []
 
 
