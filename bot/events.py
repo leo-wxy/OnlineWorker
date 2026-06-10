@@ -67,6 +67,7 @@ from bot.handlers.workspace import (
     _make_thread_topic_name,
     _replay_thread_history,
 )
+from bot.handlers.workspace_helpers import workspace_path_for_topic_hint
 from bot.event_helpers import (
     build_incomplete_turn_text as _build_incomplete_turn_text,
     codex_semantic_kind as _codex_semantic_kind,
@@ -152,6 +153,7 @@ async def _materialize_thread_topic_if_needed(
             ws_info.name,
             thread_info.preview,
             thread_id,
+            workspace_path=workspace_path_for_topic_hint(ws_info),
         )
         topic = await bot.create_forum_topic(chat_id=group_chat_id, name=topic_name)
         topic_id = topic.message_thread_id
@@ -1096,6 +1098,24 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 return False
         return False
 
+    async def _drop_empty_streaming_message(thread_id: str, st: StreamingTurn, *, reason: str) -> None:
+        if st.placeholder_deleted and st.buffer.strip() and st.buffer.strip() != "⏳ 思考中...":
+            logger.info(
+                f"[streaming] {reason}，保留当前消息 thread={thread_id[:8]} msg_id={st.message_id}"
+            )
+            return
+
+        try:
+            await bot.delete_message(
+                chat_id=group_chat_id,
+                message_id=st.message_id,
+            )
+            logger.info(
+                f"[streaming] {reason}，删除占位 thread={thread_id[:8]} msg_id={st.message_id}"
+            )
+        except Exception as e:
+            logger.debug(f"[streaming] {reason}，删除占位失败 thread={thread_id[:8]}: {e}")
+
     async def _send_formatted_final_reply(
         thread_id: str,
         topic_id: int,
@@ -1143,10 +1163,10 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             st.throttle_task = None
         st.completed = True
 
-        # 旧 turn 还停留在占位消息时，先把它收口，避免“思考中...”悬挂。
+        # 旧 turn 还停留在占位消息时只清理占位，不能用“已完成”覆盖正文。
         if not st.placeholder_deleted or not st.buffer.strip() or st.buffer.strip() == "⏳ 思考中...":
             try:
-                await _do_edit(thread_id, st, tg_empty_turn_completed_text())
+                await _drop_empty_streaming_message(thread_id, st, reason="被替换旧 turn 空完成")
             except Exception as e:
                 logger.debug(f"[streaming] 收口被替换旧 turn 失败 thread={thread_id[:8]}: {e}")
 
@@ -1396,6 +1416,19 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         if not thread_id:
             return
 
+        if (
+            ctx.event.provider == "codex"
+            and turn_id
+            and _codex_final_reply_already_synced(thread_id, turn_id)
+        ):
+            codex_state.mark_tui_turn_completed(state, thread_id)
+            logger.info(
+                "[streaming] 跳过已同步 codex turn/started duplicate thread=%s turn=%s",
+                thread_id[:8],
+                turn_id[:12],
+            )
+            return
+
         topic_id = _resolve_topic_id(state, ctx.ws_daemon_id, thread_id, ctx.event_params)
         if topic_id is None:
             if not _provider_should_materialize_unbound_thread_topic(state, thread_id):
@@ -1637,6 +1670,15 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                         except Exception as e:
                             logger.error(f"[event→TG] fallback 发 agentMessage 失败：{e}")
             if delivered_to_tg and phase == "final_answer" and ws is not None and ws.tool == "codex":
+                if event_turn_id:
+                    current_run = codex_state.get_current_run(state, thread_id)
+                    if current_run is None or current_run.turn_id != event_turn_id:
+                        codex_state.start_run(
+                            state,
+                            workspace_id=ctx.ws_daemon_id or ws.daemon_workspace_id,
+                            thread_id=thread_id,
+                            turn_id=event_turn_id,
+                        )
                 remember_codex_tg_synced_final_reply(
                     state,
                     thread_id,
@@ -1776,26 +1818,9 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                     logger.error(f"[streaming] edit error status 失败：{e}")
             elif not st.buffer or st.buffer.strip() == "⏳ 思考中...":
                 if is_tui_mirror_completion:
-                    # TUI mirror may synthesize a completion after an idle
-                    # commentary poll. If no visible content arrived, removing
-                    # the placeholder is less noisy than sending "completed".
-                    try:
-                        await bot.delete_message(
-                            chat_id=group_chat_id,
-                            message_id=st.message_id,
-                        )
-                        logger.info(
-                            f"[streaming] tui-mirror 空 turn 完成，删除占位 thread={thread_id[:8]} msg_id={st.message_id}"
-                        )
-                    except Exception as e:
-                        logger.debug(f"[streaming] 删除 tui-mirror 空占位失败 thread={thread_id[:8]}: {e}")
+                    await _drop_empty_streaming_message(thread_id, st, reason="tui-mirror 空 turn 完成")
                 else:
-                    # 没有收到任何有效内容，把占位消息改为"✅ 已完成"，让用户知道任务执行完了
-                    try:
-                        await _do_edit(thread_id, st, tg_empty_turn_completed_text())
-                        logger.info(f"[streaming] 空 buffer turn 完成，edit 为已完成 thread={thread_id[:8]} msg_id={st.message_id}")
-                    except Exception as e:
-                        logger.debug(f"[streaming] edit 已完成失败 thread={thread_id[:8]}: {e}")
+                    await _drop_empty_streaming_message(thread_id, st, reason="空 buffer turn 完成")
             else:
                 streamed_reply_text = _completed_reply_text_from_stream(st)
                 if not streamed_reply_text:
@@ -1808,13 +1833,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                             f"[streaming] tui-mirror commentary-only turn 完成，保留当前消息 thread={thread_id[:8]} msg_id={st.message_id}"
                         )
                     else:
-                        try:
-                            await _do_edit(thread_id, st, tg_empty_turn_completed_text())
-                            logger.info(
-                                f"[streaming] 空 buffer turn 完成，edit 为已完成 thread={thread_id[:8]} msg_id={st.message_id}"
-                            )
-                        except Exception as e:
-                            logger.debug(f"[streaming] edit 已完成失败 thread={thread_id[:8]}: {e}")
+                        await _drop_empty_streaming_message(thread_id, st, reason="无有效最终正文 turn 完成")
                 else:
                     completed_reply_text = streamed_reply_text
                     if _looks_like_markdown_final_text(streamed_reply_text):
@@ -1968,6 +1987,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             ws_info.name,
             title,
             thread_id,
+            workspace_path=workspace_path_for_topic_hint(ws_info),
         )
 
         try:

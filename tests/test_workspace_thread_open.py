@@ -293,6 +293,8 @@ async def test_open_workspace_uses_provider_workspace_hooks_for_custom_provider(
 
     bot = MagicMock()
     bot.create_forum_topic = AsyncMock(return_value=MagicMock(message_thread_id=7001))
+    bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=7101))
+    bot.pin_chat_message = AsyncMock()
 
     ws_info = await _open_workspace(
         bot=bot,
@@ -305,9 +307,10 @@ async def test_open_workspace_uses_provider_workspace_hooks_for_custom_provider(
     )
 
     assert normalized_calls
-    assert opened_calls == [(adapter, "/tmp/custom", "custom:customWorker")]
+    assert opened_calls == [(adapter, "/tmp/custom", "custom:/tmp/custom")]
     assert list(ws_info.threads.keys()) == ["main-1"]
     assert ws_info.threads["main-1"].is_active is True
+    assert ws_info.header_message_id == 7101
 
 
 @pytest.mark.asyncio
@@ -457,7 +460,9 @@ async def test_thread_open_renames_existing_topic_when_codex_title_changed(monke
     assert call_kwargs["name"] == "[codex/onlineWorker] latest title from sqlite"
     assert ws.threads["tid-1234567890abcdef"].preview == "latest title from sqlite"
     save_storage_mock.assert_called()
-    send_to_group.assert_awaited_once()
+    assert send_to_group.await_count == 2
+    assert send_to_group.await_args_list[0].args[2] == "thread `90abcdef` ✅ 已存在，跳转中。"
+    assert send_to_group.await_args_list[1].args[2] == "路径: /Users/example/Projects/onlineWorker"
 
 
 @pytest.mark.asyncio
@@ -739,10 +744,12 @@ async def test_thread_open_customprovider_status_message_avoids_markdown_parse_r
     await handler.callback(update, context)
 
     send_to_group.assert_awaited()
-    send_args = send_to_group.await_args_list[-1].args
-    send_kwargs = send_to_group.await_args_list[-1].kwargs
-    assert send_args[2] == "✅ thread Ql0W0uPX 新建 topic id=4257"
-    assert "parse_mode" not in send_kwargs
+    status_args = send_to_group.await_args_list[0].args
+    status_kwargs = send_to_group.await_args_list[0].kwargs
+    header_args = send_to_group.await_args_list[1].args
+    assert status_args[2] == "✅ thread Ql0W0uPX 新建 topic id=4257"
+    assert "parse_mode" not in status_kwargs
+    assert header_args[2] == "路径: /Users/example/Projects/onlineWorker"
 
 
 @pytest.mark.asyncio
@@ -1098,6 +1105,7 @@ async def test_thread_open_backfills_claude_local_session(monkeypatch):
     bot = MagicMock()
     bot.create_forum_topic = AsyncMock(return_value=MagicMock(message_thread_id=4567))
     bot.send_message = AsyncMock()
+    bot.pin_chat_message = AsyncMock()
 
     query = MagicMock()
     query.data = make_thread_open_callback_data("claude:onlineWorker", "ses-phase16")
@@ -1119,12 +1127,23 @@ async def test_thread_open_backfills_claude_local_session(monkeypatch):
         ],
         raising=False,
     )
+    replay_mock = AsyncMock(return_value="cursor-1")
     monkeypatch.setattr(
         "bot.handlers.workspace._replay_thread_history",
-        AsyncMock(),
+        replay_mock,
+    )
+    send_to_group = AsyncMock(
+        side_effect=[
+            SimpleNamespace(message_id=7001),
+            SimpleNamespace(message_id=7002),
+        ]
     )
     monkeypatch.setattr(
         "bot.handlers.workspace._send_to_group",
+        send_to_group,
+    )
+    monkeypatch.setattr(
+        "bot.handlers.workspace.send_thread_control_panel",
         AsyncMock(),
     )
     monkeypatch.setattr(
@@ -1138,6 +1157,14 @@ async def test_thread_open_backfills_claude_local_session(monkeypatch):
     call_kwargs = bot.create_forum_topic.await_args.kwargs
     assert call_kwargs["name"] == "[claude/onlineWorker] 继续 claude phase16"
     assert ws.threads["ses-phase16"].preview == "继续 claude phase16"
+    assert ws.threads["ses-phase16"].header_message_id == 7002
+    assert ws.threads["ses-phase16"].history_sync_cursor == "cursor-1"
+    replay_mock.assert_awaited_once()
+    bot.pin_chat_message.assert_awaited_once_with(
+        chat_id=GROUP_CHAT_ID,
+        message_id=7002,
+        disable_notification=True,
+    )
 
 
 @pytest.mark.asyncio

@@ -23,8 +23,32 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 14: Unified Message Event Bus** - Establish a single OnlineWorker message/event bus so Telegram, App sessions, TaskBoard, notifications, approvals, questions, and future surfaces consume the same normalized event stream instead of each owning separate message-handling logic. 14-01 through 14-04 are source verified; fast packaged build/install/restart verification passed after the 14-04 TaskBoard first-paint fix, and the Phase 16 external-ingress follow-up closed the remaining TaskBoard visibility gap.
 - [x] **Phase 15: Bus-Driven Rendering And Approval Command Boundary** - Follow up Phase 14 by migrating heavy first-party renderers onto the bus once the event schema is stable: `15-02` App Session detail live-model migration, `15-03` Telegram edge migration, and `15-04` approval/question command-boundary tightening are source verified.
 - [x] **Phase 16: Provider External Event Ingress** - Add provider-plugin-owned external event ingress for Claude and distribution-provided provider plugins so externally launched sessions can enter the Phase 14 message bus. Claude uses a marker-based global hook merge; OpenCode-compatible listener behavior is reference-only for compatible provider plugins, not a new product surface. Implementation remains scoped to provider plugin directories plus focused tests and generic bus projection fixes.
+- [ ] **Phase 17: Provider Session Core Isolation** - Move provider-private session/workspace parsing and filtering fully behind provider/plugin-owned capabilities so Tauri core, Session Tab, Dashboard/TaskBoard, and Telegram consume one provider-owned source of truth. This phase specifically removes duplicated Claude project parsing/filtering from core and prevents private fields such as Claude `entrypoint` from leaking into provider-neutral surfaces.
 
 ## Phase Details
+
+### Phase 17: Provider Session Core Isolation
+
+**Goal:** Make provider session/workspace behavior fully provider-owned so core/Tauri does not parse provider-private stores, fields, hook payloads, or launch metadata.
+**Requirements:** TBD
+**Depends on:** Phase 16
+**Plans:** 1 plan
+
+Plans:
+- [ ] 17-01: Isolate provider session logic from core
+  - [ ] Inventory provider-specific Tauri/core session logic.
+  - [ ] Define provider-owned session/facts boundary for App, TaskBoard/Dashboard, and Telegram.
+  - [ ] Migrate Claude session/workspace reads behind provider/plugin-owned capabilities.
+  - [ ] Remove duplicated Claude filtering from core.
+  - [ ] Verify App/TG workspace parity for manual CLI sessions, managed sessions, smoke/login failures, and provider-private noise.
+
+Success Criteria (what must be TRUE):
+  1. Core/Tauri no longer reads Claude project jsonl files directly for workspace or session list behavior.
+  2. Claude-specific fields such as `entrypoint` are interpreted only by the Claude provider/plugin layer.
+  3. App Session Tab, TaskBoard/Dashboard recent activity, and Telegram workspace listing share one provider-owned session/workspace truth source.
+  4. Meaningful manual Claude CLI workspaces appear consistently in both App and Telegram.
+  5. Smoke, login-failed, no-assistant CLI noise, and provider-private noise are filtered consistently.
+  6. Focused source tests and installed-app verification pass before closure.
 
 ### Phase 6: Notification Channel Abstraction
 

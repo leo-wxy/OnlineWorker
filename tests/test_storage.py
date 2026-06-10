@@ -28,7 +28,7 @@ def test_load_storage_file_not_exists(tmp_path):
 def test_save_and_load_roundtrip(tmp_path):
     """保存后再加载，数据一致。"""
     path = str(tmp_path / "state.json")
-    ws = WorkspaceInfo(name="proj-a", path="/tmp/proj-a", topic_id=9001)
+    ws = WorkspaceInfo(name="proj-a", path="/tmp/proj-a", topic_id=9001, header_message_id=321)
     storage = AppStorage(
         workspaces={"proj-a": ws},
         active_workspace="proj-a",
@@ -39,9 +39,11 @@ def test_save_and_load_roundtrip(tmp_path):
     assert "proj-a" in loaded.workspaces
     assert loaded.workspaces["proj-a"].path == "/tmp/proj-a"
     assert loaded.workspaces["proj-a"].topic_id is None
+    assert loaded.workspaces["proj-a"].header_message_id == 321
     assert loaded.active_workspace == "proj-a"
     saved = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
     assert "topic_id" not in saved["workspaces"]["proj-a"]
+    assert saved["workspaces"]["proj-a"]["header_message_id"] == 321
 
 
 def test_save_and_load_with_threads(tmp_path):
@@ -53,8 +55,9 @@ def test_save_and_load_with_threads(tmp_path):
         preview="hello",
         archived=False,
         last_tg_user_message_id=7001,
+        header_message_id=8123,
     )
-    ws = WorkspaceInfo(name="proj-b", path="/tmp/proj-b", threads={"tid-001": t})
+    ws = WorkspaceInfo(name="proj-b", path="/tmp/proj-b", header_message_id=7002, threads={"tid-001": t})
     storage = AppStorage(workspaces={"proj-b": ws}, active_workspace="proj-b")
     save_storage(storage, path)
 
@@ -67,9 +70,13 @@ def test_save_and_load_with_threads(tmp_path):
     assert t2.preview == "hello"
     assert t2.archived is False
     assert t2.last_tg_user_message_id == 7001
+    assert t2.header_message_id == 8123
+    assert loaded_ws.header_message_id == 7002
     saved = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
     assert "topic_id" not in saved["workspaces"]["proj-b"]
     assert "topic_id" not in saved["workspaces"]["proj-b"]["threads"]["tid-001"]
+    assert saved["workspaces"]["proj-b"]["header_message_id"] == 7002
+    assert saved["workspaces"]["proj-b"]["threads"]["tid-001"]["header_message_id"] == 8123
 
 
 def test_save_atomic_via_tmp(tmp_path):

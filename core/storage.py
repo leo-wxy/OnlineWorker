@@ -19,6 +19,7 @@ class ThreadInfo:
     archived: bool = False
     streaming_msg_id: Optional[int] = None
     last_tg_user_message_id: Optional[int] = None
+    header_message_id: Optional[int] = None
     history_sync_cursor: Optional[str] = None
     is_active: bool = False
     source: str = "unknown"
@@ -34,6 +35,7 @@ class WorkspaceInfo:
     # im_routes.sqlite3 and are intentionally not serialized back to JSON.
     topic_id: Optional[int] = None
     daemon_workspace_id: Optional[str] = None
+    header_message_id: Optional[int] = None
     threads: dict = field(default_factory=dict)
     _legacy_active_thread_id: Optional[str] = field(default=None, repr=False)
 
@@ -56,6 +58,7 @@ def _thread_info_from_dict(d: dict) -> ThreadInfo:
         archived=d.get("archived", False),
         streaming_msg_id=d.get("streaming_msg_id"),
         last_tg_user_message_id=d.get("last_tg_user_message_id"),
+        header_message_id=d.get("header_message_id"),
         history_sync_cursor=d.get("history_sync_cursor"),
         is_active=d.get("is_active", False),
         source=str(d.get("source") or "unknown"),
@@ -69,6 +72,7 @@ def _thread_info_to_dict(t: ThreadInfo) -> dict:
         "archived": t.archived,
         "streaming_msg_id": t.streaming_msg_id,
         "last_tg_user_message_id": t.last_tg_user_message_id,
+        "header_message_id": t.header_message_id,
         "history_sync_cursor": t.history_sync_cursor,
         "is_active": t.is_active,
         "source": t.source,
@@ -91,6 +95,7 @@ def _workspace_info_from_dict(storage_key: str, d: dict) -> WorkspaceInfo:
         tool=d.get("tool") or _infer_tool_from_storage_key(storage_key),
         topic_id=d.get("topic_id"),
         daemon_workspace_id=d.get("daemon_workspace_id"),
+        header_message_id=d.get("header_message_id"),
         threads=threads,
     )
     legacy_tid = d.get("active_thread_id")
@@ -105,6 +110,7 @@ def _workspace_info_to_dict(ws: WorkspaceInfo) -> dict:
         "path": ws.path,
         "tool": ws.tool,
         "daemon_workspace_id": ws.daemon_workspace_id,
+        "header_message_id": ws.header_message_id,
         "threads": {
             tid: _thread_info_to_dict(t)
             for tid, t in ws.threads.items()

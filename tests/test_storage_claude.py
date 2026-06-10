@@ -612,7 +612,7 @@ def test_query_claude_active_session_ids_filters_single_turn_login_failed_sessio
     assert result == {"ses-real"}
 
 
-def test_list_claude_threads_by_cwd_filters_plain_cli_sessions(tmp_path):
+def test_list_claude_threads_by_cwd_keeps_meaningful_cli_sessions(tmp_path):
     projects_dir = tmp_path / "projects"
     cwd = "/Users/example/Projects/onlineWorker"
 
@@ -680,8 +680,9 @@ def test_list_claude_threads_by_cwd_filters_plain_cli_sessions(tmp_path):
         limit=20,
     )
 
-    assert [item["id"] for item in result] == ["ses-sdk"]
+    assert [item["id"] for item in result] == ["ses-sdk", "ses-cli"]
     assert result[0]["preview"] == "现在可以了么？"
+    assert result[1]["preview"] == "who are you"
 
 
 def test_list_claude_threads_by_cwd_filters_single_turn_smoke_prompt_sessions(tmp_path):
@@ -760,7 +761,7 @@ def test_list_claude_threads_by_cwd_filters_single_turn_smoke_prompt_sessions(tm
     assert [item["id"] for item in result] == ["ses-real"]
 
 
-def test_query_claude_active_session_ids_filters_plain_cli_sessions(tmp_path):
+def test_query_claude_active_session_ids_keeps_meaningful_cli_sessions(tmp_path):
     projects_dir = tmp_path / "projects"
     cwd = "/Users/example/Projects/onlineWorker"
 
@@ -814,7 +815,7 @@ def test_query_claude_active_session_ids_filters_plain_cli_sessions(tmp_path):
         history_path=str(tmp_path / "empty-history.jsonl"),
     )
 
-    assert result == {"ses-sdk"}
+    assert result == {"ses-cli", "ses-sdk"}
 
 
 def test_scan_claude_session_cwds_filters_noise_workspace_paths(tmp_path):
@@ -1182,7 +1183,7 @@ def test_list_claude_threads_by_cwd_skips_smoke_prompt_and_login_failed_sessions
     assert [item["id"] for item in result] == ["ses-real"]
 
 
-def test_list_claude_threads_by_cwd_skips_plain_cli_project_sessions(tmp_path):
+def test_list_claude_threads_by_cwd_keeps_plain_cli_project_sessions_with_assistant_turns(tmp_path):
     projects_dir = tmp_path / "projects"
     history_path = tmp_path / "history.jsonl"
     cwd = "/Users/example/Projects/onlineWorker"
@@ -1240,7 +1241,7 @@ def test_list_claude_threads_by_cwd_skips_plain_cli_project_sessions(tmp_path):
         limit=20,
     )
 
-    assert [item["id"] for item in result] == ["ses-sdk"]
+    assert [item["id"] for item in result] == ["ses-cli", "ses-sdk"]
 
 
 def test_find_claude_project_session_file_prefers_workspace_copy_for_duplicate_session_id(tmp_path):

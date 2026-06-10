@@ -184,6 +184,163 @@ async def test_turn_completed_failed_edits_failure_instead_of_completed():
 
 
 @pytest.mark.asyncio
+async def test_turn_completed_empty_buffer_deletes_placeholder_without_completed_text():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-123"] = ThreadInfo(
+        thread_id="tid-123",
+        topic_id=3794,
+        archived=False,
+        streaming_msg_id=5001,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    state.streaming_turns["tid-123"] = StreamingTurn(
+        message_id=5001,
+        topic_id=3794,
+        turn_id="turn-123",
+        buffer="",
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "tid-123",
+                    "turnId": "turn-123",
+                    "turn": {"id": "turn-123", "status": "completed"},
+                },
+            },
+        },
+    )
+
+    bot.edit_message_text.assert_not_awaited()
+    bot.delete_message.assert_awaited_once_with(chat_id=GROUP_CHAT_ID, message_id=5001)
+    assert "tid-123" not in state.streaming_turns
+    assert ws.threads["tid-123"].streaming_msg_id is None
+
+
+@pytest.mark.asyncio
+async def test_turn_completed_processing_placeholder_preserves_message_without_completed_text():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-123"] = ThreadInfo(
+        thread_id="tid-123",
+        topic_id=3794,
+        archived=False,
+        streaming_msg_id=5001,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    state.streaming_turns["tid-123"] = StreamingTurn(
+        message_id=5001,
+        topic_id=3794,
+        turn_id="turn-123",
+        buffer="💭 已收到，处理中。",
+        placeholder_deleted=True,
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "tid-123",
+                    "turnId": "turn-123",
+                    "turn": {"id": "turn-123", "status": "completed"},
+                },
+            },
+        },
+    )
+
+    bot.edit_message_text.assert_not_awaited()
+    bot.delete_message.assert_not_awaited()
+    assert "tid-123" not in state.streaming_turns
+    assert ws.threads["tid-123"].streaming_msg_id is None
+
+
+@pytest.mark.asyncio
+async def test_new_turn_replaces_empty_old_turn_without_completed_text():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-123"] = ThreadInfo(
+        thread_id="tid-123",
+        topic_id=3794,
+        archived=False,
+        streaming_msg_id=5001,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    state.streaming_turns["tid-123"] = StreamingTurn(
+        message_id=5001,
+        topic_id=3794,
+        turn_id="turn-old",
+        buffer="",
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=5002))
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/started",
+                "params": {
+                    "threadId": "tid-123",
+                    "turn": {"id": "turn-new"},
+                },
+            },
+        },
+    )
+
+    bot.edit_message_text.assert_not_awaited()
+    bot.delete_message.assert_awaited_once_with(chat_id=GROUP_CHAT_ID, message_id=5001)
+    bot.send_message.assert_awaited_once()
+    assert state.streaming_turns["tid-123"].message_id == 5002
+    assert state.streaming_turns["tid-123"].turn_id == "turn-new"
+
+
+@pytest.mark.asyncio
 async def test_turn_completed_sends_task_notification():
     ws = WorkspaceInfo(
         name="onlineWorker",

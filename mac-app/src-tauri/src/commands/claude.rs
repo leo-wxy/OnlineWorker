@@ -1538,6 +1538,35 @@ fn read_claude_project_session_cwd(session_file: &Path) -> Option<String> {
     None
 }
 
+fn read_claude_project_session_entrypoints(session_file: &Path) -> HashSet<String> {
+    let Ok(file) = fs::File::open(session_file) else {
+        return HashSet::new();
+    };
+
+    let mut entrypoints = HashSet::new();
+    for line in BufReader::new(file).lines() {
+        let Ok(line) = line else {
+            continue;
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        };
+        let Ok(row) = serde_json::from_str::<Value>(trimmed) else {
+            continue;
+        };
+        let Some(entrypoint) = row.get("entrypoint").and_then(Value::as_str) else {
+            continue;
+        };
+        let entrypoint = entrypoint.trim();
+        if !entrypoint.is_empty() {
+            entrypoints.insert(entrypoint.to_string());
+        }
+    }
+
+    entrypoints
+}
+
 fn read_claude_project_turns(session_file: &Path) -> Vec<ClaudeTurn> {
     let Ok(file) = fs::File::open(session_file) else {
         return Vec::new();
@@ -1590,10 +1619,6 @@ pub(crate) fn should_skip_claude_session_from_workspace_list(session_file: &Path
     }
 
     let turns = read_claude_project_turns(session_file);
-    if turns.is_empty() {
-        return false;
-    }
-
     let user_turns = turns
         .iter()
         .filter(|turn| turn.role == "user")
@@ -1602,6 +1627,14 @@ pub(crate) fn should_skip_claude_session_from_workspace_list(session_file: &Path
         .iter()
         .filter(|turn| turn.role == "assistant")
         .collect::<Vec<_>>();
+    let entrypoints = read_claude_project_session_entrypoints(session_file);
+    if entrypoints.len() == 1 && entrypoints.contains("cli") && assistant_turns.is_empty() {
+        return true;
+    }
+    if turns.is_empty() {
+        return false;
+    }
+
     if assistant_turns.is_empty() {
         return false;
     }
@@ -2072,7 +2105,7 @@ mod tests {
     }
 
     #[test]
-    fn list_claude_sessions_from_paths_keeps_meaningful_cli_sessions_and_skips_noise() {
+    fn list_claude_sessions_from_paths_keeps_meaningful_cli_sessions_and_filters_noise() {
         let root = temp_dir("onlineworker-claude-session-noise");
         let projects_dir = root.join("projects");
         let history_path = root.join("history.jsonl");
@@ -2148,6 +2181,30 @@ mod tests {
             })],
         );
         write_jsonl(
+            &projects_dir.join("-Users-example-Projects-onlineWorker/ses-cli-conversation.jsonl"),
+            &[
+                json!({
+                    "type": "user",
+                    "timestamp": "2026-04-16T02:32:22.087Z",
+                    "cwd": cwd,
+                    "sessionId": "ses-cli-conversation",
+                    "entrypoint": "cli",
+                    "message": {"role": "user", "content": "手动 Claude CLI 会话"},
+                }),
+                json!({
+                    "type": "assistant",
+                    "timestamp": "2026-04-16T02:32:27.397Z",
+                    "cwd": cwd,
+                    "sessionId": "ses-cli-conversation",
+                    "entrypoint": "cli",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "这是有效回复。"}],
+                    },
+                }),
+            ],
+        );
+        write_jsonl(
             &projects_dir.join("-Users-example-Projects-onlineWorker/ses-hybrid.jsonl"),
             &[
                 json!({
@@ -2190,8 +2247,8 @@ mod tests {
             sessions,
             vec![
                 ClaudeSession {
-                    id: "ses-cli-real".into(),
-                    title: "等一下 怎么Engine出来了。。目前Demo应该只有Unit才对".into(),
+                    id: "ses-cli-conversation".into(),
+                    title: "手动 Claude CLI 会话".into(),
                     directory: cwd.into(),
                     archived: false,
                 },

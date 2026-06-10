@@ -45,6 +45,7 @@ from bot.handlers.workspace import (
     _make_thread_topic_name,
     make_thread_open_callback_data,
 )
+from bot.handlers.workspace_helpers import workspace_path_for_topic_hint
 from bot.thread_controls import send_thread_control_panel, thread_interrupt_supported
 from bot.utils import TopicNotFoundError
 
@@ -657,7 +658,13 @@ def make_new_thread_handler(state: AppState, group_chat_id: int) -> Callable:
             # 注意：此处不 save_storage，topic_id 尚未确定
 
             # 2. 创建 Telegram Forum Topic
-            topic_name = _make_thread_topic_name(ws.tool, ws.name, initial_text, thread_id)
+            topic_name = _make_thread_topic_name(
+                ws.tool,
+                ws.name,
+                initial_text,
+                thread_id,
+                workspace_path=workspace_path_for_topic_hint(ws),
+            )
             topic = await context.bot.create_forum_topic(chat_id=group_chat_id, name=topic_name)
             topic_id = topic.message_thread_id
 

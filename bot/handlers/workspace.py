@@ -15,6 +15,8 @@
   点击未打开的 workspace → 注册 daemon + 创建 workspace Topic + 同步最新 10 个 thread
 """
 import logging
+import os
+import inspect
 from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
@@ -45,10 +47,14 @@ from bot.handlers.workspace_helpers import (
     format_history_turn_message as _format_history_turn_message,
     get_workspace_callback_identity as _get_workspace_callback_identity,
     history_turn_signature as _history_turn_signature,
+    make_workspace_storage_key as _make_workspace_storage_key,
+    make_workspace_topic_name as _make_workspace_topic_name,
     make_thread_open_token as _make_thread_open_token,
     make_thread_topic_name as _make_thread_topic_name,
     normalize_history_turn_timestamp as _normalize_history_turn_timestamp,
     normalize_workspace_topic_label as _normalize_workspace_topic_label,
+    workspace_path_for_topic_hint as _workspace_path_for_topic_hint,
+    workspace_path_topic_hint as _workspace_path_topic_hint,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,6 +78,240 @@ _THREAD_HISTORY_SYNC_LOOKBACK = 50
 
 # 正在创建 topic 的 thread_id 集合，防止并发重复创建
 _creating_topics: set[str] = set()
+
+
+def _workspace_item_name(item: dict) -> str:
+    path = str(item.get("path") or "").strip()
+    name = str(item.get("name") or "").strip()
+    return name or os.path.basename(path.rstrip("/")) or path
+
+
+def _workspace_button_label(
+    item: dict,
+    status: str,
+) -> str:
+    tool_name = str(item.get("tool") or "")
+    name = _workspace_item_name(item)
+    path = str(item.get("path") or "").strip()
+    hint = _workspace_path_topic_hint(path)
+    thread_count = item.get("thread_count", 0)
+    if hint:
+        label = f"{status} [{tool_name}] · {hint} · {name} ({thread_count})"
+    else:
+        label = f"{status} [{tool_name}] {name} ({thread_count})"
+    return label[:64]
+
+
+def _find_workspace_storage_entry(storage, tool_name: str, path: str) -> tuple[Optional[str], Optional[WorkspaceInfo]]:
+    if storage is None:
+        return None, None
+    normalized_path = str(path or "").strip()
+    for storage_key, ws_info in storage.workspaces.items():
+        if ws_info.tool == tool_name and str(ws_info.path or "").strip() == normalized_path:
+            return storage_key, ws_info
+    return None, None
+
+
+async def _try_rename_forum_topic(bot, group_chat_id: int, topic_id: int | None, name: str) -> None:
+    if topic_id is None:
+        return
+    try:
+        await bot.edit_forum_topic(
+            chat_id=group_chat_id,
+            message_thread_id=topic_id,
+            name=name,
+        )
+    except BadRequest as exc:
+        message = str(exc).lower()
+        if "not modified" not in message and "message is not modified" not in message:
+            logger.debug("同步 topic 名失败: topic=%s name=%r error=%s", topic_id, name, exc)
+    except Exception as exc:
+        logger.debug("同步 topic 名失败: topic=%s name=%r error=%s", topic_id, name, exc)
+
+
+def _workspace_topic_header_text(ws_info: WorkspaceInfo) -> str:
+    return f"路径: {ws_info.path}"
+
+
+def _thread_topic_header_text(ws_info: WorkspaceInfo, thread_info: ThreadInfo) -> str:
+    return f"路径: {ws_info.path}"
+
+
+async def _upsert_pinned_topic_header(
+    *,
+    bot,
+    group_chat_id: int,
+    topic_id: int | None,
+    text: str,
+    current_message_id: int | None,
+) -> int | None:
+    if topic_id is None:
+        return current_message_id
+
+    async def _clear_topic_pins() -> None:
+        unpin_all = getattr(bot, "unpin_all_forum_topic_messages", None)
+        if not callable(unpin_all):
+            return
+        try:
+            unpin_result = unpin_all(
+                chat_id=group_chat_id,
+                message_thread_id=topic_id,
+            )
+            if inspect.isawaitable(unpin_result):
+                await unpin_result
+        except BadRequest as exc:
+            message = str(exc).lower()
+            if "not enough rights" not in message and "message to unpin not found" not in message:
+                logger.debug("清理 topic 置顶消息失败: topic=%s err=%s", topic_id, exc)
+        except Exception as exc:
+            logger.debug("清理 topic 置顶消息失败: topic=%s err=%s", topic_id, exc)
+
+    async def _pin_message(message_id: int) -> None:
+        try:
+            await _clear_topic_pins()
+            pin_result = bot.pin_chat_message(
+                chat_id=group_chat_id,
+                message_id=message_id,
+                disable_notification=True,
+            )
+            if inspect.isawaitable(pin_result):
+                await pin_result
+            logger.info("topic 路径消息已置顶: topic=%s msg=%s", topic_id, message_id)
+        except BadRequest as exc:
+            message = str(exc).lower()
+            if "message is already pinned" not in message and "not enough rights" not in message:
+                logger.debug("置顶 topic 路径消息失败: topic=%s msg=%s err=%s", topic_id, message_id, exc)
+        except Exception as exc:
+            logger.debug("置顶 topic 路径消息失败: topic=%s msg=%s err=%s", topic_id, message_id, exc)
+
+    if current_message_id is not None:
+        try:
+            await bot.edit_message_text(
+                chat_id=group_chat_id,
+                message_id=current_message_id,
+                text=text,
+            )
+            await _pin_message(current_message_id)
+            return current_message_id
+        except BadRequest as exc:
+            message = str(exc).lower()
+            if "message is not modified" in message or "not modified" in message:
+                await _pin_message(current_message_id)
+                return current_message_id
+            logger.debug(
+                "更新 topic 头消息失败，将改为重发: topic=%s msg=%s err=%s",
+                topic_id,
+                current_message_id,
+                exc,
+            )
+        except Exception as exc:
+            logger.debug(
+                "更新 topic 头消息失败，将改为重发: topic=%s msg=%s err=%s",
+                topic_id,
+                current_message_id,
+                exc,
+            )
+
+    sent = await _send_to_group(
+        bot,
+        group_chat_id,
+        text,
+        topic_id=topic_id,
+    )
+    message_id_raw = getattr(sent, "message_id", 0)
+    if isinstance(message_id_raw, int):
+        message_id = message_id_raw
+    elif isinstance(message_id_raw, str) and message_id_raw.isdigit():
+        message_id = int(message_id_raw)
+    else:
+        message_id = 0
+    if message_id > 0:
+        await _pin_message(message_id)
+        return message_id
+    return current_message_id
+
+
+async def _ensure_workspace_topic_header(
+    *,
+    bot,
+    group_chat_id: int,
+    topic_id: int | None,
+    ws_info: WorkspaceInfo,
+    storage,
+) -> None:
+    next_message_id = await _upsert_pinned_topic_header(
+        bot=bot,
+        group_chat_id=group_chat_id,
+        topic_id=topic_id,
+        text=_workspace_topic_header_text(ws_info),
+        current_message_id=ws_info.header_message_id,
+    )
+    if next_message_id != ws_info.header_message_id:
+        ws_info.header_message_id = next_message_id
+        if storage:
+            save_storage(storage)
+
+
+async def _ensure_thread_topic_header(
+    *,
+    bot,
+    group_chat_id: int,
+    topic_id: int | None,
+    ws_info: WorkspaceInfo,
+    thread_info: ThreadInfo,
+    storage,
+) -> None:
+    next_message_id = await _upsert_pinned_topic_header(
+        bot=bot,
+        group_chat_id=group_chat_id,
+        topic_id=topic_id,
+        text=_thread_topic_header_text(ws_info, thread_info),
+        current_message_id=thread_info.header_message_id,
+    )
+    if next_message_id != thread_info.header_message_id:
+        thread_info.header_message_id = next_message_id
+        if storage:
+            save_storage(storage)
+
+
+async def _finalize_workspace_topic_header(
+    *,
+    bot,
+    group_chat_id: int,
+    topic_id: int | None,
+    ws_info: WorkspaceInfo,
+    storage,
+) -> None:
+    # 新 topic 刚创建时 Telegram forum 的置顶可见性存在竞态，
+    # 等初始化消息发完后，再对同一条路径消息做一次最终置顶。
+    await _ensure_workspace_topic_header(
+        bot=bot,
+        group_chat_id=group_chat_id,
+        topic_id=topic_id,
+        ws_info=ws_info,
+        storage=storage,
+    )
+
+
+async def _finalize_thread_topic_header(
+    *,
+    bot,
+    group_chat_id: int,
+    topic_id: int | None,
+    ws_info: WorkspaceInfo,
+    thread_info: ThreadInfo,
+    storage,
+) -> None:
+    # 新 topic 刚创建时 Telegram forum 的置顶可见性存在竞态，
+    # 等历史回放和控制面板发完后，再对同一条路径消息做一次最终置顶。
+    await _ensure_thread_topic_header(
+        bot=bot,
+        group_chat_id=group_chat_id,
+        topic_id=topic_id,
+        ws_info=ws_info,
+        thread_info=thread_info,
+        storage=storage,
+    )
 
 
 def _get_workspace_hooks(tool_name: str):
@@ -298,12 +538,12 @@ def make_workspace_handler(state: AppState, group_chat_id: int, cfg: Config):
 
         # 构建 keyboard
         keyboard = []
-        for i, item in enumerate(all_items):
+        for index, item in enumerate(all_items):
             key = (item["tool"], item["path"])
             ws_info = opened.get(key)
             status = "✅" if ws_info is not None else "📂"
-            label = f"{status} [{item['tool']}] {item['name']}  ({item['thread_count']} threads)"
-            keyboard.append([InlineKeyboardButton(label, callback_data=f"ws_open:{i}")])
+            label = _workspace_button_label(item, status)
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"ws_open:{index}")])
 
         await _send_to_group(
             context.bot, group_chat_id,
@@ -330,6 +570,7 @@ def make_ws_open_callback_handler(state: AppState, group_chat_id: int) -> Callba
 
         data = query.data or ""
         if not data.startswith("ws_open:"):
+            await query.edit_message_text("❌ 参数解析失败")
             return
 
         try:
@@ -376,6 +617,26 @@ def make_ws_open_callback_handler(state: AppState, group_chat_id: int) -> Callba
 
         if existing_ws is not None:
             existing_topic_id = _workspace_topic_id(state, existing_ws)
+            existing_ws_key = state.get_workspace_storage_key(existing_ws)
+            canonical_ws_key = _make_workspace_storage_key(tool_name, path, name)
+            if (
+                storage
+                and existing_topic_id is not None
+                and existing_ws_key is not None
+                and existing_ws_key != canonical_ws_key
+                and canonical_ws_key not in storage.workspaces
+            ):
+                storage.workspaces[canonical_ws_key] = storage.workspaces.pop(existing_ws_key)
+                if storage.active_workspace == existing_ws_key:
+                    storage.active_workspace = canonical_ws_key
+                existing_ws.daemon_workspace_id = canonical_ws_key
+                state.bind_telegram_workspace_topic(
+                    canonical_ws_key,
+                    existing_ws,
+                    existing_topic_id,
+                    display_name=_make_workspace_topic_name(tool_name, name, existing_ws.path),
+                )
+                save_storage(storage)
             # 直接发消息到已有 topic，如果 topic 被删了会抛 TopicNotFoundError
             bot = query.get_bot()
             try:
@@ -383,9 +644,22 @@ def make_ws_open_callback_handler(state: AppState, group_chat_id: int) -> Callba
                     f"`[{tool_name}] {name}` 已打开，跳转到对应 Topic。",
                     parse_mode="Markdown",
                 )
+                await _try_rename_forum_topic(
+                    bot,
+                    group_chat_id,
+                    existing_topic_id,
+                    _make_workspace_topic_name(tool_name, name, existing_ws.path),
+                )
+                await _ensure_workspace_topic_header(
+                    bot=bot,
+                    group_chat_id=group_chat_id,
+                    topic_id=existing_topic_id,
+                    ws_info=existing_ws,
+                    storage=storage,
+                )
                 await _send_to_group(
                     bot, group_chat_id,
-                    f"workspace `{name}` 已打开。",
+                    f"workspace `{name}` 已打开。\nPath: `{existing_ws.path}`",
                     topic_id=existing_topic_id,
                     parse_mode="Markdown",
                 )
@@ -395,18 +669,19 @@ def make_ws_open_callback_handler(state: AppState, group_chat_id: int) -> Callba
                 logger.info(f"workspace {name} 的 topic {existing_topic_id} 已不存在，重建 topic")
                 state.invalidate_telegram_topic(existing_topic_id)
                 try:
-                    ws_topic_name = f"[{tool_name}] {name}"[:128]
-                    new_topic = await bot.create_forum_topic(chat_id=group_chat_id, name=ws_topic_name)
                     existing_ws_key = state.get_workspace_storage_key(existing_ws)
+                    ws_topic_name = _make_workspace_topic_name(tool_name, name, existing_ws.path)
+                    new_topic = await bot.create_forum_topic(chat_id=group_chat_id, name=ws_topic_name)
                     if existing_ws_key is not None:
                         state.bind_telegram_workspace_topic(
                             existing_ws_key,
                             existing_ws,
                             new_topic.message_thread_id,
-                            display_name=name,
+                            display_name=ws_topic_name,
                         )
                     else:
                         existing_ws.topic_id = new_topic.message_thread_id
+                    existing_ws.header_message_id = None
                     if storage:
                         save_storage(storage)
                     logger.info(f"workspace {name} topic 重建成功：{new_topic.message_thread_id}")
@@ -415,10 +690,24 @@ def make_ws_open_callback_handler(state: AppState, group_chat_id: int) -> Callba
                         f"✅ `[{tool_name}] {name}` topic 已重建",
                         parse_mode="Markdown",
                     )
+                    await _ensure_workspace_topic_header(
+                        bot=bot,
+                        group_chat_id=group_chat_id,
+                        topic_id=new_topic.message_thread_id,
+                        ws_info=existing_ws,
+                        storage=storage,
+                    )
 
                     # 发送 thread 列表 + 按钮到新的 workspace topic
                     await _send_workspace_thread_overview(
                         state, bot, group_chat_id, existing_ws, tool_name,
+                    )
+                    await _finalize_workspace_topic_header(
+                        bot=bot,
+                        group_chat_id=group_chat_id,
+                        topic_id=new_topic.message_thread_id,
+                        ws_info=existing_ws,
+                        storage=storage,
                     )
                 except Exception as e:
                     logger.error(f"重建 workspace {name} topic 失败：{e}")
@@ -651,18 +940,28 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                         topic_id=existing_thread_topic_id,
                         parse_mode="Markdown",
                     )
-                    if preview_changed:
-                        topic_name = _make_thread_topic_name(
-                            ws_info.tool,
+                    topic_name = _make_thread_topic_name(
+                        ws_info.tool,
                             ws_info.name,
                             thread_info.preview,
                             full_tid,
+                            workspace_path=_workspace_path_for_topic_hint(ws_info),
                         )
-                        await bot.edit_forum_topic(
-                            chat_id=group_chat_id,
-                            message_thread_id=existing_thread_topic_id,
-                            name=topic_name,
-                        )
+                    await _try_rename_forum_topic(
+                        bot,
+                        group_chat_id,
+                        existing_thread_topic_id,
+                        topic_name,
+                    )
+                    await _ensure_thread_topic_header(
+                        bot=bot,
+                        group_chat_id=group_chat_id,
+                        topic_id=existing_thread_topic_id,
+                        ws_info=ws_info,
+                        thread_info=thread_info,
+                        storage=storage,
+                    )
+                    if preview_changed:
                         logger.info(
                             "[thread_open] 已同步重命名 topic %s: %r -> %r",
                             existing_thread_topic_id,
@@ -699,6 +998,7 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                         topic_id=workspace_topic_id,
                     )
                     thread_info.topic_id = None
+                    thread_info.header_message_id = None
                     if storage:
                         save_storage(storage)
 
@@ -709,6 +1009,7 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                 ws_info.name,
                 thread_info.preview,
                 full_tid,
+                workspace_path=_workspace_path_for_topic_hint(ws_info),
             )
 
             try:
@@ -735,8 +1036,14 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                     f"✅ thread {full_tid[-8:]} 新建 topic id={topic_id}",
                     topic_id=workspace_topic_id,
                 )
-
-                # Replay history
+                await _ensure_thread_topic_header(
+                    bot=bot,
+                    group_chat_id=group_chat_id,
+                    topic_id=topic_id,
+                    ws_info=ws_info,
+                    thread_info=thread_info,
+                    storage=storage,
+                )
                 replay_cursor = await _replay_thread_history(
                     bot=bot,
                     group_chat_id=group_chat_id,
@@ -753,11 +1060,19 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                     state,
                     bot,
                     group_chat_id,
-                        ws_info,
-                        thread_info,
-                        intro=_thread_control_intro(ws_info.tool, full_tid, "已打开"),
-                        topic_id=topic_id,
-                    )
+                    ws_info,
+                    thread_info,
+                    intro=_thread_control_intro(ws_info.tool, full_tid, "已打开"),
+                    topic_id=topic_id,
+                )
+                await _finalize_thread_topic_header(
+                    bot=bot,
+                    group_chat_id=group_chat_id,
+                    topic_id=topic_id,
+                    ws_info=ws_info,
+                    thread_info=thread_info,
+                    storage=storage,
+                )
             except Exception as e:
                 logger.warning(f"[on-demand] 创建 Topic 失败：{e}")
                 await query.answer(f"❌ 创建失败：{e}", show_alert=True)
@@ -790,25 +1105,35 @@ async def _open_workspace(
     if unavailable:
         raise RuntimeError(unavailable)
 
-    # 1. 合成 workspace_id（前缀区分工具类型，供 get_adapter_for_workspace 路由）
-    ws_id = f"{tool_name}:{name}"
+    # 1. 合成 workspace_id（前缀区分工具类型，完整 path 区分同名 workspace）
+    ws_id = _make_workspace_storage_key(tool_name, path, name)
 
-    # 2. 创建 workspace 管理 Topic，名为 "[tool] ws_name"
-    ws_topic_name = f"[{tool_name}] {name}"[:128]
+    # 2. 创建 workspace 管理 Topic，名为 "[tool] ws_name @ short_path"
+    ws_topic_name = _make_workspace_topic_name(tool_name, name, path)
     topic = await bot.create_forum_topic(chat_id=group_chat_id, name=ws_topic_name)
     topic_id = topic.message_thread_id
 
     # 3. 保存到 storage — 如果已有 WorkspaceInfo 则复用（保留 thread 映射），只更新 topic_id
-    storage_key = f"{tool_name}:{name}"
-    if storage and storage_key in storage.workspaces:
-        ws_info = storage.workspaces[storage_key]
+    storage_key = ws_id
+    existing_key, existing_ws = _find_workspace_storage_entry(storage, tool_name, path)
+    if storage and existing_ws is not None and existing_key is not None:
+        ws_info = existing_ws
+        if existing_key != storage_key:
+            storage.workspaces.pop(existing_key, None)
+            storage.workspaces[storage_key] = ws_info
+            if storage.active_workspace == existing_key:
+                storage.active_workspace = storage_key
         state.bind_telegram_workspace_topic(
             storage_key,
             ws_info,
             topic_id,
-            display_name=name,
+            display_name=ws_topic_name,
         )
         ws_info.daemon_workspace_id = ws_id
+        ws_info.path = path
+        ws_info.name = name
+        ws_info.tool = tool_name
+        ws_info.header_message_id = None
         # 不清 threads，保留已有的 topic_id 映射
     else:
         ws_info = WorkspaceInfo(
@@ -822,13 +1147,21 @@ async def _open_workspace(
             storage_key,
             ws_info,
             topic_id,
-            display_name=name,
+            display_name=ws_topic_name,
         )
     if storage:
         storage.workspaces[storage_key] = ws_info
         if storage.active_workspace is None:
             storage.active_workspace = storage_key
         save_storage(storage)
+
+    await _ensure_workspace_topic_header(
+        bot=bot,
+        group_chat_id=group_chat_id,
+        topic_id=topic_id,
+        ws_info=ws_info,
+        storage=storage,
+    )
 
     # 4. 注册 adapter cwd 映射 + 同步 thread
     threads_from_server: list[dict] = []
@@ -919,6 +1252,13 @@ async def _open_workspace(
         tool_name,
         active_ids=active_ids,
     )
+    await _finalize_workspace_topic_header(
+        bot=bot,
+        group_chat_id=group_chat_id,
+        topic_id=topic_id,
+        ws_info=ws_info,
+        storage=storage,
+    )
 
     return ws_info
 
@@ -931,7 +1271,7 @@ async def _send_workspace_thread_overview(
 ) -> None:
     """发送 workspace 的 thread 概览 + 按钮到 workspace topic。"""
     name = ws_info.name
-    ws_id = ws_info.daemon_workspace_id or f"{tool_name}:{name}"
+    ws_id = ws_info.daemon_workspace_id or _make_workspace_storage_key(tool_name, ws_info.path, name)
     topic_id = _workspace_topic_id(state, ws_info)
 
     reconcile_workspace_threads_with_source(state, ws_info, active_ids=active_ids)
@@ -972,7 +1312,7 @@ async def _send_workspace_thread_overview(
     active_threads = [item for item in display_threads if item["is_active"]]
     inactive_threads = [item for item in display_threads if not item["is_active"]]
 
-    lines = [f"📂 [{tool_name}] {name}\n"]
+    lines = [f"📂 [{tool_name}] {name}", f"Path: {ws_info.path}", ""]
 
     if active_threads:
         lines.append(f"Active ({len(active_threads)}):")

@@ -600,15 +600,14 @@ def _should_skip_claude_session_from_workspace_list(session_file: Optional[str])
         return True
 
     entrypoints = _collect_claude_session_entrypoints(session_file)
-    if entrypoints and "sdk-cli" not in entrypoints and entrypoints == {"cli"}:
-        return True
-
     turns = _read_claude_project_turns(session_file)
+    assistant_turns = [turn for turn in turns if turn.get("role") == "assistant"]
+    if entrypoints == {"cli"} and not assistant_turns:
+        return True
     if not turns:
         return False
 
     user_turns = [turn for turn in turns if turn.get("role") == "user"]
-    assistant_turns = [turn for turn in turns if turn.get("role") == "assistant"]
     if not assistant_turns:
         return False
     if len(user_turns) > 1:

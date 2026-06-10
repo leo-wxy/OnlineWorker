@@ -31,6 +31,7 @@ from bot.handlers.workspace import (
     _make_thread_topic_name,
     _replay_thread_history,
 )
+from bot.handlers.workspace_helpers import workspace_path_for_topic_hint
 
 logger = logging.getLogger(__name__)
 
@@ -393,6 +394,7 @@ class LifecycleManager:
                     ws_info.name,
                     thread_info.preview,
                     thread_id,
+                    workspace_path=workspace_path_for_topic_hint(ws_info),
                 )
                 topic = await bot.create_forum_topic(chat_id=self.gid, name=topic_name)
                 self.state.bind_telegram_session_topic(
