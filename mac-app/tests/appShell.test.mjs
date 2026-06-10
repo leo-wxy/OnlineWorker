@@ -187,6 +187,22 @@ test("provider settings keeps civility mode controls sealed while rewrite is par
   assert.match(en, /Civility mode/);
 });
 
+test("provider settings exposes discovered hidden extensions with icons and a visible hint", () => {
+  const panel = readFileSync(join(root, "src", "components", "ProviderSettingsPanel.tsx"), "utf8");
+  const types = readFileSync(join(root, "src", "i18n", "types.ts"), "utf8");
+  const zh = readFileSync(join(root, "src", "i18n", "locales", "zh.ts"), "utf8");
+  const en = readFileSync(join(root, "src", "i18n", "locales", "en.ts"), "utf8");
+
+  assert.match(panel, /function ProviderIcon/);
+  assert.match(panel, /provider\?\.icon\?\.url\?\.trim\(\)/);
+  assert.match(panel, /texts\.hiddenByDefault/);
+  assert.match(panel, /texts\.hiddenByDefaultHint/);
+  assert.match(types, /hiddenByDefault:\s*string/);
+  assert.match(types, /hiddenByDefaultHint:\s*string/);
+  assert.match(zh, /默认隐藏/);
+  assert.match(en, /Hidden by default/);
+});
+
 test("provider settings exposes external CLI rewrite configuration in the app", () => {
   const panel = readFileSync(join(root, "src", "components", "ProviderSettingsPanel.tsx"), "utf8");
   const types = readFileSync(join(root, "src", "types.ts"), "utf8");

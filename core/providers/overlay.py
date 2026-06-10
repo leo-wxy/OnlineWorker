@@ -85,6 +85,9 @@ def manifest_to_provider_raw(manifest: dict[str, Any]) -> dict[str, Any]:
     auth = provider_raw.get("auth") or manifest.get("auth") or {}
     if not isinstance(auth, dict):
         auth = {}
+    message_hooks = provider_raw.get("message_hooks") or manifest.get("message_hooks") or {}
+    if not isinstance(message_hooks, dict):
+        message_hooks = {}
 
     transport = provider_raw.get("transport") or manifest.get("transport") or {}
     if not isinstance(transport, dict):
@@ -97,15 +100,15 @@ def manifest_to_provider_raw(manifest: dict[str, Any]) -> dict[str, Any]:
         "runtime_id": str(provider_raw.get("runtime_id") or manifest.get("runtime_id") or provider_id),
         "label": str(provider_raw.get("label") or manifest.get("label") or provider_id),
         "description": str(provider_raw.get("description") or manifest.get("description") or ""),
-        "managed": bool(provider_raw.get("managed", True)),
-        "autostart": bool(provider_raw.get("autostart", True)),
+        "managed": bool(provider_raw.get("managed", False)),
+        "autostart": bool(provider_raw.get("autostart", False)),
         "codex_bin": str(bin_value),
         "protocol": str(
             provider_raw.get("owner_transport")
             or manifest.get("owner_transport")
             or transport.get("owner")
             or transport.get("type")
-            or "ws"
+            or "stdio"
         ),
         "app_server_port": int(transport.get("app_server_port") or provider_raw.get("app_server_port") or 0),
         "app_server_url": str(transport.get("app_server_url") or provider_raw.get("app_server_url") or ""),
@@ -114,6 +117,7 @@ def manifest_to_provider_raw(manifest: dict[str, Any]) -> dict[str, Any]:
         "process": process,
         "health": health,
         "auth": auth,
+        "message_hooks": message_hooks,
     }
 
 

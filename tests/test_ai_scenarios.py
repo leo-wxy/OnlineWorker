@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from core.ai.client import AiHttpResponse
@@ -240,6 +241,51 @@ async def test_run_ai_scenario_returns_fallback_on_client_error():
     assert result.ok is False
     assert result.fallback == "local_notification_summary_rules"
     assert result.error == "client_error"
+
+
+@pytest.mark.asyncio
+async def test_run_ai_scenario_logs_request_error_details(caplog):
+    client = FakeAiClient(httpx.ReadTimeout(""))
+
+    with caplog.at_level("WARNING"):
+        result = await run_ai_scenario(
+            "notification_summary",
+            {"task_summary": "通知文案", "final_message": "已完成"},
+            config=_config(),
+            client=client,
+        )
+
+    assert result.ok is False
+    assert result.error == "client_error"
+    assert "scenario failed scenario=notification_summary" in caplog.text
+    assert "service=openai_default" in caplog.text
+    assert "model=gpt-5.4" in caplog.text
+    assert "timeout_s=7" in caplog.text
+    assert "target=https://api.openai.com/v1/chat/completions" in caplog.text
+    assert "error_type=ReadTimeout" in caplog.text
+    assert "error_repr=ReadTimeout('')" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_run_ai_scenario_logs_http_status_error_details(caplog):
+    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    response = httpx.Response(502, request=request)
+    client = FakeAiClient(httpx.HTTPStatusError("bad gateway", request=request, response=response))
+
+    with caplog.at_level("WARNING"):
+        result = await run_ai_scenario(
+            "notification_summary",
+            {"task_summary": "通知文案", "final_message": "已完成"},
+            config=_config(),
+            client=client,
+        )
+
+    assert result.ok is False
+    assert result.error == "client_error"
+    assert "error_type=HTTPStatusError" in caplog.text
+    assert "status_code=502" in caplog.text
+    assert "request_url=https://api.openai.com/v1/chat/completions" in caplog.text
+    assert "error=bad gateway" in caplog.text
 
 
 @pytest.mark.asyncio

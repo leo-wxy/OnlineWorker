@@ -84,6 +84,15 @@ rules needed to work safely in this codebase.
 
 ## Runtime and Storage
 
+- Runtime provider, notification, and AI defaults must come from plugin
+  manifests plus the Rust normalizer/materializer, not from hand-edited user
+  config templates.
+- Treat `config.yaml` as a user-state artifact: first-run creation,
+  migration, and settings writes may materialize a readable full file, but
+  development changes must not rely on editing `config.yaml` or
+  `default-config.yaml` to change runtime defaults.
+- When adding or changing defaults, update the owning manifest/schema/default
+  builder and add regression coverage for first-run or migration behavior.
 - Installed app data lives under:
   - `~/Library/Application Support/OnlineWorker/config.yaml`
   - `~/Library/Application Support/OnlineWorker/.env`

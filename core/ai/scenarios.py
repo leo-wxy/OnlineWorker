@@ -4,6 +4,8 @@ import logging
 import re
 from typing import Any
 
+import httpx
+
 from config import get_data_dir, load_config
 
 from .client import AiClient
@@ -46,10 +48,9 @@ async def run_ai_scenario(
         )
     except Exception as exc:
         logger.warning(
-            "[ai] scenario failed scenario=%s service=%s error=%s",
+            "[ai] scenario failed scenario=%s %s",
             scenario.id,
-            service.id,
-            exc,
+            _format_client_error_context(service, model, exc),
         )
         return _fallback(scenario, "client_error")
 
@@ -62,6 +63,47 @@ async def run_ai_scenario(
 
 def _fallback(scenario: AiScenarioConfig, error: str) -> AiScenarioResult:
     return AiScenarioResult(ok=False, fallback=scenario.fallback, error=error)
+
+
+def _service_target(service: AiScenarioConfig | Any) -> str:
+    protocol = str(getattr(service, "protocol", "") or "").strip()
+    endpoint = str(getattr(service, "endpoint", "") or "").strip()
+    base_url = str(getattr(service, "base_url", "") or "").strip().rstrip("/")
+    if endpoint:
+        return endpoint
+    if protocol == "openai_compatible_chat":
+        return f"{base_url or 'https://api.openai.com/v1'}/chat/completions"
+    if protocol == "claude_messages":
+        return "https://api.anthropic.com/v1/messages"
+    return base_url
+
+
+def _format_client_error_context(service: Any, model: str, exc: Exception) -> str:
+    parts = [
+        f"service={getattr(service, 'id', '') or 'unknown'}",
+        f"model={model or 'unknown'}",
+        f"timeout_s={getattr(service, 'timeout_seconds', 'unknown')}",
+        f"target={_service_target(service) or 'unknown'}",
+        f"error_type={type(exc).__name__}",
+    ]
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+        parts.append(f"status_code={exc.response.status_code}")
+    request = _safe_exception_request(exc)
+    if request is not None and getattr(request, "url", None):
+        parts.append(f"request_url={request.url}")
+    error_text = str(exc).strip()
+    if error_text:
+        parts.append(f"error={error_text}")
+    else:
+        parts.append(f"error_repr={exc!r}")
+    return " ".join(parts)
+
+
+def _safe_exception_request(exc: Exception) -> Any | None:
+    try:
+        return getattr(exc, "request", None)
+    except RuntimeError:
+        return None
 
 
 def _parse_json_object(value: str) -> dict[str, Any]:

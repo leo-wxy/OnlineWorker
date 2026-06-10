@@ -101,6 +101,7 @@ def create_provider_descriptor() -> ProviderDescriptor:
         ),
         lifecycle_hooks=ProviderLifecycleHooks(
             on_connected=runtime.setup_connection,
+            after_startup=runtime.sync_existing_topics_after_startup,
             resolve_reconnect_topic_id=runtime.resolve_reconnect_topic_id,
         ),
         runtime_hooks=ProviderRuntimeHooks(

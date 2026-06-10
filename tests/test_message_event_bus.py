@@ -555,6 +555,28 @@ def test_session_event_bridge_maps_final_reply_and_attention_requests():
     assert question_event.payload["message"] == "Choose model"
 
 
+def test_session_event_bridge_treats_non_codex_completed_agent_message_as_final_reply():
+    final_event = message_event_from_session_event(
+        SessionEvent(
+            provider="claude",
+            workspace_id="claude:/tmp/project",
+            thread_id="session-a",
+            turn_id="turn-a",
+            kind="assistant_completed",
+            payload={
+                "threadId": "session-a",
+                "turnId": "turn-a",
+                "text": "final answer",
+                "item": {"type": "agentMessage"},
+            },
+            raw_method="item/completed",
+        )
+    )
+
+    assert final_event.kind == "message.assistant.final"
+    assert final_event.payload["text"] == "final answer"
+
+
 def test_approval_projection_exposes_request_identity_for_task_board_actions():
     state = SimpleNamespace(message_bus=MessageEventBus())
     state.message_bus.publish(

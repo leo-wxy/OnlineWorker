@@ -478,7 +478,7 @@ async def test_server_request_approval_revives_stale_archived_thread_when_source
 
 
 @pytest.mark.asyncio
-async def test_event_approval_missing_topic_is_retained_for_local_reply():
+async def test_event_approval_missing_topic_is_discarded():
     state = make_state_with_owner(
         threads={"tid-001": ThreadInfo(thread_id="tid-001", topic_id=None, archived=False)}
     )
@@ -514,14 +514,11 @@ async def test_event_approval_missing_topic_is_retained_for_local_reply():
 
     bot.send_message.assert_not_called()
     bot.edit_message_reply_markup.assert_not_called()
-    pending = state.get_provider_runtime("claude").pending_approval_decisions.get("req-001")
-    assert pending is not None
-    assert pending.request_id == "req-001"
-    assert pending.requires_adapter_reply is True
+    assert state.get_provider_runtime("claude").pending_approval_decisions == {}
 
 
 @pytest.mark.asyncio
-async def test_server_request_approval_missing_topic_is_retained_for_local_reply():
+async def test_server_request_approval_missing_topic_is_discarded():
     state = make_state_with_owner(
         threads={"tid-001": ThreadInfo(thread_id="tid-001", topic_id=None, archived=False)}
     )
@@ -553,10 +550,7 @@ async def test_server_request_approval_missing_topic_is_retained_for_local_reply
 
     bot.send_message.assert_not_called()
     bot.edit_message_reply_markup.assert_not_called()
-    pending = state.get_provider_runtime("claude").pending_approval_decisions.get("approval-1")
-    assert pending is not None
-    assert pending.request_id == "approval-1"
-    assert pending.requires_adapter_reply is True
+    assert state.get_provider_runtime("claude").pending_approval_decisions == {}
 
 
 @pytest.mark.asyncio

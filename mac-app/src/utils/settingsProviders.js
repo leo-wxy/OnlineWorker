@@ -28,7 +28,7 @@ export function primaryProviderSettings(providers) {
 
 export function extensionProviderSettings(providers) {
   return (providers ?? [])
-    .filter((provider) => provider?.visible === true && provider?.id)
+    .filter((provider) => provider?.id)
     .filter((provider) => !PRIMARY_PROVIDER_IDS.includes(provider.id))
     .map(toProviderSetting);
 }

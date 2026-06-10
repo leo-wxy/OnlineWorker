@@ -29,6 +29,10 @@ import {
   type ProviderFilter,
   type UnifiedSession,
 } from "../components/session-browser/presentation";
+import {
+  WorkspaceActionMenu,
+  type WorkspaceActionMenuState,
+} from "../components/session-browser/workspaceActions";
 import { visibleSessionProviders } from "../utils/sessionProviders.js";
 import type { TaskBoardState } from "../utils/taskBoard";
 import type {
@@ -69,6 +73,7 @@ export function SessionBrowser({ openTarget = null }: Props) {
   const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionActionMenuState | null>(null);
+  const [workspaceContextMenu, setWorkspaceContextMenu] = useState<WorkspaceActionMenuState | null>(null);
   const [archivingSessionId, setArchivingSessionId] = useState<string | null>(null);
   const [archiveNotice, setArchiveNotice] = useState<ArchiveNotice | null>(null);
   const [taskBoardState, setTaskBoardState] = useState<TaskBoardState>(DEFAULT_TASK_BOARD_STATE);
@@ -137,15 +142,19 @@ export function SessionBrowser({ openTarget = null }: Props) {
     setSelectedWorkspace(null);
     setSelectedSessionId(null);
     setSessionContextMenu(null);
+    setWorkspaceContextMenu(null);
     setArchiveNotice(null);
   }, [openTarget?.providerId, providerFilter]);
 
   useEffect(() => {
-    if (sessionContextMenu === null) {
+    if (sessionContextMenu === null && workspaceContextMenu === null) {
       return;
     }
 
-    const closeMenu = () => setSessionContextMenu(null);
+    const closeMenu = () => {
+      setSessionContextMenu(null);
+      setWorkspaceContextMenu(null);
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         closeMenu();
@@ -162,7 +171,7 @@ export function SessionBrowser({ openTarget = null }: Props) {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("blur", closeMenu);
     };
-  }, [sessionContextMenu]);
+  }, [sessionContextMenu, workspaceContextMenu]);
 
   const loadProvider = useCallback(async (
     provider: ProviderFilter,
@@ -216,6 +225,7 @@ export function SessionBrowser({ openTarget = null }: Props) {
     setSelectedWorkspace(openTarget.workspace?.trim() || null);
     setSelectedSessionId(openTarget.sessionId);
     setSessionContextMenu(null);
+    setWorkspaceContextMenu(null);
     setArchiveNotice(null);
     void loadProvider(openTarget.providerId);
   }, [loadProvider, openTarget?.providerId, openTarget?.sessionId, openTarget?.workspace]);
@@ -231,6 +241,7 @@ export function SessionBrowser({ openTarget = null }: Props) {
     event.preventDefault();
     event.stopPropagation();
     setArchiveNotice(null);
+    setWorkspaceContextMenu(null);
     setSessionContextMenu({
       session,
       x: Math.min(event.clientX, window.innerWidth - 180),
@@ -246,10 +257,46 @@ export function SessionBrowser({ openTarget = null }: Props) {
     event.stopPropagation();
     const rect = event.currentTarget.getBoundingClientRect();
     setArchiveNotice(null);
+    setWorkspaceContextMenu(null);
     setSessionContextMenu({
       session,
       x: Math.min(Math.max(rect.right - 176, 8), window.innerWidth - 180),
       y: Math.min(rect.bottom + 6, window.innerHeight - 72),
+    });
+  }, []);
+
+  const openWorkspaceContextMenu = useCallback((
+    event: MouseEvent<HTMLElement>,
+    workspace: string,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSessionContextMenu(null);
+    setWorkspaceContextMenu({
+      workspace,
+      x: Math.min(event.clientX, window.innerWidth - 196),
+      y: Math.min(event.clientY, window.innerHeight - 118),
+    });
+  }, []);
+
+  const handleOpenWorkspaceInTerminal = useCallback((workspace: string) => {
+    setWorkspaceContextMenu(null);
+    void invoke("open_terminal", { workspacePath: workspace }).catch((error) => {
+      console.warn("Failed to open workspace in terminal", error);
+    });
+  }, []);
+
+  const handleOpenWorkspaceInFinder = useCallback((workspace: string) => {
+    setWorkspaceContextMenu(null);
+    void invoke("open_finder", { workspacePath: workspace }).catch((error) => {
+      console.warn("Failed to open workspace in Finder", error);
+    });
+  }, []);
+
+  const handleCopyWorkspacePath = useCallback((workspace: string) => {
+    setWorkspaceContextMenu(null);
+    void navigator.clipboard.writeText(workspace).catch((error) => {
+      console.warn("Failed to copy workspace path", error);
     });
   }, []);
 
@@ -356,6 +403,7 @@ export function SessionBrowser({ openTarget = null }: Props) {
           selectedWorkspace={selectedWorkspace}
           noSessionsLabel={t.sessions.noSessions}
           onSelectWorkspace={setSelectedWorkspace}
+          onOpenWorkspaceContextMenu={openWorkspaceContextMenu}
         />
 
         <SessionListPanel
@@ -419,6 +467,19 @@ export function SessionBrowser({ openTarget = null }: Props) {
             alreadyArchived: t.sessions.alreadyArchived,
           }}
           onArchive={(session) => void handleArchiveSession(session)}
+        />
+      ) : null}
+      {workspaceContextMenu ? (
+        <WorkspaceActionMenu
+          menu={workspaceContextMenu}
+          labels={{
+            openInTerminal: t.sessions.openWorkspaceInTerminal,
+            openInFinder: t.sessions.openWorkspaceInFinder,
+            copyPath: t.sessions.copyWorkspacePath,
+          }}
+          onOpenTerminal={handleOpenWorkspaceInTerminal}
+          onOpenFinder={handleOpenWorkspaceInFinder}
+          onCopyPath={handleCopyWorkspacePath}
         />
       ) : null}
     </div>

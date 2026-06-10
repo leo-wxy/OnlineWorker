@@ -34,7 +34,8 @@ use commands::logs::{get_log_file_path, start_log_tail, stop_log_tail};
 use commands::provider_sessions::{
     archive_provider_session, list_provider_sessions, read_provider_session,
     send_provider_session_message, stage_session_composer_attachments,
-    start_provider_session_stream, stop_provider_session_stream,
+    start_provider_session_event_stream, start_provider_session_stream,
+    stop_provider_session_event_stream, stop_provider_session_stream,
 };
 use commands::provider_usage::get_provider_usage_summary;
 use commands::service::{
@@ -48,7 +49,7 @@ use commands::task_board_state::{
     unpin_task_board_session,
 };
 use commands::telegram::{test_bot_permissions, test_bot_token, test_group_access};
-use commands::terminal::{open_codex_tui_host_terminal, open_terminal};
+use commands::terminal::{open_codex_tui_host_terminal, open_finder, open_terminal};
 use menubar::setup_menubar;
 
 #[derive(Default)]
@@ -279,6 +280,7 @@ pub fn run() {
             list_env_keys,
             reveal_env_field,
             open_terminal,
+            open_finder,
             open_codex_tui_host_terminal,
             list_codex_threads,
             read_codex_thread,
@@ -295,7 +297,9 @@ pub fn run() {
             archive_provider_session,
             send_provider_session_message,
             stage_session_composer_attachments,
+            start_provider_session_event_stream,
             start_provider_session_stream,
+            stop_provider_session_event_stream,
             stop_provider_session_stream,
             get_provider_usage_summary,
             get_task_board_session_activities,

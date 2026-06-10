@@ -373,6 +373,89 @@ def _approval_mirror_command(payload: dict) -> str:
     return str(command or "")
 
 
+def _event_payload_text(payload: dict, *keys: str) -> str:
+    for key in keys:
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _user_message_stream_text(payload: dict) -> str:
+    base_text = _event_payload_text(payload, "text", "message", "delta")
+    attachment_lines: list[str] = []
+    for attachment in payload.get("attachments") or []:
+        if not isinstance(attachment, dict):
+            continue
+        kind = str(attachment.get("kind") or "").strip().lower()
+        name = str(attachment.get("name") or "").strip() or "attachment"
+        label = "image" if kind == "image" else "file"
+        attachment_lines.append(f"[Attached {label}] {name}")
+    if not attachment_lines:
+        return base_text
+    if not base_text:
+        return "\n".join(attachment_lines)
+    return f"{base_text}\n" + "\n".join(attachment_lines)
+
+
+def _message_event_to_session_stream_payload(event) -> Optional[dict]:
+    payload = event.payload if isinstance(getattr(event, "payload", None), dict) else {}
+    semantic_kind = str(getattr(event, "kind", "") or "").strip()
+
+    if semantic_kind in {"message.user.submitted", "message.user.accepted"}:
+        text = _user_message_stream_text(payload)
+        if not text:
+            return None
+        return {
+            "kind": "user_message",
+            "semanticKind": semantic_kind,
+            "turn": {
+                "role": "user",
+                "content": text,
+                "displayMode": "plain",
+            },
+        }
+
+    if semantic_kind == "message.assistant.delta":
+        text = _event_payload_text(payload, "delta", "text", "message")
+        if not text:
+            return None
+        return {
+            "kind": "assistant_progress",
+            "semanticKind": semantic_kind,
+            "turn": {
+                "role": "assistant",
+                "content": text,
+                "displayMode": "plain",
+                "pending": True,
+            },
+        }
+
+    if semantic_kind == "message.assistant.final":
+        text = _event_payload_text(payload, "text", "message", "delta")
+        if not text:
+            return None
+        return {
+            "kind": "assistant_completed",
+            "semanticKind": semantic_kind,
+            "turn": {
+                "role": "assistant",
+                "content": text,
+                "displayMode": "markdown",
+            },
+        }
+
+    if semantic_kind == "turn.failed":
+        reason = _event_payload_text(payload, "reason", "text", "message", "delta")
+        return {
+            "kind": "turn_aborted",
+            "semanticKind": semantic_kind,
+            "reason": reason or "interrupted",
+        }
+
+    return None
+
+
 async def _status_lines_for_provider(state, provider_id: str, provider) -> list[str]:
     status_builder = getattr(provider, "status_builder", None)
     if callable(status_builder):
@@ -456,6 +539,9 @@ class ProviderOwnerBridge:
                 response = await self._handle_session_activities(request)
             elif request_type == "session_activity_stream":
                 await self._handle_session_activity_stream(reader, writer, request)
+                return
+            elif request_type == "session_event_stream":
+                await self._handle_session_event_stream(reader, writer, request)
                 return
             elif request_type == "reply_approval":
                 response = await self._handle_reply_approval(request)
@@ -738,6 +824,89 @@ class ProviderOwnerBridge:
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
 
+    async def _handle_session_event_stream(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        request: dict,
+    ) -> None:
+        provider_id = str(request.get("provider_id") or "").strip()
+        session_id = str(request.get("session_id") or request.get("thread_id") or "").strip()
+        workspace_dir = str(request.get("workspace_dir") or "").strip()
+
+        if not provider_id or not session_id:
+            writer.write(
+                (
+                    json.dumps(
+                        {
+                            "kind": "error",
+                            "error": "missing provider_id or session_id",
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                ).encode("utf-8")
+            )
+            await writer.drain()
+            return
+
+        bus = getattr(self.state, "message_bus", None)
+        if bus is None or not callable(getattr(bus, "subscribe", None)):
+            writer.write(
+                (
+                    json.dumps(
+                        {
+                            "kind": "error",
+                            "error": "message bus unavailable",
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                ).encode("utf-8")
+            )
+            await writer.drain()
+            return
+
+        write_lock = asyncio.Lock()
+        pending: set[asyncio.Task] = set()
+        loop = asyncio.get_running_loop()
+
+        async def send_payload(payload: dict) -> None:
+            async with write_lock:
+                writer.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
+                await writer.drain()
+
+        def schedule_payload(payload: dict) -> None:
+            task = loop.create_task(send_payload(payload))
+            pending.add(task)
+            task.add_done_callback(pending.discard)
+
+        def on_event(event) -> None:
+            if str(getattr(event, "provider_id", "") or "").strip() != provider_id:
+                return
+            if str(getattr(event, "session_id", "") or "").strip() != session_id:
+                return
+            if workspace_dir and str(getattr(event, "workspace_path", "") or "").strip() != workspace_dir:
+                return
+            payload = _message_event_to_session_stream_payload(event)
+            if payload is not None:
+                schedule_payload(payload)
+
+        unsubscribe = bus.subscribe(on_event)
+        try:
+            await send_payload(
+                {
+                    "kind": "stream_ready",
+                }
+            )
+            await reader.read()
+        finally:
+            unsubscribe()
+            for task in tuple(pending):
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+
     async def _handle_archive_session(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
         thread_id = str(request.get("session_id") or request.get("thread_id") or "").strip()
@@ -970,30 +1139,6 @@ class ProviderOwnerBridge:
             amendment_decision=request.get("amendment_decision") or {},
             approval_source=approval_source,
         )
-
-        runtime = self.state.get_provider_runtime(provider_id)
-        pending_decision = runtime.pending_approval_decisions.get(request_id)
-        rejected_message = "App 已拒绝" if action == "exec_deny" else ""
-        if pending_decision is not None and not pending_decision.requires_adapter_reply:
-            self.state.resolve_pending_approval_decision(
-                provider_id,
-                request_id,
-                action,
-                message=rejected_message,
-            )
-            publish_approval_answered(
-                self.state,
-                approval,
-                action=action,
-                source="desktop_app",
-            )
-            return {
-                "ok": True,
-                "mode": "pending-decision",
-                "provider_id": provider_id,
-                "request_id": request_id,
-                "action": action,
-            }
 
         provider = get_provider(provider_id, getattr(self.state, "config", None))
         if provider is None:

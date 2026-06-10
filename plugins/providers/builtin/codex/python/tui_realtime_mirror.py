@@ -5,11 +5,12 @@ import os
 import time
 from typing import Optional
 
+from core.messages.events import create_message_event
 from core.provider_runtime_state import ProviderWatchState
 from core.state import AppState
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
 from core.storage import WorkspaceInfo
-from plugins.providers.builtin.codex.python.storage_runtime import find_session_file
+from plugins.providers.builtin.codex.python.storage_runtime import find_session_file, read_thread_history
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +51,6 @@ def watch_codex_thread(
     if thread is None:
         return
     topic_id = _thread_topic_id(state, ws, thread) or _workspace_topic_id(state, ws)
-    if topic_id is None:
-        return
 
     runtime = codex_state.get_runtime(state)
     now = time.monotonic()
@@ -115,6 +114,25 @@ def _should_auto_watch_bound_codex_threads(state: AppState) -> bool:
     if not tool_cfg or tool_cfg.name != "codex":
         return False
     return str(getattr(tool_cfg, "control_mode", "") or "").strip().lower() == "tui"
+
+
+def _uses_shared_live_transport(state: AppState) -> bool:
+    cfg = state.config
+    if cfg is None:
+        return False
+    tool_cfg = cfg.get_tool("codex")
+    if not tool_cfg or tool_cfg.name != "codex":
+        return False
+    live_transport = str(getattr(tool_cfg, "live_transport", "") or "").strip().lower()
+    return live_transport in {"shared_ws", "shared_unix"}
+
+
+def _should_watch_thread_from_session_file(state: AppState, thread) -> bool:
+    if _should_auto_watch_bound_codex_threads(state):
+        return True
+    if not _uses_shared_live_transport(state):
+        return False
+    return str(getattr(thread, "source", "") or "").strip().lower() == "imported"
 
 
 def _synced_final_text_signature(state: AppState, thread_id: str) -> str:
@@ -181,13 +199,120 @@ def _remember_bootstrap_final(
     codex_state.get_runtime(state).last_synced_assistant[thread_id] = signature
 
 
+def _publish_startup_activity_bootstrap(
+    state: AppState,
+    ws: WorkspaceInfo,
+    thread_id: str,
+    thread,
+    *,
+    sessions_dir: Optional[str] = None,
+) -> bool:
+    bus = getattr(state, "message_bus", None)
+    publish = getattr(bus, "publish", None)
+    if not callable(publish):
+        return False
+
+    history = read_thread_history(thread_id, sessions_dir=sessions_dir, limit=20)
+    latest_user = next(
+        (
+            str(item.get("text") or "").strip()
+            for item in reversed(history)
+            if item.get("role") == "user" and str(item.get("text") or "").strip()
+        ),
+        "",
+    )
+    latest_assistant = next(
+        (
+            item
+            for item in reversed(history)
+            if item.get("role") == "assistant" and str(item.get("text") or "").strip()
+        ),
+        None,
+    )
+    title = latest_user or str(getattr(thread, "preview", "") or "").strip()
+    workspace_id = _workspace_key(state, ws)
+    workspace_path = str(getattr(ws, "path", "") or "")
+
+    published = False
+    if latest_user:
+        published = bool(
+            publish(
+                create_message_event(
+                    "message.user.submitted",
+                    provider_id="codex",
+                    workspace_id=workspace_id,
+                    workspace_path=workspace_path,
+                    session_id=thread_id,
+                    source="startup_bootstrap",
+                    payload={"text": latest_user, "title": title or latest_user},
+                    dedupe_key=f"codex:startup-bootstrap:user:{workspace_id}:{thread_id}",
+                )
+            )
+        ) or published
+    elif title:
+        published = bool(
+            publish(
+                create_message_event(
+                    "session.created",
+                    provider_id="codex",
+                    workspace_id=workspace_id,
+                    workspace_path=workspace_path,
+                    session_id=thread_id,
+                    source="startup_bootstrap",
+                    payload={"title": title, "preview": title},
+                    dedupe_key=f"codex:startup-bootstrap:session:{workspace_id}:{thread_id}",
+                )
+            )
+        ) or published
+
+    if latest_assistant is None:
+        return published
+
+    assistant_text = str(latest_assistant.get("text") or "").strip()
+    if not assistant_text:
+        return published
+
+    phase = str(latest_assistant.get("phase") or "").strip()
+    if phase == "commentary":
+        published = bool(
+            publish(
+                create_message_event(
+                    "message.assistant.delta",
+                    provider_id="codex",
+                    workspace_id=workspace_id,
+                    workspace_path=workspace_path,
+                    session_id=thread_id,
+                    turn_id=str(latest_assistant.get("turn_id") or ""),
+                    source="startup_bootstrap",
+                    payload={"delta": assistant_text, "title": title},
+                    dedupe_key=f"codex:startup-bootstrap:commentary:{workspace_id}:{thread_id}",
+                )
+            )
+        ) or published
+    else:
+        published = bool(
+            publish(
+                create_message_event(
+                    "message.assistant.final",
+                    provider_id="codex",
+                    workspace_id=workspace_id,
+                    workspace_path=workspace_path,
+                    session_id=thread_id,
+                    turn_id=str(latest_assistant.get("turn_id") or ""),
+                    source="startup_bootstrap",
+                    payload={"text": assistant_text, "status": "completed", "title": title},
+                    dedupe_key=f"codex:startup-bootstrap:final:{workspace_id}:{thread_id}",
+                )
+            )
+        ) or published
+    return published
+
+
 def _ensure_bound_codex_thread_watches(
     state: AppState,
     *,
     sessions_dir: Optional[str] = None,
 ) -> bool:
-    if not _should_auto_watch_bound_codex_threads(state):
-        return False
     if state.storage is None:
         return False
 
@@ -202,6 +327,8 @@ def _ensure_bound_codex_thread_watches(
 
         for thread_id, thread in (getattr(ws, "threads", {}) or {}).items():
             if getattr(thread, "archived", False):
+                continue
+            if not _should_watch_thread_from_session_file(state, thread):
                 continue
             topic_id = _thread_topic_id(state, ws, thread)
             if topic_id is None:
@@ -239,6 +366,18 @@ def _ensure_bound_codex_thread_watches(
                 synced_text = _synced_final_text_signature(state, thread_id)
                 if synced_text:
                     watch.last_final_text = synced_text
+                if _publish_startup_activity_bootstrap(
+                    state,
+                    ws,
+                    thread_id,
+                    thread,
+                    sessions_dir=sessions_dir,
+                ):
+                    logger.info(
+                        "[tui-mirror] 已恢复 shared-live Codex thread activity thread=%s source=%s",
+                        thread_id[:12],
+                        str(getattr(thread, "source", "") or "unknown"),
+                    )
                 changed = True
                 if not getattr(thread, "is_active", False):
                     continue
@@ -248,6 +387,18 @@ def _ensure_bound_codex_thread_watches(
             watch.topic_id = topic_id or _workspace_topic_id(state, ws) or watch.topic_id
             watch.active_until = now + DEFAULT_WATCH_TTL_SECONDS
 
+    return changed
+
+
+def bootstrap_bound_codex_thread_activity(
+    state: AppState,
+    *,
+    sessions_dir: Optional[str] = None,
+) -> bool:
+    """恢复已绑定 Codex thread 的 watch/activity 启动快照。"""
+    changed = _ensure_bound_codex_thread_watches(state, sessions_dir=sessions_dir)
+    if changed:
+        touch_codex_tui_watch_state(state)
     return changed
 
 

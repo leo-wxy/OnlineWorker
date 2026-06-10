@@ -45,6 +45,8 @@ def canonical_kind_for_session_event(event: SessionEvent) -> str:
     if event.kind == "turn_completed":
         payload = event.payload or {}
         status = _text(payload.get("status")).lower()
+        if event.semantic_kind == "turn_aborted":
+            return "turn.failed"
         if status in {"aborted", "cancelled", "canceled", "error", "failed"}:
             return "turn.failed"
         return "turn.completed"
@@ -52,6 +54,12 @@ def canonical_kind_for_session_event(event: SessionEvent) -> str:
         payload = event.payload or {}
         phase = _text(event.semantic_payload.get("phase") or payload.get("phase"))
         if phase == "final_answer" or event.semantic_kind == "turn_completed":
+            return "message.assistant.final"
+        if event.provider and event.provider != "codex":
+            # Non-Codex providers often omit an explicit final phase while still
+            # emitting a completed assistant message as the user-visible final
+            # reply. Preserve the existing Telegram/runtime behavior here so all
+            # bus consumers share the same boundary.
             return "message.assistant.final"
         return "message.assistant.delta"
     if event.kind == "session_created":

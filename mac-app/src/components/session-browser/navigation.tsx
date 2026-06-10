@@ -69,6 +69,7 @@ export function WorkspaceSidebar({
   selectedWorkspace,
   noSessionsLabel,
   onSelectWorkspace,
+  onOpenWorkspaceContextMenu,
 }: {
   workspaces: string[];
   sessions: UnifiedSession[];
@@ -77,6 +78,7 @@ export function WorkspaceSidebar({
   selectedWorkspace: string | null;
   noSessionsLabel: string;
   onSelectWorkspace: (workspace: string | null) => void;
+  onOpenWorkspaceContextMenu?: (event: MouseEvent<HTMLElement>, workspace: string) => void;
 }) {
   return (
     <div className="ow-page-frame-soft flex w-[268px] shrink-0 flex-col overflow-hidden rounded-[26px]">
@@ -108,6 +110,7 @@ export function WorkspaceSidebar({
             <button
               key={ws}
               onClick={() => onSelectWorkspace(isActive ? null : ws)}
+              onContextMenu={(event) => onOpenWorkspaceContextMenu?.(event, ws)}
               className={`group flex w-full items-center gap-3 rounded-[20px] border px-3 py-3 text-left transition-all ${activeClasses}`}
             >
               <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-2xl ${

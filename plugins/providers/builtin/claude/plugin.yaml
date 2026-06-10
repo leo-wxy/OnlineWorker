@@ -22,6 +22,9 @@ provider:
   control_mode: app
   transport:
     type: stdio
+  message_hooks:
+    abusive_language_normalization:
+      enabled: false
   capabilities:
     sessions: true
     send: true

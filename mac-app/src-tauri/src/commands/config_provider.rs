@@ -461,6 +461,9 @@ fn default_live_transport(
         if owner_transport == "unix" && matches!(control_mode, Some("app" | "hybrid")) {
             return "shared_unix".to_string();
         }
+        if owner_transport == "stdio" {
+            return "owner_bridge".to_string();
+        }
     }
     let defaults = default_provider_config(provider_id);
     if defaults.owner_transport.as_deref() == Some(owner_transport) {
@@ -498,6 +501,8 @@ struct LegacyToolConfig {
     app_server_port: Option<u16>,
     app_server_url: Option<String>,
     control_mode: Option<String>,
+    #[serde(alias = "launchMethods")]
+    launch_methods: Option<Vec<ProviderLaunchMethodConfig>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -535,6 +540,7 @@ struct ProviderPluginConfig {
     transport: Option<ProviderTransportEntry>,
     auth: Option<BTreeMap<String, String>>,
     capabilities: Option<ProviderCapabilitiesEntry>,
+    message_hooks: Option<BTreeMap<String, ProviderMessageHookEntry>>,
     process: Option<ProviderProcessEntry>,
 }
 
@@ -827,7 +833,7 @@ fn plugin_manifest_to_default(manifest: ProviderPluginManifest) -> Option<Provid
             control_mode: provider.control_mode.or_else(|| Some("app".to_string())),
             auth: provider.auth,
             capabilities: Some(provider.capabilities.unwrap_or_default()),
-            message_hooks: None,
+            message_hooks: provider.message_hooks,
             launch_methods: None,
             install: Some(ProviderInstallEntry {
                 cli_names: vec![install_cli_name],
@@ -1186,7 +1192,7 @@ fn legacy_tool_to_provider(tool: LegacyToolConfig) -> ProviderConfigEntry {
         .transport
         .as_ref()
         .and_then(|transport| transport.app_server_port));
-    if default_owner_transport(&tool.name) == "stdio"
+    if tool.name == "codex"
         && explicit_protocol.as_deref() == Some("ws")
         && app_server_url.as_deref().unwrap_or("").is_empty()
         && raw_port.unwrap_or(0) == 4722
@@ -1216,6 +1222,7 @@ fn legacy_tool_to_provider(tool: LegacyToolConfig) -> ProviderConfigEntry {
     provider.control_mode = control_mode;
     provider.owner_transport = Some(owner_transport.clone());
     provider.live_transport = Some(live_transport);
+    provider.launch_methods = normalize_launch_methods(tool.launch_methods);
     provider.transport = Some(ProviderTransportEntry {
         kind: Some(owner_transport),
         app_server_port: port,
@@ -1380,6 +1387,11 @@ pub(crate) fn provider_metadata_from_raw(
 ) -> Result<Vec<ProviderMetadata>, String> {
     let doc = normalize_provider_document_with_env(raw, env_raw)?;
     let mut providers = doc.providers.unwrap_or_default();
+    for provider_id in hidden_provider_ids() {
+        providers
+            .entry(provider_id.clone())
+            .or_insert_with(|| default_provider_config(&provider_id));
+    }
     let mut ordered = Vec::new();
     for provider_id in public_default_provider_ids() {
         if let Some(provider) = providers.remove(&provider_id) {
@@ -1418,50 +1430,16 @@ pub(crate) fn ai_config_metadata_from_raw(
     Ok(ai_metadata_from_document(doc))
 }
 
-fn explicit_provider_ids_from_raw(raw: &str) -> BTreeSet<String> {
-    let Ok(doc) = serde_yaml::from_str::<ProviderConfigDocument>(raw) else {
-        return BTreeSet::new();
-    };
-
-    let mut provider_ids = BTreeSet::new();
-    if let Some(providers) = doc.providers {
-        provider_ids.extend(providers.into_keys());
-    }
-    if let Some(tools) = doc.tools {
-        provider_ids.extend(
-            tools
-                .into_iter()
-                .map(|tool| tool.name.trim().to_string())
-                .filter(|name| !name.is_empty()),
-        );
-    }
-    provider_ids
-}
-
-fn prune_implicit_hidden_providers(doc: &mut ProviderConfigDocument, raw: &str) {
-    let explicit_ids = explicit_provider_ids_from_raw(raw);
-    let Some(providers) = doc.providers.as_mut() else {
-        return;
-    };
-
-    for provider_id in hidden_provider_ids() {
-        if !explicit_ids.contains(&provider_id) {
-            providers.remove(&provider_id);
-        }
-    }
-
-    if providers.is_empty() {
-        doc.providers = None;
-    }
-}
-
 pub(super) fn serialize_config_document_for_persistence(
     mut doc: ProviderConfigDocument,
-    raw: &str,
+    _raw: &str,
 ) -> Result<String, String> {
-    prune_implicit_hidden_providers(&mut doc, raw);
     prune_runtime_icon_urls(&mut doc);
     serde_yaml::to_string(&doc).map_err(|e| format!("Cannot serialize config.yaml: {}", e))
+}
+
+pub(super) fn build_default_user_config_with_env(env_raw: Option<&str>) -> Result<String, String> {
+    serialize_normalized_config_with_env("", env_raw)
 }
 
 fn prune_runtime_icon_urls(doc: &mut ProviderConfigDocument) {
@@ -1487,7 +1465,12 @@ pub(super) fn serialize_normalized_config_with_env(
 }
 
 pub(super) fn normalize_config_for_display(raw: &str, env_raw: Option<&str>) -> String {
-    serialize_normalized_config_with_env(raw, env_raw).unwrap_or_else(|_| raw.to_string())
+    let mut doc = match normalize_provider_document_with_env(raw, env_raw) {
+        Ok(doc) => doc,
+        Err(_) => return raw.to_string(),
+    };
+    prune_runtime_icon_urls(&mut doc);
+    serde_yaml::to_string(&doc).unwrap_or_else(|_| raw.to_string())
 }
 
 #[cfg(test)]
@@ -1660,16 +1643,17 @@ mod tests {
     use std::fs;
 
     use super::{
-        normalize_config_for_display, normalize_provider_document,
-        normalize_provider_document_with_env, notification_channel_metadata_from_raw,
-        overlay_env_spec_from_env_raw, provider_metadata_from_raw,
-        read_manifest_files_from_overlay_path, serialize_normalized_config_with_env,
-        set_ai_config_in_document, set_notification_channel_config_in_document,
-        set_notification_channel_enabled_in_document, set_provider_cli_config_in_document,
-        set_provider_flags_in_document, set_provider_message_hook_enabled_in_document,
-        set_test_process_env_override, AiScenarioConfigEntry, AiServiceConfigEntry,
-        ProviderCapabilitiesEntry, ProviderExternalCliConfig, ProviderLaunchMethodConfig,
-        ProviderSessionAccessCapabilities, NOTIFICATION_OVERLAY_ENV,
+        build_default_user_config_with_env, normalize_config_for_display,
+        normalize_provider_document, normalize_provider_document_with_env,
+        notification_channel_metadata_from_raw, overlay_env_spec_from_env_raw,
+        provider_metadata_from_raw, read_manifest_files_from_overlay_path,
+        serialize_normalized_config_with_env, set_ai_config_in_document,
+        set_notification_channel_config_in_document, set_notification_channel_enabled_in_document,
+        set_provider_cli_config_in_document, set_provider_flags_in_document,
+        set_provider_message_hook_enabled_in_document, set_test_process_env_override,
+        AiScenarioConfigEntry, AiServiceConfigEntry, ProviderCapabilitiesEntry,
+        ProviderExternalCliConfig, ProviderLaunchMethodConfig, ProviderSessionAccessCapabilities,
+        NOTIFICATION_OVERLAY_ENV, PROVIDER_OVERLAY_ENV,
     };
 
     #[test]
@@ -1677,10 +1661,10 @@ mod tests {
         let raw = r#"
 tools:
   - name: codex
-enabled: true
-codex_bin: "codex"
-protocol: "ws"
-app_server_port: 4722
+    enabled: true
+    codex_bin: "codex"
+    protocol: "ws"
+    app_server_port: 4722
 "#;
 
         let doc = normalize_provider_document(raw).expect("normalized config");
@@ -1700,6 +1684,37 @@ app_server_port: 4722
         let claude = providers.get("claude").expect("claude");
         assert_eq!(claude.managed, Some(false));
         assert_eq!(claude.autostart, Some(false));
+    }
+
+    #[test]
+    fn normalize_provider_document_migrates_legacy_launch_methods() {
+        let raw = r#"
+tools:
+  - name: claude
+    enabled: true
+    codex_bin: "claude"
+    protocol: "stdio"
+    launch_methods:
+      - id: native
+        label: Native Claude
+        bin: claude
+      - id: launcher
+        label: Launcher
+        bin: /usr/local/bin/ow-claude
+"#;
+
+        let doc = normalize_provider_document(raw).expect("normalized config");
+        let providers = doc.providers.expect("providers");
+        let claude = providers.get("claude").expect("claude");
+        let launch_methods = claude.launch_methods.as_ref().expect("launch methods");
+
+        assert_eq!(launch_methods.len(), 2);
+        assert_eq!(launch_methods[0].id, "native");
+        assert_eq!(launch_methods[0].label, "Native Claude");
+        assert_eq!(launch_methods[0].bin, "claude");
+        assert_eq!(launch_methods[1].id, "launcher");
+        assert_eq!(launch_methods[1].label, "Launcher");
+        assert_eq!(launch_methods[1].bin, "/usr/local/bin/ow-claude");
     }
 
     #[test]
@@ -1844,11 +1859,14 @@ notifications:
             .expect("telegram icon")
             .url
             .starts_with("data:image/svg+xml;base64,"));
-        assert_eq!(metadata[1].id, "wechat");
-        assert_eq!(metadata[1].label, "WeChat");
-        assert_eq!(metadata[1].description, "Custom WeChat notifier");
-        assert!(metadata[1].enabled);
-        assert!(!metadata[1].builtin);
+        let wechat = metadata
+            .iter()
+            .find(|channel| channel.id == "wechat")
+            .expect("wechat channel");
+        assert_eq!(wechat.label, "WeChat");
+        assert_eq!(wechat.description, "Custom WeChat notifier");
+        assert!(wechat.enabled);
+        assert!(!wechat.builtin);
     }
 
     #[test]
@@ -2108,10 +2126,10 @@ transport:
         let raw = r#"
 tools:
   - name: codex
-enabled: true
-codex_bin: "codex"
-protocol: "ws"
-app_server_port: 4722
+    enabled: true
+    codex_bin: "codex"
+    protocol: "ws"
+    app_server_port: 4722
 "#;
 
         let mut doc = normalize_provider_document(raw).expect("normalized config");
@@ -2442,10 +2460,10 @@ providers:
         let raw = r#"
 tools:
   - name: codex
-enabled: true
-codex_bin: "codex"
-protocol: "ws"
-app_server_port: 4722
+    enabled: true
+    codex_bin: "codex"
+    protocol: "ws"
+    app_server_port: 4722
 
 logging:
   level: "INFO"
@@ -2521,13 +2539,91 @@ codex_bin: "codex"
     }
 
     #[test]
-    fn serialize_normalized_config_omits_generated_icon_data_urls() {
+    fn serialize_normalized_config_keeps_readable_defaults_without_icon_data_urls() {
         let rendered = serialize_normalized_config_with_env("", None).expect("rendered yaml");
 
-        assert!(rendered.contains("icon:"));
-        assert!(rendered.contains("path: icon.svg"));
-        assert!(rendered.contains("source: https://simpleicons.org/icons/openai.svg"));
+        let doc: serde_yaml::Value = serde_yaml::from_str(&rendered).expect("rendered yaml");
+
+        assert_eq!(
+            doc.get("schema_version").and_then(|value| value.as_i64()),
+            Some(2)
+        );
+        assert!(doc.get("providers").is_some());
+        assert!(doc.get("notifications").is_some());
+        assert!(doc.get("ai").is_some());
         assert!(!rendered.contains("data:image/svg+xml;base64,"));
+    }
+
+    #[test]
+    fn serialize_normalized_config_preserves_default_ai_and_notification_state() {
+        let rendered = build_default_user_config_with_env(None).expect("rendered yaml");
+        let doc: serde_yaml::Value = serde_yaml::from_str(&rendered).expect("rendered yaml");
+
+        assert_eq!(
+            doc.get("schema_version").and_then(|value| value.as_i64()),
+            Some(2)
+        );
+        assert!(doc.get("providers").is_some());
+        assert!(doc.get("notifications").is_some());
+        assert!(doc.get("ai").is_some());
+        assert_eq!(
+            doc.get("providers")
+                .and_then(|providers| providers.get("codex"))
+                .and_then(|provider| provider.get("owner_transport"))
+                .and_then(|value| value.as_str()),
+            Some("unix")
+        );
+    }
+
+    #[test]
+    fn serialize_normalized_config_keeps_full_ai_service_fields() {
+        let raw = r#"
+schema_version: 2
+ai:
+  services:
+    - id: openai_default
+      name: OpenAI
+      protocol: openai_compatible_chat
+      base_url: https://api.openai.com/v1
+      models:
+        - gpt-5.4
+      default_model: gpt-5.4
+      timeout_seconds: 20
+      enabled: true
+  scenarios:
+    notification_summary:
+      enabled: false
+      service_id: openai_default
+      output_schema: notification_summary_v1
+      fallback: local_notification_summary_rules
+      limits:
+        preview_title: 16
+"#;
+
+        let rendered = serialize_normalized_config_with_env(raw, None).expect("rendered yaml");
+        let doc: serde_yaml::Value = serde_yaml::from_str(&rendered).expect("rendered yaml");
+        let services = doc
+            .get("ai")
+            .and_then(|ai| ai.get("services"))
+            .and_then(|services| services.as_sequence())
+            .expect("services");
+        let openai = services
+            .iter()
+            .find(|service| {
+                service.get("id").and_then(|value| value.as_str()) == Some("openai_default")
+            })
+            .expect("openai_default service");
+
+        assert!(services.len() >= 2);
+        assert_eq!(
+            openai.get("enabled").and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            openai.get("name").and_then(|value| value.as_str()),
+            Some("OpenAI")
+        );
+        assert!(doc.get("ai").and_then(|ai| ai.get("scenarios")).is_some());
     }
 
     #[test]
@@ -2652,6 +2748,67 @@ providers:
         );
         assert!(!codex.capabilities.launch_methods);
         assert!(claude.capabilities.launch_methods);
+    }
+
+    #[test]
+    fn provider_metadata_uses_manifest_message_hook_defaults() {
+        let providers = provider_metadata_from_raw("", None).expect("metadata");
+        let codex = providers
+            .iter()
+            .find(|provider| provider.id == "codex")
+            .expect("codex");
+        let claude = providers
+            .iter()
+            .find(|provider| provider.id == "claude")
+            .expect("claude");
+
+        assert!(codex.message_hooks.abusive_language_normalization.enabled);
+        assert!(!claude.message_hooks.abusive_language_normalization.enabled);
+    }
+
+    #[test]
+    fn provider_metadata_includes_hidden_overlay_provider_in_catalog() {
+        let dir = std::env::temp_dir().join(format!(
+            "onlineworker-hidden-provider-catalog-{}",
+            std::process::id()
+        ));
+        let plugin_dir = dir.join("hidden-provider");
+        fs::create_dir_all(&plugin_dir).expect("create plugin dir");
+        fs::write(
+            plugin_dir.join("plugin.yaml"),
+            r#"
+schema_version: 1
+id: hidden-provider
+kind: provider
+visibility: private
+label: Hidden Provider
+default_visible: false
+provider:
+  visible: false
+  managed: false
+  autostart: false
+  bin: hidden-provider
+"#,
+        )
+        .expect("write plugin manifest");
+        set_test_process_env_override(
+            PROVIDER_OVERLAY_ENV,
+            Some(dir.to_string_lossy().to_string()),
+        );
+
+        let providers = provider_metadata_from_raw("", None).expect("metadata");
+
+        set_test_process_env_override(PROVIDER_OVERLAY_ENV, None);
+        let _ = fs::remove_dir_all(&dir);
+
+        let hidden_provider = providers
+            .iter()
+            .find(|provider| provider.id == "hidden-provider")
+            .expect("hidden provider");
+        assert_eq!(hidden_provider.label, "Hidden Provider");
+        assert!(!hidden_provider.visible);
+        assert!(!hidden_provider.managed);
+        assert_eq!(hidden_provider.bin.as_deref(), Some("hidden-provider"));
     }
 
     #[test]

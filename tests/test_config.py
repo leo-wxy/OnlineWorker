@@ -196,6 +196,35 @@ providers:
     assert claude.message_hooks.builtin["abusive_language_normalization"].enabled is False
 
 
+def test_load_config_uses_builtin_provider_manifest_message_hook_defaults(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text("schema_version: 2\n", encoding="utf-8")
+    monkeypatch.setenv("TELEGRAM_TOKEN", "123:abc")
+    monkeypatch.setenv("ALLOWED_USER_ID", "456789")
+    monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
+
+    from config import load_config
+
+    cfg = load_config(str(p))
+
+    assert cfg.providers["codex"].message_hooks is not None
+    assert (
+        cfg.providers["codex"]
+        .message_hooks
+        .builtin["abusive_language_normalization"]
+        .enabled
+        is True
+    )
+    assert cfg.providers["claude"].message_hooks is not None
+    assert (
+        cfg.providers["claude"]
+        .message_hooks
+        .builtin["abusive_language_normalization"]
+        .enabled
+        is False
+    )
+
+
 def test_load_config_reads_provider_external_cli_settings(tmp_path, monkeypatch):
     p = tmp_path / "config.yaml"
     p.write_text(
@@ -526,6 +555,46 @@ entrypoints:
     assert overlay_tool.visible is False
     assert overlay_tool.managed is True
     assert [provider.name for provider in cfg.enabled_tools] == ["codex"]
+
+
+def test_load_config_provider_overlay_manifest_defaults_match_rust_effective_model(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text("schema_version: 2\n", encoding="utf-8")
+
+    overlay_root = tmp_path / "provider-overlay-defaults"
+    provider_dir = overlay_root / "overlay_tool"
+    provider_dir.mkdir(parents=True)
+    (provider_dir / "plugin.yaml").write_text(
+        """
+schema_version: 1
+id: overlay-tool
+kind: provider
+visibility: private
+label: Overlay Tool
+default_visible: false
+
+provider:
+  visible: false
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("TELEGRAM_TOKEN", "123:abc")
+    monkeypatch.setenv("ALLOWED_USER_ID", "456789")
+    monkeypatch.setenv("GROUP_CHAT_ID", "-100987654321")
+    monkeypatch.setenv("ONLINEWORKER_PROVIDER_OVERLAY", str(overlay_root))
+
+    from config import load_config
+
+    cfg = load_config(str(p))
+    overlay_tool = cfg.get_provider("overlay-tool")
+
+    assert overlay_tool is not None
+    assert overlay_tool.visible is False
+    assert overlay_tool.managed is False
+    assert overlay_tool.autostart is False
+    assert overlay_tool.protocol == "stdio"
+    assert cfg.get_tool("overlay-tool") is None
 
 
 def test_load_config_from_provider_schema(tmp_path, monkeypatch):

@@ -9,7 +9,7 @@ from typing import Any, Optional
 class ProviderWatchState:
     """单个 provider 的实时镜像：单个 thread 的增量读取状态。"""
     workspace_id: str
-    topic_id: int
+    topic_id: int | None
     session_file: Optional[str] = None
     last_offset: int = 0
     last_commentary_text: str = ""

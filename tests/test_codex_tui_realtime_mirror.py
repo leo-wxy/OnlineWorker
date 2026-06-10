@@ -24,17 +24,39 @@ def _append_response_item(
     timestamp: str,
     turn_id: str = "",
 ) -> None:
+    content_type = "input_text" if role == "user" else "output_text"
     record = {
         "timestamp": timestamp,
         "type": "response_item",
         "payload": {
             "role": role,
             "phase": phase,
-            "content": [{"type": "output_text", "text": text}],
+            "content": [{"type": content_type, "text": text}],
         },
     }
     if turn_id:
         record["payload"]["turn_id"] = turn_id
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _append_session_meta(
+    path: Path,
+    *,
+    thread_id: str,
+    cwd: str,
+    timestamp: str = "2026-04-06T10:00:00Z",
+) -> None:
+    record = {
+        "timestamp": timestamp,
+        "type": "session_meta",
+        "payload": {
+            "id": thread_id,
+            "cwd": cwd,
+            "timestamp": timestamp,
+            "source": "cli",
+        },
+    }
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -84,6 +106,26 @@ def _make_app_mode_config() -> Config:
                 protocol="stdio",
                 control_mode="app",
                 live_transport="owner_bridge",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+
+
+def _make_shared_live_app_mode_config() -> Config:
+    return Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="unix",
+                control_mode="app",
+                live_transport="shared_unix",
             )
         ],
         delete_archived_topics=True,
@@ -374,6 +416,132 @@ async def test_sync_codex_tui_realtime_once_in_app_mode_does_not_auto_watch_boun
 
 
 @pytest.mark.asyncio
+async def test_sync_codex_tui_realtime_once_does_not_import_unmanaged_local_thread_in_shared_live_mode(tmp_path):
+    from plugins.providers.builtin.codex.python.tui_realtime_mirror import sync_codex_tui_realtime_once
+
+    state, ws, session_file, sessions_dir = _make_state(tmp_path)
+    state.config = _make_shared_live_app_mode_config()
+    ws.topic_id = None
+    ws.threads.pop("tid-1")
+    handler = AsyncMock()
+
+    _append_session_meta(
+        session_file,
+        thread_id="tid-1",
+        cwd=ws.path,
+    )
+    _append_response_item(
+        session_file,
+        role="user",
+        phase="",
+        text="继续查 codex 通知",
+        timestamp="2026-04-06T10:00:00Z",
+    )
+    _append_response_item(
+        session_file,
+        role="assistant",
+        phase="commentary",
+        text="旧过程不应重放",
+        timestamp="2026-04-06T10:00:01Z",
+    )
+
+    await sync_codex_tui_realtime_once(
+        state,
+        handler,
+        sessions_dir=str(sessions_dir),
+    )
+
+    assert "tid-1" not in ws.threads
+    assert "tid-1" not in codex_state.get_runtime(state).watched_threads
+    handler.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_codex_tui_realtime_once_does_not_watch_existing_unmanaged_thread_without_topic_in_shared_live_mode(tmp_path):
+    from plugins.providers.builtin.codex.python.tui_realtime_mirror import sync_codex_tui_realtime_once
+
+    state, ws, session_file, sessions_dir = _make_state(tmp_path)
+    state.config = _make_shared_live_app_mode_config()
+    ws.topic_id = None
+    ws.threads["tid-1"].topic_id = None
+    ws.threads["tid-1"].source = "unknown"
+    ws.threads["tid-1"].is_active = True
+    handler = AsyncMock()
+
+    _append_session_meta(
+        session_file,
+        thread_id="tid-1",
+        cwd=ws.path,
+    )
+    _append_response_item(
+        session_file,
+        role="user",
+        phase="",
+        text="继续查 codex 通知",
+        timestamp="2026-04-06T10:00:00Z",
+    )
+    _append_response_item(
+        session_file,
+        role="assistant",
+        phase="commentary",
+        text="旧过程不应重放",
+        timestamp="2026-04-06T10:00:01Z",
+    )
+
+    await sync_codex_tui_realtime_once(
+        state,
+        handler,
+        sessions_dir=str(sessions_dir),
+    )
+
+    assert "tid-1" not in codex_state.get_runtime(state).watched_threads
+    assert ws.threads["tid-1"].source == "unknown"
+    handler.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_codex_tui_realtime_once_does_not_emit_session_file_updates_for_shared_live_thread(tmp_path):
+    from plugins.providers.builtin.codex.python.tui_realtime_mirror import sync_codex_tui_realtime_once
+
+    state, ws, session_file, sessions_dir = _make_state(tmp_path)
+    state.config = _make_shared_live_app_mode_config()
+    ws.threads["tid-1"].topic_id = None
+    ws.threads["tid-1"].source = "unknown"
+    ws.threads["tid-1"].is_active = True
+    handler = AsyncMock()
+
+    _append_session_meta(
+        session_file,
+        thread_id="tid-1",
+        cwd=ws.path,
+    )
+    _append_response_item(
+        session_file,
+        role="user",
+        phase="",
+        text="继续查 codex 通知",
+        timestamp="2026-04-06T10:00:00Z",
+    )
+    _append_response_item(
+        session_file,
+        role="assistant",
+        phase="commentary",
+        text="旧过程不应重放",
+        timestamp="2026-04-06T10:00:01Z",
+        turn_id="turn-shared",
+    )
+
+    await sync_codex_tui_realtime_once(
+        state,
+        handler,
+        sessions_dir=str(sessions_dir),
+    )
+
+    assert "tid-1" not in codex_state.get_runtime(state).watched_threads
+    handler.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_sync_codex_tui_realtime_once_does_not_auto_watch_active_thread_bootstrap_commentary_in_app_mode(tmp_path):
     from plugins.providers.builtin.codex.python.tui_realtime_mirror import sync_codex_tui_realtime_once
 
@@ -552,6 +720,60 @@ async def test_sync_watched_thread_once_ignores_reasoning_items_with_null_conten
 
     handler.assert_awaited()
     assert watch.last_commentary_text == "继续处理中"
+
+
+@pytest.mark.asyncio
+async def test_shared_live_imported_thread_bootstraps_bus_activity_without_live_event(tmp_path):
+    from plugins.providers.builtin.codex.python.tui_realtime_mirror import sync_codex_tui_realtime_once
+
+    state, ws, session_file, sessions_dir = _make_state(tmp_path)
+    state.config = _make_shared_live_app_mode_config()
+    ws.path = "/Users/example/Projects/onlineworker-combined"
+    ws.name = "onlineworker-combined"
+    ws.daemon_workspace_id = "codex:onlineworker-combined"
+    imported_thread = ws.threads.pop("tid-1")
+    imported_thread.thread_id = "tid-imported"
+    imported_thread.preview = "继续查 codex 通知"
+    imported_thread.source = "imported"
+    imported_thread.is_active = True
+    ws.threads["tid-imported"] = imported_thread
+    state.storage.workspaces = {ws.daemon_workspace_id: ws}
+
+    _append_response_item(
+        session_file,
+        role="user",
+        phase="",
+        text="继续查 codex 通知",
+        timestamp="2026-04-06T10:00:00Z",
+    )
+    _append_response_item(
+        session_file,
+        role="assistant",
+        phase="final_answer",
+        text="已经定位到 shared-live 启动后缺少 session activity 恢复。",
+        timestamp="2026-04-06T10:00:05Z",
+        turn_id="turn-bootstrap-1",
+    )
+    renamed = session_file.with_name("rollout-2026-04-06T10-00-00-tid-imported.jsonl")
+    session_file.rename(renamed)
+
+    handler = AsyncMock()
+
+    await sync_codex_tui_realtime_once(
+        state,
+        handler,
+        sessions_dir=str(sessions_dir),
+    )
+
+    runtime = codex_state.get_runtime(state)
+    assert "tid-imported" in runtime.watched_threads
+    activity = state.message_bus.session_activity("codex", "tid-imported")
+    assert activity is not None
+    assert activity["status"] == "completed"
+    assert activity["title"] == "继续查 codex 通知"
+    assert activity["lastUserMessage"] == "继续查 codex 通知"
+    assert activity["lastFinalMessage"] == "已经定位到 shared-live 启动后缺少 session activity 恢复。"
+    handler.assert_not_awaited()
 
 
 def test_touch_codex_tui_watch_state_updates_runtime_marker(tmp_path):

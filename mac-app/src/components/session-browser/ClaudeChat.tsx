@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
-import type { ClaudeSession, ComposerAttachment, SessionTurn } from "../../types";
+import { useProviderSessionEventStream } from "../../hooks/useProviderSessionEventStream";
+import type {
+  ClaudeSession,
+  ComposerAttachment,
+  SessionStreamEvent,
+  SessionTurn,
+} from "../../types";
+import { shouldClearReplyWatch } from "../../utils/replyWatch.js";
+import { applySessionStreamEvent } from "../../utils/sessionEventModel.js";
 import {
   buildSnapshotSignature,
   countAssistantEntries,
   pollAssistantReply,
-  startActiveSessionRefresh,
 } from "../../utils/sessionPolling.js";
 import {
   fetchClaudeMessages,
@@ -50,8 +57,6 @@ export function ClaudeChat({
   const msgEndRef = useRef<HTMLDivElement>(null);
   const replyWatchTokenRef = useRef(0);
   const messagesRef = useRef<SessionTurn[]>([]);
-  const sendingRef = useRef(false);
-  const replyWatchStateRef = useRef<ReplyWatchState | null>(null);
 
   const cancelReplyWatch = useCallback(() => {
     replyWatchTokenRef.current += 1;
@@ -89,34 +94,43 @@ export function ClaudeChat({
   }, [messages]);
 
   useEffect(() => {
-    sendingRef.current = sending;
-  }, [sending]);
-
-  useEffect(() => {
-    replyWatchStateRef.current = replyWatchState;
-  }, [replyWatchState]);
-
-  useEffect(() => startActiveSessionRefresh<SessionTurn>({
-    getCurrentSnapshot: () => messagesRef.current,
-    loadSnapshot: () => fetchClaudeMessages(rawSession.sessionId, rawSession.workspace),
-    onSnapshot: (nextMessages) => {
-      messagesRef.current = nextMessages;
-      setMessages(nextMessages);
-      setReplyWatchState((current) => (current === "expired" ? null : current));
-    },
-    shouldSkip: () => (
-      sendingRef.current ||
-      replyWatchStateRef.current === "foreground" ||
-      replyWatchStateRef.current === "background"
-    ),
-    onError: (error) => {
-      console.warn("Failed to refresh Claude session", error);
-    },
-  }), [rawSession.sessionId, rawSession.workspace]);
-
-  useEffect(() => {
     msgEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const handleSessionEvent = useCallback((event: SessionStreamEvent) => {
+    if (event?.kind === "stream_ready") {
+      return;
+    }
+    if (event?.kind === "error") {
+      if (messagesRef.current.length === 0) {
+        setMsgError(event.error ?? "provider session stream error");
+      } else {
+        console.warn("Claude session event stream error", event.error);
+      }
+      replyWatchTokenRef.current += 1;
+      setReplyWatchState((current) => (current ? "expired" : current));
+      return;
+    }
+
+    const previousMessages = messagesRef.current;
+    const nextMessages = limitSessionTurns(applySessionStreamEvent(previousMessages, event));
+    if (nextMessages === previousMessages) {
+      return;
+    }
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
+    if (shouldClearReplyWatch(previousMessages, nextMessages, event)) {
+      cancelReplyWatch();
+    }
+  }, [cancelReplyWatch]);
+
+  useProviderSessionEventStream({
+    enabled: Boolean(rawSession.sessionId),
+    providerId: "claude",
+    sessionId: rawSession.sessionId,
+    workspaceDir: rawSession.workspace ?? null,
+    onEvent: handleSessionEvent,
+  });
 
   const handleSend = async (text: string, nextAttachments: ComposerAttachment[]) => {
     if ((!text.trim() && nextAttachments.length === 0) || sending) {

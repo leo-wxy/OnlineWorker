@@ -13,6 +13,25 @@ interface Props {
   mode: ProviderSettingsMode;
 }
 
+function ProviderIcon({ provider }: { provider?: ProviderMetadata }) {
+  const iconUrl = provider?.icon?.url?.trim();
+  if (iconUrl) {
+    return (
+      <img
+        src={iconUrl}
+        alt=""
+        className="h-11 w-11 shrink-0 rounded-2xl border border-slate-200 bg-white object-contain p-1.5 shadow-sm"
+      />
+    );
+  }
+  const label = provider?.label?.trim() || provider?.id || "?";
+  return (
+    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-slate-200 bg-white text-sm font-bold text-slate-500 shadow-sm">
+      {label.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
 function providerSettingClass(enabled: boolean) {
   return enabled
     ? "border-blue-100 bg-blue-50/70"
@@ -20,7 +39,7 @@ function providerSettingClass(enabled: boolean) {
 }
 
 function supportsLaunchMethods(provider: ProviderMetadata | undefined) {
-  return provider?.capabilities.launchMethods === true;
+  return provider?.capabilities.launchMethods === true || provider?.id === "claude";
 }
 
 const CIVILITY_MODE_SEALED = true;
@@ -301,6 +320,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
           const busy = savingProviderId === setting.id;
           const cliBusy = savingCliProviderId === setting.id;
           const hookBusy = savingHookProviderId === setting.id;
+          const hiddenByDefault = provider?.visible === false;
           const cliAvailable = cliAvailability[setting.id] !== false;
           const canEnable = setting.enabled || cliAvailable;
           const supportsExternalCliRewrite = Boolean(provider?.capabilities.messageRewrite?.externalCli);
@@ -331,30 +351,43 @@ export function ProviderSettingsPanel({ mode }: Props) {
               }`}
             >
               <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-base font-bold text-gray-950">{setting.label}</h3>
-                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${
-                      !cliAvailable
-                        ? "bg-amber-100 text-amber-700"
-                        : setting.enabled
-                        ? "bg-emerald-100 text-emerald-700"
-                        : "bg-slate-200 text-slate-600"
-                    }`}>
-                      {!cliAvailable ? texts.cliMissing : setting.enabled ? texts.enabled : texts.disabled}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {provider?.description || provider?.runtimeId || setting.id}
-                  </p>
-                  <p className="mt-2 truncate text-xs font-mono text-slate-500" title={provider?.bin ?? undefined}>
-                    {provider?.bin ?? provider?.install?.cliNames?.[0] ?? setting.id}
-                  </p>
-                  {!cliAvailable && (
-                    <p className="mt-2 text-xs font-semibold text-amber-700">
-                      {texts.installCliHint}
+                <div className="flex min-w-0 items-start gap-3">
+                  <ProviderIcon provider={provider} />
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-base font-bold text-gray-950">{setting.label}</h3>
+                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${
+                        !cliAvailable
+                          ? "bg-amber-100 text-amber-700"
+                          : setting.enabled
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-slate-200 text-slate-600"
+                      }`}>
+                        {!cliAvailable ? texts.cliMissing : setting.enabled ? texts.enabled : texts.disabled}
+                      </span>
+                      {hiddenByDefault && (
+                        <span className="rounded-full bg-violet-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-violet-700">
+                          {texts.hiddenByDefault}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {provider?.description || provider?.runtimeId || setting.id}
                     </p>
-                  )}
+                    <p className="mt-2 truncate text-xs font-mono text-slate-500" title={provider?.bin ?? undefined}>
+                      {provider?.bin ?? provider?.install?.cliNames?.[0] ?? setting.id}
+                    </p>
+                    {hiddenByDefault && (
+                      <p className="mt-2 text-xs font-medium text-violet-700">
+                        {texts.hiddenByDefaultHint}
+                      </p>
+                    )}
+                    {!cliAvailable && (
+                      <p className="mt-2 text-xs font-semibold text-amber-700">
+                        {texts.installCliHint}
+                      </p>
+                    )}
+                  </div>
                 </div>
                 {busy && <span className="text-xs font-semibold text-blue-600">{texts.saving}</span>}
               </div>

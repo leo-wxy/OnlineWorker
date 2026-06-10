@@ -263,6 +263,9 @@ export interface AppTexts {
     stagingAttachments: string;
     attachmentUnsupported: string;
     sessionActions: string;
+    openWorkspaceInTerminal: string;
+    openWorkspaceInFinder: string;
+    copyWorkspacePath: string;
     alreadyArchived: string;
     pinSession: string;
     unpinSession: string;
@@ -357,6 +360,8 @@ export interface AppTexts {
     cliMissing: string;
     enabled: string;
     disabled: string;
+    hiddenByDefault: string;
+    hiddenByDefaultHint: string;
     installCliHint: string;
     saving: string;
     enable: string;

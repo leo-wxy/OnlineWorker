@@ -22,6 +22,9 @@ provider:
   control_mode: app
   transport:
     type: unix
+  message_hooks:
+    abusive_language_normalization:
+      enabled: true
   capabilities:
     sessions: true
     send: true

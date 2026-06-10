@@ -213,6 +213,124 @@ async def test_provider_owner_bridge_activity_stream_does_not_drop_startup_event
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_streams_filtered_session_events_from_message_bus(tmp_path):
+    import asyncio
+
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(storage=AppStorage())
+    state.message_bus = MessageEventBus()
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+
+    socket_path = f"/tmp/ow-bridge-events-{os.getpid()}.sock"
+    try:
+        os.remove(socket_path)
+    except FileNotFoundError:
+        pass
+    server = await asyncio.start_unix_server(bridge._handle_client, path=socket_path)
+    try:
+        reader, writer = await asyncio.open_unix_connection(socket_path)
+        writer.write(
+            b'{"type":"session_event_stream","provider_id":"claude","session_id":"thread-a","workspace_dir":"/tmp/project"}\n'
+        )
+        await writer.drain()
+        ready = json.loads((await reader.readline()).decode("utf-8"))
+        assert ready["kind"] == "stream_ready"
+
+        state.message_bus.publish(
+            create_message_event(
+                "message.user.accepted",
+                provider_id="claude",
+                workspace_id="claude:/tmp/project",
+                workspace_path="/tmp/project",
+                session_id="thread-a",
+                payload={
+                    "text": "图片里面主要是什么内容",
+                    "attachments": [{"kind": "image", "name": "Image #1"}],
+                },
+                created_at=10,
+            )
+        )
+        user_update = json.loads((await reader.readline()).decode("utf-8"))
+        assert user_update["kind"] == "user_message"
+        assert user_update["semanticKind"] == "message.user.accepted"
+        assert user_update["turn"]["role"] == "user"
+        assert user_update["turn"]["content"] == "图片里面主要是什么内容\n[Attached image] Image #1"
+
+        state.message_bus.publish(
+            create_message_event(
+                "message.assistant.delta",
+                provider_id="claude",
+                workspace_id="claude:/tmp/project",
+                workspace_path="/tmp/project",
+                session_id="thread-a",
+                payload={"delta": "我先看一下当前链路。"},
+                created_at=20,
+            )
+        )
+        delta_update = json.loads((await reader.readline()).decode("utf-8"))
+        assert delta_update["kind"] == "assistant_progress"
+        assert delta_update["turn"]["pending"] is True
+        assert delta_update["turn"]["content"] == "我先看一下当前链路。"
+
+        state.message_bus.publish(
+            create_message_event(
+                "message.assistant.final",
+                provider_id="claude",
+                workspace_id="claude:/tmp/project",
+                workspace_path="/tmp/project",
+                session_id="thread-a",
+                payload={"text": "## 最终结果"},
+                created_at=30,
+            )
+        )
+        final_update = json.loads((await reader.readline()).decode("utf-8"))
+        assert final_update["kind"] == "assistant_completed"
+        assert final_update["turn"]["displayMode"] == "markdown"
+        assert final_update["turn"]["content"] == "## 最终结果"
+
+        state.message_bus.publish(
+            create_message_event(
+                "message.assistant.delta",
+                provider_id="claude",
+                workspace_id="claude:/tmp/other",
+                workspace_path="/tmp/other",
+                session_id="thread-a",
+                payload={"delta": "should not pass"},
+                created_at=40,
+            )
+        )
+
+        state.message_bus.publish(
+            create_message_event(
+                "turn.failed",
+                provider_id="claude",
+                workspace_id="claude:/tmp/project",
+                workspace_path="/tmp/project",
+                session_id="thread-a",
+                payload={"reason": "interrupted"},
+                created_at=50,
+            )
+        )
+        first_following_update = json.loads((await reader.readline()).decode("utf-8"))
+        assert "should not pass" not in json.dumps(first_following_update, ensure_ascii=False)
+        abort_update = first_following_update
+        if abort_update["kind"] != "turn_aborted":
+            abort_update = json.loads((await reader.readline()).decode("utf-8"))
+        assert abort_update["kind"] == "turn_aborted"
+        assert abort_update["reason"] == "interrupted"
+        writer.close()
+        await writer.wait_closed()
+    finally:
+        server.close()
+        await server.wait_closed()
+        try:
+            os.remove(socket_path)
+        except FileNotFoundError:
+            pass
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_filters_archived_session_activities(tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
@@ -1546,7 +1664,7 @@ async def test_provider_owner_bridge_ignores_legacy_mirror_approval(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_provider_owner_bridge_replies_approval_via_pending_decision(tmp_path):
+async def test_provider_owner_bridge_rejects_approval_without_adapter_authority(tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
     state = AppState(storage=AppStorage())
@@ -1566,7 +1684,6 @@ async def test_provider_owner_bridge_replies_approval_via_pending_decision(tmp_p
             created_at=10,
         )
     )
-    pending = state.ensure_pending_approval_decision("codex", "req-1")
 
     bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
     response = await bridge._handle_reply_approval(
@@ -1581,16 +1698,12 @@ async def test_provider_owner_bridge_replies_approval_via_pending_decision(tmp_p
         }
     )
 
-    assert response["ok"] is True
-    assert response["mode"] == "pending-decision"
-    assert pending.event.is_set() is True
-    assert pending.decision == "exec_allow"
+    assert response == {"ok": False, "error": "codex adapter 未连接"}
     activity = state.message_bus.session_activity("codex", "thread-a")
-    assert activity["status"] == "running"
-    assert activity["attentionKind"] == ""
+    assert activity["status"] == "needs_attention"
+    assert activity["attentionKind"] == "approval"
     events = state.message_bus.recent_events()
-    assert events[-1]["kind"] == "approval.answered"
-    assert events[-1]["source"] == "desktop_app"
+    assert events[-1]["kind"] == "approval.requested"
 
 
 @pytest.mark.asyncio
@@ -1725,7 +1838,10 @@ async def test_provider_owner_bridge_preserves_numeric_approval_request_id(monke
 
 
 @pytest.mark.asyncio
-async def test_provider_owner_bridge_replies_locally_retained_approval_via_pending_decision(monkeypatch, tmp_path):
+async def test_provider_owner_bridge_replies_approval_via_connected_adapter_without_pending_decision(
+    monkeypatch,
+    tmp_path,
+):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
     adapter = SimpleNamespace(
@@ -1750,8 +1866,6 @@ async def test_provider_owner_bridge_replies_locally_retained_approval_via_pendi
             created_at=10,
         )
     )
-    pending = state.ensure_pending_approval_decision("claude", "req-local-1")
-    pending.requires_adapter_reply = True
 
     monkeypatch.setattr(
         "core.provider_owner_bridge.get_provider",
@@ -1788,8 +1902,6 @@ async def test_provider_owner_bridge_replies_locally_retained_approval_via_pendi
         "req-local-1",
         {"behavior": "allow"},
     )
-    assert pending.event.is_set() is False
-    assert pending.decision == ""
     activity = state.message_bus.session_activity("claude", "thread-a")
     assert activity["status"] == "running"
     assert activity["attentionKind"] == ""

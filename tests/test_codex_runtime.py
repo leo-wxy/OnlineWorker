@@ -381,3 +381,50 @@ async def test_prepare_send_resumes_app_owned_thread_without_remapping(monkeypat
     )
     assert ws.threads["thread-app"] is thread_info
     assert thread_info.source == "app"
+
+
+@pytest.mark.asyncio
+async def test_sync_existing_codex_topics_after_startup_repairs_active_threads(monkeypatch):
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineworker-combined",
+        path="/Users/example/Projects/onlineworker-combined",
+        tool="codex",
+        daemon_workspace_id="codex:onlineworker-combined",
+    )
+    ws.threads["tid-imported"] = ThreadInfo(
+        thread_id="tid-imported",
+        topic_id=206,
+        preview="继续查 codex 通知",
+        archived=True,
+        is_active=False,
+        source="imported",
+    )
+    storage.workspaces[ws.daemon_workspace_id] = ws
+    state = AppState(storage=storage)
+    manager = MagicMock()
+    manager.state = state
+    manager.storage = storage
+
+    bootstrap_mock = MagicMock(return_value=True)
+    saved = []
+
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.runtime.storage_runtime.query_codex_active_thread_ids",
+        lambda workspace_path: {"tid-imported"},
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_realtime_mirror.bootstrap_bound_codex_thread_activity",
+        bootstrap_mock,
+    )
+    monkeypatch.setattr(
+        "core.storage.save_storage",
+        lambda storage_obj: saved.append(storage_obj),
+    )
+
+    await codex_runtime.sync_existing_topics_after_startup(manager, MagicMock())
+
+    assert ws.threads["tid-imported"].archived is False
+    assert ws.threads["tid-imported"].is_active is True
+    bootstrap_mock.assert_called_once_with(state)
+    assert saved == [storage]

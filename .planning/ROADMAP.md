@@ -21,7 +21,7 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 12: Codex Managed App-Server Approval Host** - Follow the Paseo/Happy/Codex IDE host-client model: OnlineWorker-managed Codex sessions own the app-server request/response channel, Telegram is the remote approval UI for those sessions, and existing Desktop/VS Code/ordinary CLI sessions stay native and mirror-only. 12-02 implements `unix://` support and the installed fixed OnlineWorker Unix remote proxy; fixed-session shared CLI + TG authorization convergence has been user-accepted through `codex_remote_proxy.sock`.
 - [x] **Phase 13: Claude Provider Auth Runtime Hardening** - Replace the current fragile Claude runtime/auth fallback with an explicit, durable provider readiness contract. Telegram/provider sends now fail fast with visible diagnostics when Claude auth is unavailable, Dashboard/status paths surface the same reason before user traffic, active-process environment scanning is removed from the normal readiness path, and Claude can opt into user-configured multi-launch-method readiness through a generic Settings UI shown for providers that declare `capabilities.launch_methods`. Source verification, fast packaged build/install/restart verification, installed configured launch-method readiness, owner-bridge healthy status, and user UAT are complete.
 - [x] **Phase 14: Unified Message Event Bus** - Establish a single OnlineWorker message/event bus so Telegram, App sessions, TaskBoard, notifications, approvals, questions, and future surfaces consume the same normalized event stream instead of each owning separate message-handling logic. 14-01 through 14-04 are source verified; fast packaged build/install/restart verification passed after the 14-04 TaskBoard first-paint fix, and the Phase 16 external-ingress follow-up closed the remaining TaskBoard visibility gap.
-- [ ] **Phase 15: Bus-Driven Rendering And Approval Command Boundary** - Follow up Phase 14 by migrating heavy first-party renderers onto the bus once the event schema is stable: App Session detail live updates and Telegram send/edit/topic rendering become bus-driven consumers, and approval/question events are re-evaluated for a command boundary instead of remaining observational only.
+- [x] **Phase 15: Bus-Driven Rendering And Approval Command Boundary** - Follow up Phase 14 by migrating heavy first-party renderers onto the bus once the event schema is stable: `15-02` App Session detail live-model migration, `15-03` Telegram edge migration, and `15-04` approval/question command-boundary tightening are source verified.
 - [x] **Phase 16: Provider External Event Ingress** - Add provider-plugin-owned external event ingress for Claude and distribution-provided provider plugins so externally launched sessions can enter the Phase 14 message bus. Claude uses a marker-based global hook merge; OpenCode-compatible listener behavior is reference-only for compatible provider plugins, not a new product surface. Implementation remains scoped to provider plugin directories plus focused tests and generic bus projection fixes.
 
 ## Phase Details
@@ -583,13 +583,13 @@ Plans:
 - [ ] 15-01: Define heavy-consumer migration and command-boundary umbrella
   - [ ] Keep the overall Phase 15 scope, execution order, and verification contract explicit.
   - [ ] Decompose App Session, Telegram, and approval/question authority into narrower plans before implementation.
-- [ ] 15-02: Migrate App Session detail to a bus-derived live model
-  - [ ] Replace provider-specific live rendering semantics with canonical bus events while preserving history merge, streaming delta/final behavior, scroll ergonomics, and error states.
-  - [ ] Keep provider history reads only as initial/historical data.
-- [ ] 15-03: Migrate Telegram rendering to a bus-derived edge consumer
-  - [ ] Drive Telegram streaming/final/edit/topic rendering from canonical events while preserving Phase 11 route fail-closed behavior and Phase 12 approval ownership.
-  - [ ] Keep Telegram-specific ids, parse mode, reply markup, and callback metadata at the Telegram edge.
-- [ ] 15-04: Define approval/question command boundary
+- [x] 15-02: Migrate App Session detail to a bus-derived live model
+  - [x] Replace provider-specific live rendering semantics with canonical bus events while preserving history merge, streaming delta/final behavior, scroll ergonomics, and error states.
+  - [x] Keep provider history reads only as initial/historical data.
+- [x] 15-03: Migrate Telegram rendering to a bus-derived edge consumer
+  - [x] Drive Telegram streaming/final/edit/topic rendering from canonical events while preserving Phase 11 route fail-closed behavior and Phase 12 approval ownership.
+  - [x] Keep Telegram-specific ids, parse mode, reply markup, and callback metadata at the Telegram edge.
+- [x] 15-04: Define approval/question command boundary
   - [ ] Decide whether approval/question remains event-only or gains an explicit command boundary.
   - [ ] If command handling is added, keep commands separate from immutable lifecycle events and preserve mirrored-only observational semantics.
 
@@ -604,6 +604,9 @@ Planning status:
 - Phase 15 was added on 2026-06-05 during Phase 14 design review so deferred migration tasks would not be lost.
 - Phase 15 explicitly carries App Session detail live rendering migration, Telegram rendering migration, and the approval/question command boundary review that Phase 14 intentionally leaves out.
 - Phase 15 was decomposed on 2026-06-08 into `15-02` App Session live-model migration, `15-03` Telegram edge migration, and `15-04` approval/question command-boundary work so execution can proceed in smaller verified slices.
+- `15-02` reached source-verified status on 2026-06-09: Session Browser detail now hydrates history from provider reads but consumes live updates from a dedicated owner-bridge bus event stream with focused Python/Rust/Node/TypeScript regression coverage.
+- `15-03` reached source-verified status on 2026-06-09: Telegram session rendering now decides streaming/final/abort/topic-title behavior from canonical message events while preserving Telegram-specific formatting, route fail-closed behavior, and existing approval/question ownership paths at the edge.
+- `15-04` reached source-verified status on 2026-06-09: approval/question lifecycle events remain observational on the bus, Telegram approval routing now fail-closes when the current thread lacks a bound topic, owner-bridge approval replies require a validated adapter/app-server authority path, and the accepted `codex_remote_proxy` controlled-host path remains intact.
 
 ### Phase 16: Provider External Event Ingress
 

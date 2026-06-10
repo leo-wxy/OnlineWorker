@@ -1462,6 +1462,43 @@ async def setup_connection(manager, bot, adapter, **kwargs) -> None:
     await ensure_codex_owner_bridge_started(manager.state)
 
 
+async def sync_existing_topics_after_startup(manager, bot) -> None:
+    from bot.handlers.common import reconcile_workspace_threads_with_source
+    from core.storage import save_storage
+    from plugins.providers.builtin.codex.python.tui_realtime_mirror import (
+        bootstrap_bound_codex_thread_activity,
+    )
+
+    state_changed = False
+
+    for ws_name, ws_info in manager.storage.workspaces.items():
+        if ws_info.tool != "codex":
+            continue
+
+        active_ids = storage_runtime.query_codex_active_thread_ids(ws_info.path)
+        _, repaired = reconcile_workspace_threads_with_source(
+            manager.state,
+            ws_info,
+            active_ids=active_ids,
+            persist=False,
+        )
+        if repaired:
+            logger.info(
+                "[codex-startup-sync] 已修正 workspace thread 活跃状态 ws=%s active=%s",
+                ws_name,
+                len(active_ids),
+            )
+            state_changed = True
+
+    recovered = bootstrap_bound_codex_thread_activity(manager.state)
+    if state_changed:
+        save_storage(manager.storage)
+    if recovered:
+        logger.info("[codex-startup-sync] 已恢复已绑定 Codex thread activity/watch")
+    else:
+        logger.info("[codex-startup-sync] 无需恢复 Codex thread activity/watch")
+
+
 async def setup_adapter_connection(manager, bot, adapter) -> None:
     await manager._setup_provider_connection("codex", bot, adapter)
 

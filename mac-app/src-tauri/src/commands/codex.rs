@@ -1368,7 +1368,8 @@ pub async fn start_codex_thread_stream(
                 Ok(bytes) => {
                     current_cursor.offset += bytes as u64;
                     for event in parse_codex_stream_events(&line, current_cursor) {
-                        if is_adjacent_duplicate_codex_stream_event(&last_visible_signature, &event) {
+                        if is_adjacent_duplicate_codex_stream_event(&last_visible_signature, &event)
+                        {
                             continue;
                         }
                         last_visible_signature = codex_stream_event_signature(&event);
@@ -2708,7 +2709,9 @@ mod tests {
         .expect("second event");
 
         let signature = super::codex_stream_event_signature(&first);
-        assert!(super::is_adjacent_duplicate_codex_stream_event(&signature, &second));
+        assert!(super::is_adjacent_duplicate_codex_stream_event(
+            &signature, &second
+        ));
     }
 
     #[test]

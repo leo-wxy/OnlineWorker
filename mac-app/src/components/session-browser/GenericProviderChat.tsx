@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
-import type { ComposerAttachment, SessionTurn } from "../../types";
+import { useProviderSessionEventStream } from "../../hooks/useProviderSessionEventStream";
+import type { ComposerAttachment, SessionStreamEvent, SessionTurn } from "../../types";
+import { shouldClearReplyWatch } from "../../utils/replyWatch.js";
+import { applySessionStreamEvent } from "../../utils/sessionEventModel.js";
 import {
   buildSnapshotSignature,
   countAssistantEntries,
@@ -85,6 +88,41 @@ export function GenericProviderChat({
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const handleSessionEvent = useCallback((event: SessionStreamEvent) => {
+    if (event?.kind === "stream_ready") {
+      return;
+    }
+    if (event?.kind === "error") {
+      if (messagesRef.current.length === 0) {
+        setError(event.error ?? "provider session stream error");
+      } else {
+        console.warn("Provider session event stream error", event.error);
+      }
+      replyWatchTokenRef.current += 1;
+      setReplyWatchState((current) => (current ? "expired" : current));
+      return;
+    }
+
+    const previousMessages = messagesRef.current;
+    const nextMessages = limitSessionTurns(applySessionStreamEvent(previousMessages, event));
+    if (nextMessages === previousMessages) {
+      return;
+    }
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
+    if (shouldClearReplyWatch(previousMessages, nextMessages, event)) {
+      cancelReplyWatch();
+    }
+  }, [cancelReplyWatch]);
+
+  useProviderSessionEventStream({
+    enabled: Boolean(session.id),
+    providerId: session.type,
+    sessionId: session.id,
+    workspaceDir: session.workspace ?? null,
+    onEvent: handleSessionEvent,
+  });
 
   const handleSend = async (trimmedText: string, nextAttachments: ComposerAttachment[]) => {
     if (!trimmedText.trim() && nextAttachments.length === 0) {

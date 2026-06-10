@@ -81,6 +81,54 @@ def _to_text(value: Any) -> str:
     return str(value or "")
 
 
+def _extract_auth_status_dict(payload: str) -> dict[str, Any] | None:
+    text = str(payload or "").strip()
+    if not text:
+        return None
+
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        parsed = None
+    if isinstance(parsed, dict) and "loggedIn" in parsed:
+        return parsed
+
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"[\{\[]", text):
+        fragment = text[match.start() :].lstrip()
+        if not fragment:
+            continue
+        try:
+            parsed, _ = decoder.raw_decode(fragment)
+        except ValueError:
+            continue
+        if isinstance(parsed, dict) and "loggedIn" in parsed:
+            return parsed
+
+    # Fallback for wrappers that prepend/append text or emit loose key/value
+    # status fragments instead of strict JSON.
+    logged_in_match = re.search(r'"?loggedIn"?\s*[:=]\s*(true|false)', text, re.IGNORECASE)
+    if not logged_in_match:
+        return None
+
+    status: dict[str, Any] = {
+        "loggedIn": logged_in_match.group(1).lower() == "true",
+    }
+    auth_method_match = re.search(
+        r'"?authMethod"?\s*[:=]\s*"?(?P<value>[A-Za-z0-9_.-]+)"?',
+        text,
+    )
+    if auth_method_match:
+        status["authMethod"] = auth_method_match.group("value")
+    api_provider_match = re.search(
+        r'"?apiProvider"?\s*[:=]\s*"?(?P<value>[A-Za-z0-9_.-]+)"?',
+        text,
+    )
+    if api_provider_match:
+        status["apiProvider"] = api_provider_match.group("value")
+    return status
+
+
 def _extract_claude_assistant_text(message: Any) -> str:
     if not isinstance(message, dict):
         return ""
@@ -1717,9 +1765,8 @@ class ClaudeAdapter:
                 reason="emptyAuthStatus",
             )
 
-        try:
-            status = json.loads(payload)
-        except Exception:
+        status = _extract_auth_status_dict(payload)
+        if status is None:
             payload_lower = payload.lower()
             if "not logged in" in payload_lower or "please run /login" in payload_lower:
                 return _new_claude_readiness(

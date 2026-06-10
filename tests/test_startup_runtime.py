@@ -394,6 +394,62 @@ async def test_post_init_syncs_existing_claude_topics_after_startup():
 
 
 @pytest.mark.asyncio
+async def test_post_init_syncs_existing_codex_topics_after_startup():
+    storage = AppStorage()
+    state = AppState(storage=storage)
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=2,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                codex_bin="codex",
+                protocol="unix",
+                app_server_url="unix://",
+                live_transport="shared_unix",
+            ),
+        ],
+        delete_archived_topics=True,
+    )
+    manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
+
+    bot = MagicMock()
+    bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=3169))
+    bot.send_message = AsyncMock()
+
+    codex_started = AsyncMock()
+    sync_mock = AsyncMock()
+
+    with patch("core.lifecycle.save_storage"), patch(
+        "core.lifecycle.get_provider",
+        lambda name: SimpleNamespace(
+            runtime_hooks=SimpleNamespace(start=codex_runtime.start_runtime),
+            lifecycle_hooks=SimpleNamespace(after_startup=codex_runtime.sync_existing_topics_after_startup),
+        ) if name == "codex" else None,
+    ), patch(
+        "plugins.providers.builtin.codex.python.runtime.start_runtime",
+        new=codex_started,
+    ), patch(
+        "plugins.providers.builtin.codex.python.runtime.sync_existing_topics_after_startup",
+        new=sync_mock,
+    ), patch.object(
+        LifecycleManager,
+        "_cleanup_archived_threads",
+        new=AsyncMock(),
+    ), patch.object(
+        LifecycleManager,
+        "_cleanup_subagent_threads",
+        new=AsyncMock(),
+    ):
+        await manager.post_init(SimpleNamespace(bot=bot))
+
+    sync_mock.assert_awaited_once_with(manager, bot)
+
+
+@pytest.mark.asyncio
 async def test_start_claude_defers_cli_touching_work_until_send():
     storage = AppStorage()
     state = AppState(storage=storage)

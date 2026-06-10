@@ -52,6 +52,25 @@ pub struct StagedComposerAttachmentInput {
     pub base64_data: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderSessionStreamEventTurn {
+    pub role: String,
+    pub content: String,
+    pub display_mode: Option<String>,
+    pub pending: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderSessionStreamEvent {
+    pub kind: String,
+    pub semantic_kind: Option<String>,
+    pub turn: Option<ProviderSessionStreamEventTurn>,
+    pub reason: Option<String>,
+    pub error: Option<String>,
+}
+
 fn provider_session_stream_generation() -> Arc<AtomicU64> {
     PROVIDER_SESSION_STREAM_GENERATION
         .get_or_init(|| Arc::new(AtomicU64::new(0)))
@@ -377,6 +396,153 @@ fn archive_provider_session_via_owner_bridge(
     }
 
     Ok(response)
+}
+
+fn stream_provider_session_events_via_owner_bridge(
+    data_dir: &Path,
+    provider_id: &str,
+    session_id: &str,
+    workspace_dir: Option<&str>,
+    generation: Arc<AtomicU64>,
+    my_generation: u64,
+    channel: Channel<ProviderSessionStreamEvent>,
+) {
+    let socket_path = provider_owner_bridge_socket_path(data_dir);
+    let provider_id = provider_id.to_string();
+    let session_id = session_id.to_string();
+    let workspace_dir = workspace_dir
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        while generation.load(Ordering::SeqCst) == my_generation {
+            let socket = match UnixStream::connect(&socket_path) {
+                Ok(socket) => socket,
+                Err(error) => {
+                    let _ = channel.send(ProviderSessionStreamEvent {
+                        kind: "error".to_string(),
+                        semantic_kind: None,
+                        turn: None,
+                        reason: None,
+                        error: Some(format!("connect provider owner bridge failed: {error}")),
+                    });
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    continue;
+                }
+            };
+            let _ = socket.set_read_timeout(Some(std::time::Duration::from_secs(1)));
+            let _ = socket.set_write_timeout(Some(std::time::Duration::from_secs(1)));
+            let mut writer = match socket.try_clone() {
+                Ok(cloned) => cloned,
+                Err(error) => {
+                    let _ = channel.send(ProviderSessionStreamEvent {
+                        kind: "error".to_string(),
+                        semantic_kind: None,
+                        turn: None,
+                        reason: None,
+                        error: Some(format!(
+                            "clone provider owner bridge socket failed: {error}"
+                        )),
+                    });
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    continue;
+                }
+            };
+            let mut payload = serde_json::json!({
+                "type": "session_event_stream",
+                "provider_id": provider_id,
+                "session_id": session_id,
+            });
+            if let Some(workspace_dir) = workspace_dir.as_deref() {
+                payload["workspace_dir"] = Value::String(workspace_dir.to_string());
+            }
+            let raw_request = format!("{}\n", payload);
+            if let Err(error) = writer.write_all(raw_request.as_bytes()) {
+                let _ = channel.send(ProviderSessionStreamEvent {
+                    kind: "error".to_string(),
+                    semantic_kind: None,
+                    turn: None,
+                    reason: None,
+                    error: Some(format!(
+                        "write provider owner bridge stream request failed: {error}"
+                    )),
+                });
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                continue;
+            }
+            if let Err(error) = writer.flush() {
+                let _ = channel.send(ProviderSessionStreamEvent {
+                    kind: "error".to_string(),
+                    semantic_kind: None,
+                    turn: None,
+                    reason: None,
+                    error: Some(format!(
+                        "flush provider owner bridge stream request failed: {error}"
+                    )),
+                });
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                continue;
+            }
+
+            let mut reader = BufReader::new(socket);
+            while generation.load(Ordering::SeqCst) == my_generation {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        match serde_json::from_str::<ProviderSessionStreamEvent>(line.trim()) {
+                            Ok(event) => {
+                                let is_fatal_error = event.kind == "error";
+                                let _ = channel.send(event);
+                                if is_fatal_error {
+                                    break;
+                                }
+                            }
+                            Err(error) => {
+                                let _ = channel.send(ProviderSessionStreamEvent {
+                                    kind: "error".to_string(),
+                                    semantic_kind: None,
+                                    turn: None,
+                                    reason: None,
+                                    error: Some(format!(
+                                    "parse provider owner bridge session stream failed: {error}"
+                                )),
+                                });
+                                break;
+                            }
+                        }
+                    }
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            std::io::ErrorKind::WouldBlock
+                                | std::io::ErrorKind::TimedOut
+                                | std::io::ErrorKind::Interrupted
+                        ) =>
+                    {
+                        continue;
+                    }
+                    Err(error) => {
+                        let _ = channel.send(ProviderSessionStreamEvent {
+                            kind: "error".to_string(),
+                            semantic_kind: None,
+                            turn: None,
+                            reason: None,
+                            error: Some(format!(
+                                "read provider owner bridge session stream failed: {error}"
+                            )),
+                        });
+                        break;
+                    }
+                }
+            }
+
+            if generation.load(Ordering::SeqCst) == my_generation {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        }
+    });
 }
 
 fn owner_bridge_archive_error_allows_sidecar(error: &str) -> bool {
@@ -742,7 +908,7 @@ pub async fn list_provider_sessions(app: AppHandle, provider_id: String) -> Resu
                         )
                         .await
                     }
-            }?;
+                }?;
             Ok(overlay_provider_sessions(&data_dir, &provider.id, sessions))
         }
         other => Err(format!(
@@ -1055,6 +1221,35 @@ pub async fn stop_provider_session_stream(
     }
 }
 
+#[tauri::command]
+pub async fn start_provider_session_event_stream(
+    provider_id: String,
+    session_id: String,
+    workspace_dir: Option<String>,
+    channel: Channel<ProviderSessionStreamEvent>,
+) -> Result<(), String> {
+    let _provider = require_runtime_provider(&provider_id)?;
+    let generation = provider_session_stream_generation();
+    let my_generation = generation.fetch_add(1, Ordering::SeqCst) + 1;
+    let data_dir = ensure_data_dir()?;
+    stream_provider_session_events_via_owner_bridge(
+        &data_dir,
+        &provider_id,
+        &session_id,
+        workspace_dir.as_deref(),
+        generation,
+        my_generation,
+        channel,
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn stop_provider_session_event_stream() -> Result<(), String> {
+    provider_session_stream_generation().fetch_add(1, Ordering::SeqCst);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1062,8 +1257,7 @@ mod tests {
         list_provider_sessions_via_owner_bridge_with_timeout,
         owner_bridge_archive_error_allows_sidecar, persist_provider_session_archived_state,
         provider_session_list_access, provider_session_read_access, provider_session_send_access,
-        provider_session_stream_access,
-        send_provider_session_message_via_owner_bridge,
+        provider_session_stream_access, send_provider_session_message_via_owner_bridge,
         send_provider_session_message_via_owner_bridge_with_retry, ComposerAttachment,
     };
     use crate::commands::config_provider::provider_metadata_from_raw;

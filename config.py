@@ -460,6 +460,11 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
             "auth": {},
             "external_cli": {},
             "launch_methods": [],
+            "message_hooks": {
+                "abusive_language_normalization": {
+                    "enabled": True,
+                }
+            },
         }
     if name == "claude":
         return {
@@ -494,16 +499,21 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
             "auth": {},
             "external_cli": {},
             "launch_methods": [],
+            "message_hooks": {
+                "abusive_language_normalization": {
+                    "enabled": False,
+                }
+            },
         }
     return {
         "visible": True,
         "runtime_id": name,
         "label": name,
         "description": "",
-        "managed": True,
-        "autostart": True,
+        "managed": False,
+        "autostart": False,
         "codex_bin": name,
-        "protocol": "ws",
+        "protocol": "stdio",
         "app_server_port": 0,
         "app_server_url": "",
         "control_mode": "app",
@@ -513,6 +523,7 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
         "auth": {},
         "external_cli": {},
         "launch_methods": [],
+        "message_hooks": None,
     }
 
 
@@ -575,6 +586,7 @@ def _load_builtin_provider_plugin_blueprint(name: str) -> dict[str, Any] | None:
         "auth": auth,
         "external_cli": provider_raw.get("external_cli") if isinstance(provider_raw.get("external_cli"), dict) else {},
         "launch_methods": provider_raw.get("launch_methods") if isinstance(provider_raw.get("launch_methods"), list) else [],
+        "message_hooks": provider_raw.get("message_hooks") if isinstance(provider_raw.get("message_hooks"), dict) else None,
     }
 
 
@@ -815,6 +827,9 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
             for k, v in raw.get("auth", {}).items()
             if k is not None and str(v or "").strip()
         }
+    raw_message_hooks = raw.get("message_hooks")
+    if not isinstance(raw_message_hooks, dict):
+        raw_message_hooks = defaults.get("message_hooks")
     return ToolConfig(
         name=tool_name,
         enabled=managed,
@@ -837,7 +852,7 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
         auth=auth,
         external_cli=raw.get("external_cli") if isinstance(raw.get("external_cli"), dict) else defaults["external_cli"],
         launch_methods=raw.get("launch_methods") if isinstance(raw.get("launch_methods"), list) else defaults["launch_methods"],
-        message_hooks=_message_hooks_from_raw(raw.get("message_hooks")),
+        message_hooks=_message_hooks_from_raw(raw_message_hooks),
     )
 
 

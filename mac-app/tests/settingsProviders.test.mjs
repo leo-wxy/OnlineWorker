@@ -20,9 +20,10 @@ test("primaryProviderSettings keeps default public agents in stable order", () =
   ]);
 });
 
-test("extensionProviderSettings exposes non-default visible providers only", () => {
+test("extensionProviderSettings exposes non-default discovered providers", () => {
   assert.deepEqual(extensionProviderSettings(PROVIDERS), [
     { id: "customprovider", label: "Custom Provider", enabled: false, autostart: false },
+    { id: "hidden", label: "Hidden", enabled: true, autostart: true },
   ]);
 });
 

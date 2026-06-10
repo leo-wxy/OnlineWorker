@@ -1,9 +1,9 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::config_provider::{
-    ai_config_metadata_from_raw, normalize_config_for_display,
+    ai_config_metadata_from_raw, build_default_user_config_with_env, normalize_config_for_display,
     normalize_provider_document_with_env, notification_channel_metadata_from_raw,
     serialize_config_document_for_persistence, serialize_normalized_config_with_env,
     set_ai_config_in_document, set_notification_channel_config_in_document,
@@ -24,10 +24,31 @@ pub(crate) fn app_support_dir_name() -> &'static str {
     DEFAULT_APP_NAME
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_HOME_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn set_test_home_override(path: Option<PathBuf>) {
+    TEST_HOME_OVERRIDE.with(|override_path| {
+        *override_path.borrow_mut() = path;
+    });
+}
+
+fn home_dir() -> PathBuf {
+    #[cfg(test)]
+    if let Some(path) = TEST_HOME_OVERRIDE.with(|override_path| override_path.borrow().clone()) {
+        return path;
+    }
+
+    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/Users/unknown".to_string()))
+}
+
 /// Application data directory: ~/Library/Application Support/<app name>/
 pub fn data_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/unknown".to_string());
-    PathBuf::from(home)
+    home_dir()
         .join("Library/Application Support")
         .join(app_support_dir_name())
 }
@@ -124,6 +145,14 @@ fn cleanup_legacy_claude_config(dir: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+fn read_config_or_materialize_default(path: &Path, env_raw: &str) -> Result<String, String> {
+    if path.exists() {
+        std::fs::read_to_string(path).map_err(|e| format!("Cannot read config.yaml: {}", e))
+    } else {
+        build_default_user_config_with_env(Some(env_raw))
+    }
+}
+
 #[derive(Serialize)]
 pub struct ConfigContent {
     pub raw: String,
@@ -155,15 +184,16 @@ pub async fn check_first_run() -> Result<bool, String> {
 pub async fn create_default_config() -> Result<(), String> {
     let dir = ensure_data_dir()?;
     cleanup_legacy_claude_config(&dir)?;
-    let config = dir.join("config.yaml");
-    if !config.exists() {
-        let default = include_str!("../../default-config.yaml");
-        std::fs::write(&config, default).map_err(|e| e.to_string())?;
-    }
     let env = dir.join(".env");
     if !env.exists() {
         let template = default_env_template();
         std::fs::write(&env, template).map_err(|e| e.to_string())?;
+    }
+    let config = dir.join("config.yaml");
+    if !config.exists() {
+        let env_raw = std::fs::read_to_string(&env).unwrap_or_default();
+        let default = build_default_user_config_with_env(Some(&env_raw))?;
+        std::fs::write(&config, default).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -177,12 +207,8 @@ pub async fn set_provider_flags(
     let dir = ensure_data_dir()?;
     cleanup_legacy_claude_config(&dir)?;
     let path = dir.join("config.yaml");
-    let raw = if path.exists() {
-        std::fs::read_to_string(&path).map_err(|e| format!("Cannot read config.yaml: {}", e))?
-    } else {
-        include_str!("../../default-config.yaml").to_string()
-    };
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
+    let raw = read_config_or_materialize_default(&path, &env_raw)?;
 
     let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
     set_provider_flags_in_document(&mut doc, &provider_id, managed, autostart);
@@ -199,12 +225,8 @@ pub async fn set_provider_message_hook_enabled(
     let dir = ensure_data_dir()?;
     cleanup_legacy_claude_config(&dir)?;
     let path = dir.join("config.yaml");
-    let raw = if path.exists() {
-        std::fs::read_to_string(&path).map_err(|e| format!("Cannot read config.yaml: {}", e))?
-    } else {
-        include_str!("../../default-config.yaml").to_string()
-    };
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
+    let raw = read_config_or_materialize_default(&path, &env_raw)?;
 
     let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
     set_provider_message_hook_enabled_in_document(&mut doc, &provider_id, &hook_name, enabled);
@@ -222,12 +244,8 @@ pub async fn set_provider_cli_config(
     let dir = ensure_data_dir()?;
     cleanup_legacy_claude_config(&dir)?;
     let path = dir.join("config.yaml");
-    let raw = if path.exists() {
-        std::fs::read_to_string(&path).map_err(|e| format!("Cannot read config.yaml: {}", e))?
-    } else {
-        include_str!("../../default-config.yaml").to_string()
-    };
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
+    let raw = read_config_or_materialize_default(&path, &env_raw)?;
 
     let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
     set_provider_cli_config_in_document(&mut doc, &provider_id, bin, external_cli, launch_methods);
@@ -303,12 +321,8 @@ pub async fn set_ai_config(
     let dir = ensure_data_dir()?;
     cleanup_legacy_claude_config(&dir)?;
     let path = dir.join("config.yaml");
-    let raw = if path.exists() {
-        std::fs::read_to_string(&path).map_err(|e| format!("Cannot read config.yaml: {}", e))?
-    } else {
-        include_str!("../../default-config.yaml").to_string()
-    };
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
+    let raw = read_config_or_materialize_default(&path, &env_raw)?;
 
     let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
     set_ai_config_in_document(&mut doc, services, scenarios);
@@ -324,12 +338,8 @@ pub async fn set_notification_channel_enabled(
     let dir = ensure_data_dir()?;
     cleanup_legacy_claude_config(&dir)?;
     let path = dir.join("config.yaml");
-    let raw = if path.exists() {
-        std::fs::read_to_string(&path).map_err(|e| format!("Cannot read config.yaml: {}", e))?
-    } else {
-        include_str!("../../default-config.yaml").to_string()
-    };
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
+    let raw = read_config_or_materialize_default(&path, &env_raw)?;
 
     let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
     set_notification_channel_enabled_in_document(&mut doc, &channel_id, enabled);
@@ -345,12 +355,8 @@ pub async fn set_notification_channel_config(
     let dir = ensure_data_dir()?;
     cleanup_legacy_claude_config(&dir)?;
     let path = dir.join("config.yaml");
-    let raw = if path.exists() {
-        std::fs::read_to_string(&path).map_err(|e| format!("Cannot read config.yaml: {}", e))?
-    } else {
-        include_str!("../../default-config.yaml").to_string()
-    };
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
+    let raw = read_config_or_materialize_default(&path, &env_raw)?;
 
     let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
     set_notification_channel_config_in_document(&mut doc, &channel_id, config);
@@ -578,7 +584,45 @@ pub async fn list_env_keys() -> Result<Vec<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_env_template, is_sensitive_key, sanitize_env_content};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use serde_yaml::Value;
+
+    use super::{
+        config_path, create_default_config, default_env_template, env_path, is_sensitive_key,
+        read_config, sanitize_env_content, set_provider_flags, set_test_home_override,
+        write_config,
+    };
+
+    struct TestHomeGuard {
+        root: PathBuf,
+    }
+
+    impl TestHomeGuard {
+        fn new() -> Self {
+            let stamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("current time")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "onlineworker-config-command-tests-{}-{}",
+                std::process::id(),
+                stamp
+            ));
+            fs::create_dir_all(&root).expect("create test home");
+            set_test_home_override(Some(root.clone()));
+            Self { root }
+        }
+    }
+
+    impl Drop for TestHomeGuard {
+        fn drop(&mut self) {
+            set_test_home_override(None);
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
 
     #[test]
     fn default_env_template_only_contains_telegram_fields() {
@@ -620,5 +664,218 @@ GROUP_CHAT_ID=-1001
         assert!(!sanitized.contains("ANTHROPIC_BASE_URL"));
         assert!(!sanitized.contains("ANTHROPIC_MODEL"));
         assert!(!sanitized.contains("runtime.example.test"));
+    }
+
+    #[test]
+    fn create_default_config_writes_generated_readable_yaml() {
+        let _guard = TestHomeGuard::new();
+
+        tauri::async_runtime::block_on(create_default_config()).expect("create default config");
+
+        let raw = fs::read_to_string(config_path()).expect("read config.yaml");
+        let doc: Value = serde_yaml::from_str(&raw).expect("parse config.yaml");
+
+        assert_eq!(
+            doc.get("schema_version").and_then(|value| value.as_i64()),
+            Some(2)
+        );
+        assert_eq!(
+            doc.get("providers")
+                .and_then(|providers| providers.get("codex"))
+                .and_then(|provider| provider.get("bin"))
+                .and_then(|value| value.as_str()),
+            Some("codex")
+        );
+        assert_eq!(
+            doc.get("providers")
+                .and_then(|providers| providers.get("codex"))
+                .and_then(|provider| provider.get("owner_transport"))
+                .and_then(|value| value.as_str()),
+            Some("unix")
+        );
+        assert_eq!(
+            doc.get("providers")
+                .and_then(|providers| providers.get("claude"))
+                .and_then(|provider| provider.get("bin"))
+                .and_then(|value| value.as_str()),
+            Some("claude")
+        );
+        assert!(doc
+            .get("notifications")
+            .and_then(|notifications| notifications.get("channels"))
+            .and_then(|channels| channels.get("telegram"))
+            .is_some());
+        assert_eq!(
+            doc.get("ai")
+                .and_then(|ai| ai.get("services"))
+                .and_then(|services| services.as_sequence())
+                .map(|services| services.len()),
+            Some(2)
+        );
+        assert!(env_path().exists());
+    }
+
+    #[test]
+    fn create_default_config_materializes_schema_only_existing_config() {
+        let _guard = TestHomeGuard::new();
+        fs::create_dir_all(config_path().parent().expect("config parent"))
+            .expect("create config parent");
+        fs::write(config_path(), "schema_version: 2\n").expect("write schema-only config");
+
+        tauri::async_runtime::block_on(create_default_config()).expect("create default config");
+
+        let raw = fs::read_to_string(config_path()).expect("read migrated config");
+        let doc: Value = serde_yaml::from_str(&raw).expect("parse migrated config");
+
+        assert!(doc
+            .get("providers")
+            .and_then(|providers| providers.get("codex"))
+            .is_some());
+        assert!(doc
+            .get("providers")
+            .and_then(|providers| providers.get("claude"))
+            .is_some());
+        assert!(doc
+            .get("notifications")
+            .and_then(|notifications| notifications.get("channels"))
+            .and_then(|channels| channels.get("telegram"))
+            .is_some());
+        assert_eq!(
+            doc.get("ai")
+                .and_then(|ai| ai.get("services"))
+                .and_then(|services| services.as_sequence())
+                .map(|services| services.len()),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn read_config_renders_effective_defaults_from_fresh_yaml() {
+        let _guard = TestHomeGuard::new();
+        tauri::async_runtime::block_on(create_default_config()).expect("create default config");
+
+        let content = tauri::async_runtime::block_on(read_config()).expect("read config");
+        let doc: Value = serde_yaml::from_str(&content.raw).expect("parse rendered config");
+
+        assert_eq!(
+            doc.get("providers")
+                .and_then(|providers| providers.get("codex"))
+                .and_then(|provider| provider.get("bin"))
+                .and_then(|value| value.as_str()),
+            Some("codex")
+        );
+        assert_eq!(
+            doc.get("providers")
+                .and_then(|providers| providers.get("claude"))
+                .and_then(|provider| provider.get("bin"))
+                .and_then(|value| value.as_str()),
+            Some("claude")
+        );
+        assert_eq!(
+            doc.get("ai")
+                .and_then(|ai| ai.get("services"))
+                .and_then(|services| services.as_sequence())
+                .map(|services| services.len()),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn write_config_round_trips_effective_yaml_without_pruning_to_minimal() {
+        let _guard = TestHomeGuard::new();
+        tauri::async_runtime::block_on(create_default_config()).expect("create default config");
+
+        let content = tauri::async_runtime::block_on(read_config()).expect("read config");
+        tauri::async_runtime::block_on(write_config(content.raw)).expect("write config");
+
+        let raw = fs::read_to_string(config_path()).expect("read persisted config");
+        let doc: Value = serde_yaml::from_str(&raw).expect("parse persisted config");
+
+        assert_eq!(
+            doc.get("schema_version").and_then(|value| value.as_i64()),
+            Some(2)
+        );
+        assert!(doc.get("providers").is_some());
+        assert!(doc.get("notifications").is_some());
+        assert!(doc.get("ai").is_some());
+        assert_eq!(
+            doc.get("providers")
+                .and_then(|providers| providers.get("codex"))
+                .and_then(|provider| provider.get("owner_transport"))
+                .and_then(|value| value.as_str()),
+            Some("unix")
+        );
+    }
+
+    #[test]
+    fn write_config_persists_provider_override_without_dropping_other_defaults() {
+        let _guard = TestHomeGuard::new();
+        tauri::async_runtime::block_on(create_default_config()).expect("create default config");
+
+        let content = tauri::async_runtime::block_on(read_config()).expect("read config");
+        let mut doc: Value = serde_yaml::from_str(&content.raw).expect("parse rendered config");
+        doc["providers"]["codex"]["managed"] = Value::Bool(false);
+        doc["providers"]["codex"]["autostart"] = Value::Bool(false);
+
+        let edited = serde_yaml::to_string(&doc).expect("serialize edited config");
+        tauri::async_runtime::block_on(write_config(edited)).expect("write config");
+
+        let raw = fs::read_to_string(config_path()).expect("read persisted config");
+        let persisted: Value = serde_yaml::from_str(&raw).expect("parse persisted config");
+
+        assert_eq!(
+            persisted
+                .get("providers")
+                .and_then(|providers| providers.get("codex"))
+                .and_then(|provider| provider.get("managed"))
+                .and_then(|value| value.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            persisted
+                .get("providers")
+                .and_then(|providers| providers.get("codex"))
+                .and_then(|provider| provider.get("autostart"))
+                .and_then(|value| value.as_bool()),
+            Some(false)
+        );
+        assert!(persisted
+            .get("providers")
+            .and_then(|providers| providers.get("claude"))
+            .is_some());
+        assert!(persisted.get("ai").is_some());
+        assert!(persisted.get("notifications").is_some());
+    }
+
+    #[test]
+    fn set_provider_flags_materializes_missing_config_without_template_fallback() {
+        let _guard = TestHomeGuard::new();
+
+        tauri::async_runtime::block_on(set_provider_flags("codex".to_string(), false, false))
+            .expect("set provider flags");
+
+        let raw = fs::read_to_string(config_path()).expect("read materialized config");
+        let doc: Value = serde_yaml::from_str(&raw).expect("parse materialized config");
+
+        assert_eq!(
+            doc.get("providers")
+                .and_then(|providers| providers.get("codex"))
+                .and_then(|provider| provider.get("managed"))
+                .and_then(|value| value.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            doc.get("providers")
+                .and_then(|providers| providers.get("codex"))
+                .and_then(|provider| provider.get("owner_transport"))
+                .and_then(|value| value.as_str()),
+            Some("unix")
+        );
+        assert!(doc
+            .get("providers")
+            .and_then(|providers| providers.get("claude"))
+            .is_some());
+        assert!(doc.get("notifications").is_some());
+        assert!(doc.get("ai").is_some());
     }
 }

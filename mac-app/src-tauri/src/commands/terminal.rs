@@ -102,6 +102,28 @@ pub async fn open_terminal(workspace_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn open_finder(workspace_path: String) -> Result<(), String> {
+    let normalized_workspace = workspace_path.trim();
+    if normalized_workspace.is_empty() {
+        return Err("workspace_path is required".to_string());
+    }
+
+    let result = Command::new("open")
+        .args(["-a", "Finder", normalized_workspace])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if result.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Failed to open Finder: {}",
+            String::from_utf8_lossy(&result.stderr)
+        ))
+    }
+}
+
+#[tauri::command]
 pub async fn open_codex_tui_host_terminal(
     app: AppHandle,
     workspace_path: String,

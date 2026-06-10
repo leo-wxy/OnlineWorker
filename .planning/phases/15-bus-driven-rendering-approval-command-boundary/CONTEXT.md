@@ -96,6 +96,39 @@ Out of scope unless a later plan expands scope:
 - Changing Codex app-server approval source-of-truth semantics.
 - Replacing provider adapter protocols.
 
+## Follow-Up Discovered During Installed-App Investigation
+
+Installed-app investigation on 2026-06-09 exposed a separate distribution/config
+model problem that should be recorded here but not reclassified as Phase 15
+scope:
+
+- Bundled provider and notification behavior currently depends on multiple
+  implicit layers at once: packaged manifests, `default-config.yaml`,
+  `~/Library/Application Support/OnlineWorker/config.yaml`, app-support `.env`,
+  packaged `Info.plist` environment entries, and current process environment.
+- Rust/Tauri settings discovery and Python runtime config loading do not share a
+  single effective-config model. Fresh install visibility for bundled
+  extensions can therefore differ from machines that already carry local user
+  config or overlay environment state.
+- Real installed-app evidence showed that bundled resources can exist in
+  `/Applications/OnlineWorker.app/Contents/Resources/...` while user-visible
+  provider availability still differs by machine because bundled/private
+  defaults, local config overrides, and overlay environment rules are merged
+  differently.
+- Provider settings UI also does not currently render provider icons even when
+  metadata contains a resolved icon URL, which makes bundled-extension
+  discovery problems harder to diagnose in the App.
+
+This problem is not a failure of the Phase 15 bus-rendering or approval-boundary
+work. It should be handled as a dedicated follow-up that:
+
+- separates bundled distribution extensions from external/private overlay
+  mechanisms
+- unifies Rust/Tauri and Python runtime effective-config rules
+- narrows `config.yaml` to user overrides instead of a second hidden default
+  source
+- surfaces source/default/current state clearly in the Settings UI
+
 ## App Session Rendering Principle
 
 App Session detail views should be able to render live state from bus-derived

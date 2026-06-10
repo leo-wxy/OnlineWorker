@@ -839,6 +839,58 @@ async def test_turn_started_materializes_missing_topic_for_registered_customprov
 
 
 @pytest.mark.asyncio
+async def test_turn_started_materializes_imported_thread_without_replaying_history_when_cursor_exists():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-imported"] = ThreadInfo(
+        thread_id="tid-imported",
+        topic_id=None,
+        preview="继续查 codex 通知",
+        archived=False,
+        is_active=True,
+        source="imported",
+        history_sync_cursor="cursor-current",
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+
+    bot = SimpleNamespace()
+    bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=6202))
+    bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=5002))
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID)
+    replay_mock = AsyncMock(return_value="cursor-should-not-be-used")
+    with patch("bot.events._replay_thread_history", new=replay_mock), patch(
+        "bot.events.save_storage"
+    ) as save_storage_mock:
+        await handler(
+            "app-server-event",
+            {
+                "workspace_id": "codex:onlineWorker",
+                "message": {
+                    "method": "turn/started",
+                    "params": {"threadId": "tid-imported", "turn": {"id": "turn-imported-1"}},
+                },
+            },
+        )
+
+    bot.create_forum_topic.assert_awaited_once()
+    replay_mock.assert_not_awaited()
+    bot.send_message.assert_awaited_once()
+    assert ws.threads["tid-imported"].topic_id == 6202
+    assert ws.threads["tid-imported"].history_sync_cursor == "cursor-current"
+    assert state.streaming_turns["tid-imported"].topic_id == 6202
+    assert save_storage_mock.call_count >= 1
+
+
+@pytest.mark.asyncio
 async def test_turn_started_does_not_materialize_missing_topic_for_claude_app_session():
     ws = WorkspaceInfo(
         name="onlineWorker",
@@ -951,6 +1003,65 @@ async def test_turn_started_does_not_materialize_missing_topic_for_external_app_
     assert ws.threads["ses-external-123"].topic_id is None
     assert "ses-external-123" not in state.streaming_turns
     save_storage_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_final_answer_without_topic_still_emits_notification_for_imported_codex_thread():
+    ws = WorkspaceInfo(
+        name="onlineworker-combined",
+        path="/Users/example/Projects/onlineworker-combined",
+        tool="codex",
+        topic_id=None,
+        daemon_workspace_id="codex:/Users/example/Projects/onlineworker-combined",
+    )
+    ws.threads["tid-imported-no-topic"] = ThreadInfo(
+        thread_id="tid-imported-no-topic",
+        topic_id=None,
+        preview="继续查 codex 通知",
+        archived=False,
+        is_active=True,
+        source="imported",
+    )
+    storage = AppStorage(workspaces={ws.daemon_workspace_id: ws})
+    state = AppState(storage=storage)
+
+    bot = SimpleNamespace()
+    bot.create_forum_topic = AsyncMock()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": ws.daemon_workspace_id,
+            "message": {
+                "method": "item/completed",
+                "params": {
+                    "threadId": "tid-imported-no-topic",
+                    "turnId": "turn-shared-1",
+                    "item": {
+                        "type": "agentMessage",
+                        "threadId": "tid-imported-no-topic",
+                        "phase": "final_answer",
+                        "text": "最终定位到了 shared live 漏接线程",
+                    },
+                },
+            },
+        },
+    )
+
+    bot.send_message.assert_not_awaited()
+    bot.edit_message_text.assert_not_awaited()
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.agent_id == "codex"
+    assert event.status == "completed"
+    assert event.task_name == "继续查 codex 通知"
+    assert event.message == "完成摘要：最终定位到了 shared live 漏接线程"
 
 
 @pytest.mark.asyncio
@@ -1711,6 +1822,82 @@ async def test_tui_mirror_empty_completed_does_not_send_fallback_notification():
 
 
 @pytest.mark.asyncio
+async def test_tui_mirror_buffered_final_without_item_emits_bus_final_and_notification(monkeypatch):
+    async def fake_run_ai_scenario(scenario_id, variables):
+        return SimpleNamespace(ok=False, data={})
+
+    monkeypatch.setattr("bot.events.run_ai_scenario", fake_run_ai_scenario)
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-buffered-mirror"] = ThreadInfo(
+        thread_id="tid-buffered-mirror",
+        topic_id=3794,
+        preview="修复 Codex 通知",
+        archived=False,
+        streaming_msg_id=5006,
+    )
+    storage = AppStorage(workspaces={"codex:onlineWorker": ws})
+    state = AppState(storage=storage)
+    codex_state.start_run(
+        state,
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-buffered-mirror",
+        turn_id="turn-buffered-mirror",
+    )
+    state.streaming_turns["tid-buffered-mirror"] = StreamingTurn(
+        message_id=5006,
+        topic_id=3794,
+        turn_id="turn-buffered-mirror",
+        buffer="已根据日志定位到 shared-live Codex buffered final 链路缺口。",
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    notifications = RecordingNotificationRouter()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "tid-buffered-mirror",
+                    "turnId": "turn-buffered-mirror",
+                    "turn": {
+                        "id": "turn-buffered-mirror",
+                        "status": "completed",
+                        "source": "tui-mirror",
+                    },
+                },
+            },
+        },
+    )
+
+    assert "tid-buffered-mirror" not in state.streaming_turns
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.status == "completed"
+    assert event.task_name == "修复 Codex 通知"
+    assert event.message == "完成摘要：已根据日志定位到 shared-live Codex buffered final 链路缺口。"
+
+    activity = state.message_bus.session_activity("codex", "tid-buffered-mirror")
+    assert activity is not None
+    assert activity["status"] == "completed"
+    assert activity["lastFinalMessage"] == "已根据日志定位到 shared-live Codex buffered final 链路缺口。"
+    assert activity["lastEventKind"] == "message.assistant.final"
+
+
+@pytest.mark.asyncio
 async def test_final_answer_notification_uses_result_summary_instead_of_url_preview():
     ws = WorkspaceInfo(
         name="onlineWorker",
@@ -2322,6 +2509,76 @@ async def test_item_completed_can_render_codex_semantic_final_reply_without_raw_
     kwargs = bot.edit_message_text.await_args.kwargs
     assert kwargs["text"] == "语义层最终回复"
     assert kwargs["parse_mode"] == "HTML"
+
+
+@pytest.mark.asyncio
+async def test_non_codex_item_completed_without_phase_still_renders_as_final_reply():
+    ws = WorkspaceInfo(
+        name="demo",
+        path="/Users/example/Projects/demo",
+        tool="claude",
+        topic_id=3794,
+        daemon_workspace_id="claude:demo",
+    )
+    ws.threads["session-123"] = ThreadInfo(
+        thread_id="session-123",
+        topic_id=3794,
+        archived=False,
+    )
+    storage = AppStorage(workspaces={"claude:demo": ws})
+    state = AppState(storage=storage)
+    state.streaming_turns["session-123"] = StreamingTurn(
+        message_id=5001,
+        topic_id=3794,
+        turn_id="turn-123",
+        buffer="still working",
+        placeholder_deleted=True,
+    )
+
+    bot = SimpleNamespace()
+    bot.send_message = AsyncMock()
+    bot.delete_message = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID)
+    event = SessionEvent(
+        provider="claude",
+        workspace_id="claude:demo",
+        thread_id="session-123",
+        turn_id="turn-123",
+        kind="assistant_completed",
+        payload={
+            "threadId": "session-123",
+            "turnId": "turn-123",
+            "text": "## Claude final",
+            "item": {
+                "type": "agentMessage",
+            },
+        },
+        raw_method="item/completed",
+    )
+
+    with patch("bot.events.normalize_session_event", return_value=event):
+        await handler(
+            "app-server-event",
+            {
+                "workspace_id": "claude:demo",
+                "message": {
+                    "method": "item/completed",
+                    "params": {
+                        "threadId": "session-123",
+                        "turnId": "turn-123",
+                        "text": "## Claude final",
+                        "item": {"type": "agentMessage"},
+                    },
+                },
+            },
+        )
+
+    bot.edit_message_text.assert_awaited_once()
+    kwargs = bot.edit_message_text.await_args.kwargs
+    assert kwargs["parse_mode"] == "HTML"
+    assert "<b>Claude final</b>" in kwargs["text"]
 
 
 @pytest.mark.asyncio

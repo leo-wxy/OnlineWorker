@@ -788,6 +788,60 @@ async def test_claude_adapter_unknown_auth_status_output_fails_closed(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_claude_adapter_auth_status_accepts_prefixed_json_output(monkeypatch):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    adapter = ClaudeAdapter(claude_bin="/Users/example/bin/claude-launcher claude")
+    create_process = AsyncMock(
+        return_value=FakeAuthProcess(
+            'monitor: ingest batch ok (claude_code: 1)\n{\n  "loggedIn": true,\n  "authMethod": "oauth_token",\n  "apiProvider": "firstParty"\n}'
+        )
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.asyncio.create_subprocess_exec",
+        create_process,
+    )
+
+    status = await adapter.refresh_auth_status()
+
+    assert status["loggedIn"] is True
+    assert status["authMethod"] == "oauth_token"
+    assert adapter.auth_ready is True
+    assert adapter.auth_method == "oauth_token"
+    create_process.assert_awaited_once()
+    assert create_process.await_args.args[:5] == (
+        "/Users/example/bin/claude-launcher",
+        "claude",
+        "auth",
+        "status",
+        )
+
+
+@pytest.mark.asyncio
+async def test_claude_adapter_auth_status_accepts_loggedin_fallback_output(monkeypatch):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    adapter = ClaudeAdapter(claude_bin="/Users/example/bin/claude-launcher claude")
+    create_process = AsyncMock(
+        return_value=FakeAuthProcess(
+            'monitor: ingest batch ok (claude_code: 1)\nstatus => {loggedIn: true, authMethod: oauth_token, apiProvider: firstParty}'
+        )
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.asyncio.create_subprocess_exec",
+        create_process,
+    )
+
+    status = await adapter.refresh_auth_status()
+
+    assert status["loggedIn"] is True
+    assert status["authMethod"] == "oauth_token"
+    assert status["apiProvider"] == "firstParty"
+    assert adapter.auth_ready is True
+    create_process.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_claude_adapter_auth_status_uses_runtime_env_without_cli_login(monkeypatch):
     from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
 

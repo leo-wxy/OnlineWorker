@@ -25,11 +25,13 @@ import time
 from dataclasses import dataclass, replace
 from typing import Any, Optional
 from telegram import Bot
+from core.messages.events import create_message_event
 from core.state import AppState, PendingApproval, PendingQuestion, PendingQuestionGroup, StreamingTurn
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
 from plugins.providers.builtin.codex.python.tui_bridge import (
     remember_codex_tg_synced_final_reply,
 )
+from core.messages.session_bridge import message_event_from_session_event
 from core.providers.session_events import SessionEvent, normalize_session_event
 from core.providers.topic_policy import provider_allows_unbound_thread_topic_materialization
 from core.providers.registry import get_provider, list_providers
@@ -97,6 +99,12 @@ def _workspace_topic_id(state: AppState, ws_info) -> Optional[int]:
 
 def _thread_topic_id(state: AppState, ws_info, thread_info: ThreadInfo) -> Optional[int]:
     return state.get_thread_topic_id(_workspace_key(state, ws_info), ws_info, thread_info)
+
+
+def _workspace_path_from_id(workspace_id: str) -> str:
+    if ":" not in workspace_id:
+        return ""
+    return workspace_id.split(":", 1)[1]
 
 
 def _provider_should_materialize_unbound_thread_topic(
@@ -169,19 +177,17 @@ async def _materialize_thread_topic_if_needed(
             topic_id,
         )
 
-        replay_cursor = await _replay_thread_history(
-            bot=bot,
-            group_chat_id=group_chat_id,
-            topic_id=topic_id,
-            thread_id=thread_id,
-            sessions_dir=None,
-            tool_name=ws_info.tool,
-        )
-        if (
-            replay_cursor
-            and thread_info.history_sync_cursor != replay_cursor
-            and state.storage is not None
-        ):
+        replay_cursor = thread_info.history_sync_cursor or None
+        if not replay_cursor:
+            replay_cursor = await _replay_thread_history(
+                bot=bot,
+                group_chat_id=group_chat_id,
+                topic_id=topic_id,
+                thread_id=thread_id,
+                sessions_dir=None,
+                tool_name=ws_info.tool,
+            )
+        if replay_cursor and thread_info.history_sync_cursor != replay_cursor and state.storage is not None:
             thread_info.history_sync_cursor = replay_cursor
             save_storage(state.storage)
         return topic_id
@@ -216,6 +222,9 @@ async def send_approval_to_telegram(
     topic_id: Optional[int],
     workspace_id: str,
     info: ApprovalInfo,
+    *,
+    interactive: bool = True,
+    notice_suffix: str = "",
 ) -> None:
     """Send app-server approval UI, record PendingApproval, and attach buttons."""
     text = tg_approval_request_text(
@@ -223,6 +232,8 @@ async def send_approval_to_telegram(
         reason=info.reason,
         tool_type=info.tool_type,
     )
+    if notice_suffix:
+        text = f"{text}\n\n{notice_suffix}"
 
     try:
         sent = await _send_to_group(
@@ -253,19 +264,21 @@ async def send_approval_to_telegram(
             workspace_id=workspace_id,
             source="telegram",
         )
-        keyboard = build_approval_keyboard(msg_id)
-        await bot.edit_message_reply_markup(
-            chat_id=group_chat_id,
-            message_id=msg_id,
-            reply_markup=keyboard,
-        )
+        if interactive:
+            keyboard = build_approval_keyboard(msg_id)
+            await bot.edit_message_reply_markup(
+                chat_id=group_chat_id,
+                message_id=msg_id,
+                reply_markup=keyboard,
+            )
         logger.info(
-            "[approval_request] 已推送 tool=%s topic=%s msg_id=%s thread=%s request_id=%s",
+            "[approval_request] 已推送 tool=%s topic=%s msg_id=%s thread=%s request_id=%s interactive=%s",
             info.tool_type,
             topic_id,
             msg_id,
             info.thread_id,
             info.request_id,
+            interactive,
         )
     except Exception as e:
         logger.error(f"推送授权请求到 Telegram 失败：{e}")
@@ -551,71 +564,6 @@ def _log_discarded_unroutable_approval(
     )
 
 
-def _approval_is_locally_actionable(
-    state: AppState,
-    info: ApprovalInfo,
-    *,
-    workspace_id: str,
-) -> bool:
-    provider_id = str(info.tool_type or "").strip() or str(info.tool_name or "").strip()
-    request_id = str(info.request_id or "").strip()
-    if not provider_id or not request_id:
-        return False
-
-    adapter = state.get_adapter(provider_id)
-    if adapter is None or not getattr(adapter, "connected", False):
-        adapter = state.get_adapter_for_workspace(workspace_id)
-    if adapter is None or not getattr(adapter, "connected", False):
-        return False
-
-    reply_server_request = getattr(adapter, "reply_server_request", None)
-    return callable(reply_server_request)
-
-
-def _retain_locally_actionable_approval(
-    state: AppState,
-    info: ApprovalInfo,
-    *,
-    workspace_id: str,
-    route_error: str,
-) -> bool:
-    provider_id = str(info.tool_type or "").strip() or str(info.tool_name or "").strip()
-    request_id = str(info.request_id or "").strip()
-    if not provider_id or not request_id:
-        return False
-    if not _approval_is_locally_actionable(state, info, workspace_id=workspace_id):
-        return False
-
-    pending = state.ensure_pending_approval_decision(provider_id, request_id)
-    pending.requires_adapter_reply = True
-    publish_approval_requested(
-        state,
-        PendingApproval(
-            request_id=info.request_id,
-            workspace_id=workspace_id,
-            thread_id=info.thread_id or "",
-            cmd=info.command,
-            justification=info.reason,
-            tool_name=info.tool_name,
-            proposed_amendment=info.proposed_amendment,
-            amendment_decision=info.amendment_decision,
-            tool_type=info.tool_type,
-            approval_source=info.approval_source,
-        ),
-        workspace_id=workspace_id,
-        source="local_retained",
-    )
-    logger.info(
-        "[approval_target] 保留本地可回复审批 error=%s tool=%s thread=%s ws=%s request_id=%s",
-        route_error,
-        provider_id,
-        info.thread_id or "N/A",
-        workspace_id or "N/A",
-        request_id,
-    )
-    return True
-
-
 def _resolve_topic_id(
     state: AppState,
     ws_daemon_id: str,
@@ -805,6 +753,64 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         if _notification_text_is_url_only(summary):
             return ""
         return _notification_summary_text(summary)
+
+    def _publish_buffered_final_message(
+        ctx: "EventContext",
+        *,
+        thread_id: str,
+        text: str,
+        turn_id: str = "",
+    ) -> None:
+        normalized_text = str(text or "").strip()
+        if not normalized_text or not thread_id:
+            return
+
+        bus = getattr(state, "message_bus", None)
+        publish = getattr(bus, "publish", None)
+        if not callable(publish):
+            return
+
+        dedupe_key = ""
+        if turn_id:
+            dedupe_key = ":".join(
+                part
+                for part in (
+                    ctx.event.provider,
+                    ctx.ws_daemon_id,
+                    thread_id,
+                    turn_id,
+                    "message.assistant.final",
+                    "tui-mirror-buffered",
+                )
+                if part
+            )
+
+        try:
+            publish(
+                create_message_event(
+                    "message.assistant.final",
+                    provider_id=ctx.event.provider,
+                    workspace_id=ctx.ws_daemon_id,
+                    workspace_path=_workspace_path_from_id(ctx.ws_daemon_id),
+                    session_id=thread_id,
+                    turn_id=turn_id,
+                    source="provider_event",
+                    payload={
+                        "text": normalized_text,
+                        "status": "completed",
+                        "rawMethod": ctx.event.raw_method or "turn/completed",
+                        "semanticKind": "turn_completed",
+                    },
+                    dedupe_key=dedupe_key,
+                )
+            )
+        except Exception:
+            logger.warning(
+                "[message-bus] 发布 tui-mirror buffered final 失败 thread=%s turn=%s",
+                thread_id[:8],
+                (turn_id or "")[:12] or "?",
+                exc_info=True,
+            )
 
     async def _emit_notification(
         ctx: "EventContext",
@@ -1187,6 +1193,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
     class EventContext:
         """Per-event context passed to all handler functions."""
         event: SessionEvent
+        message_event: Any
         msg: dict  # full message dict with id, method, params
 
         @property
@@ -1200,6 +1207,47 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         @property
         def event_params(self) -> dict:
             return self.event.payload
+
+        @property
+        def message_kind(self) -> str:
+            return str(getattr(self.message_event, "kind", "") or "").strip()
+
+        @property
+        def message_payload(self) -> dict:
+            payload = getattr(self.message_event, "payload", None)
+            return payload if isinstance(payload, dict) else {}
+
+    def _message_event_text(ctx: EventContext) -> str:
+        payload = ctx.message_payload
+        return str(
+            payload.get("text")
+            or payload.get("delta")
+            or payload.get("message")
+            or ""
+        ).strip()
+
+    def _message_event_title(ctx: EventContext) -> str:
+        return str(ctx.message_payload.get("title") or "").strip()
+
+    def _message_event_status(ctx: EventContext) -> str:
+        return str(ctx.message_payload.get("status") or "").strip().lower()
+
+    def _message_event_reason(ctx: EventContext) -> str:
+        return str(ctx.message_payload.get("reason") or "").strip()
+
+    def _canonical_turn_status(ctx: EventContext) -> str:
+        status = _message_event_status(ctx)
+        if ctx.message_kind == "turn.completed":
+            return "completed"
+        if ctx.message_kind == "turn.failed":
+            if status in {"aborted", "cancelled", "canceled", "error", "failed"}:
+                return status
+            if _message_event_reason(ctx):
+                return "aborted"
+            return "failed"
+        if ctx.event.kind == "turn_aborted":
+            return "aborted"
+        return status
 
     async def _handle_approval(ctx: EventContext) -> None:
         """item/commandExecution/requestApproval"""
@@ -1256,13 +1304,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 thread_id or "N/A",
                 ctx.ws_daemon_id or "N/A",
             )
-            if _retain_locally_actionable_approval(
-                state,
-                info,
-                workspace_id=workspace_id,
-                route_error=route_error,
-            ):
-                return
             _log_discarded_unroutable_approval(
                 info,
                 route_error=route_error,
@@ -1439,13 +1480,15 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
 
     async def _handle_agent_message_delta(ctx: EventContext) -> None:
         """item/agentMessage/delta"""
+        if ctx.message_kind != "message.assistant.delta":
+            return
         thread_id = ctx.thread_id
         if not thread_id:
             thread_id = ctx.event_params.get("threadId") or ctx.event_params.get("thread_id")
         if not thread_id:
             return
 
-        delta = ctx.event_params.get("delta", "")
+        delta = _message_event_text(ctx)
         if not delta:
             return
 
@@ -1498,11 +1541,9 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
     async def _handle_item_completed(ctx: EventContext) -> None:
         """item/completed — agentMessage or shellCommand."""
         item = ctx.event_params.get("item", {})
-        if not isinstance(item, dict):
-            return
-        item_type = item.get("type", "")
+        item_type = item.get("type", "") if isinstance(item, dict) else ""
         semantic_payload = _codex_semantic_payload(ctx)
-        semantic_kind = _codex_semantic_kind(ctx)
+        is_final_answer = ctx.message_kind == "message.assistant.final"
 
         thread_id = ctx.thread_id
         if not thread_id:
@@ -1513,9 +1554,9 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             )
         event_turn_id = _extract_turn_id(ctx.event_params)
 
-        if item_type == "agentMessage":
-            text = str(item.get("text", "")).strip()
-            phase = str(item.get("phase", "") or "")
+        if ctx.message_kind in {"message.assistant.delta", "message.assistant.final"}:
+            text = _message_event_text(ctx)
+            phase = "final_answer" if is_final_answer else "commentary"
             notification_status = ""
             notification_message = ""
             notification_task_name_override = ""
@@ -1524,26 +1565,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             notification_task_summary_snapshot: str | None = None
             if semantic_payload:
                 text = str(semantic_payload.get("text") or text).strip()
-                phase = str(semantic_payload.get("phase") or phase or "")
-                if semantic_kind == "assistant_progress" and not phase:
-                    phase = "commentary"
-                elif semantic_kind == "turn_completed" and not phase:
-                    phase = "final_answer"
-                    notification_status, notification_message = _notification_for_turn_status(
-                        "completed",
-                        {"status": "completed"},
-                        ctx,
-                    )
-                elif semantic_kind == "turn_aborted":
-                    notification_status, notification_message = _notification_for_turn_status(
-                        "aborted",
-                        {"status": "aborted", "reason": semantic_payload.get("reason", "")},
-                        ctx,
-                    )
-            if not phase and ctx.event.provider and ctx.event.provider != "codex":
-                # Some provider event streams omit phase; their completed agentMessage
-                # is treated as the user-visible final assistant reply.
-                phase = "final_answer"
             if not text or not thread_id:
                 return
             st = state.streaming_turns.get(thread_id)
@@ -1553,7 +1574,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             delivered_to_tg = False
 
             if (
-                phase == "final_answer"
+                is_final_answer
                 and ctx.event.provider == "codex"
                 and st is None
                 and _codex_final_reply_already_synced(thread_id, event_turn_id)
@@ -1566,7 +1587,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 )
                 return
 
-            if phase == "final_answer" and not notification_status:
+            if is_final_answer and not notification_status:
                 notification_status, notification_message = _notification_for_turn_status(
                     "completed",
                     {"status": "completed"},
@@ -1585,7 +1606,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 if st.throttle_task and not st.throttle_task.done():
                     st.throttle_task.cancel()
                     st.throttle_task = None
-                if phase == "final_answer":
+                if is_final_answer:
                     st.buffer = text
                     delivered_to_tg = await _do_formatted_final_edit(thread_id, st, text)
                     if delivered_to_tg:
@@ -1606,7 +1627,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                         f"thread={thread_id[:8]} text={text[:60]}"
                     )
                 else:
-                    if phase == "final_answer":
+                    if is_final_answer:
                         delivered_to_tg = await _send_formatted_final_reply(thread_id, topic_id, text)
                     else:
                         out = _truncate_text(f"{prefix} {text}")
@@ -1626,7 +1647,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                     thread_id=thread_id,
                     final_reply_synced_to_tg=True,
                 )
-            if phase == "final_answer" and notification_status:
+            if is_final_answer and notification_status:
                 if not _claim_streaming_notification(st, thread_id, source="item_completed"):
                     return
                 if notification_status == "completed":
@@ -1650,7 +1671,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 )
             return
 
-        if item_type == "shellCommand":
+        if ctx.message_kind == "shell.command.completed" or item_type == "shellCommand":
             # 只记录日志，不推送到 TG（工具调用结果不属于文字类消息）
             cmd = item.get("command", "")
             logger.debug(f"[item/completed] shellCommand 忽略推送 thread={thread_id[:8] if thread_id else '?'} cmd={cmd[:60]}")
@@ -1658,8 +1679,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
     async def _handle_turn_completed(ctx: EventContext) -> None:
         """turn/completed / turn_aborted"""
         turn = ctx.event_params.get("turn", {})
-        semantic_payload = _codex_semantic_payload(ctx)
-        semantic_kind = _codex_semantic_kind(ctx)
         thread_id = ctx.thread_id
         if not thread_id:
             thread_id = (
@@ -1671,20 +1690,13 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         if not thread_id:
             return
 
-        status = ""
-        if isinstance(turn, dict):
-            status = turn.get("status", "")
-        if not status:
-            status = ctx.event_params.get("status", "")
-        if not status and semantic_kind == "turn_aborted":
-            status = "aborted"
-        if not status and ctx.event.kind == "turn_aborted":
-            status = "aborted"
+        status = _canonical_turn_status(ctx)
 
         st = state.streaming_turns.get(thread_id)
         event_turn_id = _extract_turn_id(ctx.event_params)
         run_status = status or "completed"
         is_tui_mirror_completion = _is_codex_tui_mirror_completion(ctx, run_status, turn)
+        completed_reply_text = ""
         if st is not None:
             if st.completed:
                 logger.debug(f"[streaming] turn/completed 已由 final item 收口 thread={thread_id[:8]}")
@@ -1741,13 +1753,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             streamed_reply_text = ""
 
             if status == "aborted":
-                reason = ""
-                if isinstance(turn, dict):
-                    reason = str(turn.get("reason") or "")
-                if not reason:
-                    reason = str(ctx.event_params.get("reason") or "")
-                if not reason:
-                    reason = str(semantic_payload.get("reason") or "")
+                reason = _message_event_reason(ctx)
                 run_status = "aborted"
                 try:
                     await _do_edit(
@@ -1776,15 +1782,29 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 except Exception as e:
                     logger.debug(f"[streaming] edit 已完成失败 thread={thread_id[:8]}: {e}")
             else:
-                streamed_reply_text = _normalize_streamed_reply_for_sync(st.buffer)
-                if _looks_like_markdown_final_text(streamed_reply_text):
+                streamed_reply_text = _completed_reply_text_from_stream(st)
+                if not streamed_reply_text:
+                    # mirror/commentary-only completions may end with a local
+                    # processing placeholder instead of a user-visible final
+                    # reply. Treat them like an empty completion so they do not
+                    # publish bogus final text or completion notifications.
                     try:
-                        await _do_formatted_final_edit(thread_id, st, streamed_reply_text)
-                    except Exception as e:
-                        logger.debug(
-                            f"[streaming] turn/completed final formatted edit 失败 "
-                            f"thread={thread_id[:8]}: {e}"
+                        await _do_edit(thread_id, st, tg_empty_turn_completed_text())
+                        logger.info(
+                            f"[streaming] 空 buffer turn 完成，edit 为已完成 thread={thread_id[:8]} msg_id={st.message_id}"
                         )
+                    except Exception as e:
+                        logger.debug(f"[streaming] edit 已完成失败 thread={thread_id[:8]}: {e}")
+                else:
+                    completed_reply_text = streamed_reply_text
+                    if _looks_like_markdown_final_text(streamed_reply_text):
+                        try:
+                            await _do_formatted_final_edit(thread_id, st, streamed_reply_text)
+                        except Exception as e:
+                            logger.debug(
+                                f"[streaming] turn/completed final formatted edit 失败 "
+                                f"thread={thread_id[:8]}: {e}"
+                            )
 
             logger.info(f"[streaming] turn/completed thread={thread_id[:8]} status={status}")
             ws = _resolve_workspace_info(state, ctx.ws_daemon_id, thread_id)
@@ -1840,6 +1860,27 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
 
         if _claim_streaming_notification(st, thread_id, source="turn_completed"):
             if is_tui_mirror_completion:
+                if completed_reply_text:
+                    _publish_buffered_final_message(
+                        ctx,
+                        thread_id=thread_id,
+                        text=completed_reply_text,
+                        turn_id=event_turn_id or "",
+                    )
+                    (
+                        notification_status,
+                        notification_message,
+                        task_name_override,
+                        task_summary_override,
+                    ) = await _notification_for_completed_reply_text(ctx, thread_id, completed_reply_text)
+                    await _emit_notification(
+                        ctx,
+                        thread_id=thread_id,
+                        status=notification_status,
+                        message=notification_message,
+                        task_name_override=task_name_override,
+                        task_summary_override=task_summary_override,
+                    )
                 return
             if not is_tui_mirror_completion:
                 notification_status, notification_message = _notification_for_turn_status(run_status, turn, ctx)
@@ -1888,7 +1929,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         thread_id = ctx.thread_id
         if not thread_id:
             thread_id = ctx.event_params.get("threadId")
-        title = ctx.event_params.get("title", "")
+        title = _message_event_title(ctx) or ctx.event_params.get("title", "")
         if not thread_id or not title:
             return
 
@@ -1941,6 +1982,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         event = normalize_session_event(method, params)
         if event is None:
             return
+        message_event = message_event_from_session_event(event)
 
         msg = params.get("message", {})
         thread_id = event.thread_id
@@ -1955,6 +1997,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
 
         ctx = EventContext(
             event=event,
+            message_event=message_event,
             msg=msg,
         )
 
@@ -2005,13 +2048,6 @@ def make_server_request_handler(state: AppState, bot: Bot, group_chat_id: int):
                 thread_id or "N/A",
                 workspace_id or "N/A",
             )
-            if _retain_locally_actionable_approval(
-                state,
-                info,
-                workspace_id=workspace_id,
-                route_error=route_error,
-            ):
-                return
             _log_discarded_unroutable_approval(
                 info,
                 route_error=route_error,
