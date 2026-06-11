@@ -23,6 +23,92 @@ interface Props {
   onRefresh: () => void;
 }
 
+type StatusTone = "healthy" | "warning" | "error" | "neutral";
+
+interface ParsedStatusItem {
+  label: string | null;
+  tone: StatusTone;
+  icon: string | null;
+  badgeText: string;
+  note: string | null;
+}
+
+const statusToneStyles: Record<StatusTone, string> = {
+  healthy: "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-100",
+  warning: "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-100",
+  error: "bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-100",
+  neutral: "bg-slate-100 text-slate-600 ring-1 ring-inset ring-slate-200",
+};
+
+function parseStatusTone(value: string): { tone: StatusTone; icon: string | null; content: string } {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("✅")) {
+    return {
+      tone: "healthy",
+      icon: "✅",
+      content: trimmed.replace(/^✅\s*/, "").trim(),
+    };
+  }
+  if (trimmed.startsWith("⚠️")) {
+    return {
+      tone: "warning",
+      icon: "⚠️",
+      content: trimmed.replace(/^⚠️\s*/, "").trim(),
+    };
+  }
+  if (trimmed.startsWith("❌")) {
+    return {
+      tone: "error",
+      icon: "❌",
+      content: trimmed.replace(/^❌\s*/, "").trim(),
+    };
+  }
+  return {
+    tone: "neutral",
+    icon: null,
+    content: trimmed,
+  };
+}
+
+function parseProviderStatusItems(detail: string | null | undefined): ParsedStatusItem[] {
+  const raw = detail?.trim();
+  if (!raw) {
+    return [];
+  }
+
+  const segments = raw
+    .replace(/\r/g, "")
+    .replace(/\n+/g, "\n")
+    .replace(/\s*•\s*/g, "\n• ")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return segments.map((segment) => {
+    const cleaned = segment.replace(/^[•\-]\s*/, "").trim();
+    const match = cleaned.match(/^([^:：]+?)\s*[:：]\s*(.+)$/);
+    const label = match ? match[1].trim() : null;
+    const rawValue = match ? match[2].trim() : cleaned;
+    const parsedTone = parseStatusTone(rawValue);
+    const detailMatch = parsedTone.content.match(/^([^:：]+?)\s*[:：]\s*(.+)$/);
+
+    return {
+      label,
+      tone: parsedTone.tone,
+      icon: parsedTone.icon,
+      badgeText: detailMatch ? detailMatch[1].trim() : parsedTone.content,
+      note: detailMatch ? detailMatch[2].trim() : null,
+    };
+  });
+}
+
+function formatStatusBadgeText(item: ParsedStatusItem): string {
+  if (item.label && item.badgeText) {
+    return `${item.label} ${item.badgeText}`;
+  }
+  return item.label ?? item.badgeText;
+}
+
 export function ProviderStatusList({
   loading,
   providers,
@@ -98,6 +184,8 @@ function ProviderStatusCard({
   const accent = providerAccent(provider);
   const statusStyle = getServiceStyles(texts)[provider.health] ?? getServiceStyles(texts).unknown;
   const unavailable = provider.health === "stopped" || !provider.managed;
+  const statusText = providerDetail(provider, texts);
+  const statusItems = parseProviderStatusItems(statusText);
 
   return (
     <div className={`ow-page-frame rounded-[26px] p-5 ${unavailable ? "opacity-60 grayscale" : ""}`}>
@@ -128,7 +216,7 @@ function ProviderStatusCard({
         )}
       </div>
 
-      <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200/70 bg-slate-50/75 p-4 md:grid-cols-3">
+      <div className="mt-4 grid gap-4 rounded-2xl border border-slate-200/70 bg-slate-50/75 p-4 md:grid-cols-[minmax(0,9rem)_minmax(0,1.1fr)_minmax(0,1.35fr)]">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
             {texts.dashboard.ownerTransportLabel}
@@ -139,17 +227,51 @@ function ProviderStatusCard({
           <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
             {providerShowsPort(provider) ? (texts.dashboard.portLabel ?? "Port") : "Status"}
           </p>
-          <p className="mt-1 text-sm text-gray-800">
-            {providerStatusValue(provider, providerDetail(provider, texts))}
-          </p>
+          <div className="mt-2 space-y-2.5">
+            {providerShowsPort(provider) && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700 ring-1 ring-inset ring-sky-100">
+                  {texts.dashboard.portLabel ?? "Port"}
+                </span>
+                <span className="text-sm font-mono text-gray-800">
+                  {providerStatusValue(provider, statusText)}
+                </span>
+              </div>
+            )}
+            {statusItems.length > 0 ? (
+              statusItems.map((item, index) => (
+                <div
+                  key={`${provider.id}-status-${index}`}
+                  className={`rounded-2xl px-3 py-2.5 ${statusToneStyles[item.tone]}`}
+                >
+                  <div className="flex items-start gap-1.5 text-[13px] font-semibold leading-5">
+                    {item.icon ? <span>{item.icon}</span> : null}
+                    <span className="min-w-0">{formatStatusBadgeText(item)}</span>
+                  </div>
+                  {item.note ? (
+                    <span className="mt-1 block text-[13px] leading-5 opacity-80">
+                      {item.note}
+                    </span>
+                  ) : null}
+                </div>
+              ))
+            ) : (
+              <p className="text-sm leading-6 text-gray-800">{statusText}</p>
+            )}
+          </div>
         </div>
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
             {texts.dashboard.binaryLabel}
           </p>
-          <p className="mt-1 truncate text-sm font-mono text-gray-800" title={provider.bin ?? "-"}>
-            {provider.bin ?? "-"}
-          </p>
+          <div className="mt-2 rounded-xl bg-white/80 px-3 py-2 ring-1 ring-inset ring-slate-200/80">
+            <p
+              className="whitespace-normal break-words [overflow-wrap:anywhere] text-[13px] leading-6 font-mono text-gray-800 select-all"
+              title={provider.bin ?? "-"}
+            >
+              {provider.bin ?? "-"}
+            </p>
+          </div>
         </div>
       </div>
 

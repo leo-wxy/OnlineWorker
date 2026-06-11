@@ -303,6 +303,12 @@ test("dashboard renders provider icons from provider metadata", () => {
   assert.match(types, /icon\?: ProviderIconMetadata \| null;/);
   assert.match(providerIcon, /provider\.icon\?\.url\?\.trim\(\)/);
   assert.match(providerList, /<ProviderIcon provider=\{provider\} \/>/);
+  assert.match(providerList, /function parseProviderStatusItems/);
+  assert.match(providerList, /function formatStatusBadgeText/);
+  assert.match(providerList, /rounded-2xl px-3 py-2\.5/);
+  assert.match(providerList, /break-words/);
+  assert.equal(providerList.includes("truncate text-sm font-mono"), false);
+  assert.equal(providerList.includes(" · "), false);
   assert.equal(dashboard.includes("function ProviderIcon()"), false);
 });
 
