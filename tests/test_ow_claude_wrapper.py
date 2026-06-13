@@ -55,6 +55,19 @@ def test_build_ow_claude_child_env_keeps_original_base_url_as_upstream():
     )
 
 
+def test_build_ow_claude_child_env_keeps_configured_auth_token():
+    from plugins.providers.builtin.claude.python.cli_wrapper import build_claude_proxy_env
+
+    env = build_claude_proxy_env(
+        {"ANTHROPIC_AUTH_TOKEN": "configured-token"},
+        "http://127.0.0.1:45678",
+    )
+
+    assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:45678"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "configured-token"
+    assert "ANTHROPIC_API_KEY" not in env
+
+
 def test_parse_ow_claude_args_forwards_claude_options_without_separator():
     from plugins.providers.builtin.claude.python.cli_wrapper import parse_ow_claude_args
 
@@ -191,6 +204,75 @@ async def test_run_ow_claude_once_starts_proxy_then_runs_claude(monkeypatch, tmp
 
 
 @pytest.mark.asyncio
+async def test_run_ow_claude_once_uses_configured_auth_token_when_process_env_missing(monkeypatch, tmp_path):
+    from plugins.providers.builtin.claude.python import cli_wrapper
+
+    observed_env = {}
+    observed_proxy = []
+
+    class FakeProxy:
+        def __init__(
+            self,
+            *,
+            state,
+            upstream_base_url,
+            listen_host,
+            listen_port,
+            rewrite,
+            probe,
+        ):
+            self.listen_url = ""
+            observed_proxy.append(upstream_base_url)
+
+        async def start(self):
+            self.listen_url = "http://127.0.0.1:45678"
+            return self.listen_url
+
+        async def stop(self):
+            return None
+
+    async def fake_child(argv, env):
+        observed_env.update(env)
+        return 0
+
+    config = SimpleNamespace(
+        providers={
+            "claude": SimpleNamespace(
+                codex_bin="configured-claude",
+                external_cli={
+                    "auth_token": "configured-token",
+                    "upstream_base_url": "https://gateway.example.test/anthropic",
+                    "model": "deepseek-v4-pro[1m]",
+                },
+            )
+        },
+        get_provider=lambda name: config.providers.get(name),
+    )
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr(cli_wrapper, "ClaudeHttpProxy", FakeProxy)
+    monkeypatch.setattr(cli_wrapper, "load_config", lambda data_dir=None: config)
+    monkeypatch.setattr(cli_wrapper, "set_data_dir", lambda path: None)
+    monkeypatch.setattr(cli_wrapper, "run_claude_child", fake_child)
+
+    exit_code = await cli_wrapper.run_ow_claude_once(
+        ["-p", "hello"],
+        data_dir=str(tmp_path),
+        claude_bin="configured-claude",
+        rewrite=True,
+    )
+
+    assert exit_code == 0
+    assert observed_env["ANTHROPIC_AUTH_TOKEN"] == "configured-token"
+    assert observed_env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:45678"
+    assert observed_env["ANTHROPIC_MODEL"] == "deepseek-v4-pro[1m]"
+    assert observed_env["ONLINEWORKER_CLAUDE_UPSTREAM_BASE_URL"] == "https://gateway.example.test/anthropic"
+    assert observed_proxy == ["https://gateway.example.test/anthropic"]
+    assert "ANTHROPIC_API_KEY" not in observed_env
+
+
+@pytest.mark.asyncio
 async def test_run_ow_claude_once_can_disable_rewrite_for_probe(monkeypatch, tmp_path):
     from plugins.providers.builtin.claude.python import cli_wrapper
 
@@ -316,7 +398,7 @@ async def test_run_ow_claude_once_wraps_external_launcher_with_claude_path_shim(
 
 
 @pytest.mark.asyncio
-async def test_run_ow_claude_once_ignores_configured_upstream_base_url(monkeypatch, tmp_path):
+async def test_run_ow_claude_once_uses_configured_upstream_base_url(monkeypatch, tmp_path):
     from plugins.providers.builtin.claude.python import cli_wrapper
 
     real_bin_dir = tmp_path / "real-bin"
@@ -377,10 +459,10 @@ async def test_run_ow_claude_once_ignores_configured_upstream_base_url(monkeypat
         probe=True,
     )
 
-    assert events[0] == ("init_proxy", None, True, True)
+    assert events[0] == ("init_proxy", "https://config.example.test/anthropic", True, True)
     child_event = events[1]
     assert child_event[1] == ["company-launcher", "start", "-p", "hello"]
-    assert "ONLINEWORKER_CLAUDE_UPSTREAM_BASE_URL=''" in child_event[2]
+    assert "ONLINEWORKER_CLAUDE_UPSTREAM_BASE_URL='https://config.example.test/anthropic'" in child_event[2]
     assert events[2] == ("stop_proxy",)
 
 

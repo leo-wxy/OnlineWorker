@@ -372,6 +372,12 @@ export interface AppTexts {
     externalCliBin: string;
     externalCliCodexAliasTitle: string;
     externalCliCodexAliasDescription: string;
+    claudeAuthToken: string;
+    claudeAuthTokenPlaceholder: string;
+    claudeBaseUrl: string;
+    claudeBaseUrlPlaceholder: string;
+    claudeModel: string;
+    claudeModelPlaceholder: string;
     launchMethodCommands: string;
     launchMethodCommandsPlaceholder: string;
     launchMethodCommandsHint: string;

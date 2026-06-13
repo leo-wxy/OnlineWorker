@@ -160,6 +160,12 @@ class ToolConfig:
             if k is not None
         }
         self.external_cli = dict(self.external_cli or {})
+        if "auth_token" in self.external_cli and "auth_token" not in self.auth:
+            self.auth["auth_token"] = str(self.external_cli.get("auth_token") or "").strip()
+        if "upstream_base_url" in self.external_cli and "base_url" not in self.auth:
+            self.auth["base_url"] = str(self.external_cli.get("upstream_base_url") or "").strip()
+        if "model" in self.external_cli and "model" not in self.auth:
+            self.auth["model"] = str(self.external_cli.get("model") or "").strip()
         self.launch_methods = _normalize_launch_methods(self.launch_methods)
 
 

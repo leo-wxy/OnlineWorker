@@ -500,6 +500,52 @@ async def test_start_claude_defers_cli_touching_work_until_send():
 
 
 @pytest.mark.asyncio
+async def test_start_claude_runtime_passes_configured_auth_token_to_adapter():
+    storage = AppStorage()
+    state = AppState(storage=storage)
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=2,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="claude",
+                enabled=True,
+                codex_bin="claude",
+                protocol="stdio",
+                external_cli={"auth_token": "configured-token"},
+            )
+        ],
+        data_dir="/tmp/onlineworker-claude-test",
+        delete_archived_topics=True,
+    )
+    manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
+    tool_cfg = cfg.get_tool("claude")
+    assert tool_cfg is not None
+
+    adapter = MagicMock()
+    adapter.connect = AsyncMock()
+    adapter.configure_hook_bridge = MagicMock()
+    adapter.install_external_hook_ingress = AsyncMock(return_value={"state": "installed"})
+    adapter.start_hook_bridge = AsyncMock()
+
+    with patch(
+        "plugins.providers.builtin.claude.python.runtime.ClaudeAdapter",
+        return_value=adapter,
+    ) as adapter_cls, patch(
+        "plugins.providers.builtin.claude.python.runtime.setup_connection",
+        new=AsyncMock(),
+    ):
+        await claude_runtime.start_runtime(manager, bot=MagicMock(), tool_cfg=tool_cfg)
+
+    adapter_cls.assert_called_once_with(
+        claude_bin="claude",
+        auth={"auth_token": "configured-token"},
+    )
+
+
+@pytest.mark.asyncio
 async def test_setup_claude_connection_hides_stale_threads_from_authoritative_facts(monkeypatch):
     storage = AppStorage()
     ws = WorkspaceInfo(

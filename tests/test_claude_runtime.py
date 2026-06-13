@@ -107,6 +107,56 @@ async def test_prepare_send_resumes_app_owned_thread_without_remapping():
 
 
 @pytest.mark.asyncio
+async def test_prepare_send_allows_claude_send_when_auth_status_reports_logged_out():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="claude",
+        daemon_workspace_id="claude:onlineWorker",
+    )
+    thread_info = ThreadInfo(
+        thread_id="ses-app",
+        topic_id=6968,
+        preview="App 会话",
+        is_active=True,
+        source="app",
+    )
+    ws.threads["ses-app"] = thread_info
+    state = AppState(storage=AppStorage())
+
+    adapter = MagicMock()
+    adapter.start_thread = AsyncMock(return_value={"id": "ses-new"})
+    adapter.inspect_thread_activity = AsyncMock(return_value={"busy": False})
+    adapter.check_readiness = AsyncMock(
+        return_value={
+            "ready": False,
+            "source": "cliAuth",
+            "reason": "loggedOut",
+            "authMethod": "none",
+            "detail": "Claude CLI is not logged in.",
+        }
+    )
+    adapter.resume_thread = AsyncMock(return_value={})
+
+    should_continue = await claude_runtime.prepare_send(
+        state,
+        adapter,
+        ws,
+        thread_info,
+        update=SimpleNamespace(),
+        context=SimpleNamespace(),
+        group_chat_id=1,
+        src_topic_id=6968,
+        text="继续",
+        has_photo=False,
+    )
+
+    assert should_continue is True
+    adapter.check_readiness.assert_awaited_once_with(force=True)
+    adapter.resume_thread.assert_awaited_once_with("claude:onlineWorker", "ses-app")
+
+
+@pytest.mark.asyncio
 async def test_prepare_send_keeps_thread_inferred_as_imported(monkeypatch):
     ws = WorkspaceInfo(
         name="onlineWorker",

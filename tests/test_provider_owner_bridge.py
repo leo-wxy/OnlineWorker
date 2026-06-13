@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import time
@@ -913,12 +914,66 @@ async def test_provider_owner_bridge_returns_send_error(monkeypatch, tmp_path):
     )
 
     assert response == {
-        "ok": False,
-        "error": "boom",
+        "ok": True,
+        "accepted": True,
         "provider_id": "claude",
         "thread_id": "tid-new",
+        "requested_thread_id": "tid-new",
+        "remapped": False,
         "workspace_id": "claude:/tmp/new-workspace",
     }
+    if bridge._pending_send_tasks:
+        await asyncio.gather(*tuple(bridge._pending_send_tasks), return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_accepts_send_before_slow_send_completes(monkeypatch, tmp_path):
+    import asyncio
+
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    class _FakeAdapter:
+        connected = True
+
+    send_started = asyncio.Event()
+    release_send = asyncio.Event()
+
+    async def send(state_obj, current_adapter, ws_info, thread_info, **kwargs):
+        send_started.set()
+        await release_send.wait()
+        return {"threadId": thread_info.thread_id, "turnId": "turn-1", "status": "completed"}
+
+    state = AppState(storage=AppStorage())
+    state.set_adapter("claude", _FakeAdapter())
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            message_hooks=SimpleNamespace(
+                ensure_connected=AsyncMock(return_value=state.get_adapter(name)),
+                prepare_send=AsyncMock(return_value=True),
+                send=send,
+            )
+        )
+        if name == "claude"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_send_message(
+        {
+            "provider_id": "claude",
+            "thread_id": "tid-new",
+            "text": "hello",
+            "workspace_dir": "/tmp/new-workspace",
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["accepted"] is True
+    await asyncio.wait_for(send_started.wait(), timeout=1)
+    release_send.set()
+    if bridge._pending_send_tasks:
+        await asyncio.gather(*tuple(bridge._pending_send_tasks))
 
 
 @pytest.mark.asyncio
@@ -1057,6 +1112,8 @@ async def test_provider_owner_bridge_returns_and_persists_remapped_thread(monkey
     assert set(ws.threads) == {"real-thread"}
     assert ws.threads["real-thread"].preview == "new app thread"
     save_mock.assert_called_once_with(storage)
+    if bridge._pending_send_tasks:
+        await asyncio.gather(*tuple(bridge._pending_send_tasks), return_exceptions=True)
     send.assert_awaited_once()
 
 

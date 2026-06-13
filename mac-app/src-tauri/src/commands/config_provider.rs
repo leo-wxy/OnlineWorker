@@ -75,6 +75,14 @@ pub(crate) struct ProviderExternalCliConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub(crate) upstream_base_url: Option<String>,
+    #[serde(
+        default,
+        alias = "auth_token",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(crate) auth_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) model: Option<String>,
     #[serde(default, alias = "launcher_wraps_claude")]
     pub(crate) launcher_wraps_claude: bool,
 }
@@ -1357,6 +1365,13 @@ fn provider_external_cli_config(provider: &ProviderConfigEntry) -> ProviderExter
             .get("upstream_base_url")
             .and_then(value_as_string)
             .or_else(|| config.get("upstreamBaseUrl").and_then(value_as_string)),
+        auth_token: config
+            .get("auth_token")
+            .and_then(value_as_string)
+            .or_else(|| config.get("authToken").and_then(value_as_string)),
+        model: config
+            .get("model")
+            .and_then(value_as_string),
         launcher_wraps_claude: config
             .get("launcher_wraps_claude")
             .and_then(value_as_bool)
@@ -1547,6 +1562,7 @@ pub(super) fn set_provider_cli_config_in_document(
 
     let mut config = provider.external_cli.take().unwrap_or_default();
     config.remove("upstreamBaseUrl");
+    config.remove("authToken");
     config.remove("launcherWrapsClaude");
 
     match external_cli
@@ -1562,6 +1578,38 @@ pub(super) fn set_provider_cli_config_in_document(
         }
         None => {
             config.remove("upstream_base_url");
+        }
+    }
+
+    match external_cli
+        .auth_token
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        Some(auth_token) => {
+            config.insert(
+                "auth_token".to_string(),
+                serde_yaml::Value::String(auth_token),
+            );
+        }
+        None => {
+            config.remove("auth_token");
+        }
+    }
+
+    match external_cli
+        .model
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        Some(model) => {
+            config.insert(
+                "model".to_string(),
+                serde_yaml::Value::String(model),
+            );
+        }
+        None => {
+            config.remove("model");
         }
     }
 
@@ -2202,6 +2250,7 @@ providers:
     bin: "company-launcher start"
     external_cli:
       upstream_base_url: "https://upstream.example.test/anthropic"
+      model: "deepseek-v4-pro[1m]"
       launcher_wraps_claude: true
 "#;
 
@@ -2216,6 +2265,7 @@ providers:
             claude.external_cli.upstream_base_url.as_deref(),
             Some("https://upstream.example.test/anthropic")
         );
+        assert_eq!(claude.external_cli.model.as_deref(), Some("deepseek-v4-pro[1m]"));
         assert!(claude.external_cli.launcher_wraps_claude);
     }
 
@@ -2240,6 +2290,8 @@ providers:
             Some("company-launcher start".to_string()),
             ProviderExternalCliConfig {
                 upstream_base_url: Some("https://upstream.example.test/anthropic".to_string()),
+                auth_token: Some("sk-test-token".to_string()),
+                model: Some("deepseek-v4-pro[1m]".to_string()),
                 launcher_wraps_claude: true,
             },
             None,
@@ -2258,6 +2310,18 @@ providers:
         );
         assert_eq!(
             external_cli
+                .get("auth_token")
+                .and_then(|value| value.as_str()),
+            Some("sk-test-token")
+        );
+        assert_eq!(
+            external_cli
+                .get("model")
+                .and_then(|value| value.as_str()),
+            Some("deepseek-v4-pro[1m]")
+        );
+        assert_eq!(
+            external_cli
                 .get("launcher_wraps_claude")
                 .and_then(|value| value.as_bool()),
             Some(true)
@@ -2269,6 +2333,7 @@ providers:
             Some("keep")
         );
         assert!(external_cli.get("upstreamBaseUrl").is_none());
+        assert!(external_cli.get("authToken").is_none());
         assert!(external_cli.get("launcherWrapsClaude").is_none());
     }
 

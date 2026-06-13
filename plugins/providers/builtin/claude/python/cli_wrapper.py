@@ -142,6 +142,56 @@ def _truthy_config_value(value) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _configured_auth_token(tool_cfg) -> str:
+    auth = getattr(tool_cfg, "auth", None)
+    if isinstance(auth, dict):
+        token = str(auth.get("auth_token") or "").strip()
+        if token:
+            return token
+    external_cli = getattr(tool_cfg, "external_cli", None)
+    if isinstance(external_cli, dict):
+        token = str(
+            external_cli.get("auth_token")
+            or external_cli.get("authToken")
+            or ""
+        ).strip()
+        if token:
+            return token
+    return ""
+
+
+def _configured_base_url(tool_cfg) -> str:
+    auth = getattr(tool_cfg, "auth", None)
+    if isinstance(auth, dict):
+        value = str(auth.get("base_url") or "").strip()
+        if value:
+            return value
+    external_cli = getattr(tool_cfg, "external_cli", None)
+    if isinstance(external_cli, dict):
+        value = str(
+            external_cli.get("upstream_base_url")
+            or external_cli.get("upstreamBaseUrl")
+            or ""
+        ).strip()
+        if value:
+            return value
+    return ""
+
+
+def _configured_model(tool_cfg) -> str:
+    auth = getattr(tool_cfg, "auth", None)
+    if isinstance(auth, dict):
+        value = str(auth.get("model") or "").strip()
+        if value:
+            return value
+    external_cli = getattr(tool_cfg, "external_cli", None)
+    if isinstance(external_cli, dict):
+        value = str(external_cli.get("model") or "").strip()
+        if value:
+            return value
+    return ""
+
+
 async def run_ow_claude_once(
     passthrough_args: Sequence[str],
     *,
@@ -168,9 +218,19 @@ async def run_ow_claude_once(
         or _truthy_config_value(_external_cli_value(tool_cfg, "launcher_wraps_claude"))
     )
     base_env = dict(os.environ)
+    configured_auth_token = _configured_auth_token(tool_cfg)
+    configured_base_url = _configured_base_url(tool_cfg)
+    configured_model = _configured_model(tool_cfg)
+    if configured_auth_token and not str(base_env.get("ANTHROPIC_AUTH_TOKEN") or "").strip():
+        base_env["ANTHROPIC_AUTH_TOKEN"] = configured_auth_token
+    if configured_base_url and not str(base_env.get("ANTHROPIC_BASE_URL") or "").strip():
+        base_env["ANTHROPIC_BASE_URL"] = configured_base_url
+    if configured_model and not str(base_env.get("ANTHROPIC_MODEL") or "").strip():
+        base_env["ANTHROPIC_MODEL"] = configured_model
     argv = [*resolve_claude_command_prefix(configured_bin), *[str(arg) for arg in passthrough_args]]
     upstream = str(
         configured_upstream_base_url
+        or configured_base_url
         or base_env.get("ONLINEWORKER_CLAUDE_UPSTREAM_BASE_URL")
         or base_env.get("ANTHROPIC_BASE_URL")
         or ""

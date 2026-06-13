@@ -1095,6 +1095,31 @@ providers:
     assert env["ANTHROPIC_MODEL"] == "process-model"
 
 
+def test_claude_adapter_build_env_uses_explicit_auth_config_when_process_env_missing(tmp_path, monkeypatch):
+    from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
+
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+
+    adapter = ClaudeAdapter(
+        claude_bin="claude",
+        auth={
+            "auth_token": "configured-token",
+            "base_url": "https://gateway.example.test/anthropic",
+            "model": "deepseek-v4-pro[1m]",
+        },
+    )
+    adapter._hook_data_dir = str(tmp_path)
+
+    env = adapter._build_claude_env()
+
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "configured-token"
+    assert env["ANTHROPIC_BASE_URL"] == "https://gateway.example.test/anthropic"
+    assert env["ANTHROPIC_MODEL"] == "deepseek-v4-pro[1m]"
+    assert "ANTHROPIC_API_KEY" not in env
+
+
 @pytest.mark.asyncio
 async def test_claude_adapter_does_not_treat_current_config_auth_token_as_ready(tmp_path, monkeypatch):
     from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
@@ -1249,7 +1274,7 @@ async def test_claude_adapter_reports_stale_runtime_env_as_unavailable(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_claude_adapter_preflight_refreshes_cached_status_and_blocks_logged_out_send(monkeypatch, tmp_path):
+async def test_claude_adapter_preflight_refreshes_cached_status_and_attempts_logged_out_send(monkeypatch, tmp_path):
     from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
 
     adapter = ClaudeAdapter(claude_bin="claude")
@@ -1266,7 +1291,11 @@ async def test_claude_adapter_preflight_refreshes_cached_status_and_blocks_logge
             FakeAuthProcess(
                 '{"loggedIn": false, "authMethod": "none", "apiProvider": "firstParty"}'
             ),
-            AssertionError("claude -p should not be spawned when auth preflight fails"),
+            FakeStreamingProcess(
+                stdout_lines=[
+                    '{"type":"result","subtype":"success","is_error":false,"result":"ok"}\n',
+                ],
+            ),
         ]
     )
     monkeypatch.setattr(
@@ -1276,10 +1305,9 @@ async def test_claude_adapter_preflight_refreshes_cached_status_and_blocks_logge
 
     result = await adapter.send_user_message("claude:onlineWorker", "ses-1", "继续")
 
-    assert result["status"] == "error"
-    assert "not logged in" in result["error"]
-    assert result["readiness"]["reason"] == "loggedOut"
-    create_process.assert_awaited_once()
+    assert result["status"] == "completed"
+    assert create_process.await_args_list[0].args[:3] == ("claude", "auth", "status")
+    assert create_process.await_args_list[1].args[:3] == ("claude", "-p", "--verbose")
 
 
 @pytest.mark.asyncio

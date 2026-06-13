@@ -723,6 +723,15 @@ def format_claude_unavailable_message(readiness: dict[str, Any] | None) -> str:
     return "Claude provider unavailable: readiness check failed."
 
 
+def should_block_claude_send_for_readiness(readiness: dict[str, Any] | None) -> bool:
+    status = readiness if isinstance(readiness, dict) else {}
+    if status.get("ready") is not False:
+        return False
+    if status.get("source") == "cliAuth" and status.get("reason") == "loggedOut":
+        return False
+    return True
+
+
 def _readiness_to_legacy_auth_status(readiness: dict[str, Any]) -> dict[str, Any]:
     return {
         "loggedIn": bool(readiness.get("ready")),
@@ -871,8 +880,10 @@ class ClaudeAdapter:
         self.claude_bin = self._claude_command_prefix[0]
         self._configured_claude_bin = str(claude_bin or "claude").strip() or "claude"
         self._launch_methods = _normalize_claude_launch_methods(self._configured_claude_bin, launch_methods)
-        # auth is accepted for descriptor compatibility only. Claude CLI owns
-        # provider/auth configuration; OnlineWorker treats it as a black-box CLI.
+        normalized_auth = auth if isinstance(auth, dict) else {}
+        self._configured_auth_token = str(normalized_auth.get("auth_token") or "").strip()
+        self._configured_base_url = str(normalized_auth.get("base_url") or "").strip()
+        self._configured_model = str(normalized_auth.get("model") or "").strip()
         self._connected = False
         self._auth_ready: bool | None = None
         self._auth_method: str = ""
@@ -1653,6 +1664,12 @@ class ClaudeAdapter:
             elif key.upper().startswith("ANTHROPIC_"):
                 env.pop(key, None)
         env.update(runtime_env)
+        if self._configured_auth_token and not str(env.get("ANTHROPIC_AUTH_TOKEN") or "").strip():
+            env["ANTHROPIC_AUTH_TOKEN"] = self._configured_auth_token
+        if self._configured_base_url and not str(env.get("ANTHROPIC_BASE_URL") or "").strip():
+            env["ANTHROPIC_BASE_URL"] = self._configured_base_url
+        if self._configured_model and not str(env.get("ANTHROPIC_MODEL") or "").strip():
+            env["ANTHROPIC_MODEL"] = self._configured_model
         if (
             env.get("ANTHROPIC_BASE_URL")
             and not str(env.get("ANTHROPIC_AUTH_TOKEN") or "").strip()
@@ -1912,7 +1929,7 @@ class ClaudeAdapter:
 
     async def _ensure_ready_for_send(self) -> dict[str, Any]:
         readiness = await self.check_readiness(force=True)
-        if not readiness.get("ready"):
+        if should_block_claude_send_for_readiness(readiness):
             raise ClaudeProviderUnavailable(readiness)
         return readiness
 

@@ -24,6 +24,7 @@ from core.providers.workspace_runtime import default_normalize_server_threads
 from plugins.providers.builtin.claude.python.adapter import (
     ClaudeAdapter,
     format_claude_unavailable_message,
+    should_block_claude_send_for_readiness,
 )
 from plugins.providers.builtin.claude.python.storage_runtime import infer_claude_thread_source_from_logs
 
@@ -162,7 +163,7 @@ async def _reject_if_claude_not_ready(adapter) -> None:
 
     readiness_result = check_readiness(force=True)
     readiness = await readiness_result if inspect.isawaitable(readiness_result) else readiness_result
-    if isinstance(readiness, dict) and readiness.get("ready") is False:
+    if should_block_claude_send_for_readiness(readiness):
         raise RuntimeError(format_claude_unavailable_message(readiness))
 
 
@@ -197,11 +198,16 @@ async def prepare_send(
 async def start_runtime(manager, bot, tool_cfg) -> None:
     """Start Claude local adapter backed by the provider-owned CLI runtime."""
     configured_claude_bin = str(tool_cfg.codex_bin or "claude").strip() or "claude"
+    configured_auth = getattr(tool_cfg, "auth", None) or None
     launch_methods = getattr(tool_cfg, "launch_methods", None) or None
     if launch_methods:
-        adapter = ClaudeAdapter(claude_bin=configured_claude_bin, launch_methods=launch_methods)
+        adapter = ClaudeAdapter(
+            claude_bin=configured_claude_bin,
+            auth=configured_auth,
+            launch_methods=launch_methods,
+        )
     else:
-        adapter = ClaudeAdapter(claude_bin=configured_claude_bin)
+        adapter = ClaudeAdapter(claude_bin=configured_claude_bin, auth=configured_auth)
     await adapter.connect()
     data_dir = manager.state.config.data_dir if manager.state.config is not None else None
     if data_dir:

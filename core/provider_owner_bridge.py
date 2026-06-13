@@ -478,6 +478,7 @@ class ProviderOwnerBridge:
         self.data_dir = data_dir if data_dir is not None else get_data_dir()
         self.socket_path = provider_owner_bridge_socket_path(self.data_dir)
         self._server: Optional[asyncio.base_events.Server] = None
+        self._pending_send_tasks: set[asyncio.Task] = set()
 
     @property
     def is_running(self) -> bool:
@@ -501,6 +502,12 @@ class ProviderOwnerBridge:
             self._server.close()
             await self._server.wait_closed()
             self._server = None
+
+        for task in tuple(self._pending_send_tasks):
+            task.cancel()
+        if self._pending_send_tasks:
+            await asyncio.gather(*self._pending_send_tasks, return_exceptions=True)
+            self._pending_send_tasks.clear()
 
         if self.socket_path and os.path.exists(self.socket_path):
             try:
@@ -1337,29 +1344,6 @@ class ProviderOwnerBridge:
                     "thread_id": thread_id,
                     "workspace_id": workspace_id,
                 }
-
-            send_result = await message_hooks.send(
-                self.state,
-                adapter,
-                ws_info,
-                thread_info,
-                update=None,
-                context=None,
-                group_chat_id=0,
-                src_topic_id=None,
-                text=text,
-                has_photo=False,
-                attachments=attachments,
-            )
-            if isinstance(send_result, dict) and str(send_result.get("status") or "") == "error":
-                rollback_thread_remap()
-                return {
-                    "ok": False,
-                    "error": str(send_result.get("error") or f"{provider_id} send failed"),
-                    "provider_id": provider_id,
-                    "thread_id": thread_id,
-                    "workspace_id": workspace_id,
-                }
         except Exception as exc:
             rollback_thread_remap()
             return {"ok": False, "error": str(exc)}
@@ -1385,6 +1369,34 @@ class ProviderOwnerBridge:
             text=text,
             workspace_path=str(getattr(ws_info, "path", "") or ""),
         )
+
+        async def execute_send() -> None:
+            try:
+                send_result = await message_hooks.send(
+                    self.state,
+                    adapter,
+                    ws_info,
+                    thread_info,
+                    update=None,
+                    context=None,
+                    group_chat_id=0,
+                    src_topic_id=None,
+                    text=text,
+                    has_photo=False,
+                    attachments=attachments,
+                )
+                if isinstance(send_result, dict) and str(send_result.get("status") or "") == "error":
+                    raise RuntimeError(str(send_result.get("error") or f"{provider_id} send failed"))
+            except Exception:
+                logger.exception(
+                    "[provider-owner-bridge] 后台发送失败 provider=%s thread=%s",
+                    provider_id,
+                    thread_id[:12] if thread_id else "?",
+                )
+
+        task = asyncio.create_task(execute_send())
+        self._pending_send_tasks.add(task)
+        task.add_done_callback(self._pending_send_tasks.discard)
 
         return {
             "ok": True,

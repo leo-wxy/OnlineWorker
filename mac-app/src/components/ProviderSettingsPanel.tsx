@@ -48,6 +48,9 @@ const CODEX_REMOTE_PROXY_ALIAS =
 
 interface ProviderCliDraft {
   bin: string;
+  authToken: string;
+  baseUrl: string;
+  model: string;
   launcherWrapsClaude: boolean;
   launchCommands: string;
 }
@@ -125,6 +128,9 @@ export function ProviderSettingsPanel({ mode }: Props) {
           provider.id,
           {
             bin: provider.bin ?? provider.install?.cliNames?.[0] ?? provider.id,
+            authToken: provider.externalCli?.authToken ?? "",
+            baseUrl: provider.externalCli?.upstreamBaseUrl ?? "",
+            model: provider.externalCli?.model ?? "",
             launcherWrapsClaude: provider.externalCli?.launcherWrapsClaude ?? false,
             launchCommands: (provider.launchMethods?.length
               ? provider.launchMethods.map((method) => method.bin).join("\n")
@@ -198,12 +204,15 @@ export function ProviderSettingsPanel({ mode }: Props) {
   ) => {
     setCliDrafts((current) => {
       const provider = byId.get(providerId);
-      const previous = current[providerId] ?? {
-        bin: provider?.bin ?? provider?.install?.cliNames?.[0] ?? providerId,
-        launcherWrapsClaude: provider?.externalCli?.launcherWrapsClaude ?? false,
-        launchCommands: provider?.launchMethods?.length
-          ? provider.launchMethods.map((method) => method.bin).join("\n")
-          : provider?.bin ?? provider?.install?.cliNames?.[0] ?? providerId,
+        const previous = current[providerId] ?? {
+          bin: provider?.bin ?? provider?.install?.cliNames?.[0] ?? providerId,
+          authToken: provider?.externalCli?.authToken ?? "",
+          baseUrl: provider?.externalCli?.upstreamBaseUrl ?? "",
+          model: provider?.externalCli?.model ?? "",
+          launcherWrapsClaude: provider?.externalCli?.launcherWrapsClaude ?? false,
+          launchCommands: provider?.launchMethods?.length
+            ? provider.launchMethods.map((method) => method.bin).join("\n")
+            : provider?.bin ?? provider?.install?.cliNames?.[0] ?? providerId,
       };
       return {
         ...current,
@@ -218,6 +227,9 @@ export function ProviderSettingsPanel({ mode }: Props) {
   const saveProviderCliConfig = async (provider: ProviderMetadata) => {
     const draft = cliDrafts[provider.id] ?? {
       bin: provider.bin ?? provider.install?.cliNames?.[0] ?? provider.id,
+      authToken: provider.externalCli?.authToken ?? "",
+      baseUrl: provider.externalCli?.upstreamBaseUrl ?? "",
+      model: provider.externalCli?.model ?? "",
       launcherWrapsClaude: provider.externalCli?.launcherWrapsClaude ?? false,
       launchCommands: provider.launchMethods?.length
         ? provider.launchMethods.map((method) => method.bin).join("\n")
@@ -244,7 +256,9 @@ export function ProviderSettingsPanel({ mode }: Props) {
         providerId: provider.id,
         bin: primaryBin,
         externalCli: {
-          upstreamBaseUrl: null,
+          upstreamBaseUrl: provider.id === "claude" ? draft.baseUrl.trim() || null : null,
+          authToken: provider.id === "claude" ? draft.authToken.trim() || null : null,
+          model: provider.id === "claude" ? draft.model.trim() || null : null,
           launcherWrapsClaude: provider.id === "claude" && draft.launcherWrapsClaude,
         },
         launchMethods,
@@ -335,6 +349,9 @@ export function ProviderSettingsPanel({ mode }: Props) {
           const civilityModeEnabled = provider?.messageHooks?.abusiveLanguageNormalization.enabled ?? true;
           const draft = cliDrafts[setting.id] ?? {
             bin: provider?.bin ?? provider?.install?.cliNames?.[0] ?? setting.id,
+            authToken: provider?.externalCli?.authToken ?? "",
+            baseUrl: provider?.externalCli?.upstreamBaseUrl ?? "",
+            model: provider?.externalCli?.model ?? "",
             launcherWrapsClaude: provider?.externalCli?.launcherWrapsClaude ?? false,
             launchCommands: provider?.launchMethods?.length
               ? provider.launchMethods.map((method) => method.bin).join("\n")
@@ -482,6 +499,49 @@ export function ProviderSettingsPanel({ mode }: Props) {
                           <p className="text-xs font-medium leading-5 text-slate-500">
                             {texts.launchMethodCommandsHint}
                           </p>
+                        )}
+                        {provider?.id === "claude" && (
+                          <>
+                            <label className="grid gap-1.5 text-xs font-bold text-slate-600">
+                              {texts.claudeAuthToken}
+                              <input
+                                type="password"
+                                value={draft.authToken}
+                                disabled={cliBusy}
+                                onChange={(event) => updateCliDraft(setting.id, { authToken: event.currentTarget.value })}
+                                className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-mono text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                                placeholder={texts.claudeAuthTokenPlaceholder}
+                                autoComplete="off"
+                                spellCheck={false}
+                              />
+                            </label>
+                            <label className="grid gap-1.5 text-xs font-bold text-slate-600">
+                              {texts.claudeBaseUrl}
+                              <input
+                                type="text"
+                                value={draft.baseUrl}
+                                disabled={cliBusy}
+                                onChange={(event) => updateCliDraft(setting.id, { baseUrl: event.currentTarget.value })}
+                                className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-mono text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                                placeholder={texts.claudeBaseUrlPlaceholder}
+                                autoComplete="off"
+                                spellCheck={false}
+                              />
+                            </label>
+                            <label className="grid gap-1.5 text-xs font-bold text-slate-600">
+                              {texts.claudeModel}
+                              <input
+                                type="text"
+                                value={draft.model}
+                                disabled={cliBusy}
+                                onChange={(event) => updateCliDraft(setting.id, { model: event.currentTarget.value })}
+                                className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-mono text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                                placeholder={texts.claudeModelPlaceholder}
+                                autoComplete="off"
+                                spellCheck={false}
+                              />
+                            </label>
+                          </>
                         )}
                       </div>
                       <div className="flex flex-wrap items-center justify-end gap-3">

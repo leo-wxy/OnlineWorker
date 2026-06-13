@@ -54,6 +54,8 @@ export interface ProviderMessageHooksMetadata {
 
 export interface ProviderExternalCliConfig {
   upstreamBaseUrl?: string | null;
+  authToken?: string | null;
+  model?: string | null;
   launcherWrapsClaude: boolean;
 }
 
