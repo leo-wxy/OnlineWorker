@@ -1,6 +1,7 @@
 import type { MouseEvent, ReactNode } from "react";
 import type { ArchiveNotice } from "./archive";
 import { ArchiveNoticeBanner } from "./archive";
+import { sessionPreviewText } from "../../utils/sessionBrowserState.js";
 import {
   StatePanel,
   getProviderUi,
@@ -67,6 +68,7 @@ export function WorkspaceSidebar({
   providerFilter,
   providerLabels,
   selectedWorkspace,
+  loading = false,
   noSessionsLabel,
   onSelectWorkspace,
   onOpenWorkspaceContextMenu,
@@ -76,6 +78,7 @@ export function WorkspaceSidebar({
   providerFilter: ProviderFilter;
   providerLabels: Record<string, string>;
   selectedWorkspace: string | null;
+  loading?: boolean;
   noSessionsLabel: string;
   onSelectWorkspace: (workspace: string | null) => void;
   onOpenWorkspaceContextMenu?: (event: MouseEvent<HTMLElement>, workspace: string) => void;
@@ -95,7 +98,9 @@ export function WorkspaceSidebar({
       </div>
 
       <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
-        {workspaces.length === 0 ? (
+        {loading ? (
+          <StatePanel message={noSessionsLabel} />
+        ) : workspaces.length === 0 ? (
           <StatePanel message={noSessionsLabel} />
         ) : workspaces.map((ws) => {
           const name = ws.split("/").pop() || ws;
@@ -149,6 +154,7 @@ export function SessionListPanel({
   archiveFilter,
   archivingSessionId,
   archiveNotice,
+  loading = false,
   labels,
   pinnedSessionIds,
   renderSessionMeta,
@@ -165,6 +171,7 @@ export function SessionListPanel({
   archiveFilter: ArchiveFilter;
   archivingSessionId: string | null;
   archiveNotice: ArchiveNotice | null;
+  loading?: boolean;
   labels: {
     active: string;
     archived: string;
@@ -225,7 +232,9 @@ export function SessionListPanel({
       <ArchiveNoticeBanner notice={archiveNotice} />
 
       <div className="relative flex-1 space-y-2 overflow-y-auto px-3 py-3">
-        {sessions.length === 0 ? (
+        {loading ? (
+          <StatePanel message={labels.noSessions} />
+        ) : sessions.length === 0 ? (
           <StatePanel message={labels.noSessions} />
         ) : sessions.map((session) => {
           const isActive = selectedSessionId === session.id;
@@ -314,6 +323,11 @@ export function SessionListPanel({
               <h4 className={`line-clamp-2 pl-1 text-sm leading-6 ${isActive ? "font-semibold text-gray-950" : "font-medium text-gray-700"}`}>
                 {session.title}
               </h4>
+              {sessionPreviewText(session) ? (
+                <p className="mt-2 line-clamp-3 pl-1 text-xs leading-5 text-slate-500">
+                  {sessionPreviewText(session)}
+                </p>
+              ) : null}
               {renderSessionMeta?.(session)}
               <p className="mt-2 truncate pl-1 font-mono text-[11px] text-slate-400">
                 {session.id.slice(0, 12)}

@@ -1,4 +1,5 @@
 const BOARD_LANE_LIMIT = 12;
+const ABSOLUTE_PATH_RE = /(^|\s)(\/(?:Users|Volumes|Applications|private|tmp|var|opt|Library|System)\/[\w./~:-]+)/g;
 
 const NEEDS_ATTENTION_STATUSES = new Set([
   "approval_requested",
@@ -37,6 +38,27 @@ function readSessionTimestamp(session) {
       raw.createdAt ??
       raw.created_at,
   );
+}
+
+function preferSessionPreviewOverActivity({ activityPreviewText, session, activity, title }) {
+  const sessionText = uniquePreview(
+    sessionPreview(session) ||
+      activityPreviewFallback({ ...activity, sessionId: normalizedString(activity.sessionId) }, title),
+    title,
+  );
+  const activityText = activityPreviewText || null;
+  if (!sessionText) {
+    return activityText;
+  }
+  if (!activityText) {
+    return sessionText;
+  }
+  const sessionUpdatedAt = readSessionTimestamp(session) ?? 0;
+  const activityUpdatedAt = normalizeTimestamp(activity?.updatedAt) ?? 0;
+  if (sessionUpdatedAt > activityUpdatedAt) {
+    return sessionText;
+  }
+  return activityText;
 }
 
 function providerLabelFor(providerLabels, providerId) {
@@ -111,15 +133,22 @@ function activityTitle(activity, session) {
 
 function sessionPreview(session) {
   const raw = session?.raw ?? {};
-  const preview =
-    raw.lastMessage ??
-    raw.last_message ??
-    raw.latestMessage ??
-    raw.latest_message ??
-    raw.preview ??
-    raw.summary ??
-    raw.highlightedThreadPreview;
-  const text = typeof preview === "string" && preview.trim() ? previewText(preview) : "";
+  const preview = firstNonEmptyString(
+    raw.highlightedThreadPreview,
+    raw.lastAssistantMessage,
+    raw.last_assistant_message,
+    raw.lastFinalMessage,
+    raw.last_final_message,
+    raw.lastUserMessage,
+    raw.last_user_message,
+    raw.lastMessage,
+    raw.last_message,
+    raw.latestMessage,
+    raw.latest_message,
+    raw.preview,
+    raw.summary,
+  );
+  const text = preview ? previewText(preview) : "";
   return text || null;
 }
 
@@ -153,8 +182,20 @@ function normalizedString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    const text = normalizedString(value);
+    if (text) {
+      return text;
+    }
+  }
+  return "";
+}
+
 function previewText(value) {
-  let text = normalizedString(value).replace(/\s+/g, " ");
+  let text = normalizedString(value)
+    .replace(ABSOLUTE_PATH_RE, (_, prefix) => `${prefix}[path]`)
+    .replace(/\s+/g, " ");
   for (let index = 0; index < 4; index += 1) {
     const next = text
       .replace(/^你说得对[，。:：]\s*/, "")
@@ -174,16 +215,17 @@ function previewText(value) {
 
 function meaningfulPreview(preview, title, fallback) {
   const text = normalizedString(preview);
-  if (text && text !== normalizedString(title)) {
+  const normalizedTitle = previewText(title);
+  if (text && text !== normalizedTitle) {
     return text;
   }
   const fallbackText = normalizedString(fallback);
-  return fallbackText && fallbackText !== normalizedString(title) ? fallbackText : null;
+  return fallbackText && fallbackText !== normalizedTitle ? fallbackText : null;
 }
 
 function uniquePreview(preview, title) {
   const text = normalizedString(preview);
-  return text && text !== normalizedString(title) ? text : null;
+  return text && text !== previewText(title) ? text : null;
 }
 
 function activityStatusReason(activity, fallback) {
@@ -258,6 +300,38 @@ function activityRunning(activity) {
   return normalizedString(activity.status).toLowerCase() === "running";
 }
 
+function readProviderActiveSignal(raw) {
+  if (
+    raw.providerActive === true ||
+    raw.provider_active === true ||
+    raw.ownerBridgeActive === true ||
+    raw.owner_bridge_active === true
+  ) {
+    return true;
+  }
+  if (
+    raw.providerActive === false ||
+    raw.provider_active === false ||
+    raw.ownerBridgeActive === false ||
+    raw.owner_bridge_active === false
+  ) {
+    return false;
+  }
+  return null;
+}
+
+function hasStrongActiveRecentActivity(recentActivity) {
+  if (!recentActivity) {
+    return false;
+  }
+  const activeSessionId = normalizedString(recentActivity.activeSessionId);
+  if (!activeSessionId) {
+    return false;
+  }
+  const preview = previewText(recentActivity.highlightedThreadPreview || "");
+  return !isPlaceholderTitle(preview, activeSessionId) && !isLowSignalTitleText(preview);
+}
+
 function taskBoardKey(providerId, sessionId) {
   return `${providerId}:${sessionId}`;
 }
@@ -294,11 +368,22 @@ export function buildTaskBoardModel({
     recentActivity?.activeTool?.trim() ||
     null;
   const activeWorkspacePath = recentActivity?.activeWorkspacePath?.trim() || null;
+  const hasStrongActiveSession = hasStrongActiveRecentActivity(recentActivity);
   const generatedAtEpochMs = normalizeTimestamp(dashboardState?.generatedAtEpoch) ?? nowEpochMs;
   const pinnedKeys = sessionRefSet(taskBoardState?.pinned);
   const sessionsByKey = new Map(
     sessions.map((session) => [taskBoardKey(session.type, session.id), session]),
   );
+  const activeSessionKey =
+    activeSessionId && activeProviderId
+      ? taskBoardKey(activeProviderId, activeSessionId)
+      : null;
+  const activeRecentSession = activeSessionKey ? sessionsByKey.get(activeSessionKey) : null;
+  const activeRecentSessionProviderActive = activeRecentSession
+    ? readProviderActiveSignal(activeRecentSession.raw ?? {})
+    : null;
+  const allowDashboardActiveSession =
+    hasStrongActiveSession && activeRecentSessionProviderActive !== false;
 
   const tasks = sessionActivities.flatMap((activity) => {
     const providerId = normalizedString(activity.providerId);
@@ -309,7 +394,8 @@ export function buildTaskBoardModel({
     const key = taskBoardKey(providerId, sessionId);
     const session = sessionsByKey.get(key);
     const needsAttention = activityNeedsAttention(activity);
-    const running = !needsAttention && activityRunning(activity);
+    const providerActive = readProviderActiveSignal(session?.raw ?? {});
+    const running = !needsAttention && activityRunning(activity) && providerActive !== false;
     const pinned = pinnedKeys.has(key);
     const title = activityTitle({ ...activity, sessionId }, session);
     const fallbackReason = needsAttention
@@ -319,12 +405,13 @@ export function buildTaskBoardModel({
         : pinned
           ? "关注中"
           : "";
-    const preview = uniquePreview(
-      normalizedString(activityPreview(activity)) ||
-        sessionPreview(session) ||
-        activityPreviewFallback({ ...activity, sessionId }, title),
+    const activityPreviewText = normalizedString(activityPreview(activity));
+    const preview = preferSessionPreviewOverActivity({
+      activityPreviewText,
+      session,
+      activity: { ...activity, sessionId },
       title,
-    );
+    });
 
     return [{
       id: key,
@@ -347,7 +434,7 @@ export function buildTaskBoardModel({
       running,
       pinned,
       statusReason: activityStatusReason(activity, fallbackReason),
-      recentEvent: normalizedString(activity.lastEventKind) || null,
+      recentEvent: providerActive === true ? "provider_active" : normalizedString(activity.lastEventKind) || null,
       updatedAtEpochMs: normalizeTimestamp(activity.updatedAt),
     }];
   });
@@ -357,15 +444,17 @@ export function buildTaskBoardModel({
     const raw = session.raw ?? {};
     const updatedAtEpochMs = readSessionTimestamp(session);
     const isActive =
+      allowDashboardActiveSession &&
       Boolean(activeSessionId) &&
       session.id === activeSessionId &&
       (!activeProviderId || session.type === activeProviderId);
+    const providerActive = readProviderActiveSignal(raw) === true;
     const key = taskBoardKey(session.type, session.id);
     if (projectedKeys.has(key)) {
       return;
     }
     const needsAttention = hasNeedsAttentionSignal(raw);
-    const running = !needsAttention && isActive;
+    const running = !needsAttention && (isActive || providerActive);
     const pinned = pinnedKeys.has(key);
     const title = sessionTitle(session);
     const fallbackReason = needsAttention
@@ -375,9 +464,13 @@ export function buildTaskBoardModel({
         : pinned
           ? "关注中"
           : "";
+    const sessionPreviewText = sessionPreview(session);
+    const activePreviewText = previewText(recentActivity?.highlightedThreadPreview || "");
     const rawPreview = isActive
-      ? recentActivity?.highlightedThreadPreview || sessionPreview(session)
-      : sessionPreview(session);
+      ? meaningfulPreview(activePreviewText, title, sessionPreviewText || "")
+      : providerActive
+        ? sessionPreviewText
+        : sessionPreviewText;
     const preview = pinned
       ? uniquePreview(rawPreview, title)
       : meaningfulPreview(rawPreview, title, "");
@@ -400,13 +493,14 @@ export function buildTaskBoardModel({
       mirroredOnly: false,
       running,
       pinned,
-      statusReason: needsAttention ? fallbackReason : "",
-      recentEvent: isActive ? "active_session" : readRecentEvent(raw),
+      statusReason: needsAttention || running ? fallbackReason : "",
+      recentEvent: isActive ? "active_session" : providerActive ? "provider_active" : readRecentEvent(raw),
       updatedAtEpochMs: isActive ? Math.max(updatedAtEpochMs ?? 0, generatedAtEpochMs) : updatedAtEpochMs,
     });
   });
 
   if (
+    allowDashboardActiveSession &&
     activeSessionId &&
     !tasks.some((task) => task.sessionId === activeSessionId && (!activeProviderId || task.providerId === activeProviderId)) &&
     (activeWorkspacePath || recentActivity?.highlightedThreadPreview)

@@ -75,6 +75,237 @@ test("buildTaskBoardModel ignores stale session-list running flags without live 
   assert.equal(board.counts.pinnedIdle, 0);
 });
 
+test("buildTaskBoardModel puts provider-active session in running column", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "thread-active",
+        type: "codex",
+        title: "JSONL active task",
+        raw: {
+          providerActive: true,
+          updatedAt: nowEpochMs - 5_000,
+        },
+      }),
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.counts.running, 1);
+  assert.equal(board.running[0].sessionId, "thread-active");
+  assert.equal(board.running[0].statusReason, "正在执行");
+  assert.equal(board.running[0].recentEvent, "provider_active");
+});
+
+test("buildTaskBoardModel shows live preview from session raw when provider-active row has no dashboard preview", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "thread-active",
+        type: "codex",
+        title: "继续 phase17 的实现",
+        raw: {
+          providerActive: true,
+          highlightedThreadPreview: "继续修 Session 列表 preview",
+          updatedAt: nowEpochMs - 5_000,
+        },
+      }),
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.counts.running, 1);
+  assert.equal(board.running[0].sessionId, "thread-active");
+  assert.equal(board.running[0].preview, "继续修 Session 列表 preview");
+});
+
+test("buildTaskBoardModel uses assistant preview when provider-active row lacks generic preview fields", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "thread-active",
+        type: "codex",
+        title: "继续 phase17 的实现",
+        raw: {
+          providerActive: true,
+          lastAssistantMessage: "我现在继续同步 preview 到 task board。",
+          updatedAt: nowEpochMs - 5_000,
+        },
+      }),
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.counts.running, 1);
+  assert.equal(board.running[0].preview, "同步 preview 到 task board。");
+});
+
+test("buildTaskBoardModel prefers live session preview over stale cached preview", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "thread-active",
+        type: "codex",
+        title: "继续 phase17 的实现",
+        raw: {
+          providerActive: true,
+          preview: "旧的 cached preview",
+          highlightedThreadPreview: "我现在继续通过事件流刷新 TaskBoard。",
+          updatedAt: nowEpochMs - 5_000,
+        },
+      }),
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.counts.running, 1);
+  assert.equal(board.running[0].preview, "通过事件流刷新 TaskBoard。");
+});
+
+test("buildTaskBoardModel shows sanitized owner-bridge preview for provider-active row", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "thread-active",
+        type: "codex",
+        title: "继续phase17 的实现",
+        raw: {
+          providerActive: true,
+          preview: "我现在继续修 Session 列表预览，并检查 [path] 里的 owner bridge 数据链。",
+          updatedAt: nowEpochMs - 5_000,
+        },
+      }),
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.counts.running, 1);
+  assert.equal(
+    board.running[0].preview,
+    "修 Session 列表预览，并检查 [path] 里的 owner bridge 数据链。",
+  );
+});
+
+test("buildTaskBoardModel suppresses stale running activity when provider marks session inactive", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "thread-stale",
+        type: "claude",
+        title: "Old Claude task",
+        raw: {
+          providerActive: false,
+          updatedAt: nowEpochMs - 5_000,
+        },
+      }),
+    ],
+    sessionActivities: [
+      {
+        providerId: "claude",
+        workspaceId: "claude:/tmp/project",
+        workspacePath: "/tmp/project",
+        sessionId: "thread-stale",
+        title: "Old Claude task",
+        status: "running",
+        attentionReason: "",
+        lastUserMessage: "old prompt",
+        lastAssistantMessage: "",
+        lastFinalMessage: "",
+        lastEventKind: "message.user.accepted",
+        updatedAt: Math.floor(nowEpochMs / 1000),
+      },
+    ],
+    providerLabels: { claude: "Claude" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.counts.running, 0);
+  assert.equal(board.counts.total, 1);
+});
+
+test("buildTaskBoardModel keeps activity running when session metadata is absent", () => {
+  const board = buildTaskBoardModel({
+    sessions: [],
+    sessionActivities: [
+      {
+        providerId: "codex",
+        workspaceId: "codex:/tmp/project",
+        workspacePath: "/tmp/project",
+        sessionId: "thread-live",
+        title: "Live task",
+        status: "running",
+        attentionReason: "",
+        lastUserMessage: "live prompt",
+        lastAssistantMessage: "",
+        lastFinalMessage: "",
+        lastEventKind: "message.assistant.delta",
+        updatedAt: Math.floor(nowEpochMs / 1000),
+      },
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.counts.running, 1);
+  assert.equal(board.running[0].sessionId, "thread-live");
+  assert.equal(board.running[0].recentEvent, "message.assistant.delta");
+});
+
+test("buildTaskBoardModel prefers fresher provider session preview over stale activity preview", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "thread-live",
+        type: "codex",
+        title: "继续phase17 的实现",
+        raw: {
+          providerActive: true,
+          preview: "我先直接取安装态 owner bridge 的实时返回，不再靠猜。",
+          updatedAt: nowEpochMs - 5_000,
+        },
+      }),
+    ],
+    sessionActivities: [
+      {
+        providerId: "codex",
+        workspaceId: "codex:/tmp/project",
+        workspacePath: "/tmp/project",
+        sessionId: "thread-live",
+        title: "继续phase17 的实现",
+        status: "running",
+        attentionReason: "",
+        lastUserMessage: "继续phase17 的实现",
+        lastAssistantMessage: "旧的 activity preview",
+        lastFinalMessage: "",
+        lastEventKind: "message.assistant.delta",
+        updatedAt: Math.floor((nowEpochMs - 30_000) / 1000),
+      },
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.counts.running, 1);
+  assert.equal(board.running[0].sessionId, "thread-live");
+  assert.equal(
+    board.running[0].preview,
+    "直接取安装态 owner bridge 的实时返回，不再靠猜。",
+  );
+});
+
 test("buildTaskBoardModel separates archived sessions", () => {
   const board = buildTaskBoardModel({
     sessions: [
@@ -303,7 +534,7 @@ test("buildTaskBoardModel suppresses running preview when only the title is avai
   assert.equal(board.running[0].statusReason, "");
 });
 
-test("buildTaskBoardModel suppresses latest user message when it repeats the title", () => {
+test("buildTaskBoardModel keeps latest user message preview even when it repeats the title", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -334,7 +565,7 @@ test("buildTaskBoardModel suppresses latest user message when it repeats the tit
   });
 
   assert.equal(board.running[0].title, "切换 codex/phase-14-message-event-bus 这个分支");
-  assert.equal(board.running[0].preview, null);
+  assert.equal(board.running[0].preview, "切换 codex/phase-14-message-event-bus 这个分支");
   assert.equal(board.running[0].statusReason, "");
 });
 
@@ -361,6 +592,140 @@ test("buildTaskBoardModel suppresses active session preview when it repeats the 
 
   assert.equal(board.running[0].title, "继续 /Users/example/Projects/sample-repo 的任务");
   assert.equal(board.running[0].preview, null);
+});
+
+test("buildTaskBoardModel falls back to provider session preview when active dashboard preview only repeats the title", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "thread-a",
+        title: "继续phase17 的实现",
+        raw: {
+          providerActive: true,
+          preview: "我先抓一份安装态 owner bridge 的真实 list_sessions 返回。",
+          updatedAt: nowEpochMs - 30_000,
+        },
+      }),
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: {
+      recentActivity: {
+        activeSessionId: "thread-a",
+        activeSessionTool: "codex",
+        highlightedThreadPreview: "继续phase17 的实现",
+      },
+      generatedAtEpoch: Math.floor(nowEpochMs / 1000),
+    },
+    nowEpochMs,
+  });
+
+  assert.equal(board.running[0].title, "继续phase17 的实现");
+  assert.equal(
+    board.running[0].preview,
+    "抓一份安装态 owner bridge 的真实 list_sessions 返回。",
+  );
+});
+
+test("buildTaskBoardModel ignores stale low-signal dashboard active session without live provider signal", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "ses-old-ok",
+        type: "codemaker",
+        title: "OK",
+        workspace: "/Users/example/Projects/onlineWorker",
+        raw: {
+          updatedAt: nowEpochMs - 30_000,
+          providerActive: false,
+        },
+      }),
+    ],
+    providerLabels: { codemaker: "CodeMaker" },
+    dashboardState: {
+      recentActivity: {
+        activeSessionId: "ses-old-ok",
+        activeSessionTool: "codemaker",
+        highlightedThreadPreview: "OK",
+      },
+      generatedAtEpoch: Math.floor(nowEpochMs / 1000),
+    },
+    nowEpochMs,
+  });
+
+  assert.equal(board.counts.running, 0);
+  assert.equal(board.running.length, 0);
+});
+
+test("buildTaskBoardModel ignores stale dashboard active workspace when matching session is explicitly inactive", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "ses-old-ok",
+        type: "codemaker",
+        title: "OK",
+        workspace: "/Users/example/Projects/onlineWorker",
+        raw: {
+          preview: "OK",
+          updatedAt: nowEpochMs - 30_000,
+          providerActive: false,
+        },
+      }),
+      session({
+        id: "thread-live",
+        type: "codex",
+        title: "继续phase17 的实现",
+        workspace: "/Users/example/Projects/onlineworker-combined",
+        raw: {
+          preview: "继续phase17 的实现",
+          updatedAt: nowEpochMs - 5_000,
+          providerActive: true,
+        },
+      }),
+    ],
+    providerLabels: { codemaker: "CodeMaker", codex: "Codex" },
+    dashboardState: {
+      recentActivity: {
+        activeWorkspaceId: "codemaker:onlineWorker",
+        activeWorkspaceName: "onlineWorker",
+        activeWorkspacePath: "/Users/example/Projects/onlineWorker",
+        activeTool: "codemaker",
+        activeSessionId: "ses-old-ok",
+        activeSessionTool: "codemaker",
+        highlightedThreadPreview: "OK",
+        activeThreadCount: 5,
+      },
+      generatedAtEpoch: Math.floor(nowEpochMs / 1000),
+    },
+    nowEpochMs,
+  });
+
+  assert.equal(board.counts.running, 1);
+  assert.equal(board.running.length, 1);
+  assert.equal(board.running[0].providerId, "codex");
+  assert.equal(board.running[0].sessionId, "thread-live");
+});
+
+test("buildTaskBoardModel sanitizes absolute local paths in provider session preview", () => {
+  const board = buildTaskBoardModel({
+    sessions: [
+      session({
+        id: "thread-active",
+        type: "codex",
+        title: "继续phase17 的实现",
+        raw: {
+          providerActive: true,
+          preview: "我现在继续读 /Users/wxy/Projects/onlineworker-combined/OnlineWorker/mac-app/src/pages/TaskBoard.tsx 这条链路。",
+          updatedAt: nowEpochMs - 5_000,
+        },
+      }),
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.counts.running, 1);
+  assert.equal(board.running[0].preview, "读 [path] 这条链路。");
 });
 
 test("buildTaskBoardModel replaces uuid activity title with session title", () => {

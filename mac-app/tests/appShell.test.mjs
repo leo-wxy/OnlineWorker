@@ -56,6 +56,8 @@ test("app shell exposes first-class task, usage, ai, and notification tabs in na
   assert.match(app, /activeTab === "notifications"/);
   assert.match(app, /<TaskBoard[\s\S]*sessionActivities=\{taskBoardActivities\}/);
   assert.match(app, /sessionActivities=\{taskBoardActivities\}/);
+  assert.match(app, /<SessionBrowser[\s\S]*openTarget=\{sessionOpenTarget\}[\s\S]*taskBoardActivities=\{taskBoardActivities\}[\s\S]*active=\{activeTab === "sessions"\}[\s\S]*\/>/);
+  assert.match(app, /activeTab === "sessions" \? "" : "hidden"/);
   assert.match(app, /taskAttentionCount > 0/);
   assert.match(app, /status === "needs_attention"/);
   assert.equal(app.includes("attentionKind.length > 0"), false);
@@ -65,6 +67,57 @@ test("app shell exposes first-class task, usage, ai, and notification tabs in na
   assert.match(components, /export \{ AiSettingsPanel \}/);
   assert.match(pages, /export \{ TaskBoard \} from "\.\/TaskBoard";/);
   assert.match(pages, /export \{ UsageBrowser \} from "\.\/UsageBrowser";/);
+});
+
+test("task board keeps cached provider summaries and uses force refresh only on explicit reload", () => {
+  const taskBoard = readFileSync(join(root, "src", "pages", "TaskBoard.tsx"), "utf8");
+  const sessionData = readFileSync(join(root, "src", "components", "session-browser", "sessionData.ts"), "utf8");
+
+  assert.match(taskBoard, /readCachedProviderSessionSnapshotRows/);
+  assert.match(taskBoard, /writeCachedProviderSessionSnapshot/);
+  assert.match(taskBoard, /forceProviderRefresh\?: boolean/);
+  assert.match(taskBoard, /await fetchProviderSessions\(provider\.id, \{ forceRefresh \}\)/);
+  assert.match(taskBoard, /const hasHydratedProviderSessionsRef = useRef\(false\);/);
+  assert.match(taskBoard, /await refresh\(\{ includeActivities: true \}\);/);
+  assert.match(taskBoard, /if \(cancelled \|\| hasHydratedProviderSessionsRef\.current\) \{\s*return;\s*\}/s);
+  assert.match(taskBoard, /await refresh\(\{ includeActivities: false, forceProviderRefresh: true \}\);/);
+  assert.equal(taskBoard.includes("if (loading || hasHydratedProviderSessionsRef.current)"), false);
+  assert.match(taskBoard, /onClick=\{\(\) => void refresh\(\{ includeActivities: true, forceProviderRefresh: true \}\)\}/);
+  assert.match(taskBoard, /await refresh\(\{ includeActivities: true, forceProviderRefresh: true \}\);/);
+  assert.match(sessionData, /const providerSessionSnapshotCache = new Map/);
+  assert.match(sessionData, /export function readCachedProviderSessionSnapshotRows/);
+  assert.match(sessionData, /export function writeCachedProviderSessionSnapshot/);
+});
+
+test("session browser loads provider sessions only when the tab is active and promotes first visible load to a force refresh", () => {
+  const sessionBrowser = readFileSync(join(root, "src", "pages", "SessionBrowser.tsx"), "utf8");
+  const navigation = readFileSync(join(root, "src", "components", "session-browser", "navigation.tsx"), "utf8");
+
+  assert.match(sessionBrowser, /const activatedProvidersRef = useRef<Set<ProviderFilter>>\(new Set\(\)\);/);
+  assert.match(sessionBrowser, /const loadingProvidersRef = useRef<Set<ProviderFilter>>\(new Set\(\)\);/);
+  assert.match(sessionBrowser, /const emptyForceRefreshAttemptsRef = useRef<Map<ProviderFilter, number>>\(new Map\(\)\);/);
+  assert.match(sessionBrowser, /const \[providerReloadTick,\s*setProviderReloadTick\] = useState\(0\);/);
+  assert.match(sessionBrowser, /const retryTimerRef = useRef<number \| null>\(null\);/);
+  assert.match(sessionBrowser, /const shouldSeedCachedSessions = true;/);
+  assert.match(sessionBrowser, /loadingProvidersRef\.current\.add\(provider\);/);
+  assert.match(sessionBrowser, /setLoading\(loadingProvidersRef\.current\.size > 0\);/);
+  assert.match(sessionBrowser, /const providerListReady = loadedProvidersRef\.current\.has\(providerFilter\);/);
+  assert.match(sessionBrowser, /const waitingForProviderList = useMemo/);
+  assert.match(sessionBrowser, /resolveSessionSnapshotUpdate\(cachedSessions, normalizedSessions, \{/);
+  assert.match(sessionBrowser, /emptyRetryBudget: options\?\.forceRefresh && !acceptEmptySnapshot \? 1 : 0,/);
+  assert.match(sessionBrowser, /window\.setTimeout\(\(\) => \{\s*setProviderReloadTick\(\(current\) => current \+ 1\);\s*\}, 750\)/s);
+  assert.match(sessionBrowser, /if \(!active \|\| !providerFilter\) \{\s*return;\s*\}/s);
+  assert.match(sessionBrowser, /const hasLoadedProvider = loadedProvidersRef\.current\.has\(providerFilter\);/);
+  assert.match(sessionBrowser, /const hasActivatedProvider = activatedProvidersRef\.current\.has\(providerFilter\);/);
+  assert.match(sessionBrowser, /const loaded = await loadProvider\(providerFilter, \{\s*force: true,\s*forceRefresh: shouldForceRefresh,\s*\}\);/s);
+  assert.match(sessionBrowser, /if \(loaded\) \{\s*activatedProvidersRef\.current\.add\(providerFilter\);\s*\}/s);
+  assert.match(sessionBrowser, /\}, \[active, loadProvider, providerFilter, providerReloadTick\]\);/);
+  assert.match(sessionBrowser, /if \(!active \|\| !openTarget \|\| openTarget\.providerId !== providerFilter\) \{\s*return;\s*\}/s);
+  assert.match(sessionBrowser, /void loadProvider\(openTarget\.providerId, \{\s*force: true,\s*forceRefresh: true,\s*\}\);/s);
+  assert.match(sessionBrowser, /acceptEmptySnapshot: true,/);
+  assert.match(navigation, /loading = false/);
+  assert.match(navigation, /\{loading \? \(\s*<StatePanel message=\{noSessionsLabel\} \/>/s);
+  assert.match(navigation, /\{loading \? \(\s*<StatePanel message=\{labels\.noSessions\} \/>/s);
 });
 
 test("ai settings uses fixed service cards and scenario service selection", () => {
@@ -84,10 +137,10 @@ test("ai settings uses fixed service cards and scenario service selection", () =
   assert.match(panel, /get_ai_config/);
   assert.match(panel, /set_ai_config/);
   assert.match(panel, /test_ai_service_connection/);
-  assert.match(utils, /BUILTIN_SERVICE_IDS = \["openai_default", "claude_default"\]/);
   assert.match(utils, /function serviceTitle/);
-  assert.match(utils, /labels\.openaiService/);
-  assert.match(utils, /labels\.claudeService/);
+  assert.match(utils, /service\.label \|\| service\.name \|\| service\.id/);
+  assert.match(utils, /service\.description \|\| labels\.customServiceDescription/);
+  assert.match(panel, /service\?\.pluginOwned/);
   assert.match(serviceEditor, /labels\.enableService/);
   assert.match(scenarioEditor, /labels\.enableScenario/);
   assert.match(panel, /const setServiceEnabled = /);
@@ -108,11 +161,10 @@ test("ai settings uses fixed service cards and scenario service selection", () =
   assert.equal(`${panel}${utils}${serviceEditor}${scenarioEditor}${sidebar}`.includes("apiKeySource"), false);
   assert.equal(`${panel}${utils}${serviceEditor}${scenarioEditor}${sidebar}`.includes("selectedScenario.model"), false);
   assert.match(types, /apiKey\?: string \| null;/);
-  assert.match(i18nTypes, /openaiService:\s*string/);
   assert.match(i18nTypes, /effectiveModel:\s*string/);
-  assert.match(zh, /固定维护 OpenAI 和 Claude 两个服务。/);
+  assert.match(zh, /内置服务由插件清单提供/);
   assert.match(zh, /场景只选择一个已配置服务/);
-  assert.match(en, /Manage the built-in OpenAI and Claude services./);
+  assert.match(en, /Built-in services come from plugin manifests/);
   assert.match(en, /A scenario selects one configured service/);
 });
 
@@ -218,28 +270,46 @@ test("provider settings exposes external CLI rewrite configuration in the app", 
   assert.match(panel, /navigator\.clipboard\.writeText/);
   assert.equal(panel.includes("externalCliUpstreamBaseUrl"), false);
   assert.equal(panel.includes("draft.upstreamBaseUrl"), false);
-  assert.match(panel, /externalCliLauncherWrapsClaude/);
+  assert.match(panel, /externalCliLaunchesManagedChildCli/);
   assert.match(panel, /supportsLaunchMethods/);
   assert.match(panel, /provider\?\.capabilities\.launchMethods === true/);
-  assert.match(panel, /provider\.id === "claude" && draft\.launcherWrapsClaude/);
+  assert.match(panel, /supportsExternalCliAuthConfig/);
+  assert.match(panel, /supportsExternalCliLauncherWrap/);
+  assert.match(panel, /primaryProviderSettings\(providers\)/);
+  assert.match(panel, /extensionProviderSettings\(providers\)/);
   assert.match(panel, /provider\?\.capabilities\.messageRewrite\?\.externalCli/);
+  assert.match(panel, /managedRemoteProxyAlias/);
+  assert.match(types, /proxyAlias\?:\s*string \| null/);
+  assert.equal(panel.includes("CODEX_REMOTE_PROXY_ALIAS"), false);
+  assert.equal(panel.includes("codexR"), false);
   assert.match(types, /launchMethods:\s*boolean/);
   assert.match(types, /launchMethods\?:\s*ProviderLaunchMethodConfig\[\]/);
+  assert.match(types, /export interface ProviderDiscoveryMetadata/);
+  assert.match(types, /discovery\?:\s*ProviderDiscoveryMetadata/);
   assert.match(i18nTypes, /cliConfigTitle:\s*string/);
   assert.match(i18nTypes, /launchMethodCommands:\s*string/);
+  assert.match(i18nTypes, /externalCliProxyAliasTitle:\s*string/);
+  assert.match(i18nTypes, /externalCliProxyAliasDescription:\s*string/);
+  assert.match(i18nTypes, /externalCliAuthToken:\s*string/);
+  assert.match(i18nTypes, /externalCliBaseUrl:\s*string/);
+  assert.match(i18nTypes, /externalCliModel:\s*string/);
   assert.equal(i18nTypes.includes("externalCliUpstreamBaseUrl"), false);
+  assert.equal(i18nTypes.includes("externalCliCodexAliasTitle"), false);
+  assert.equal(i18nTypes.includes("claudeAuthToken"), false);
+  assert.equal(i18nTypes.includes("claudeBaseUrl"), false);
+  assert.equal(i18nTypes.includes("claudeModel"), false);
   assert.match(zh, /CLI 配置/);
   assert.match(zh, /启动命令候选/);
   assert.equal(zh.includes("上游 Base URL"), false);
   assert.equal(zh.includes("外挂 CLI"), false);
   assert.equal(zh.includes("启动器会再调用 claude"), false);
   assert.match(zh, /发送前将不文明表达改写为普通表达。/);
-  assert.match(zh, /启动后进入 Claude CLI/);
+  assert.match(zh, /启动后进入受管子 CLI/);
   assert.match(en, /CLI configuration/);
   assert.match(en, /Launch command candidates/);
   assert.equal(en.includes("Upstream Base URL"), false);
   assert.match(en, /Rewrite abusive language into neutral wording before sending./);
-  assert.match(en, /Open Claude CLI after launcher starts/);
+  assert.match(en, /Open the managed child CLI after launcher starts/);
   assert.match(rustConfig, /pub async fn set_provider_cli_config/);
   assert.match(rustLib, /set_provider_cli_config/);
 });
@@ -318,7 +388,7 @@ test("task board listens to activity stream without fallback polling", () => {
   const lib = readFileSync(join(root, "src-tauri", "src", "lib.rs"), "utf8");
   const taskBoardState = readFileSync(join(root, "src-tauri", "src", "commands", "task_board_state.rs"), "utf8");
 
-  assert.match(taskBoard, /onClick=\{\(\) => void refresh\(\)\}/);
+  assert.match(taskBoard, /onClick=\{\(\) => void refresh\(\{ includeActivities: true, forceProviderRefresh: true \}\)\}/);
   assert.match(app, /start_task_board_activity_stream/);
   assert.match(taskBoard, /function upsertSessionActivity/);
   assert.match(taskBoard, /function removeSessionActivity/);
@@ -387,5 +457,5 @@ test("task board hydrates previews for pinned idle sessions", () => {
   assert.match(taskBoard, /readSessionLastMessageWithTimeout\(session\)/);
   assert.match(taskBoard, /raw:\s*\{\s*\.\.\.\(session\.raw \?\? \{\}\),\s*lastMessage,/);
   assert.match(taskBoard, /void hydratePinnedSessionPreviews\(flatSessions, nextTaskBoardState\)/);
-  assert.match(taskBoard, /setSessions\(hydratedSessions\)/);
+  assert.match(taskBoard, /setSessions\(\(current\) => mergeTaskBoardSessions\(current, hydratedSessions\)\)/);
 });

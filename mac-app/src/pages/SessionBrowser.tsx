@@ -2,8 +2,6 @@ import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent } fr
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "../i18n";
 import {
-  fetchClaudeSessions,
-  fetchCodexSessions,
   fetchProviderMetadata,
   fetchProviderSessions,
 } from "../components/session-browser/api";
@@ -13,11 +11,21 @@ import {
   type ArchiveNotice,
   type SessionActionMenuState,
 } from "../components/session-browser/archive";
-import { CodexSessionBadges } from "../components/session-browser/badges";
-import { ClaudeChat } from "../components/session-browser/ClaudeChat";
-import { CodexChat } from "../components/session-browser/CodexChat";
+import { ProviderSessionBadges } from "../components/session-browser/badges";
 import { GenericProviderChat } from "../components/session-browser/GenericProviderChat";
-import { normalizeGenericProviderSessions } from "../components/session-browser/sessionData";
+import {
+  providerSessionMetadataFromUnifiedSession,
+  mergeSessionSnapshotsByProvider,
+  normalizeGenericProviderSessions,
+  readCachedProviderSessionSnapshot,
+  writeCachedProviderSessionSnapshot,
+} from "../components/session-browser/sessionData";
+import {
+  hasPendingSelectedSession,
+  mergeLiveSessionActivities,
+  nextSelectedSessionId,
+  resolveSessionSnapshotUpdate,
+} from "../utils/sessionBrowserState.js";
 import {
   SessionListPanel,
   SessionProviderToolbar,
@@ -34,11 +42,10 @@ import {
   type WorkspaceActionMenuState,
 } from "../components/session-browser/workspaceActions";
 import { visibleSessionProviders } from "../utils/sessionProviders.js";
-import type { TaskBoardState } from "../utils/taskBoard";
+import type { TaskBoardSessionActivity, TaskBoardState } from "../utils/taskBoard";
 import type {
-  ClaudeSession,
-  CodexSession,
   ProviderMetadata,
+  ProviderSessionSendResult,
 } from "../types";
 
 interface SessionBrowserOpenTarget {
@@ -49,6 +56,8 @@ interface SessionBrowserOpenTarget {
 
 interface Props {
   openTarget?: SessionBrowserOpenTarget | null;
+  taskBoardActivities?: TaskBoardSessionActivity[];
+  active?: boolean;
 }
 
 const DEFAULT_TASK_BOARD_STATE: TaskBoardState = {
@@ -60,15 +69,13 @@ function sessionTaskBoardKey(session: UnifiedSession) {
   return `${session.type}:${session.id}`;
 }
 
-export function SessionBrowser({ openTarget = null }: Props) {
+export function SessionBrowser({ openTarget = null, taskBoardActivities = [], active = true }: Props) {
   const { t } = useI18n();
   const [providers, setProviders] = useState<ProviderMetadata[]>([]);
-  const [codexSessions, setCodexSessions] = useState<CodexSession[]>([]);
-  const [claudeSessions, setClaudeSessions] = useState<ClaudeSession[]>([]);
-  const [genericSessionsByProvider, setGenericSessionsByProvider] = useState<Record<string, UnifiedSession[]>>({});
+  const [genericSessionsByProvider, setGenericSessionsByProvider] = useState<Record<string, UnifiedSession[]>>(() => ({}));
   
   const [loading, setLoading] = useState(false);
-  const [providerFilter, setProviderFilter] = useState<ProviderFilter>("codex");
+  const [providerFilter, setProviderFilter] = useState<ProviderFilter>(() => openTarget?.providerId || "");
   const [archiveFilter, setArchiveFilter] = useState<ArchiveFilter>("active");
   const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -77,8 +84,13 @@ export function SessionBrowser({ openTarget = null }: Props) {
   const [archivingSessionId, setArchivingSessionId] = useState<string | null>(null);
   const [archiveNotice, setArchiveNotice] = useState<ArchiveNotice | null>(null);
   const [taskBoardState, setTaskBoardState] = useState<TaskBoardState>(DEFAULT_TASK_BOARD_STATE);
+  const [providerReloadTick, setProviderReloadTick] = useState(0);
   const loadedProvidersRef = useRef<Set<ProviderFilter>>(new Set());
+  const activatedProvidersRef = useRef<Set<ProviderFilter>>(new Set());
+  const loadingProvidersRef = useRef<Set<ProviderFilter>>(new Set());
+  const emptyForceRefreshAttemptsRef = useRef<Map<ProviderFilter, number>>(new Map());
   const loadTokenRef = useRef(0);
+  const retryTimerRef = useRef<number | null>(null);
   const visibleProviders = useMemo(
     () => visibleSessionProviders(providers) as ProviderMetadata[],
     [providers],
@@ -93,6 +105,14 @@ export function SessionBrowser({ openTarget = null }: Props) {
     () => new Set(taskBoardState.pinned.map((item) => `${item.providerId}:${item.sessionId}`)),
     [taskBoardState],
   );
+
+  useEffect(() => {
+    return () => {
+      if (retryTimerRef.current !== null) {
+        window.clearTimeout(retryTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -175,46 +195,107 @@ export function SessionBrowser({ openTarget = null }: Props) {
 
   const loadProvider = useCallback(async (
     provider: ProviderFilter,
-    options?: { force?: boolean },
+    options?: { force?: boolean; forceRefresh?: boolean; acceptEmptySnapshot?: boolean },
   ) => {
+    if (!provider) {
+      return;
+    }
     const force = options?.force ?? false;
     if (!force && loadedProvidersRef.current.has(provider)) {
       return;
     }
 
+    const shouldSeedCachedSessions = true;
+    const cachedSessions = readCachedProviderSessionSnapshot(provider);
+    if (shouldSeedCachedSessions && cachedSessions.length > 0) {
+      setGenericSessionsByProvider((current) => mergeSessionSnapshotsByProvider(
+        current,
+        provider,
+        cachedSessions,
+      ));
+    }
+
     const token = ++loadTokenRef.current;
+    loadingProvidersRef.current.add(provider);
     setLoading(true);
     try {
-      if (provider === "codex") {
-        const sessions = await fetchCodexSessions();
-        setCodexSessions(sessions);
-      } else if (provider === "claude") {
-        const sessions = await fetchClaudeSessions();
-        setClaudeSessions(sessions);
+      const sessions = await fetchProviderSessions(provider, { forceRefresh: options?.forceRefresh ?? false });
+      const normalizedSessions = normalizeGenericProviderSessions(
+        provider,
+        sessions,
+        t.sessions.workspaceFallback,
+      );
+      const acceptEmptySnapshot = options?.acceptEmptySnapshot === true;
+      const emptyRetryCount = emptyForceRefreshAttemptsRef.current.get(provider) ?? 0;
+      const snapshotUpdate = resolveSessionSnapshotUpdate(cachedSessions, normalizedSessions, {
+        preserveOnEmpty: !acceptEmptySnapshot,
+        emptyRetryBudget: options?.forceRefresh && !acceptEmptySnapshot ? 1 : 0,
+        emptyRetryCount,
+      });
+      const cachedMerged = writeCachedProviderSessionSnapshot(provider, snapshotUpdate.sessions, {
+        preserveOnEmpty: snapshotUpdate.preserved,
+      });
+      setGenericSessionsByProvider((current) => mergeSessionSnapshotsByProvider(
+        current,
+        provider,
+        cachedMerged,
+        { preserveOnEmpty: snapshotUpdate.preserved },
+      ));
+      if (retryTimerRef.current !== null) {
+        window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+      if (normalizedSessions.length > 0) {
+        emptyForceRefreshAttemptsRef.current.delete(provider);
+      } else if (snapshotUpdate.shouldRetry) {
+        emptyForceRefreshAttemptsRef.current.set(provider, emptyRetryCount + 1);
+        retryTimerRef.current = window.setTimeout(() => {
+          setProviderReloadTick((current) => current + 1);
+        }, 750);
+        return false;
       } else {
-        const sessions = await fetchProviderSessions(provider);
-        setGenericSessionsByProvider((current) => ({
-          ...current,
-          [provider]: normalizeGenericProviderSessions(
-            provider,
-            sessions,
-            t.sessions.workspaceFallback,
-          ),
-        }));
+        emptyForceRefreshAttemptsRef.current.delete(provider);
       }
       loadedProvidersRef.current.add(provider);
+      return snapshotUpdate.accepted;
     } catch (error) {
       console.warn(`Failed to load ${provider} sessions`, error);
+      if (retryTimerRef.current !== null) {
+        window.clearTimeout(retryTimerRef.current);
+      }
+      retryTimerRef.current = window.setTimeout(() => {
+        setProviderReloadTick((current) => current + 1);
+      }, 750);
+      return false;
     } finally {
+      loadingProvidersRef.current.delete(provider);
       if (loadTokenRef.current === token) {
-        setLoading(false);
+        setLoading(loadingProvidersRef.current.size > 0);
       }
     }
   }, [t.sessions.workspaceFallback]);
 
   useEffect(() => {
-    void loadProvider(providerFilter);
-  }, [loadProvider, providerFilter]);
+    if (!active || !providerFilter) {
+      return;
+    }
+    const hasLoadedProvider = loadedProvidersRef.current.has(providerFilter);
+    const hasActivatedProvider = activatedProvidersRef.current.has(providerFilter);
+    const shouldForceRefresh = !hasLoadedProvider || !hasActivatedProvider;
+    if (hasLoadedProvider && hasActivatedProvider) {
+      return;
+    }
+
+    void (async () => {
+      const loaded = await loadProvider(providerFilter, {
+        force: true,
+        forceRefresh: shouldForceRefresh,
+      });
+      if (loaded) {
+        activatedProvidersRef.current.add(providerFilter);
+      }
+    })();
+  }, [active, loadProvider, providerFilter, providerReloadTick]);
 
   useEffect(() => {
     if (!openTarget) {
@@ -227,11 +308,44 @@ export function SessionBrowser({ openTarget = null }: Props) {
     setSessionContextMenu(null);
     setWorkspaceContextMenu(null);
     setArchiveNotice(null);
-    void loadProvider(openTarget.providerId);
-  }, [loadProvider, openTarget?.providerId, openTarget?.sessionId, openTarget?.workspace]);
+  }, [openTarget?.providerId, openTarget?.sessionId, openTarget?.workspace]);
+
+  useEffect(() => {
+    if (!active || !openTarget || openTarget.providerId !== providerFilter) {
+      return;
+    }
+    const providerSessions = genericSessionsByProvider[openTarget.providerId] ?? [];
+    const targetWorkspace = openTarget.workspace?.trim() || "";
+    const hasTargetSession = providerSessions.some((session) => {
+      if (session.id !== openTarget.sessionId) {
+        return false;
+      }
+      if (!targetWorkspace) {
+        return true;
+      }
+      return session.workspace === targetWorkspace;
+    });
+    if (hasTargetSession) {
+      return;
+    }
+    void loadProvider(openTarget.providerId, {
+      force: true,
+      forceRefresh: true,
+    });
+  }, [
+    active,
+    genericSessionsByProvider,
+    loadProvider,
+    openTarget,
+    providerFilter,
+  ]);
 
   const refreshCurrentProvider = useCallback(async () => {
-    await loadProvider(providerFilter, { force: true });
+    await loadProvider(providerFilter, {
+      force: true,
+      forceRefresh: true,
+      acceptEmptySnapshot: true,
+    });
   }, [loadProvider, providerFilter]);
 
   const openSessionContextMenu = useCallback((
@@ -337,28 +451,26 @@ export function SessionBrowser({ openTarget = null }: Props) {
   }, [pinnedSessionIds]);
 
   const unifiedSessions = useMemo<UnifiedSession[]>(() => {
-    if (providerFilter === "codex") {
-      return codexSessions.map(s => ({
-        id: s.threadId,
-        type: "codex" as const,
-        workspace: s.cwd || t.sessions.workspaceFallback,
-        title: s.title || s.threadId,
-        archived: s.archived ?? false,
-        raw: s
-      }));
+    const sessions = genericSessionsByProvider[providerFilter] ?? [];
+    return mergeLiveSessionActivities(
+      sessions,
+      taskBoardActivities.filter((activity) => activity.providerId === providerFilter),
+    );
+  }, [genericSessionsByProvider, providerFilter, taskBoardActivities]);
+
+  const handleSessionRemapped = useCallback(async (
+    previousSession: UnifiedSession,
+    sendResult: ProviderSessionSendResult,
+  ) => {
+    const nextSessionId = sendResult.threadId?.trim();
+    if (!nextSessionId || nextSessionId === previousSession.id) {
+      return;
     }
-    if (providerFilter === "claude") {
-      return claudeSessions.map(s => ({
-      id: s.sessionId,
-      type: "claude" as const,
-      workspace: s.workspace || t.sessions.workspaceFallback,
-      title: s.title || s.sessionId,
-      archived: s.archived ?? false,
-      raw: s
-      }));
-    }
-    return genericSessionsByProvider[providerFilter] ?? [];
-  }, [providerFilter, codexSessions, claudeSessions, genericSessionsByProvider, t]);
+
+    await loadProvider(previousSession.type, { force: true });
+    setSelectedWorkspace(previousSession.workspace || null);
+    setSelectedSessionId(nextSessionId);
+  }, [loadProvider]);
 
   const workspaces = useMemo(() => {
     const list = Array.from(new Set(unifiedSessions.map(s => s.workspace)));
@@ -384,6 +496,44 @@ export function SessionBrowser({ openTarget = null }: Props) {
     return unifiedSessions.find(s => s.id === selectedSessionId) || null;
   }, [unifiedSessions, selectedSessionId]);
 
+  const providerListReady = loadedProvidersRef.current.has(providerFilter);
+  const waitingForProviderList = useMemo(() => (
+    active &&
+    Boolean(providerFilter) &&
+    !providerListReady &&
+    loading
+  ), [active, loading, providerFilter, providerListReady]);
+
+  const waitingForOpenTargetSession = useMemo(() => (
+    Boolean(
+      active &&
+      openTarget &&
+      openTarget.providerId === providerFilter &&
+      selectedSessionId === openTarget.sessionId &&
+      !selectedSession,
+    )
+  ), [active, openTarget, providerFilter, selectedSession, selectedSessionId]);
+
+  const effectiveSelectedSession = useMemo(() => (
+    selectedSession ?? (!selectedSessionId ? filteredSessions[0] ?? null : null)
+  ), [filteredSessions, selectedSession, selectedSessionId]);
+
+  const pendingSelectedSession = useMemo(() => (
+    hasPendingSelectedSession(unifiedSessions, selectedSessionId) &&
+    (loading || waitingForOpenTargetSession)
+  ), [loading, selectedSessionId, unifiedSessions, waitingForOpenTargetSession]);
+
+  useEffect(() => {
+    const nextSessionId = nextSelectedSessionId(
+      filteredSessions,
+      selectedSessionId,
+      { preserveMissing: waitingForOpenTargetSession },
+    );
+    if (nextSessionId !== selectedSessionId) {
+      setSelectedSessionId(nextSessionId);
+    }
+  }, [filteredSessions, selectedSessionId, waitingForOpenTargetSession]);
+
   return (
     <div className="ow-page-frame flex h-full flex-1 flex-col overflow-hidden rounded-[30px]">
       <SessionProviderToolbar
@@ -401,7 +551,8 @@ export function SessionBrowser({ openTarget = null }: Props) {
           providerFilter={providerFilter}
           providerLabels={providerLabels}
           selectedWorkspace={selectedWorkspace}
-          noSessionsLabel={t.sessions.noSessions}
+          loading={waitingForProviderList}
+          noSessionsLabel={waitingForProviderList ? t.common.loading : t.sessions.noSessions}
           onSelectWorkspace={setSelectedWorkspace}
           onOpenWorkspaceContextMenu={openWorkspaceContextMenu}
         />
@@ -414,20 +565,21 @@ export function SessionBrowser({ openTarget = null }: Props) {
           archiveFilter={archiveFilter}
           archivingSessionId={archivingSessionId}
           archiveNotice={archiveNotice}
+          loading={waitingForProviderList}
           labels={{
             active: "Active",
             archived: "Archived",
             archivingSession: t.sessions.archivingSession,
-            noSessions: t.sessions.noSessions,
+            noSessions: waitingForProviderList ? t.common.loading : t.sessions.noSessions,
             pinSession: t.sessions.pinSession,
             unpinSession: t.sessions.unpinSession,
             sessionActions: t.sessions.sessionActions,
           }}
           pinnedSessionIds={pinnedSessionIds}
           renderSessionMeta={(session) => (
-            session.type === "codex" ? (
+            session.type === providerFilter ? (
               <div className="pl-1">
-                <CodexSessionBadges session={session.raw as CodexSession} compact />
+                <ProviderSessionBadges session={providerSessionMetadataFromUnifiedSession(session)} compact />
               </div>
             ) : null
           )}
@@ -439,17 +591,23 @@ export function SessionBrowser({ openTarget = null }: Props) {
         />
 
         <div className="min-w-0 flex-1 overflow-hidden rounded-[28px]">
-          {selectedSession ? (
-            selectedSession.type === "codex" ? <CodexChat session={selectedSession} key={selectedSession.id} /> :
-            selectedSession.type === "claude" ? <ClaudeChat session={selectedSession} key={selectedSession.id} refreshSessions={refreshCurrentProvider} /> :
+          {effectiveSelectedSession ? (
             <GenericProviderChat
-              session={selectedSession}
-              key={selectedSession.id}
+              session={effectiveSelectedSession}
+              key={effectiveSelectedSession.id}
               providerSupportsAttachments={Boolean(
-                providerCapabilities[selectedSession.type]?.files ||
-                providerCapabilities[selectedSession.type]?.photos
+                providerCapabilities[effectiveSelectedSession.type]?.files ||
+                providerCapabilities[effectiveSelectedSession.type]?.photos
               )}
+              onSessionRemapped={
+                effectiveSelectedSession.type === providerFilter ? handleSessionRemapped : undefined
+              }
+              active={active}
             />
+          ) : pendingSelectedSession ? (
+            <div className="ow-page-frame-soft flex h-full items-center justify-center rounded-[28px]">
+              <StatePanel message={t.common.loading} />
+            </div>
           ) : (
             <div className="ow-page-frame-soft flex h-full items-center justify-center rounded-[28px]">
               <StatePanel message={t.sessions.selectSession} />
