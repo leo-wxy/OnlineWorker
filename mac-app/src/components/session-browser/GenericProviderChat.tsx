@@ -1,13 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import { useProviderSessionEventStream } from "../../hooks/useProviderSessionEventStream";
-import type { ComposerAttachment, SessionStreamEvent, SessionTurn } from "../../types";
+import type {
+  ComposerAttachment,
+  ProviderSessionSendResult,
+  SessionStreamEvent,
+  SessionTurn,
+} from "../../types";
 import { shouldClearReplyWatch } from "../../utils/replyWatch.js";
 import { applySessionStreamEvent } from "../../utils/sessionEventModel.js";
+import { ProviderSessionBadges } from "./badges";
 import {
   buildSnapshotSignature,
   countAssistantEntries,
+  hasSessionSnapshotChanged,
   pollAssistantReply,
+  startActiveSessionRefresh,
 } from "../../utils/sessionPolling.js";
 import {
   fetchProviderSession,
@@ -15,27 +23,51 @@ import {
 } from "./api";
 import { useStagedAttachments } from "./composerAttachments";
 import { getProviderUi, type UnifiedSession } from "./presentation";
+import { providerSessionMetadataFromUnifiedSession } from "./sessionData";
 import {
   BACKGROUND_REPLY_POLL,
+  CODEX_BACKGROUND_REPLY_POLL,
+  CODEX_FOREGROUND_REPLY_POLL,
   FOREGROUND_REPLY_POLL,
   limitSessionTurns,
+  mergeSessionTurns,
   SessionChatHeader,
   SessionComposer,
   SessionMessages,
   type ReplyWatchState,
 } from "./shared";
 
+function isSessionMetadataRich(session: UnifiedSession) {
+  const providerSession = providerSessionMetadataFromUnifiedSession(session);
+  return Boolean(
+    providerSession.modelProvider ||
+    providerSession.source ||
+    providerSession.approvalMode ||
+    providerSession.sandboxPolicy != null ||
+    providerSession.isSmoke
+  );
+}
+
+function usesExtendedReplyPolling(session: UnifiedSession) {
+  return isSessionMetadataRich(session);
+}
+
 export function GenericProviderChat({
   session,
   providerSupportsAttachments,
+  onSessionRemapped,
+  active = true,
 }: {
   session: UnifiedSession;
   providerSupportsAttachments: boolean;
+  onSessionRemapped?: (previousSession: UnifiedSession, sendResult: ProviderSessionSendResult) => Promise<void> | void;
+  active?: boolean;
 }) {
   const { t } = useI18n();
   const providerLabel = getProviderUi(session.type).label;
+  const [activeSession, setActiveSession] = useState(session);
   const [messages, setMessages] = useState<SessionTurn[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
@@ -49,44 +81,105 @@ export function GenericProviderChat({
   const endRef = useRef<HTMLDivElement>(null);
   const replyWatchTokenRef = useRef(0);
   const messagesRef = useRef<SessionTurn[]>([]);
+  const liveRefreshBlockedRef = useRef(true);
+  const hasLoadedRef = useRef(false);
+  const pendingScrollBehaviorRef = useRef<ScrollBehavior>("auto");
 
   const cancelReplyWatch = useCallback(() => {
     replyWatchTokenRef.current += 1;
     setReplyWatchState(null);
   }, []);
 
+  const applyMessages = useCallback((
+    nextMessages: SessionTurn[],
+    scrollBehavior: ScrollBehavior = "auto",
+  ) => {
+    messagesRef.current = nextMessages;
+    pendingScrollBehaviorRef.current = scrollBehavior;
+    setMessages(nextMessages);
+  }, []);
+
+  useEffect(() => {
+    setActiveSession(session);
+  }, [session.id, session.type, session.workspace]);
+
+  useEffect(() => {
+    setActiveSession((current) => {
+      if (
+        current.id !== session.id ||
+        current.type !== session.type ||
+        current.workspace !== session.workspace
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        title: session.title,
+        archived: session.archived,
+        raw: session.raw,
+      };
+    });
+  }, [session.archived, session.raw, session.title, session.id, session.type, session.workspace]);
+
   const loadMessages = useCallback(async () => {
     setLoading(true);
     setError(null);
-    setMessages([]);
-    messagesRef.current = [];
     try {
-      const turns = await fetchProviderSession(session.type, session.id, session.workspace);
-      messagesRef.current = turns;
-      setMessages(turns);
+      const turns = await fetchProviderSession(activeSession.type, activeSession.id, activeSession.workspace);
+      applyMessages(turns, "auto");
+      hasLoadedRef.current = true;
       setReplyWatchState((current) => (current === "expired" ? null : current));
     } catch (loadError) {
       setError((loadError as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [session.id, session.type, session.workspace]);
+  }, [activeSession.id, activeSession.type, activeSession.workspace, applyMessages]);
+
+  const refreshMessagesSilently = useCallback(async () => {
+    try {
+      const turns = await fetchProviderSession(activeSession.type, activeSession.id, activeSession.workspace);
+      hasLoadedRef.current = true;
+      if (!hasSessionSnapshotChanged(messagesRef.current, turns)) {
+        setReplyWatchState((current) => (current === "expired" ? null : current));
+        return;
+      }
+      applyMessages(turns, "auto");
+      setReplyWatchState((current) => (current === "expired" ? null : current));
+    } catch (loadError) {
+      if (messagesRef.current.length === 0) {
+        setError((loadError as Error).message);
+      } else {
+        console.warn("Provider session silent refresh failed", loadError);
+      }
+    }
+  }, [activeSession.id, activeSession.type, activeSession.workspace, applyMessages]);
 
   useEffect(() => {
+    if (!active) {
+      return;
+    }
     cancelReplyWatch();
     setAttachments([]);
-    void loadMessages();
+    if (hasLoadedRef.current && messagesRef.current.length > 0) {
+      void refreshMessagesSilently();
+    } else {
+      void loadMessages();
+    }
     return () => {
       replyWatchTokenRef.current += 1;
     };
-  }, [loadMessages, cancelReplyWatch]);
+  }, [active, loadMessages, refreshMessagesSilently, cancelReplyWatch]);
 
   useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
+    liveRefreshBlockedRef.current =
+      loading || sending || (replyWatchState !== null && replyWatchState !== "expired");
+  }, [loading, sending, replyWatchState]);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    const behavior = pendingScrollBehaviorRef.current;
+    endRef.current?.scrollIntoView({ behavior });
+    pendingScrollBehaviorRef.current = "auto";
   }, [messages]);
 
   const handleSessionEvent = useCallback((event: SessionStreamEvent) => {
@@ -109,20 +202,50 @@ export function GenericProviderChat({
     if (nextMessages === previousMessages) {
       return;
     }
-    messagesRef.current = nextMessages;
-    setMessages(nextMessages);
+    applyMessages(nextMessages, "auto");
     if (shouldClearReplyWatch(previousMessages, nextMessages, event)) {
       cancelReplyWatch();
     }
-  }, [cancelReplyWatch]);
+  }, [applyMessages, cancelReplyWatch]);
 
   useProviderSessionEventStream({
-    enabled: Boolean(session.id),
-    providerId: session.type,
-    sessionId: session.id,
-    workspaceDir: session.workspace ?? null,
+    enabled: active && Boolean(activeSession.id),
+    providerId: activeSession.type,
+    sessionId: activeSession.id,
+    workspaceDir: activeSession.workspace ?? null,
     onEvent: handleSessionEvent,
   });
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    if (!activeSession.id) {
+      return;
+    }
+
+    const cleanup = startActiveSessionRefresh({
+      intervalMs: 3000,
+      getCurrentSnapshot: () => messagesRef.current,
+      loadSnapshot: async () => {
+        return fetchProviderSession(
+          activeSession.type,
+          activeSession.id,
+          activeSession.workspace,
+        );
+      },
+      onSnapshot: (snapshot) => {
+        applyMessages(snapshot, "auto");
+        setReplyWatchState((current) => (current === "expired" ? null : current));
+      },
+      shouldSkip: () => liveRefreshBlockedRef.current,
+      onError: (error) => {
+        console.warn("Provider session snapshot refresh failed", error);
+      },
+    });
+
+    return cleanup;
+  }, [active, activeSession.id, activeSession.type, activeSession.workspace]);
 
   const handleSend = async (trimmedText: string, nextAttachments: ComposerAttachment[]) => {
     if (!trimmedText.trim() && nextAttachments.length === 0) {
@@ -145,27 +268,58 @@ export function GenericProviderChat({
 
     setSending(true);
     setError(null);
-    messagesRef.current = optimisticMessages;
-    setMessages(optimisticMessages);
-    setReplyWatchState("foreground");
+      applyMessages(optimisticMessages, "smooth");
+      setReplyWatchState("foreground");
 
     const baselineAssistantCount = countAssistantEntries(previousMessages);
 
     try {
-      await sendProviderSessionMessage(session.type, session.id, trimmedText, nextAttachments, session.workspace);
+      const sendResult = await sendProviderSessionMessage(
+        activeSession.type,
+        activeSession.id,
+        trimmedText,
+        nextAttachments,
+        activeSession.workspace,
+      );
+      const remappedSessionId = sendResult.threadId?.trim();
+      if (remappedSessionId && remappedSessionId !== activeSession.id) {
+        const nextSession = {
+          ...activeSession,
+          id: remappedSessionId,
+        };
+        setActiveSession(nextSession);
+        await onSessionRemapped?.(activeSession, sendResult);
+      }
       setAttachments([]);
 
       const loadSnapshot = async () => {
-        const snapshot = await fetchProviderSession(session.type, session.id, session.workspace);
+        const currentSession = remappedSessionId && remappedSessionId !== activeSession.id
+          ? {
+              ...activeSession,
+              id: remappedSessionId,
+            }
+          : activeSession;
+        const snapshot = await fetchProviderSession(
+          currentSession.type,
+          currentSession.id,
+          currentSession.workspace,
+        );
+        const shouldMergeSnapshot = remappedSessionId && remappedSessionId !== activeSession.id;
+        const nextSnapshot = shouldMergeSnapshot
+          ? mergeSessionTurns(previousMessages, snapshot)
+          : snapshot;
         if (shouldContinue()) {
-          messagesRef.current = snapshot;
+          messagesRef.current = nextSnapshot;
         }
-        return snapshot;
+        return nextSnapshot;
       };
       const applySnapshot = (snapshot: SessionTurn[]) => {
+        const shouldMergeSnapshot = remappedSessionId && remappedSessionId !== activeSession.id;
+        const nextSnapshot = shouldMergeSnapshot
+          ? mergeSessionTurns(previousMessages, snapshot)
+          : snapshot;
         if (shouldContinue()) {
-          messagesRef.current = snapshot;
-          setMessages(snapshot);
+          applyMessages(nextSnapshot, "auto");
         }
       };
 
@@ -177,14 +331,13 @@ export function GenericProviderChat({
         baselineSnapshot: previousMessages,
         onUpdate: applySnapshot,
         shouldContinue,
-        ...FOREGROUND_REPLY_POLL,
+        ...(usesExtendedReplyPolling(activeSession) ? CODEX_FOREGROUND_REPLY_POLL : FOREGROUND_REPLY_POLL),
       });
       if (!shouldContinue()) {
         return;
       }
 
-      messagesRef.current = foregroundResult.snapshot;
-      setMessages(foregroundResult.snapshot);
+      applyMessages(foregroundResult.snapshot, "auto");
       if (foregroundResult.settled) {
         setReplyWatchState(null);
         return;
@@ -200,21 +353,19 @@ export function GenericProviderChat({
           baselineSnapshot: previousMessages,
           onUpdate: applySnapshot,
           shouldContinue,
-          ...BACKGROUND_REPLY_POLL,
+          ...(usesExtendedReplyPolling(activeSession) ? CODEX_BACKGROUND_REPLY_POLL : BACKGROUND_REPLY_POLL),
         });
         if (!shouldContinue()) {
           return;
         }
 
-        messagesRef.current = backgroundResult.snapshot;
-        setMessages(backgroundResult.snapshot);
+        applyMessages(backgroundResult.snapshot, "auto");
         setReplyWatchState(backgroundResult.settled ? null : "expired");
       })();
     } catch (sendError) {
       cancelReplyWatch();
       setError((sendError as Error).message);
-      messagesRef.current = previousMessages;
-      setMessages(previousMessages);
+      applyMessages(previousMessages, "auto");
     } finally {
       setSending(false);
     }
@@ -223,8 +374,8 @@ export function GenericProviderChat({
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/60 bg-white/58 shadow-[0_18px_40px_rgba(15,23,42,0.06)] backdrop-blur-xl">
       <SessionChatHeader
-        title={session.title}
-        shortId={session.id.slice(0, 12)}
+        title={activeSession.title}
+        shortId={activeSession.id.slice(0, 12)}
         loading={loading}
         reloadTitle={t.sessions.reloadMessages}
         badge={(
@@ -234,7 +385,11 @@ export function GenericProviderChat({
           </span>
         )}
         onReload={() => void loadMessages()}
-      />
+      >
+        {isSessionMetadataRich(activeSession) ? (
+          <ProviderSessionBadges session={providerSessionMetadataFromUnifiedSession(activeSession)} />
+        ) : null}
+      </SessionChatHeader>
 
       <SessionMessages
         loading={loading}
@@ -254,7 +409,7 @@ export function GenericProviderChat({
       />
 
       <SessionComposer
-        resetKey={session.id}
+        resetKey={activeSession.id}
         sending={sending}
         placeholder={t.sessions.sendPlaceholder}
         sendLabel={t.sessions.send}
