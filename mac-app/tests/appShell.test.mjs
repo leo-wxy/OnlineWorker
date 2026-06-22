@@ -89,7 +89,7 @@ test("task board keeps cached provider summaries and uses force refresh only on 
   assert.match(sessionData, /export function writeCachedProviderSessionSnapshot/);
 });
 
-test("session browser loads provider sessions only when the tab is active and promotes first visible load to a force refresh", () => {
+test("session browser loads provider sessions only when the tab is active and keeps first visible load cache-friendly", () => {
   const sessionBrowser = readFileSync(join(root, "src", "pages", "SessionBrowser.tsx"), "utf8");
   const navigation = readFileSync(join(root, "src", "components", "session-browser", "navigation.tsx"), "utf8");
 
@@ -99,6 +99,7 @@ test("session browser loads provider sessions only when the tab is active and pr
   assert.match(sessionBrowser, /const \[providerReloadTick,\s*setProviderReloadTick\] = useState\(0\);/);
   assert.match(sessionBrowser, /const retryTimerRef = useRef<number \| null>\(null\);/);
   assert.match(sessionBrowser, /const shouldSeedCachedSessions = true;/);
+  assert.match(sessionBrowser, /if \(shouldSeedCachedSessions && cachedSessions\.length > 0\) \{\s*loadedProvidersRef\.current\.add\(provider\);/s);
   assert.match(sessionBrowser, /loadingProvidersRef\.current\.add\(provider\);/);
   assert.match(sessionBrowser, /setLoading\(loadingProvidersRef\.current\.size > 0\);/);
   assert.match(sessionBrowser, /const providerListReady = loadedProvidersRef\.current\.has\(providerFilter\);/);
@@ -109,7 +110,7 @@ test("session browser loads provider sessions only when the tab is active and pr
   assert.match(sessionBrowser, /if \(!active \|\| !providerFilter\) \{\s*return;\s*\}/s);
   assert.match(sessionBrowser, /const hasLoadedProvider = loadedProvidersRef\.current\.has\(providerFilter\);/);
   assert.match(sessionBrowser, /const hasActivatedProvider = activatedProvidersRef\.current\.has\(providerFilter\);/);
-  assert.match(sessionBrowser, /const loaded = await loadProvider\(providerFilter, \{\s*force: true,\s*forceRefresh: shouldForceRefresh,\s*\}\);/s);
+  assert.match(sessionBrowser, /const loaded = await loadProvider\(providerFilter, \{\s*force: true,\s*forceRefresh: false,\s*\}\);/s);
   assert.match(sessionBrowser, /if \(loaded\) \{\s*activatedProvidersRef\.current\.add\(providerFilter\);\s*\}/s);
   assert.match(sessionBrowser, /\}, \[active, loadProvider, providerFilter, providerReloadTick\]\);/);
   assert.match(sessionBrowser, /if \(!active \|\| !openTarget \|\| openTarget\.providerId !== providerFilter\) \{\s*return;\s*\}/s);

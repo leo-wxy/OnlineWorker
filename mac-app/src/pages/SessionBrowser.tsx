@@ -208,6 +208,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     const shouldSeedCachedSessions = true;
     const cachedSessions = readCachedProviderSessionSnapshot(provider);
     if (shouldSeedCachedSessions && cachedSessions.length > 0) {
+      loadedProvidersRef.current.add(provider);
       setGenericSessionsByProvider((current) => mergeSessionSnapshotsByProvider(
         current,
         provider,
@@ -281,7 +282,6 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     }
     const hasLoadedProvider = loadedProvidersRef.current.has(providerFilter);
     const hasActivatedProvider = activatedProvidersRef.current.has(providerFilter);
-    const shouldForceRefresh = !hasLoadedProvider || !hasActivatedProvider;
     if (hasLoadedProvider && hasActivatedProvider) {
       return;
     }
@@ -289,7 +289,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     void (async () => {
       const loaded = await loadProvider(providerFilter, {
         force: true,
-        forceRefresh: shouldForceRefresh,
+        forceRefresh: false,
       });
       if (loaded) {
         activatedProvidersRef.current.add(providerFilter);

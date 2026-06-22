@@ -1,22 +1,19 @@
 mod commands;
 mod menubar;
 
+use std::io::Write;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
 use std::time::Duration;
-use std::{env, path::Path};
+use std::{env, fs, path::{Path, PathBuf}, thread};
 use tauri::Manager;
 use tokio::sync::Mutex;
 
 use commands::ai_config::test_ai_service_connection;
 use commands::attachment_cache::{clear_attachment_cache, get_attachment_cache_stats};
-use commands::claude::{list_claude_sessions, read_claude_session, send_claude_session_message};
-use commands::codex::{
-    list_codex_threads, read_codex_thread, read_codex_thread_state, read_codex_thread_updates,
-    send_codex_thread_message, start_codex_thread_stream, stop_codex_thread_stream,
-};
 use commands::command_registry::{
     get_command_registry, publish_telegram_commands, refresh_command_registry,
     set_command_telegram_enabled,
@@ -34,8 +31,7 @@ use commands::logs::{get_log_file_path, start_log_tail, stop_log_tail};
 use commands::provider_sessions::{
     archive_provider_session, list_provider_sessions, read_provider_session,
     send_provider_session_message, stage_session_composer_attachments,
-    start_provider_session_event_stream, start_provider_session_stream,
-    stop_provider_session_event_stream, stop_provider_session_stream,
+    start_provider_session_event_stream, stop_provider_session_event_stream,
 };
 use commands::provider_usage::get_provider_usage_summary;
 use commands::service::{
@@ -49,13 +45,31 @@ use commands::task_board_state::{
     unpin_task_board_session,
 };
 use commands::telegram::{test_bot_permissions, test_bot_token, test_group_access};
-use commands::terminal::{open_codex_tui_host_terminal, open_finder, open_terminal};
-use menubar::setup_menubar;
+use commands::terminal::{open_finder, open_provider_tui_host_terminal, open_terminal};
+use menubar::{setup_menubar, show_main_window};
 
 #[derive(Default)]
 struct AppExitState {
     exiting: AtomicBool,
     cleanup_started: AtomicBool,
+}
+
+const SINGLE_INSTANCE_SOCKET_FILENAME: &str = "onlineworker-app-instance.sock";
+const SINGLE_INSTANCE_ACTIVATE_MESSAGE: &[u8] = b"activate\n";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExistingInstanceStatus {
+    NotRunning,
+    Activated,
+    StaleSocket,
+}
+
+enum SingleInstanceStartup {
+    Primary {
+        listener: UnixListener,
+        socket_path: PathBuf,
+    },
+    Secondary,
 }
 
 impl AppExitState {
@@ -101,6 +115,85 @@ pub(crate) fn cleanup_managed_processes_for_exit_once(app: &tauri::AppHandle) {
 
 fn should_restore_main_window_on_reopen(has_visible_windows: bool) -> bool {
     !has_visible_windows
+}
+
+fn single_instance_socket_path(data_dir: &Path) -> PathBuf {
+    data_dir.join(SINGLE_INSTANCE_SOCKET_FILENAME)
+}
+
+fn probe_existing_instance(socket_path: &Path) -> Result<ExistingInstanceStatus, String> {
+    match UnixStream::connect(socket_path) {
+        Ok(mut stream) => {
+            stream
+                .write_all(SINGLE_INSTANCE_ACTIVATE_MESSAGE)
+                .map_err(|error| format!("write single-instance activation failed: {error}"))?;
+            Ok(ExistingInstanceStatus::Activated)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(ExistingInstanceStatus::NotRunning)
+        }
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionRefused
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::BrokenPipe
+            ) =>
+        {
+            Ok(ExistingInstanceStatus::StaleSocket)
+        }
+        Err(error) => Err(format!("connect single-instance socket failed: {error}")),
+    }
+}
+
+fn bind_primary_instance_listener(socket_path: &Path) -> Result<UnixListener, String> {
+    UnixListener::bind(socket_path)
+        .map_err(|error| format!("bind single-instance socket failed: {error}"))
+}
+
+fn prepare_single_instance_startup(data_dir: &Path) -> Result<SingleInstanceStartup, String> {
+    fs::create_dir_all(data_dir).map_err(|error| format!("create data dir failed: {error}"))?;
+    let socket_path = single_instance_socket_path(data_dir);
+
+    match probe_existing_instance(&socket_path)? {
+        ExistingInstanceStatus::Activated => Ok(SingleInstanceStartup::Secondary),
+        ExistingInstanceStatus::NotRunning => {
+            let _ = fs::remove_file(&socket_path);
+            let listener = bind_primary_instance_listener(&socket_path)?;
+            Ok(SingleInstanceStartup::Primary {
+                listener,
+                socket_path,
+            })
+        }
+        ExistingInstanceStatus::StaleSocket => {
+            let _ = fs::remove_file(&socket_path);
+            let listener = bind_primary_instance_listener(&socket_path)?;
+            Ok(SingleInstanceStartup::Primary {
+                listener,
+                socket_path,
+            })
+        }
+    }
+}
+
+fn cleanup_single_instance_socket(socket_path: &Path) {
+    let _ = fs::remove_file(socket_path);
+}
+
+fn spawn_single_instance_listener(app_handle: tauri::AppHandle, listener: UnixListener) {
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else {
+                continue;
+            };
+            drop(stream);
+            let app_handle = app_handle.clone();
+            let focus_handle = app_handle.clone();
+            let _ = app_handle.run_on_main_thread(move || {
+                let _ = show_main_window(&focus_handle);
+            });
+        }
+    });
 }
 
 fn launch_service_self_check_delay() -> Duration {
@@ -225,6 +318,25 @@ fn spawn_service_guard_loop(app_handle: tauri::AppHandle, state: Arc<Mutex<BotSt
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let data_dir = match commands::config::ensure_data_dir() {
+        Ok(dir) => dir,
+        Err(error) => panic!("failed to initialize app data dir: {error}"),
+    };
+    let single_instance = match prepare_single_instance_startup(&data_dir) {
+        Ok(startup) => startup,
+        Err(error) => panic!("failed to initialize single-instance guard: {error}"),
+    };
+    if matches!(single_instance, SingleInstanceStartup::Secondary) {
+        return;
+    }
+    let (single_instance_listener, single_instance_socket_path) = match single_instance {
+        SingleInstanceStartup::Primary {
+            listener,
+            socket_path,
+        } => (listener, socket_path),
+        SingleInstanceStartup::Secondary => unreachable!(),
+    };
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
@@ -241,6 +353,7 @@ pub fn run() {
             let state = app.state::<Arc<Mutex<BotState>>>().inner().clone();
             let app_handle = app.handle().clone();
             setup_menubar(&app_handle, state)?;
+            spawn_single_instance_listener(app_handle.clone(), single_instance_listener);
             spawn_service_guard_loop(
                 app_handle,
                 app.state::<Arc<Mutex<BotState>>>().inner().clone(),
@@ -281,26 +394,14 @@ pub fn run() {
             reveal_env_field,
             open_terminal,
             open_finder,
-            open_codex_tui_host_terminal,
-            list_codex_threads,
-            read_codex_thread,
-            read_codex_thread_state,
-            read_codex_thread_updates,
-            send_codex_thread_message,
-            start_codex_thread_stream,
-            stop_codex_thread_stream,
-            list_claude_sessions,
-            read_claude_session,
-            send_claude_session_message,
+            open_provider_tui_host_terminal,
             list_provider_sessions,
             read_provider_session,
             archive_provider_session,
             send_provider_session_message,
             stage_session_composer_attachments,
             start_provider_session_event_stream,
-            start_provider_session_stream,
             stop_provider_session_event_stream,
-            stop_provider_session_stream,
             get_provider_usage_summary,
             get_task_board_session_activities,
             get_task_board_state,
@@ -340,14 +441,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| match event {
+    app.run(move |app_handle, event| match event {
         tauri::RunEvent::ExitRequested { .. } => {
             let exit_state = app_handle.state::<AppExitState>();
             exit_state.mark_exiting();
             cleanup_managed_processes_for_exit_once(app_handle);
+            cleanup_single_instance_socket(&single_instance_socket_path);
         }
         tauri::RunEvent::Exit => {
             cleanup_managed_processes_for_exit_once(app_handle);
+            cleanup_single_instance_socket(&single_instance_socket_path);
         }
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen {
@@ -369,13 +472,26 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
+        prepare_single_instance_startup, probe_existing_instance, single_instance_socket_path,
+        ExistingInstanceStatus, SingleInstanceStartup,
         default_provider_overlay_env, launch_service_self_check_delay,
         service_guard_check_interval, should_auto_start_service_after_launch,
         should_auto_start_service_in_session, should_cleanup_on_destroy,
         should_hide_window_on_close, should_restore_main_window_on_reopen, AppExitState,
     };
     use crate::commands::service::ServiceStatus;
-    use std::{fs, time::Duration};
+    use std::os::unix::net::UnixListener;
+    use std::{fs, path::Path, time::Duration};
+
+    fn temp_single_instance_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::path::PathBuf::from("/tmp").join(format!(
+            "ow-si-{name}-{}",
+            std::process::id(),
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
 
     #[test]
     fn main_window_close_hides_window_when_app_is_not_exiting() {
@@ -425,6 +541,91 @@ mod tests {
     #[test]
     fn service_guard_check_interval_runs_every_fifteen_seconds() {
         assert_eq!(service_guard_check_interval(), Duration::from_secs(15));
+    }
+
+    #[test]
+    fn single_instance_socket_path_uses_data_dir() {
+        let data_dir = Path::new("/tmp/onlineworker-data");
+        assert_eq!(
+            single_instance_socket_path(data_dir),
+            data_dir.join("onlineworker-app-instance.sock")
+        );
+    }
+
+    #[test]
+    fn probe_existing_instance_reports_not_running_when_socket_is_missing() {
+        let dir = temp_single_instance_dir("missing");
+        let socket_path = single_instance_socket_path(&dir);
+
+        assert_eq!(
+            probe_existing_instance(&socket_path).expect("probe missing socket"),
+            ExistingInstanceStatus::NotRunning
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn probe_existing_instance_reports_activated_when_listener_exists() {
+        let dir = temp_single_instance_dir("active");
+        let socket_path = single_instance_socket_path(&dir);
+        let listener = UnixListener::bind(&socket_path).expect("bind listener");
+
+        assert_eq!(
+            probe_existing_instance(&socket_path).expect("probe active listener"),
+            ExistingInstanceStatus::Activated
+        );
+
+        drop(listener);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn probe_existing_instance_reports_stale_socket_when_listener_is_gone() {
+        let dir = temp_single_instance_dir("stale");
+        let socket_path = single_instance_socket_path(&dir);
+        let listener = UnixListener::bind(&socket_path).expect("bind listener");
+        drop(listener);
+
+        assert_eq!(
+            probe_existing_instance(&socket_path).expect("probe stale socket"),
+            ExistingInstanceStatus::StaleSocket
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prepare_single_instance_startup_returns_secondary_when_listener_exists() {
+        let dir = temp_single_instance_dir("secondary");
+        let socket_path = single_instance_socket_path(&dir);
+        let listener = UnixListener::bind(&socket_path).expect("bind listener");
+
+        assert!(matches!(
+            prepare_single_instance_startup(&dir).expect("prepare single instance startup"),
+            SingleInstanceStartup::Secondary
+        ));
+
+        drop(listener);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prepare_single_instance_startup_rebinds_stale_socket_as_primary() {
+        let dir = temp_single_instance_dir("primary");
+        let socket_path = single_instance_socket_path(&dir);
+        let listener = UnixListener::bind(&socket_path).expect("bind listener");
+        drop(listener);
+
+        let startup = prepare_single_instance_startup(&dir).expect("prepare startup");
+        match startup {
+            SingleInstanceStartup::Primary { socket_path, .. } => {
+                assert_eq!(socket_path, single_instance_socket_path(&dir));
+            }
+            SingleInstanceStartup::Secondary => panic!("expected primary startup"),
+        }
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
