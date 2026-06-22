@@ -28,8 +28,10 @@ use provider_status::{
 use recent_activity::read_recent_activity_summary;
 #[cfg(test)]
 use recent_activity::{
-    build_claude_activity_index, extract_thread_summary, read_claude_workspace_activity,
-    read_recent_activity_summary_cached_with_now, WorkspaceSnapshot, RECENT_ACTIVITY_CACHE_TTL,
+    extract_thread_summary, read_provider_workspace_activity,
+    read_recent_activity_summary_cached_with_now,
+    read_recent_activity_summary_from_paths_with_provider_sessions, ProviderSessionRow,
+    WorkspaceSnapshot, RECENT_ACTIVITY_CACHE_TTL,
 };
 
 const REQUIRED_ENV_KEYS: &[&str] = &["TELEGRAM_TOKEN", "ALLOWED_USER_ID", "GROUP_CHAT_ID"];
@@ -48,10 +50,11 @@ pub async fn get_dashboard_state(
     state: tauri::State<'_, Arc<Mutex<BotState>>>,
 ) -> Result<DashboardState, String> {
     let _ = ensure_service_running_if_needed(&app, state.inner()).await?;
-    compute_dashboard_state(state.inner()).await
+    compute_dashboard_state(&app, state.inner()).await
 }
 
 pub(crate) async fn compute_dashboard_state(
+    app: &tauri::AppHandle,
     state: &Arc<Mutex<BotState>>,
 ) -> Result<DashboardState, String> {
     let dir = ensure_data_dir()?;
@@ -89,7 +92,7 @@ pub(crate) async fn compute_dashboard_state(
         providers,
         telegram_connected: telegram.connected,
         telegram_detail: telegram.detail,
-        recent_activity: read_recent_activity_summary(&dir),
+        recent_activity: read_recent_activity_summary(app, &dir).await,
     }))
 }
 
@@ -374,15 +377,19 @@ fn read_telegram_polling_diagnostic(data_dir: &Path, now: SystemTime) -> Telegra
 
 #[cfg(test)]
 mod tests {
+    use crate::commands::config_provider::{
+        provider_default_metadata, public_default_provider_ids, ProviderTuiHostEntry,
+    };
+
     use super::{
-        build_claude_activity_index, build_dashboard_state, build_provider_statuses,
-        diagnose_telegram_polling_from_log, extract_thread_summary, read_claude_workspace_activity,
-        read_env_key, read_provider_runtime_status_via_owner_bridge_with_timeout,
-        read_recent_activity_summary, read_recent_activity_summary_cached_with_now,
-        redact_telegram_token, resolve_builtin_provider_snapshots, AlertLevel,
-        DashboardComputationInput, ProviderConfigSnapshot, ProviderDashboardStatus,
-        RecentActivitySummary, ServiceHealth, SystemHealth, TelegramPollingDiagnostic,
-        WorkspaceSnapshot, RECENT_ACTIVITY_CACHE_TTL,
+        build_dashboard_state, build_provider_statuses, diagnose_telegram_polling_from_log,
+        extract_thread_summary, read_env_key, read_provider_runtime_status_via_owner_bridge_with_timeout,
+        read_provider_workspace_activity, read_recent_activity_summary_cached_with_now,
+        read_recent_activity_summary_from_paths_with_provider_sessions, redact_telegram_token,
+        resolve_builtin_provider_snapshots, AlertLevel, DashboardComputationInput,
+        ProviderConfigSnapshot, ProviderDashboardStatus, ProviderSessionRow, RecentActivitySummary,
+        ServiceHealth, SystemHealth, TelegramPollingDiagnostic, WorkspaceSnapshot,
+        RECENT_ACTIVITY_CACHE_TTL,
     };
     use serde_json::json;
     use std::collections::HashMap;
@@ -392,6 +399,16 @@ mod tests {
     use std::os::unix::net::UnixListener;
     use std::thread;
     use std::time::{Duration, SystemTime};
+
+    fn shared_unix_provider_id_for_test() -> String {
+        public_default_provider_ids()
+            .into_iter()
+            .find(|provider_id| {
+                let metadata = provider_default_metadata(provider_id);
+                metadata.transport.owner == "unix" && metadata.live_transport == "shared_unix"
+            })
+            .expect("shared unix provider")
+    }
 
     fn local_log_time(now: SystemTime, delta: Duration) -> String {
         let timestamp = now.checked_sub(delta).unwrap_or(now);
@@ -442,7 +459,7 @@ mod tests {
             service_running: true,
             service_pid: Some(4321),
             providers: vec![ProviderDashboardStatus {
-                id: "codex".into(),
+                id: "primary".into(),
                 icon: None,
                 managed: true,
                 autostart: true,
@@ -452,7 +469,8 @@ mod tests {
                 transport: Some("ws".into()),
                 live_transport: Some("shared_ws".into()),
                 control_mode: Some("app".into()),
-                bin: Some("codex".into()),
+                bin: Some("primary".into()),
+                tui_host: ProviderTuiHostEntry::default(),
             }],
             telegram_connected: None,
             telegram_detail: None,
@@ -552,7 +570,7 @@ mod tests {
     fn build_provider_statuses_marks_missing_cli_as_stopped() {
         let providers = build_provider_statuses(
             vec![ProviderConfigSnapshot {
-                id: "codex".into(),
+                id: "primary".into(),
                 icon: None,
                 visible: true,
                 managed: true,
@@ -562,7 +580,8 @@ mod tests {
                 port: None,
                 app_server_url: None,
                 control_mode: Some("app".into()),
-                bin: Some("/definitely/missing/onlineworker-test-codex".into()),
+                bin: Some("/definitely/missing/onlineworker-test-primary".into()),
+                tui_host: ProviderTuiHostEntry::default(),
             }],
             std::path::Path::new("/tmp"),
             true,
@@ -574,7 +593,7 @@ mod tests {
         assert_eq!(providers[0].health, ServiceHealth::Stopped);
         assert_eq!(
             providers[0].detail.as_deref(),
-            Some("CLI not found in PATH: /definitely/missing/onlineworker-test-codex")
+            Some("CLI not found in PATH: /definitely/missing/onlineworker-test-primary")
         );
     }
 
@@ -593,7 +612,7 @@ mod tests {
 
         let providers = build_provider_statuses(
             vec![ProviderConfigSnapshot {
-                id: "claude".into(),
+                id: "secondary".into(),
                 icon: None,
                 visible: true,
                 managed: true,
@@ -604,6 +623,7 @@ mod tests {
                 app_server_url: None,
                 control_mode: Some("app".into()),
                 bin: Some(format!("{} cc", cli.display())),
+                tui_host: ProviderTuiHostEntry::default(),
             }],
             &temp_dir,
             true,
@@ -664,6 +684,7 @@ mod tests {
                 app_server_url: None,
                 control_mode: Some("app".into()),
                 bin: Some("/bin/sh".into()),
+                tui_host: ProviderTuiHostEntry::default(),
             }],
             &temp_dir,
             true,
@@ -683,9 +704,9 @@ mod tests {
     }
 
     #[test]
-    fn build_provider_statuses_reads_codex_health_from_owner_bridge() {
+    fn build_provider_statuses_reads_degraded_health_from_owner_bridge() {
         let temp_dir =
-            std::path::PathBuf::from("/tmp").join(format!("ow-cdx-status-{}", std::process::id()));
+            std::path::PathBuf::from("/tmp").join(format!("ow-provider-status-{}", std::process::id()));
         fs::create_dir_all(&temp_dir).expect("create temp dir");
         let socket_path = temp_dir.join("provider_owner_bridge.sock");
         let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
@@ -700,20 +721,20 @@ mod tests {
             let payload: serde_json::Value =
                 serde_json::from_str(request.trim()).expect("parse owner bridge request");
             assert_eq!(payload["type"], "runtime_status");
-            assert_eq!(payload["provider_id"], "codex");
+            assert_eq!(payload["provider_id"], "primary");
 
             let response = serde_json::json!({
                 "ok": true,
                 "health": "degraded",
-                "detail": "• codex：连接不可用",
-                "lines": ["• codex：连接不可用"],
+                "detail": "• primary：连接不可用",
+                "lines": ["• primary：连接不可用"],
             });
             writeln!(stream, "{response}").expect("write response");
         });
 
         let providers = build_provider_statuses(
             vec![ProviderConfigSnapshot {
-                id: "codex".into(),
+                id: "primary".into(),
                 icon: None,
                 visible: true,
                 managed: true,
@@ -724,6 +745,7 @@ mod tests {
                 app_server_url: None,
                 control_mode: Some("app".into()),
                 bin: Some("/bin/sh".into()),
+                tui_host: ProviderTuiHostEntry::default(),
             }],
             &temp_dir,
             true,
@@ -733,16 +755,16 @@ mod tests {
         );
 
         assert_eq!(providers[0].health, ServiceHealth::Degraded);
-        assert_eq!(providers[0].detail.as_deref(), Some("• codex：连接不可用"));
+        assert_eq!(providers[0].detail.as_deref(), Some("• primary：连接不可用"));
 
         server.join().expect("join owner bridge server");
         let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
-    fn build_provider_statuses_reads_claude_health_from_owner_bridge() {
+    fn build_provider_statuses_reads_healthy_status_from_owner_bridge() {
         let temp_dir = std::path::PathBuf::from("/tmp")
-            .join(format!("ow-dashboard-claude-status-{}", std::process::id()));
+            .join(format!("ow-dashboard-provider-status-{}", std::process::id()));
         fs::create_dir_all(&temp_dir).expect("create temp dir");
         let socket_path = temp_dir.join("provider_owner_bridge.sock");
         let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
@@ -757,20 +779,20 @@ mod tests {
             let payload: serde_json::Value =
                 serde_json::from_str(request.trim()).expect("parse owner bridge request");
             assert_eq!(payload["type"], "runtime_status");
-            assert_eq!(payload["provider_id"], "claude");
+            assert_eq!(payload["provider_id"], "secondary");
 
             let response = serde_json::json!({
                 "ok": true,
                 "health": "healthy",
-                "detail": "• claude CLI：✅ 已连接",
-                "lines": ["• claude CLI：✅ 已连接"],
+                "detail": "• secondary CLI：✅ 已连接",
+                "lines": ["• secondary CLI：✅ 已连接"],
             });
             writeln!(stream, "{response}").expect("write response");
         });
 
         let providers = build_provider_statuses(
             vec![ProviderConfigSnapshot {
-                id: "claude".into(),
+                id: "secondary".into(),
                 icon: None,
                 visible: true,
                 managed: true,
@@ -780,7 +802,8 @@ mod tests {
                 port: None,
                 app_server_url: None,
                 control_mode: Some("app".into()),
-                bin: Some("claude".into()),
+                bin: Some("secondary".into()),
+                tui_host: ProviderTuiHostEntry::default(),
             }],
             &temp_dir,
             true,
@@ -792,7 +815,7 @@ mod tests {
         assert_eq!(providers[0].health, ServiceHealth::Healthy);
         assert_eq!(
             providers[0].detail.as_deref(),
-            Some("• claude CLI：✅ 已连接")
+            Some("• secondary CLI：✅ 已连接")
         );
 
         server.join().expect("join owner bridge server");
@@ -802,7 +825,7 @@ mod tests {
     #[test]
     fn provider_status_does_not_fall_back_to_cli_when_owner_bridge_times_out() {
         let temp_dir = std::path::PathBuf::from("/tmp").join(format!(
-            "ow-dashboard-claude-timeout-{}",
+            "ow-dashboard-provider-timeout-{}",
             std::process::id()
         ));
         fs::create_dir_all(&temp_dir).expect("create temp dir");
@@ -827,6 +850,7 @@ mod tests {
                 app_server_url: None,
                 control_mode: Some("app".into()),
                 bin: Some("/definitely/missing/onlineworker-test-runtime-tool".into()),
+                tui_host: ProviderTuiHostEntry::default(),
             }],
             &temp_dir,
             true,
@@ -863,7 +887,7 @@ mod tests {
 
         let result = read_provider_runtime_status_via_owner_bridge_with_timeout(
             &temp_dir,
-            "claude",
+            "runtime-tool",
             Duration::from_millis(20),
         );
 
@@ -882,7 +906,7 @@ mod tests {
             service_pid: Some(4321),
             providers: vec![
                 ProviderDashboardStatus {
-                    id: "codex".into(),
+                    id: "primary".into(),
                     icon: None,
                     managed: true,
                     autostart: true,
@@ -892,10 +916,11 @@ mod tests {
                     transport: Some("ws".into()),
                     live_transport: Some("shared_ws".into()),
                     control_mode: Some("app".into()),
-                    bin: Some("codex".into()),
+                    bin: Some("primary".into()),
+                    tui_host: ProviderTuiHostEntry::default(),
                 },
                 ProviderDashboardStatus {
-                    id: "claude".into(),
+                    id: "secondary".into(),
                     icon: None,
                     managed: false,
                     autostart: false,
@@ -905,18 +930,19 @@ mod tests {
                     transport: Some("stdio".into()),
                     live_transport: Some("stdio".into()),
                     control_mode: Some("app".into()),
-                    bin: Some("claude".into()),
+                    bin: Some("secondary".into()),
+                    tui_host: ProviderTuiHostEntry::default(),
                 },
             ],
             telegram_connected: Some(true),
             telegram_detail: None,
             recent_activity: Some(RecentActivitySummary {
-                active_workspace_id: Some("codex:onlineWorker".into()),
+                active_workspace_id: Some("primary:onlineWorker".into()),
                 active_workspace_name: Some("onlineWorker".into()),
                 active_workspace_path: Some("/Users/example/Projects/onlineWorker".into()),
-                active_tool: Some("codex".into()),
+                active_tool: Some("primary".into()),
                 active_session_id: Some("ses_demo".into()),
-                active_session_tool: Some("codex".into()),
+                active_session_tool: Some("primary".into()),
                 highlighted_thread_preview: Some("Phase C-2 执行继续".into()),
                 active_thread_count: 3,
             }),
@@ -925,7 +951,7 @@ mod tests {
         assert_eq!(state.overall, SystemHealth::Healthy);
         assert_eq!(state.bot.pid, Some(4321));
         assert_eq!(state.providers.len(), 1);
-        assert_eq!(state.providers[0].id, "codex");
+        assert_eq!(state.providers[0].id, "primary");
         assert_eq!(
             state
                 .recent_activity
@@ -951,7 +977,7 @@ mod tests {
             service_pid: Some(4321),
             providers: vec![
                 ProviderDashboardStatus {
-                    id: "codex".into(),
+                    id: "primary".into(),
                     icon: None,
                     managed: true,
                     autostart: true,
@@ -961,7 +987,8 @@ mod tests {
                     transport: Some("ws".into()),
                     live_transport: Some("shared_ws".into()),
                     control_mode: Some("app".into()),
-                    bin: Some("codex".into()),
+                    bin: Some("primary".into()),
+                    tui_host: ProviderTuiHostEntry::default(),
                 },
                 ProviderDashboardStatus {
                     id: "custom".into(),
@@ -975,6 +1002,7 @@ mod tests {
                     live_transport: Some("stdio".into()),
                     control_mode: Some("app".into()),
                     bin: Some("custom".into()),
+                    tui_host: ProviderTuiHostEntry::default(),
                 },
             ],
             telegram_connected: Some(true),
@@ -987,7 +1015,7 @@ mod tests {
     }
 
     #[test]
-    fn build_dashboard_state_marks_degraded_when_claude_is_degraded() {
+    fn build_dashboard_state_marks_degraded_when_provider_is_degraded() {
         let state = build_dashboard_state(DashboardComputationInput {
             config_ready: true,
             missing_config_fields: vec![],
@@ -995,7 +1023,7 @@ mod tests {
             service_pid: Some(4321),
             providers: vec![
                 ProviderDashboardStatus {
-                    id: "codex".into(),
+                    id: "primary".into(),
                     icon: None,
                     managed: true,
                     autostart: true,
@@ -1005,20 +1033,22 @@ mod tests {
                     transport: Some("stdio".into()),
                     live_transport: Some("owner_bridge".into()),
                     control_mode: Some("app".into()),
-                    bin: Some("codex".into()),
+                    bin: Some("primary".into()),
+                    tui_host: ProviderTuiHostEntry::default(),
                 },
                 ProviderDashboardStatus {
-                    id: "claude".into(),
+                    id: "secondary".into(),
                     icon: None,
                     managed: true,
                     autostart: true,
                     health: ServiceHealth::Degraded,
                     port: None,
-                    detail: Some("Claude CLI not authenticated".into()),
+                    detail: Some("Provider CLI not authenticated".into()),
                     transport: Some("stdio".into()),
                     live_transport: Some("stdio".into()),
                     control_mode: Some("app".into()),
-                    bin: Some("claude".into()),
+                    bin: Some("secondary".into()),
+                    tui_host: ProviderTuiHostEntry::default(),
                 },
             ],
             telegram_connected: Some(true),
@@ -1031,53 +1061,59 @@ mod tests {
             .alerts
             .iter()
             .any(|alert| alert.code == "provider_degraded"
-                && alert.title == "claude status degraded"));
+                && alert.title == "secondary status degraded"));
     }
 
     #[test]
-    fn resolve_builtin_provider_snapshots_defaults_codex_to_stdio_owner_bridge() {
+    fn resolve_builtin_provider_snapshots_defaults_shared_provider_to_unix_shared_transport() {
+        let provider_id = shared_unix_provider_id_for_test();
         let providers = resolve_builtin_provider_snapshots(None);
-        let codex = providers
+        let provider = providers
             .iter()
-            .find(|provider| provider.id == "codex")
-            .expect("codex snapshot");
+            .find(|provider| provider.id == provider_id)
+            .expect("provider snapshot");
 
-        assert_eq!(codex.transport, "stdio");
-        assert_eq!(codex.live_transport, "owner_bridge");
-        assert_eq!(codex.port, None);
+        assert_eq!(provider.transport, "unix");
+        assert_eq!(provider.live_transport, "shared_unix");
+        assert_eq!(provider.port, None);
     }
 
     #[test]
-    fn resolve_builtin_provider_snapshots_migrates_legacy_codex_default_ws_to_stdio_owner_bridge() {
-        let raw = r#"
+    fn resolve_builtin_provider_snapshots_migrates_legacy_default_ws_to_unix_shared_transport() {
+        let provider_id = shared_unix_provider_id_for_test();
+        let raw = format!(
+            r#"
 tools:
-  - name: codex
+  - name: {provider_id}
     enabled: true
-    codex_bin: "codex"
+    bin: "{provider_id}"
     protocol: "ws"
     app_server_port: 4722
-"#;
+"#
+        );
 
-        let providers = resolve_builtin_provider_snapshots(Some(raw));
-        let codex = providers
+        let providers = resolve_builtin_provider_snapshots(Some(&raw));
+        let provider = providers
             .iter()
-            .find(|provider| provider.id == "codex")
-            .expect("codex snapshot");
+            .find(|provider| provider.id == provider_id)
+            .expect("provider snapshot");
 
-        assert_eq!(codex.transport, "stdio");
-        assert_eq!(codex.live_transport, "owner_bridge");
-        assert_eq!(codex.port, None);
+        assert_eq!(provider.transport, "unix");
+        assert_eq!(provider.live_transport, "shared_unix");
+        assert_eq!(provider.port, None);
     }
 
     #[test]
-    fn resolve_builtin_provider_snapshots_backfills_claude_and_omits_hidden_overlay_provider() {
-        let raw = r#"
+    fn resolve_builtin_provider_snapshots_backfills_public_defaults_and_omits_hidden_overlay_provider() {
+        let provider_id = shared_unix_provider_id_for_test();
+        let raw = format!(
+            r#"
 schema_version: 2
 providers:
-  codex:
+  {provider_id}:
     managed: true
     autostart: true
-    bin: "codex"
+    bin: "{provider_id}"
     transport:
       type: "stdio"
     owner_transport: "stdio"
@@ -1094,25 +1130,25 @@ providers:
     owner_transport: "http"
     live_transport: "http"
     control_mode: "app"
-"#;
+"#
+        );
 
-        let providers = resolve_builtin_provider_snapshots(Some(raw));
+        let providers = resolve_builtin_provider_snapshots(Some(&raw));
         let ids: Vec<_> = providers
             .iter()
-            .map(|provider| provider.id.as_str())
+            .map(|provider| provider.id.clone())
             .collect();
-        assert_eq!(ids, vec!["codex", "claude"]);
+        assert_eq!(ids, public_default_provider_ids());
+        assert!(!ids.contains(&"overlay-tool".to_string()));
 
-        let claude = providers
-            .iter()
-            .find(|provider| provider.id == "claude")
-            .expect("claude snapshot");
-
-        assert!(!claude.managed);
-        assert!(!claude.autostart);
-        assert_eq!(claude.transport, "stdio");
-        assert_eq!(claude.live_transport, "stdio");
-        assert_eq!(claude.bin.as_deref(), Some("claude"));
+        for provider_id in ids {
+            let default = provider_default_metadata(&provider_id);
+            let provider = providers
+                .iter()
+                .find(|provider| provider.id == provider_id)
+                .expect("provider snapshot");
+            assert_eq!(provider.visible, default.visible);
+        }
     }
 
     #[test]
@@ -1146,11 +1182,11 @@ providers:
         std::fs::create_dir_all(&dir).unwrap();
         let state_path = dir.join("onlineworker_state.json");
         let payload = json!({
-            "active_workspace": "codex:onlineWorker",
+            "active_workspace": "primary:onlineWorker",
             "workspaces": {
-                "codex:onlineWorker": {
+                "primary:onlineWorker": {
                     "name": "onlineWorker",
-                    "tool": "codex",
+                    "tool": "primary",
                     "threads": {
                         "t1": {"preview": "hello dashboard", "archived": false, "is_active": true}
                     }
@@ -1159,17 +1195,22 @@ providers:
         });
         std::fs::write(&state_path, serde_json::to_string(&payload).unwrap()).unwrap();
 
-        let summary = read_recent_activity_summary(&dir).expect("recent activity");
+        let summary = read_recent_activity_summary_from_paths_with_provider_sessions(
+            &dir,
+            None,
+            &HashMap::new(),
+        )
+        .expect("recent activity");
         assert_eq!(
             summary.active_workspace_id.as_deref(),
-            Some("codex:onlineWorker")
+            Some("primary:onlineWorker")
         );
         assert_eq!(
             summary.active_workspace_name.as_deref(),
             Some("onlineWorker")
         );
         assert_eq!(summary.active_session_id.as_deref(), Some("t1"));
-        assert_eq!(summary.active_session_tool.as_deref(), Some("codex"));
+        assert_eq!(summary.active_session_tool.as_deref(), Some("primary"));
         assert_eq!(
             summary.highlighted_thread_preview.as_deref(),
             Some("hello dashboard")
@@ -1194,11 +1235,12 @@ providers:
 
         let write_preview = |preview: &str| {
             let payload = json!({
-                "active_workspace": "codex:onlineWorker",
+                "active_workspace": "primary:onlineWorker",
                 "workspaces": {
-                    "codex:onlineWorker": {
+                    "primary:onlineWorker": {
                         "name": "onlineWorker",
-                        "tool": "codex",
+                        "path": "/Users/example/Projects/onlineWorker",
+                        "tool": "primary",
                         "threads": {
                             "t1": {"preview": preview, "archived": false, "is_active": true}
                         }
@@ -1208,9 +1250,30 @@ providers:
             std::fs::write(&state_path, serde_json::to_string(&payload).unwrap()).unwrap();
         };
 
+        let provider_sessions = |preview: &str| {
+            HashMap::from([(
+                "primary".to_string(),
+                vec![ProviderSessionRow {
+                    id: "t1".to_string(),
+                    workspace: "/Users/example/Projects/onlineWorker".to_string(),
+                    title: preview.to_string(),
+                    preview: Some(preview.to_string()),
+                    archived: false,
+                    provider_active: true,
+                    updated_at: 1_800_000_000_000,
+                    created_at: 1_800_000_000_000,
+                }],
+            )])
+        };
+
         let base = std::time::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
         write_preview("first snapshot");
-        let first = read_recent_activity_summary_cached_with_now(&dir, None, base)
+        let first = read_recent_activity_summary_cached_with_now(
+            &dir,
+            None,
+            &provider_sessions("first snapshot"),
+            base,
+        )
             .expect("first recent activity");
         assert_eq!(
             first.highlighted_thread_preview.as_deref(),
@@ -1221,6 +1284,7 @@ providers:
         let cached = read_recent_activity_summary_cached_with_now(
             &dir,
             None,
+            &provider_sessions("second snapshot"),
             base + Duration::from_secs(RECENT_ACTIVITY_CACHE_TTL.as_secs() / 2),
         )
         .expect("cached recent activity");
@@ -1232,6 +1296,7 @@ providers:
         let refreshed = read_recent_activity_summary_cached_with_now(
             &dir,
             None,
+            &provider_sessions("second snapshot"),
             base + RECENT_ACTIVITY_CACHE_TTL + Duration::from_secs(1),
         )
         .expect("refreshed recent activity");
@@ -1245,212 +1310,227 @@ providers:
     }
 
     #[test]
-    fn read_claude_workspace_activity_reads_local_session_store() {
-        let dir = std::env::temp_dir().join(format!(
-            "onlineworker-dashboard-claude-activity-test-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system time")
-                .as_nanos()
-        ));
-        let projects_dir = dir.join("projects");
-        let history_path = dir.join("history.jsonl");
+    fn read_provider_workspace_activity_uses_provider_session_rows() {
         let workspace_path = "/Users/example/Projects/onlineWorker";
-        let session_file =
-            projects_dir.join("-Users-example-Projects-onlineWorker/ses-claude-dashboard.jsonl");
-
-        std::fs::create_dir_all(session_file.parent().expect("session parent")).unwrap();
-        let session_rows = [
-            json!({
-                "type": "user",
-                "timestamp": "2026-04-07T10:31:18.002Z",
-                "cwd": workspace_path,
-                "sessionId": "ses-claude-dashboard",
-                "message": {"role": "user", "content": "继续 Claude dashboard 收口"},
-            }),
-            json!({
-                "type": "assistant",
-                "timestamp": "2026-04-07T10:31:19.002Z",
-                "cwd": workspace_path,
-                "sessionId": "ses-claude-dashboard",
-                "message": {"role": "assistant", "content": "先补最近活动测试"},
-            }),
+        let provider_rows = vec![
+            ProviderSessionRow {
+                id: "ses-secondary-dashboard".into(),
+                workspace: workspace_path.into(),
+                title: "继续 dashboard 收口".into(),
+                preview: Some("继续 dashboard 收口".into()),
+                archived: false,
+                provider_active: true,
+                updated_at: 1_775_603_600_000_i64,
+                created_at: 1_775_603_599_000_i64,
+            },
+            ProviderSessionRow {
+                id: "ses-other".into(),
+                workspace: "/Users/example/Projects/other".into(),
+                title: "别的工程".into(),
+                preview: Some("别的工程".into()),
+                archived: false,
+                provider_active: true,
+                updated_at: 1_775_603_700_000_i64,
+                created_at: 1_775_603_699_000_i64,
+            },
         ];
-        let session_content = session_rows
-            .iter()
-            .map(|row| serde_json::to_string(row).expect("session row"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        std::fs::write(&session_file, format!("{session_content}\n")).unwrap();
 
-        let history_rows = [
-            json!({
-                "display": "/doctor",
-                "timestamp": 1_775_603_600_000_i64,
-                "project": workspace_path,
-                "sessionId": "ses-claude-dashboard",
-            }),
-            json!({
-                "display": "别的工程",
-                "timestamp": 1_775_603_700_000_i64,
-                "project": "/Users/example/Projects/other",
-                "sessionId": "ses-other",
-            }),
-        ];
-        let history_content = history_rows
-            .iter()
-            .map(|row| serde_json::to_string(row).expect("history row"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        std::fs::write(&history_path, format!("{history_content}\n")).unwrap();
-
-        let index = build_claude_activity_index(Some(&projects_dir), Some(&history_path));
-        let candidate = read_claude_workspace_activity(
+        let candidate = read_provider_workspace_activity(
             &WorkspaceSnapshot {
-                id: "claude:onlineWorker".into(),
+                id: "secondary:onlineWorker".into(),
                 name: Some("onlineWorker".into()),
-                tool: "claude".into(),
+                tool: "secondary".into(),
                 path: workspace_path.into(),
             },
-            &HashMap::new(),
-            &index,
+            &provider_rows,
         )
-        .expect("claude activity");
+        .expect("secondary activity");
 
-        assert_eq!(candidate.workspace_id, "claude:onlineWorker");
+        assert_eq!(candidate.workspace_id, "secondary:onlineWorker");
         assert_eq!(candidate.workspace_name.as_deref(), Some("onlineWorker"));
-        assert_eq!(candidate.tool, "claude");
-        assert_eq!(candidate.session_id, "ses-claude-dashboard");
+        assert_eq!(candidate.tool, "secondary");
+        assert_eq!(candidate.session_id, "ses-secondary-dashboard");
         assert_eq!(
             candidate.preview.as_deref(),
-            Some("继续 Claude dashboard 收口")
+            Some("继续 dashboard 收口")
         );
         assert_eq!(candidate.updated_at, 1_775_603_600_000_i64);
         assert_eq!(candidate.active_thread_count, 1);
-
-        let _ = std::fs::remove_file(history_path);
-        let _ = std::fs::remove_file(session_file);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn read_claude_workspace_activity_filters_noise_sessions() {
-        let dir = std::env::temp_dir().join(format!(
-            "onlineworker-dashboard-claude-noise-test-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system time")
-                .as_nanos()
-        ));
-        let projects_dir = dir.join("projects");
-        let history_path = dir.join("history.jsonl");
+    fn read_provider_workspace_activity_filters_archived_rows() {
         let workspace_path = "/Users/example/Projects/onlineWorker";
+        let provider_rows = vec![
+            ProviderSessionRow {
+                id: "ses-archived".into(),
+                workspace: workspace_path.into(),
+                title: "应该被过滤".into(),
+                preview: Some("应该被过滤".into()),
+                archived: true,
+                provider_active: true,
+                updated_at: 1_775_603_800_000_i64,
+                created_at: 1_775_603_799_000_i64,
+            },
+            ProviderSessionRow {
+                id: "ses-real".into(),
+                workspace: workspace_path.into(),
+                title: "现在可以了么？".into(),
+                preview: Some("现在可以了么？".into()),
+                archived: false,
+                provider_active: true,
+                updated_at: 1_775_603_700_000_i64,
+                created_at: 1_775_603_699_000_i64,
+            },
+        ];
 
-        std::fs::create_dir_all(&projects_dir).unwrap();
-        std::fs::write(&history_path, "").unwrap();
-
-        let cli_file = projects_dir.join("-Users-example-Projects-onlineWorker/ses-cli.jsonl");
-        std::fs::create_dir_all(cli_file.parent().expect("cli parent")).unwrap();
-        std::fs::write(
-            &cli_file,
-            format!(
-                "{}\n",
-                serde_json::to_string(&json!({
-                    "type": "user",
-                    "timestamp": "2026-04-07T09:33:42.791Z",
-                    "cwd": workspace_path,
-                    "sessionId": "ses-cli",
-                    "entrypoint": "cli",
-                    "message": {
-                        "role": "user",
-                        "content": "<local-command-caveat>Caveat: The messages below were generated by the user while running local commands. DO NOT respond.</local-command-caveat>",
-                    },
-                }))
-                .unwrap()
-            ),
-        )
-        .unwrap();
-
-        let login_failed_file =
-            projects_dir.join("-Users-example-Projects-onlineWorker/ses-login-failed.jsonl");
-        std::fs::create_dir_all(login_failed_file.parent().expect("login parent")).unwrap();
-        std::fs::write(
-            &login_failed_file,
-            format!(
-                "{}\n{}\n",
-                serde_json::to_string(&json!({
-                    "type": "user",
-                    "timestamp": "2026-04-12T11:47:36.917Z",
-                    "cwd": workspace_path,
-                    "sessionId": "ses-login-failed",
-                    "entrypoint": "sdk-cli",
-                    "message": {"role": "user", "content": "Reply with exactly OK"},
-                }))
-                .unwrap(),
-                serde_json::to_string(&json!({
-                    "type": "assistant",
-                    "timestamp": "2026-04-12T11:47:37.020Z",
-                    "cwd": workspace_path,
-                    "sessionId": "ses-login-failed",
-                    "entrypoint": "sdk-cli",
-                    "message": {
-                        "role": "assistant",
-                        "content": [{"type": "text", "text": "Not logged in · Please run /login"}],
-                    },
-                }))
-                .unwrap()
-            ),
-        )
-        .unwrap();
-
-        let real_file = projects_dir.join("-Users-example-Projects-onlineWorker/ses-real.jsonl");
-        std::fs::create_dir_all(real_file.parent().expect("real parent")).unwrap();
-        std::fs::write(
-            &real_file,
-            format!(
-                "{}\n{}\n",
-                serde_json::to_string(&json!({
-                    "type": "user",
-                    "timestamp": "2026-04-16T02:30:22.087Z",
-                    "cwd": workspace_path,
-                    "sessionId": "ses-real",
-                    "entrypoint": "sdk-cli",
-                    "message": {"role": "user", "content": "现在可以了么？"},
-                }))
-                .unwrap(),
-                serde_json::to_string(&json!({
-                    "type": "assistant",
-                    "timestamp": "2026-04-16T02:30:27.397Z",
-                    "cwd": workspace_path,
-                    "sessionId": "ses-real",
-                    "entrypoint": "sdk-cli",
-                    "message": {
-                        "role": "assistant",
-                        "content": [{"type": "text", "text": "可以了！"}],
-                    },
-                }))
-                .unwrap()
-            ),
-        )
-        .unwrap();
-
-        let index = build_claude_activity_index(Some(&projects_dir), Some(&history_path));
-        let candidate = read_claude_workspace_activity(
+        let candidate = read_provider_workspace_activity(
             &WorkspaceSnapshot {
-                id: "claude:onlineWorker".into(),
+                id: "secondary:onlineWorker".into(),
                 name: Some("onlineWorker".into()),
-                tool: "claude".into(),
+                tool: "secondary".into(),
                 path: workspace_path.into(),
             },
-            &HashMap::new(),
-            &index,
+            &provider_rows,
         )
-        .expect("claude activity");
+        .expect("secondary activity");
 
         assert_eq!(candidate.session_id, "ses-real");
         assert_eq!(candidate.preview.as_deref(), Some("现在可以了么？"));
         assert_eq!(candidate.active_thread_count, 1);
+    }
 
+    #[test]
+    fn read_provider_workspace_activity_ignores_non_running_rows() {
+        let workspace_path = "/Users/example/Projects/onlineWorker";
+        let provider_rows = vec![ProviderSessionRow {
+            id: "ses-old-ok".into(),
+            workspace: workspace_path.into(),
+            title: "OK".into(),
+            preview: Some("OK".into()),
+            archived: false,
+            provider_active: false,
+            updated_at: 1_775_603_800_000_i64,
+            created_at: 1_775_603_799_000_i64,
+        }];
+
+        let candidate = read_provider_workspace_activity(
+            &WorkspaceSnapshot {
+                id: "codemaker:onlineWorker".into(),
+                name: Some("onlineWorker".into()),
+                tool: "codemaker".into(),
+                path: workspace_path.into(),
+            },
+            &provider_rows,
+        );
+
+        assert!(candidate.is_none());
+    }
+
+    #[test]
+    fn read_recent_activity_summary_does_not_fall_back_to_stale_state_active_workspace() {
+        let dir = std::env::temp_dir().join(format!(
+            "onlineworker-dashboard-stale-active-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let state_path = dir.join("onlineworker_state.json");
+        let payload = json!({
+            "active_workspace": "codemaker:onlineWorker",
+            "workspaces": {
+                "codemaker:onlineWorker": {
+                    "name": "onlineWorker",
+                    "path": "/Users/example/Projects/onlineWorker",
+                    "tool": "codemaker",
+                    "threads": {
+                        "ses-old-ok": {"preview": "OK", "archived": false, "is_active": true}
+                    }
+                }
+            }
+        });
+        std::fs::write(&state_path, serde_json::to_string(&payload).unwrap()).unwrap();
+
+        let summary = read_recent_activity_summary_from_paths_with_provider_sessions(
+            &dir,
+            None,
+            &HashMap::from([(
+                "codemaker".to_string(),
+                vec![ProviderSessionRow {
+                    id: "ses-old-ok".into(),
+                    workspace: "/Users/example/Projects/onlineWorker".into(),
+                    title: "OK".into(),
+                    preview: Some("OK".into()),
+                    archived: false,
+                    provider_active: false,
+                    updated_at: 1_775_603_800_000_i64,
+                    created_at: 1_775_603_799_000_i64,
+                }],
+            )]),
+        );
+
+        assert!(summary.is_none());
+
+        let _ = std::fs::remove_file(state_path);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn read_recent_activity_summary_uses_provider_rows_without_state_workspace_registration() {
+        let dir = std::env::temp_dir().join(format!(
+            "onlineworker-dashboard-provider-owned-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let state_path = dir.join("onlineworker_state.json");
+        let payload = json!({
+            "workspaces": {}
+        });
+        std::fs::write(&state_path, serde_json::to_string(&payload).unwrap()).unwrap();
+
+        let workspace_path = "/Users/example/Projects/provider-owned-workspace";
+        let summary = read_recent_activity_summary_from_paths_with_provider_sessions(
+            &dir,
+            None,
+            &HashMap::from([(
+                "claude".to_string(),
+                vec![ProviderSessionRow {
+                    id: "claude-live-1".into(),
+                    workspace: workspace_path.into(),
+                    title: "继续收 provider-owned parity".into(),
+                    preview: Some("继续收 provider-owned parity".into()),
+                    archived: false,
+                    provider_active: true,
+                    updated_at: 1_775_603_900_000_i64,
+                    created_at: 1_775_603_899_000_i64,
+                }],
+            )]),
+        )
+        .expect("provider-owned recent activity");
+
+        assert_eq!(
+            summary.active_workspace_id.as_deref(),
+            Some("claude:/Users/example/Projects/provider-owned-workspace")
+        );
+        assert_eq!(
+            summary.active_workspace_name.as_deref(),
+            Some("provider-owned-workspace")
+        );
+        assert_eq!(summary.active_workspace_path.as_deref(), Some(workspace_path));
+        assert_eq!(summary.active_tool.as_deref(), Some("claude"));
+        assert_eq!(summary.active_session_id.as_deref(), Some("claude-live-1"));
+        assert_eq!(
+            summary.highlighted_thread_preview.as_deref(),
+            Some("继续收 provider-owned parity")
+        );
+        assert_eq!(summary.active_thread_count, 1);
+
+        let _ = std::fs::remove_file(state_path);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

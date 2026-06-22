@@ -29,7 +29,7 @@ def _thread_id(thread: Any) -> str:
 
 
 def _thread_title(thread: dict[str, Any], thread_id: str) -> str:
-    preview = thread.get("preview") or thread.get("title") or thread.get("name")
+    preview = thread.get("title") or thread.get("name") or thread.get("preview")
     title = str(preview or "").strip()
     return title or thread_id
 
@@ -302,7 +302,7 @@ async def _provider_session_adapter(descriptor, provider_id: str):
         (),
         {
             "name": provider_id,
-            "codex_bin": bin_value or provider_id,
+            "bin": bin_value or provider_id,
             "app_server_port": app_server_port,
             "protocol": transport_kind,
             "owner_transport": owner_transport or transport_kind,
@@ -376,6 +376,48 @@ def list_provider_session_rows(
     limit_per_workspace: int = 100,
 ) -> list[dict[str, Any]]:
     facts = _provider_facts(provider_id)
+    list_sessions = getattr(facts, "list_sessions", None)
+    if callable(list_sessions):
+        sessions: list[dict[str, Any]] = []
+        for session in list_sessions(limit=limit_per_workspace) or []:
+            if not isinstance(session, dict):
+                continue
+            thread_id = _thread_id(session)
+            workspace_path = str(session.get("workspace") or session.get("path") or "").strip()
+            if not thread_id or not workspace_path:
+                continue
+            sessions.append(
+                {
+                    "id": thread_id,
+                    "title": _thread_title(session, thread_id),
+                    "preview": str(session.get("preview") or "").strip(),
+                    "workspace": workspace_path,
+                    "archived": bool(session.get("archived", False)),
+                    "providerActive": bool(session.get("providerActive", False)),
+                    "updatedAt": _int_value(
+                        session.get("updatedAt")
+                        or session.get("updated_at")
+                        or session.get("updated_at_epoch")
+                        or session.get("createdAt")
+                        or session.get("created_at")
+                    ),
+                    "createdAt": _int_value(
+                        session.get("createdAt")
+                        or session.get("created_at")
+                        or session.get("updatedAt")
+                        or session.get("updated_at")
+                    ),
+                }
+            )
+        sessions.sort(
+            key=lambda item: (
+                -_int_value(item.get("updatedAt")),
+                -_int_value(item.get("createdAt")),
+                str(item.get("id") or ""),
+            )
+        )
+        return sessions
+
     sessions: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
 
@@ -411,8 +453,10 @@ def list_provider_session_rows(
                 {
                     "id": thread_id,
                     "title": _thread_title(thread, thread_id),
+                    "preview": str(thread.get("preview") or "").strip(),
                     "workspace": workspace_path,
                     "archived": archived,
+                    "providerActive": thread_id in normalized_active_ids,
                     "updatedAt": _int_value(
                         thread.get("updatedAt")
                         or thread.get("updated_at")

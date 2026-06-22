@@ -100,16 +100,20 @@ def test_list_provider_session_rows_merges_workspaces_and_sorts(monkeypatch):
         {
             "id": "tid-2",
             "title": "Beta",
+            "preview": "Beta",
             "workspace": "/tmp/beta",
             "archived": False,
+            "providerActive": True,
             "updatedAt": 20,
             "createdAt": 20,
         },
         {
             "id": "tid-1",
             "title": "Alpha",
+            "preview": "Alpha",
             "workspace": "/tmp/alpha",
             "archived": False,
+            "providerActive": True,
             "updatedAt": 10,
             "createdAt": 10,
         },
@@ -138,7 +142,111 @@ def test_list_provider_session_rows_marks_inactive_threads_archived(monkeypatch)
     result = bridge.list_provider_session_rows("overlay-tool")
 
     assert result[0]["archived"] is False
+    assert result[0]["providerActive"] is True
     assert result[1]["archived"] is True
+    assert result[1]["providerActive"] is False
+
+
+def test_list_provider_session_rows_prefers_provider_level_list_sessions(monkeypatch):
+    class Facts:
+        @staticmethod
+        def list_sessions(*, limit=100, sessions_dir=None):
+            return [
+                {
+                    "id": "tid-2",
+                    "title": "Beta",
+                    "preview": "Beta preview",
+                    "workspace": "/tmp/beta",
+                    "archived": False,
+                    "providerActive": True,
+                    "updatedAt": 20,
+                    "createdAt": 19,
+                },
+                {
+                    "id": "tid-1",
+                    "title": "Alpha",
+                    "preview": "Alpha preview",
+                    "workspace": "/tmp/alpha",
+                    "archived": True,
+                    "providerActive": False,
+                    "updatedAt": 10,
+                    "createdAt": 9,
+                },
+            ]
+
+        @staticmethod
+        def scan_workspaces():
+            raise AssertionError("provider-level list_sessions should bypass workspace scans")
+
+        @staticmethod
+        def query_active_thread_ids(workspace_path):
+            raise AssertionError("provider-level list_sessions should bypass active id queries")
+
+        @staticmethod
+        def list_threads(workspace_path, limit=100):
+            raise AssertionError("provider-level list_sessions should bypass thread listing")
+
+    monkeypatch.setattr(bridge, "_provider_facts", lambda provider_id: Facts)
+
+    result = bridge.list_provider_session_rows("overlay-tool")
+
+    assert result == [
+        {
+            "id": "tid-2",
+            "title": "Beta",
+            "preview": "Beta preview",
+            "workspace": "/tmp/beta",
+            "archived": False,
+            "providerActive": True,
+            "updatedAt": 20,
+            "createdAt": 19,
+        },
+        {
+            "id": "tid-1",
+            "title": "Alpha",
+            "preview": "Alpha preview",
+            "workspace": "/tmp/alpha",
+            "archived": True,
+            "providerActive": False,
+            "updatedAt": 10,
+            "createdAt": 9,
+        },
+    ]
+
+
+def test_list_provider_session_rows_keeps_preview_separate_from_title(monkeypatch):
+    class Facts:
+        @staticmethod
+        def list_sessions(*, limit=100, sessions_dir=None):
+            return [
+                {
+                    "id": "tid-2",
+                    "title": "继续phase17 的实现",
+                    "preview": "我现在继续修 Session 列表预览，并检查 [path] 里的 owner bridge 数据链。",
+                    "workspace": "/tmp/beta",
+                    "archived": False,
+                    "providerActive": True,
+                    "updatedAt": 20,
+                    "createdAt": 19,
+                }
+            ]
+
+    monkeypatch.setattr(bridge, "_provider_facts", lambda provider_id: Facts)
+
+    result = bridge.list_provider_session_rows("overlay-tool")
+
+    assert result == [
+        {
+            "id": "tid-2",
+            "title": "继续phase17 的实现",
+            "preview": "我现在继续修 Session 列表预览，并检查 [path] 里的 owner bridge 数据链。",
+            "workspace": "/tmp/beta",
+            "archived": False,
+            "providerActive": True,
+            "updatedAt": 20,
+            "createdAt": 19,
+        }
+    ]
 
 
 def test_read_provider_session_rows_normalizes_content_shape(monkeypatch):
@@ -442,7 +550,7 @@ def test_send_provider_session_message_uses_generic_runtime_start_hook(monkeypat
         async def start(manager, bot, tool_cfg):
             called["tool_cfg"] = {
                 "name": tool_cfg.name,
-                "bin": tool_cfg.codex_bin,
+                "bin": tool_cfg.bin,
                 "port": tool_cfg.app_server_port,
                 "protocol": tool_cfg.protocol,
             }
