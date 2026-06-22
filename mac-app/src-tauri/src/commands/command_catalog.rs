@@ -273,12 +273,13 @@ mod tests {
 
     #[test]
     fn public_default_downstream_catalog_omits_private_provider() {
-        let ids = downstream_commands_for_visible_provider_ids(["codex", "claude"])
+        let visible_provider_ids = crate::commands::config_provider::public_default_provider_ids();
+        let ids = downstream_commands_for_visible_provider_ids(&visible_provider_ids)
             .into_iter()
             .map(|command| command.id)
             .collect::<Vec<_>>();
 
-        assert!(ids.contains(&"downstream:codex:help".to_string()));
+        assert!(ids.iter().any(|id| id.starts_with("downstream:")));
         assert!(!ids.contains(&"downstream:private-provider:help".to_string()));
     }
 

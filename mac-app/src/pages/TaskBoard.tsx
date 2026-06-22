@@ -2,16 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { useI18n } from "../i18n";
 import {
-  fetchClaudeSessions,
-  fetchClaudeMessages,
-  fetchCodexSessions,
-  fetchCodexThreadState,
   fetchProviderMetadata,
   fetchProviderSession,
   fetchProviderSessions,
 } from "../components/session-browser/api";
-import { normalizeGenericProviderSessions } from "../components/session-browser/sessionData";
+import {
+  normalizeGenericProviderSessions,
+  readCachedProviderSessionSnapshotRows,
+  writeCachedProviderSessionSnapshot,
+} from "../components/session-browser/sessionData";
 import { type UnifiedSession } from "../components/session-browser/presentation";
+import { mergeSessionListSnapshot } from "../utils/sessionBrowserState.js";
 import { visibleSessionProviders } from "../utils/sessionProviders.js";
 import {
   buildTaskBoardModel,
@@ -20,8 +21,6 @@ import {
   type TaskBoardTask,
 } from "../utils/taskBoard.js";
 import type {
-  ClaudeSession,
-  CodexSession,
   DashboardState,
   ProviderMetadata,
   SessionTurn,
@@ -48,7 +47,6 @@ const PINNED_PREVIEW_HYDRATION_LIMIT = 12;
 const LOW_SIGNAL_PREVIEW_HYDRATION_LIMIT = 16;
 const SESSION_PREVIEW_HYDRATION_TIMEOUT_MS = 1200;
 const TASK_BOARD_ACTIVITY_REFRESH_TIMEOUT_MS = 1500;
-const TASK_BOARD_SESSION_LIST_REFRESH_TIMEOUT_MS = 2000;
 
 interface TaskBoardActivityStreamEvent {
   kind: "snapshot" | "activity" | "remove" | "error";
@@ -61,6 +59,7 @@ interface TaskBoardActivityStreamEvent {
 
 interface RefreshOptions {
   includeActivities?: boolean;
+  forceProviderRefresh?: boolean;
 }
 
 type TaskBoardApprovalAction = "exec_allow" | "exec_deny";
@@ -132,28 +131,6 @@ function formatLoadError(error: string, texts: ReturnType<typeof useI18n>["t"]) 
   return error;
 }
 
-function toCodexSession(session: CodexSession, workspaceFallback: string): UnifiedSession {
-  return {
-    id: session.threadId,
-    type: "codex",
-    workspace: session.cwd || workspaceFallback,
-    title: session.title || session.threadId,
-    archived: session.archived ?? false,
-    raw: session,
-  };
-}
-
-function toClaudeSession(session: ClaudeSession, workspaceFallback: string): UnifiedSession {
-  return {
-    id: session.sessionId,
-    type: "claude",
-    workspace: session.workspace || workspaceFallback,
-    title: session.title || session.sessionId,
-    archived: session.archived ?? false,
-    raw: session,
-  };
-}
-
 function lastTurnMessage(turns: SessionTurn[]) {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const content = turns[index]?.content?.trim();
@@ -165,16 +142,6 @@ function lastTurnMessage(turns: SessionTurn[]) {
 }
 
 async function readSessionLastMessage(session: UnifiedSession) {
-  if (session.type === "codex") {
-    const rolloutPath = (session.raw as CodexSession).rolloutPath;
-    if (!rolloutPath) {
-      return null;
-    }
-    return lastTurnMessage((await fetchCodexThreadState(rolloutPath)).turns);
-  }
-  if (session.type === "claude") {
-    return lastTurnMessage(await fetchClaudeMessages(session.id, session.workspace));
-  }
   return lastTurnMessage(await fetchProviderSession(session.type, session.id, session.workspace));
 }
 
@@ -222,22 +189,17 @@ async function withTimeout<T>(
 async function loadTaskBoardProviderSessions(
   provider: ProviderMetadata,
   workspaceFallback: string,
+  forceRefresh = false,
 ): Promise<UnifiedSession[]> {
-  if (provider.id === "codex") {
-    return (await fetchCodexSessions()).map((session) =>
-      toCodexSession(session, workspaceFallback),
-    );
-  }
-  if (provider.id === "claude") {
-    return (await fetchClaudeSessions()).map((session) =>
-      toClaudeSession(session, workspaceFallback),
-    );
-  }
   return normalizeGenericProviderSessions(
     provider.id,
-    await fetchProviderSessions(provider.id),
+    await fetchProviderSessions(provider.id, { forceRefresh }),
     workspaceFallback,
   );
+}
+
+function mergeTaskBoardSessions(previous: UnifiedSession[], next: UnifiedSession[]) {
+  return mergeSessionListSnapshot(previous, next);
 }
 
 async function hydratePinnedSessionPreviews(
@@ -339,25 +301,35 @@ async function hydrateLowSignalSessionPreviews(
 }
 
 function taskAccent(providerId: string) {
-  if (providerId === "codex") {
-    return {
+  const accents = [
+    {
       dot: "bg-violet-500",
       chip: "border-violet-100 bg-violet-50 text-violet-700",
       card: "hover:border-violet-200 hover:bg-violet-50/50",
-    };
-  }
-  if (providerId === "claude") {
-    return {
+    },
+    {
+      dot: "bg-sky-500",
+      chip: "border-sky-100 bg-sky-50 text-sky-700",
+      card: "hover:border-sky-200 hover:bg-sky-50/50",
+    },
+    {
+      dot: "bg-emerald-500",
+      chip: "border-emerald-100 bg-emerald-50 text-emerald-700",
+      card: "hover:border-emerald-200 hover:bg-emerald-50/50",
+    },
+    {
+      dot: "bg-amber-500",
+      chip: "border-amber-100 bg-amber-50 text-amber-700",
+      card: "hover:border-amber-200 hover:bg-amber-50/50",
+    },
+    {
       dot: "bg-slate-500",
       chip: "border-slate-200 bg-slate-100 text-slate-700",
       card: "hover:border-slate-300 hover:bg-slate-50/70",
-    };
-  }
-  return {
-    dot: "bg-blue-500",
-    chip: "border-blue-100 bg-blue-50 text-blue-700",
-    card: "hover:border-blue-200 hover:bg-blue-50/50",
-  };
+    },
+  ];
+  const hash = providerId.split("").reduce((value, char) => ((value * 31) + char.charCodeAt(0)) >>> 0, 0);
+  return accents[hash % accents.length];
 }
 
 function laneTone(tone: "needsAttention" | "running" | "pinned") {
@@ -648,7 +620,9 @@ export function TaskBoard({
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [selectedApprovalTaskIds, setSelectedApprovalTaskIds] = useState<string[]>([]);
   const [busyApprovalTaskIds, setBusyApprovalTaskIds] = useState<string[]>([]);
+  const hasHydratedProviderSessionsRef = useRef(false);
   const refreshSequenceRef = useRef(0);
+  const refreshInFlightRef = useRef(false);
 
   const providerLabels = useMemo(
     () => Object.fromEntries(
@@ -657,7 +631,11 @@ export function TaskBoard({
     [providers],
   );
 
-  const refresh = useCallback(async ({ includeActivities = true }: RefreshOptions = {}) => {
+  const refresh = useCallback(async ({ includeActivities = true, forceProviderRefresh = false }: RefreshOptions = {}) => {
+    if (refreshInFlightRef.current) {
+      return;
+    }
+    refreshInFlightRef.current = true;
     setRefreshing(true);
     const refreshSequence = refreshSequenceRef.current + 1;
     refreshSequenceRef.current = refreshSequence;
@@ -691,15 +669,23 @@ export function TaskBoard({
       setError(null);
       setLoading(false);
 
+      const cachedSessions = readCachedProviderSessionSnapshotRows(
+        visibleSessionProviders(nextProviders).map((provider) => provider.id),
+      );
+      if (cachedSessions.length > 0) {
+        setSessions((current) => mergeTaskBoardSessions(current, cachedSessions));
+      }
+
       const visibleProviders = visibleSessionProviders(nextProviders) as ProviderMetadata[];
       const sessionResults = await Promise.all(
         visibleProviders.map(async (provider) => {
           try {
-            return await withTimeout(
-              loadTaskBoardProviderSessions(provider, t.sessions.workspaceFallback),
-              TASK_BOARD_SESSION_LIST_REFRESH_TIMEOUT_MS,
-              `load task board sessions for ${provider.id}`,
+            const normalizedSessions = await loadTaskBoardProviderSessions(
+              provider,
+              t.sessions.workspaceFallback,
+              forceProviderRefresh,
             );
+            return writeCachedProviderSessionSnapshot(provider.id, normalizedSessions);
           } catch (sessionError) {
             console.warn(`Failed to load task board sessions for ${provider.id}`, sessionError);
             return [];
@@ -707,14 +693,14 @@ export function TaskBoard({
         }),
       );
       const flatSessions = sessionResults.flat();
-      setSessions(flatSessions);
+      setSessions((current) => mergeTaskBoardSessions(current, flatSessions));
       setNowMs(Date.now());
       void hydratePinnedSessionPreviews(flatSessions, nextTaskBoardState)
         .then((hydratedSessions) => {
           if (refreshSequenceRef.current !== refreshSequence) {
             return;
           }
-          setSessions(hydratedSessions);
+          setSessions((current) => mergeTaskBoardSessions(current, hydratedSessions));
           setNowMs(Date.now());
         })
         .catch((hydrationError) => {
@@ -723,13 +709,27 @@ export function TaskBoard({
     } catch (err) {
       setError(String(err));
     } finally {
+      refreshInFlightRef.current = false;
       setLoading(false);
       setRefreshing(false);
     }
   }, [onSessionActivitiesChange, t.sessions.workspaceFallback]);
 
   useEffect(() => {
-    void refresh({ includeActivities: true });
+    let cancelled = false;
+
+    void (async () => {
+      await refresh({ includeActivities: true });
+      if (cancelled || hasHydratedProviderSessionsRef.current) {
+        return;
+      }
+      hasHydratedProviderSessionsRef.current = true;
+      await refresh({ includeActivities: false, forceProviderRefresh: true });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [refresh]);
 
   useEffect(() => {
@@ -911,7 +911,7 @@ export function TaskBoard({
       }
 
       setSelectedApprovalTaskIds((current) => current.filter((id) => !succeededTaskIds.includes(id)));
-      await refresh({ includeActivities: true });
+      await refresh({ includeActivities: true, forceProviderRefresh: true });
     } finally {
       setBusyApprovalTaskIds((current) => current.filter((id) => !taskIds.includes(id)));
     }
@@ -956,7 +956,7 @@ export function TaskBoard({
           </div>
           <button
             type="button"
-            onClick={() => void refresh()}
+            onClick={() => void refresh({ includeActivities: true, forceProviderRefresh: true })}
             disabled={refreshing}
             className="ow-btn inline-flex h-10 items-center gap-2 rounded-2xl px-4 text-sm font-extrabold text-slate-700 disabled:opacity-60"
             title={t.taskBoard.refresh}

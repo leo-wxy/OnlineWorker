@@ -18,12 +18,12 @@ CHECKED_FILES = [
 
 
 ALLOWED_TOPIC_ATTR_READS = {
-    ("bot/handlers/message.py", 214),  # rollback snapshot only
+    ("bot/handlers/message.py", 225),  # rollback snapshot only
 }
 
 
 ALLOWED_GETATTR_TOPIC_READS = {
-    ("core/provider_owner_bridge.py", 717),  # rollback snapshot only
+    ("core/provider_owner_bridge.py", 1512),  # rollback snapshot only
 }
 
 

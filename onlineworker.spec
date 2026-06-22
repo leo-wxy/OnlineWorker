@@ -5,7 +5,14 @@
 
 import platform
 
+from PyInstaller.utils.hooks import collect_submodules
+
 block_cipher = None
+
+provider_hiddenimports = (
+    collect_submodules('plugins.providers.builtin.claude.python')
+    + collect_submodules('plugins.providers.builtin.codex.python')
+)
 
 a = Analysis(
     ['main.py'],
@@ -29,10 +36,7 @@ a = Analysis(
         'websockets.legacy.client',
         'telegram',
         'telegram.ext',
-        'plugins.providers.builtin.claude.python.cli_wrapper',
-        'plugins.providers.builtin.claude.python.http_proxy',
-        'plugins.providers.builtin.codex.python.cli_wrapper',
-    ],
+    ] + provider_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

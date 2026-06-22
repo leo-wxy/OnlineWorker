@@ -271,8 +271,18 @@ class CodexAdapter:
         result = await self._call("thread/list", params)
         # app-server 返回 {data: [...], nextCursor: ...}
         if isinstance(result, dict):
-            return result.get("data", [])
-        return result if isinstance(result, list) else []
+            threads = result.get("data", [])
+        else:
+            threads = result if isinstance(result, list) else []
+
+        if workspace_id and isinstance(threads, list):
+            for thread in threads:
+                if not isinstance(thread, dict):
+                    continue
+                thread_id = self._extract_thread_id_from_result(thread)
+                if thread_id:
+                    self._thread_workspace_map[thread_id] = workspace_id
+        return threads
 
     async def start_thread(self, workspace_id: str) -> dict:
         cwd = self._workspace_cwd_map.get(workspace_id)

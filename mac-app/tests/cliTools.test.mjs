@@ -5,30 +5,46 @@ import { buildSetupCliToolsFromProviderMetadata, getCliInstallInfo } from "../sr
 
 test("buildSetupCliToolsFromProviderMetadata defaults to visible providers only", () => {
   assert.deepEqual(buildSetupCliToolsFromProviderMetadata([
-    { id: "codex", label: "Codex", visible: true, bin: "codex" },
+    {
+      id: "primary",
+      label: "Primary",
+      visible: true,
+      bin: "primary",
+      install: { cliNames: ["primary"], label: "Primary CLI", method: "npm", command: "npm install -g primary" },
+    },
     { id: "customprovider", label: "Custom Provider", visible: false, bin: "customprovider" },
-    { id: "claude", label: "Claude", visible: true, bin: "claude" },
+    { id: "secondary", label: "Secondary", visible: true, bin: "secondary" },
   ]), [
-    { name: "codex", label: "Codex", bin: "codex" },
-    { name: "claude", label: "Claude", bin: "claude" },
+    {
+      name: "primary",
+      label: "Primary",
+      bin: "primary",
+      install: { cliNames: ["primary"], label: "Primary CLI", method: "npm", command: "npm install -g primary" },
+    },
+    { name: "secondary", label: "Secondary", bin: "secondary", install: null },
   ]);
 });
 
-test("getCliInstallInfo returns official Claude Code install metadata", () => {
+test("getCliInstallInfo returns provider manifest install metadata", () => {
   const texts = {
     installViaNpm: "Install via npm",
     installViaOfficialInstaller: "Install via official installer",
     installManually: (bin) => `Install ${bin} manually`,
   };
 
-  assert.deepEqual(getCliInstallInfo("claude", "claude", texts), {
-    label: "Anthropic Claude Code CLI",
+  assert.deepEqual(getCliInstallInfo("primary", "primary", texts, {
+    label: "Primary CLI",
+    method: "npm",
+    command: "npm install -g primary-cli",
+    docsUrl: "https://example.test/primary",
+  }), {
+    label: "Primary CLI",
     steps: [
       {
         desc: "Install via npm",
-        cmd: "npm install -g @anthropic-ai/claude-code",
+        cmd: "npm install -g primary-cli",
       },
     ],
-    docsUrl: "https://docs.anthropic.com/en/docs/claude-code/getting-started",
+    docsUrl: "https://example.test/primary",
   });
 });

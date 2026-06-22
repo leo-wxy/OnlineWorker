@@ -170,6 +170,7 @@ def make_state_with_workspace(
     ws = WorkspaceInfo(
         name=ws_name,
         path=f"/{ws_name}",
+        tool="codex",
         topic_id=ws_topic_id,
         daemon_workspace_id=daemon_ws_id,
     )
@@ -266,7 +267,7 @@ def make_state_with_owner(
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",

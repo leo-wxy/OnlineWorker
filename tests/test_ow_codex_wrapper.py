@@ -111,7 +111,7 @@ async def test_run_ow_codex_once_starts_proxy_then_runs_codex(monkeypatch, tmp_p
     config = SimpleNamespace(
         providers={
             "codex": SimpleNamespace(
-                codex_bin="configured-codex",
+                bin="configured-codex",
                 app_server_port=0,
                 message_hooks=SimpleNamespace(enabled=True),
             )
@@ -187,7 +187,7 @@ async def test_run_ow_codex_once_cleans_up_when_codex_child_fails(monkeypatch, t
     config = SimpleNamespace(
         providers={
             "codex": SimpleNamespace(
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=0,
                 message_hooks=SimpleNamespace(enabled=True),
             )

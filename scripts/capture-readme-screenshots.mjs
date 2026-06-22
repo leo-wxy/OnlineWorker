@@ -144,7 +144,7 @@ function demoProviders() {
       controlMode: "app",
       capabilities: baseCapabilities,
       messageHooks: { abusiveLanguageNormalization: { enabled: false, mode: "off" } },
-      externalCli: { launcherWrapsClaude: false },
+      externalCli: { launchesManagedChildCli: false },
       install: { cliNames: ["codex"] },
       process: { cleanupMatchers: [] },
       icon: null,
@@ -163,7 +163,7 @@ function demoProviders() {
       controlMode: "app",
       capabilities: baseCapabilities,
       messageHooks: { abusiveLanguageNormalization: { enabled: false, mode: "off" } },
-      externalCli: { launcherWrapsClaude: false },
+      externalCli: { launchesManagedChildCli: false },
       install: { cliNames: ["claude"] },
       process: { cleanupMatchers: [] },
       icon: null,
@@ -197,6 +197,39 @@ function demoUsage(providerId) {
   };
 }
 
+function demoClaudeSessions() {
+  return [
+    {
+      id: "claude-demo-001",
+      title: "Review release notes",
+      workspace: "/demo/workspaces/onlineworker",
+      archived: false,
+    },
+    {
+      id: "claude-demo-002",
+      title: "Draft setup guide",
+      workspace: "/demo/workspaces/docs",
+      archived: false,
+    },
+  ];
+}
+
+function demoProviderSessionTurns(providerId, sessionId) {
+  if (providerId === "codex") {
+    return [
+      { role: "user", content: `Open session ${sessionId}` },
+      { role: "assistant", content: "Updated the session browser to use provider-owned chats." },
+    ];
+  }
+  if (providerId === "claude") {
+    return [
+      { role: "user", content: `Open session ${sessionId}` },
+      { role: "assistant", content: "Summarized the latest provider-owned session activity." },
+    ];
+  }
+  return [];
+}
+
 function demoAiConfig() {
   return {
     services: [
@@ -213,9 +246,9 @@ function demoAiConfig() {
         enabled: true,
       },
       {
-        id: "claude_default",
-        name: "Claude",
-        protocol: "claude_messages",
+        id: "anthropic_default",
+        name: "Anthropic",
+        protocol: "anthropic_messages",
         baseUrl: null,
         endpoint: "https://api.example.com/messages",
         apiKey: "",
@@ -351,7 +384,6 @@ function demoTauriScript() {
   const data = {
     providers: demoProviders(),
     dashboard: demoDashboardState(),
-    codexThreads: demoCodexThreads(),
     ai: demoAiConfig(),
   };
   return `
@@ -426,18 +458,16 @@ function demoTauriScript() {
           return { ok: true, title: "Demo Group", chat_type: "supergroup", is_forum: true };
         case "test_bot_permissions":
           return { ok: true, status: "administrator", can_manage_topics: true, can_delete_messages: true, can_pin_messages: true };
-        case "list_codex_threads":
-          return data.codexThreads;
-        case "list_claude_sessions":
-          return [
-            { id: "claude-demo-001", title: "Review release notes", directory: "/demo/workspaces/onlineworker", archived: false },
-            { id: "claude-demo-002", title: "Draft setup guide", directory: "/demo/workspaces/docs", archived: false }
-          ];
-        case "read_codex_thread_state":
-        case "read_codex_thread_updates":
+        case "list_provider_sessions":
+          if (args.providerId === "codex") {
+            return demoCodexThreads();
+          }
+          if (args.providerId === "claude") {
+            return demoClaudeSessions();
+          }
+          return [];
         case "read_provider_session":
-        case "read_claude_session":
-          return { turns: [], cursor: { offset: 0 }, replace: true };
+          return demoProviderSessionTurns(args.providerId, args.sessionId);
         case "get_provider_usage_summary":
           return ${demoUsage.toString()}(args.providerId || "codex");
         case "get_ai_config":

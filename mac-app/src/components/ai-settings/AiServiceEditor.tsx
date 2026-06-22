@@ -3,7 +3,6 @@ import type { AiConnectionTestResult, AiServiceMetadata } from "../../types";
 import { NumberField, TextField, Toggle } from "./fields";
 import type { AiLabels } from "./utils";
 import {
-  BUILTIN_SERVICE_IDS,
   serviceDescription,
   serviceTitle,
   statusText,
@@ -54,7 +53,7 @@ export function AiServiceEditor({
           <div className="flex shrink-0 items-center gap-3">
             {saved && <span className="text-xs font-bold text-emerald-700">{common.saved}</span>}
             {saving && <span className="text-xs font-bold text-blue-600">{common.saving}</span>}
-            {!BUILTIN_SERVICE_IDS.includes(service.id) && (
+            {!service.pluginOwned && (
               <button
                 type="button"
                 onClick={() => onDelete(service.id)}
@@ -90,11 +89,11 @@ export function AiServiceEditor({
           <TextField
             id={`ai-service-${service.id}-url`}
             label={labels.requestUrl}
-            value={service.id === "claude_default" ? service.endpoint || "" : service.baseUrl || ""}
+            value={service.endpoint || service.baseUrl || ""}
             disabled={saving}
             onChange={(value) => onUpdate(
               service.id,
-              service.id === "claude_default" ? { endpoint: value } : { baseUrl: value },
+              service.protocol === "anthropic_messages" ? { endpoint: value } : { baseUrl: value },
             )}
           />
           <TextField

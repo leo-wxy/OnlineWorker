@@ -202,11 +202,16 @@ export function resolveProviders(state: DashboardState | null): ProviderDashboar
   return state.providers ?? [];
 }
 
-export function canOpenCodexTuiHost(state: DashboardState | null): boolean {
+export function canOpenProviderTuiHost(state: DashboardState | null): boolean {
+  const recentActivity = state?.recentActivity;
+  const activeTool = recentActivity?.activeSessionTool?.trim();
+  const activeProvider = (state?.providers ?? []).find((provider) => provider.id === activeTool);
+  const sidecarArgs = activeProvider?.tuiHost?.sidecarArgs ?? [];
   return (
-    state?.recentActivity?.activeSessionTool === "codex" &&
-    Boolean(state.recentActivity.activeWorkspacePath?.trim()) &&
-    Boolean(state.recentActivity.activeSessionId?.trim())
+    Boolean(activeTool) &&
+    sidecarArgs.length > 0 &&
+    Boolean(recentActivity?.activeWorkspacePath?.trim()) &&
+    Boolean(recentActivity?.activeSessionId?.trim())
   );
 }
 

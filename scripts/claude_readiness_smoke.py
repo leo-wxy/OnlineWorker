@@ -128,7 +128,7 @@ def _configured_claude_from_raw_config(data: dict[str, Any]) -> tuple[str, list[
     if isinstance(providers, dict):
         claude = providers.get("claude")
         if isinstance(claude, dict):
-            value = claude.get("bin") or claude.get("codex_bin")
+            value = claude.get("bin")
             launch_methods = _normalize_launch_methods(claude.get("launch_methods") or claude.get("launchMethods"))
             if str(value or "").strip():
                 return str(value).strip(), launch_methods
@@ -142,7 +142,7 @@ def _configured_claude_from_raw_config(data: dict[str, Any]) -> tuple[str, list[
                 continue
             if str(item.get("name") or "").strip() != "claude":
                 continue
-            value = item.get("bin") or item.get("codex_bin")
+            value = item.get("bin")
             if str(value or "").strip():
                 return str(value).strip(), []
 

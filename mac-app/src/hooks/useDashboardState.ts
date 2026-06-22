@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { DashboardState } from "../types";
 import {
   buildServiceControlStatus,
-  canOpenCodexTuiHost,
+  canOpenProviderTuiHost,
   resolveProviders,
 } from "../components/dashboard/model";
 
@@ -14,7 +14,7 @@ interface UseDashboardStateReturn {
   refresh: () => void;
   providers: ReturnType<typeof resolveProviders>;
   serviceControlStatus: ReturnType<typeof buildServiceControlStatus>;
-  canOpenCodexTuiHost: boolean;
+  canOpenProviderTuiHost: boolean;
 }
 
 export function useDashboardState(): UseDashboardStateReturn {
@@ -49,6 +49,6 @@ export function useDashboardState(): UseDashboardStateReturn {
     refresh,
     providers: resolveProviders(dashboardState),
     serviceControlStatus: buildServiceControlStatus(dashboardState),
-    canOpenCodexTuiHost: canOpenCodexTuiHost(dashboardState),
+    canOpenProviderTuiHost: canOpenProviderTuiHost(dashboardState),
   };
 }

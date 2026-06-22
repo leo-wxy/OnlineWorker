@@ -35,7 +35,7 @@ fn test_ai_service_connection_blocking(
 
     match service.protocol.trim() {
         "openai_compatible_chat" => test_openai_compatible_chat(&service, &api_key),
-        "claude_messages" => test_claude_messages(&service, &api_key),
+        "anthropic_messages" => test_anthropic_messages(&service, &api_key),
         protocol => Ok(AiConnectionTestResult {
             ok: false,
             status: None,
@@ -97,7 +97,7 @@ fn test_openai_compatible_chat(
     Ok(connection_result(response))
 }
 
-fn test_claude_messages(
+fn test_anthropic_messages(
     service: &AiServiceConfigEntry,
     api_key: &str,
 ) -> Result<AiConnectionTestResult, String> {
@@ -206,19 +206,19 @@ mod tests {
     #[test]
     fn model_for_test_falls_back_to_first_model() {
         let service = AiServiceConfigEntry {
-            id: "claude_default".to_string(),
-            name: "Claude".to_string(),
-            protocol: "claude_messages".to_string(),
+            id: "provider_default".to_string(),
+            name: "Provider".to_string(),
+            protocol: "openai_compatible_chat".to_string(),
             base_url: String::new(),
-            endpoint: "https://api.anthropic.com/v1/messages".to_string(),
+            endpoint: String::new(),
             api_key: "sk-test".to_string(),
-            api_key_env: "ANTHROPIC_API_KEY".to_string(),
-            models: vec!["claude-sonnet-4-6".to_string()],
+            api_key_env: "PROVIDER_API_KEY".to_string(),
+            models: vec!["model-alpha".to_string()],
             default_model: String::new(),
             timeout_seconds: 20,
             enabled: true,
         };
 
-        assert_eq!(model_for_test(&service), "claude-sonnet-4-6");
+        assert_eq!(model_for_test(&service), "model-alpha");
     }
 }

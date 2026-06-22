@@ -17,6 +17,7 @@ interface CliToolStatus {
   name: string;
   label?: string;
   bin: string;
+  install?: ProviderMetadata["install"] | null;
   installed: boolean | null;
 }
 

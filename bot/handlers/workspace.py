@@ -3,9 +3,9 @@
 /workspace 命令：列出所有已知 workspace（扫描各工具的 sessions 目录），按需打开。
 
 三层 Topic 结构：
-  codex                        ← 工具全局控制台（/workspace 在这里响应）
-  [codex] nm_common_cache      ← workspace 控制台（/new /list 在这里响应）
-  [codex/nm_common_cache] ...  ← thread Topic（消息直接发给 codex）
+  provider                     ← 工具全局控制台（/workspace 在这里响应）
+  [provider] workspace         ← workspace 控制台（/new /list 在这里响应）
+  [provider/workspace] ...     ← thread Topic（消息直接发给对应 provider）
 
 交互流程：
   /workspace
@@ -316,7 +316,12 @@ async def _finalize_thread_topic_header(
 
 def _get_workspace_hooks(tool_name: str):
     provider = get_provider(tool_name)
-    return provider.workspace_hooks if provider is not None else None
+    return getattr(provider, "workspace_hooks", None) if provider is not None else None
+
+
+def _get_thread_hooks(tool_name: str):
+    provider = get_provider(tool_name)
+    return getattr(provider, "thread_hooks", None) if provider is not None else None
 
 
 def _normalize_provider_server_threads(tool_name: str, server_threads: list[dict], *, limit: int) -> list[dict]:
@@ -345,6 +350,40 @@ def _list_provider_local_threads(tool_name: str, workspace_path: str, *, limit: 
     return []
 
 
+def _provider_thread_source(tool_name: str, *, default: str = "unknown") -> str:
+    hooks = _get_thread_hooks(tool_name)
+    callback = getattr(hooks, "new_imported_thread_source", None) if hooks is not None else None
+    if callable(callback):
+        value = str(callback() or "").strip()
+        if value:
+            return value
+    return default
+
+
+async def _sync_existing_provider_thread_history(
+    *,
+    tool_name: str,
+    bot,
+    group_chat_id: int,
+    topic_id: int,
+    thread_info: ThreadInfo,
+    thread_id: str,
+    storage,
+) -> bool:
+    hooks = _get_workspace_hooks(tool_name)
+    callback = getattr(hooks, "sync_existing_thread_history", None) if hooks is not None else None
+    if not callable(callback):
+        return False
+    return await callback(
+        bot=bot,
+        group_chat_id=group_chat_id,
+        topic_id=topic_id,
+        thread_info=thread_info,
+        thread_id=thread_id,
+        storage=storage,
+    )
+
+
 def _workspace_key(state: AppState, ws_info: WorkspaceInfo) -> str:
     return state.get_workspace_storage_key(ws_info) or ws_info.daemon_workspace_id or f"{ws_info.tool}:{ws_info.name}"
 
@@ -357,98 +396,6 @@ def _thread_topic_id(state: AppState, ws_info: WorkspaceInfo, thread_info: Threa
     return state.get_thread_topic_id(_workspace_key(state, ws_info), ws_info, thread_info)
 
 
-async def _sync_existing_claude_thread_history(
-    *,
-    bot,
-    group_chat_id: int,
-    topic_id: int,
-    thread_info: ThreadInfo,
-    thread_id: str,
-    storage,
-) -> bool:
-    try:
-        history = read_provider_thread_history(
-            "claude",
-            thread_id,
-            limit=_THREAD_HISTORY_SYNC_LOOKBACK,
-            sessions_dir=None,
-        )
-    except Exception as e:
-        logger.warning(f"[thread_open] 读取 Claude thread {thread_id[:8]}… 历史失败：{e}")
-        return False
-
-    if not history:
-        logger.info(
-            "[claude-history-sync] thread=%s topic=%s 无历史可同步",
-            thread_id[:12],
-            topic_id,
-        )
-        return False
-
-    current_cursor = thread_info.history_sync_cursor or None
-    latest_cursor = _history_turn_signature(history[-1])
-    turns_to_send: list[dict] = []
-    snapshot_mode = False
-
-    if current_cursor:
-        matched_index = -1
-        for index in range(len(history) - 1, -1, -1):
-            if _history_turn_signature(history[index]) == current_cursor:
-                matched_index = index
-                break
-        if matched_index >= 0:
-            turns_to_send = history[matched_index + 1:]
-        else:
-            snapshot_mode = True
-            turns_to_send = history[-_THREAD_SYNC_LIMIT:]
-    else:
-        snapshot_mode = True
-        turns_to_send = history[-_THREAD_SYNC_LIMIT:]
-
-    if not turns_to_send:
-        if thread_info.history_sync_cursor != latest_cursor:
-            thread_info.history_sync_cursor = latest_cursor
-            if storage:
-                save_storage(storage)
-        logger.info(
-            "[claude-history-sync] thread=%s topic=%s 已是最新，无需补齐",
-            thread_id[:12],
-            topic_id,
-        )
-        return False
-
-    header = (
-        f"🔄 当前会话快照（最近 {len(turns_to_send)} 条）："
-        if snapshot_mode
-        else f"🔄 同步到 {len(turns_to_send)} 条新消息："
-    )
-    rendered_turns = [
-        msg
-        for msg in (_format_history_turn_message(turn) for turn in turns_to_send)
-        if msg
-    ]
-    for batch in _build_history_sync_batches(header, rendered_turns):
-        await _send_to_group(
-            bot,
-            group_chat_id,
-            batch,
-            topic_id=topic_id,
-        )
-
-    if thread_info.history_sync_cursor != latest_cursor:
-        thread_info.history_sync_cursor = latest_cursor
-        if storage:
-            save_storage(storage)
-    logger.info(
-        "[claude-history-sync] thread=%s topic=%s mode=%s sent=%s",
-        thread_id[:12],
-        topic_id,
-        "snapshot" if snapshot_mode else "incremental",
-        len(turns_to_send),
-    )
-    return True
-
-
 def make_thread_open_callback_data(ws_id: str, thread_id: str) -> str:
     """构造 thread_open 唯一 callback_data，避免 thread id 前缀冲突。"""
     return f"{_THREAD_OPEN_V2_PREFIX}:{_make_thread_open_token(ws_id)}:{_make_thread_open_token(thread_id)}"
@@ -456,8 +403,10 @@ def make_thread_open_callback_data(ws_id: str, thread_id: str) -> str:
 
 def _thread_control_intro(tool_name: str, thread_id: str, state_text: str) -> str:
     intro = f"thread `{thread_id[-8:]}` {state_text}，继续对话或使用下方按钮。"
-    if tool_name == "codex":
-        intro += "\n此 Topic 由 OnlineWorker 托管；Codex app-server 权限请求会在这里显示 TG 审批按钮。"
+    hooks = _get_workspace_hooks(tool_name)
+    callback = getattr(hooks, "thread_control_intro_extra", None) if hooks is not None else None
+    if callable(callback):
+        intro += str(callback(thread_id, state_text) or "")
     return intro
 
 
@@ -492,7 +441,7 @@ def _resolve_thread_open_workspace(storage, data: str) -> tuple[Optional[Workspa
 def make_workspace_handler(state: AppState, group_chat_id: int, cfg: Config):
     """
     /workspace → 扫描所有已启用工具的 sessions 目录，列出所有 cwd，inline keyboard 每行一个按钮。
-    回复到命令所在的 topic（通常是 codex 全局 topic）。
+    回复到命令所在的 topic（通常是 provider 全局 topic）。
     """
     async def workspace(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         storage = state.storage
@@ -877,7 +826,7 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                     preview=matched.get("preview"),
                     archived=False,
                     is_active=True,
-                    source="imported" if ws_info.tool == "claude" else "unknown",
+                    source=_provider_thread_source(ws_info.tool),
                 )
                 ws_info.threads[sid] = thread_info
                 if storage:
@@ -968,15 +917,15 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                             previous_preview,
                             thread_info.preview,
                         )
-                    if ws_info.tool == "claude":
-                        await _sync_existing_claude_thread_history(
-                            bot=bot,
-                            group_chat_id=group_chat_id,
-                            topic_id=existing_thread_topic_id,
-                            thread_info=thread_info,
-                            thread_id=full_tid,
-                            storage=storage,
-                        )
+                    await _sync_existing_provider_thread_history(
+                        tool_name=ws_info.tool,
+                        bot=bot,
+                        group_chat_id=group_chat_id,
+                        topic_id=existing_thread_topic_id,
+                        thread_info=thread_info,
+                        thread_id=full_tid,
+                        storage=storage,
+                    )
                     await send_thread_control_panel(
                         state,
                         bot,
@@ -1211,7 +1160,7 @@ async def _open_workspace(
             topic_id=None,
             preview=preview,
             archived=False,
-            source="imported",
+            source=_provider_thread_source(tool_name, default="imported"),
         )
         needs_save = True
 
@@ -1277,7 +1226,11 @@ async def _send_workspace_thread_overview(
     reconcile_workspace_threads_with_source(state, ws_info, active_ids=active_ids)
 
     display_threads: list[dict] = []
-    if tool_name == "claude":
+    hooks = _get_workspace_hooks(tool_name)
+    prefer_provider_thread_overview = bool(
+        getattr(hooks, "prefer_provider_thread_overview", False) if hooks is not None else False
+    )
+    if prefer_provider_thread_overview:
         archived_ids = {
             tid
             for tid, tinfo in ws_info.threads.items()
@@ -1421,7 +1374,7 @@ def make_cli_handler(state: AppState, group_chat_id: int, cfg: Config):
     /cli 命令：在 General topic 列出所有工具，显示其全局 topic 状态，提供创建/重建按钮。
     
     功能：
-    1. 列出所有已启用的 provider（如 codex、claude、overlay provider 等）
+    1. 列出所有已启用的 provider（如 builtin provider、overlay provider 等）
     2. 显示每个工具的全局 topic 状态（已创建 ✅ / 未创建 ⚠️）
     3. 提供按钮创建/重建工具的全局 topic
     """

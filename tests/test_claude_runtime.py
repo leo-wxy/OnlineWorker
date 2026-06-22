@@ -270,7 +270,7 @@ async def test_start_runtime_starts_hook_bridge_before_install(monkeypatch):
             ToolConfig(
                 name="claude",
                 enabled=True,
-                codex_bin="claude",
+                bin="claude",
                 protocol="stdio",
             ),
         ],

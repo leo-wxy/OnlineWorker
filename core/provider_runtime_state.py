@@ -90,3 +90,5 @@ class ProviderRuntimeState:
     active_threads: set[str] = field(default_factory=set)
     thread_idle_events: dict[str, asyncio.Event] = field(default_factory=dict)
     pending_approval_decisions: dict[str, ProviderPendingApprovalDecision] = field(default_factory=dict)
+    thread_capacity_auto_continue_attempts: dict[str, int] = field(default_factory=dict)
+    thread_capacity_auto_continue_last_at: dict[str, float] = field(default_factory=dict)

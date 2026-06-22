@@ -10,7 +10,8 @@ def build_codex_tui_host_parser() -> argparse.ArgumentParser:
     parser.add_argument("--data-dir", required=True, help="OnlineWorker data dir")
     parser.add_argument("--remote", help="Optional remote codex app-server ws url")
     parser.add_argument("--cd", required=True, help="Workspace cwd for codex resume")
-    parser.add_argument("--codex-bin", default="codex", help="Codex executable path")
+    parser.add_argument("--bin", dest="provider_bin", default="codex", help="Provider executable path")
+    parser.add_argument("--codex-bin", dest="provider_bin", help=argparse.SUPPRESS)
     parser.add_argument(
         "target",
         nargs="?",
@@ -34,7 +35,7 @@ async def run_from_args(args: argparse.Namespace) -> int:
         data_dir=args.data_dir,
         cwd=args.cd,
         remote_url=args.remote,
-        codex_bin=args.codex_bin,
+        provider_bin=args.provider_bin,
         extra_args=args.extra_arg,
         target=args.target,
     )

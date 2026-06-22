@@ -309,10 +309,10 @@ async def test_run_ai_scenario_uses_selected_service_model_not_scenario_model():
                 timeout_seconds=7,
                 enabled=True,
             ),
-            "claude_default": AiServiceConfig(
-                id="claude_default",
-                name="Claude",
-                protocol="claude_messages",
+            "anthropic_default": AiServiceConfig(
+                id="anthropic_default",
+                name="Anthropic",
+                protocol="anthropic_messages",
                 endpoint="https://api.anthropic.com/v1/messages",
                 api_key="sk-claude",
                 models=("claude-sonnet-4-6",),
@@ -325,7 +325,7 @@ async def test_run_ai_scenario_uses_selected_service_model_not_scenario_model():
             "notification_summary": AiScenarioConfig(
                 id="notification_summary",
                 enabled=True,
-                service_id="claude_default",
+                service_id="anthropic_default",
                 model="gpt-5.4",
                 output_schema="notification_summary_v1",
                 fallback="local_notification_summary_rules",
@@ -343,6 +343,6 @@ async def test_run_ai_scenario_uses_selected_service_model_not_scenario_model():
 
     assert result.ok is True
     assert len(client.calls) == 1
-    assert client.calls[0]["service"].id == "claude_default"
+    assert client.calls[0]["service"].id == "anthropic_default"
     assert client.calls[0]["model"] == "claude-sonnet-4-6"
     assert client.calls[0]["timeout_seconds"] == 9

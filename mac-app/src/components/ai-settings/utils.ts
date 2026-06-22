@@ -4,8 +4,6 @@ import type { AiScenarioMetadata, AiServiceMetadata } from "../../types";
 export type AiView = "services" | "scenarios";
 export type AiLabels = ReturnType<typeof useI18n>["t"]["ai"];
 
-export const BUILTIN_SERVICE_IDS = ["openai_default", "claude_default"];
-
 export function serviceBadge(service: AiServiceMetadata, labels: AiLabels) {
   if (!service.enabled) {
     return labels.disabled;
@@ -35,24 +33,12 @@ export function statusText(status: number | null | undefined) {
   return status ? `HTTP ${status}` : "-";
 }
 
-export function serviceTitle(service: AiServiceMetadata, labels: AiLabels) {
-  if (service.id === "openai_default") {
-    return labels.openaiService;
-  }
-  if (service.id === "claude_default") {
-    return labels.claudeService;
-  }
-  return service.name || service.id;
+export function serviceTitle(service: AiServiceMetadata, _labels: AiLabels) {
+  return service.label || service.name || service.id;
 }
 
 export function serviceDescription(service: AiServiceMetadata, labels: AiLabels) {
-  if (service.id === "openai_default") {
-    return labels.openaiServiceDescription;
-  }
-  if (service.id === "claude_default") {
-    return labels.claudeServiceDescription;
-  }
-  return labels.customServiceDescription;
+  return service.description || labels.customServiceDescription;
 }
 
 export function scenarioTitle(scenario: AiScenarioMetadata, labels: AiLabels) {

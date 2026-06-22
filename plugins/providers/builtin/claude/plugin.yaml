@@ -22,6 +22,8 @@ provider:
   control_mode: app
   transport:
     type: stdio
+  compatibility:
+    auth_policy: external_cli_only
   message_hooks:
     abusive_language_normalization:
       enabled: false
@@ -44,12 +46,22 @@ provider:
       external_cli: http_proxy
       wrapper: ow-claude
     session_access:
-      list: claude_projects
-      read: claude_project
+      list: owner_bridge
+      read: owner_bridge
       send: owner_bridge
       stream: none
   process:
     cleanup_matchers: []
+  discovery:
+    skill_roots:
+      - ~/.claude/skills
+  install:
+    cli_names:
+      - claude
+    label: Anthropic Claude Code CLI
+    method: npm
+    command: npm install -g @anthropic-ai/claude-code
+    docs_url: https://docs.anthropic.com/en/docs/claude-code/getting-started
   health: {}
   commands:
     - name: doctor
@@ -68,5 +80,21 @@ provider:
       scope: global
       description: 检查 Claude CLI 更新（静态 fallback catalog）
 
+ai:
+  services:
+    - id: anthropic_default
+      name: Anthropic
+      label: Claude
+      description: Claude Messages API service for Anthropic Claude.
+      protocol: anthropic_messages
+      endpoint: https://api.anthropic.com/v1/messages
+      api_key_env: ANTHROPIC_API_KEY
+      models:
+        - claude-sonnet-4-6
+      default_model: claude-sonnet-4-6
+      timeout_seconds: 20
+      enabled: false
+
 entrypoints:
   python_descriptor: plugins.providers.builtin.claude.python.provider:create_provider_descriptor
+  python_document_normalizer: plugins.providers.builtin.claude.python.config_normalizer:normalize_config_document

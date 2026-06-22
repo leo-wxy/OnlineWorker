@@ -27,14 +27,12 @@ from bot.utils import (
 
 logger = logging.getLogger(__name__)
 
-
-_AUTHORITATIVE_THREAD_FACT_TOOLS = {"claude"}
-
-
 def _load_authoritative_thread_ids(ws_info) -> Optional[set[str]]:
     """对 thread 事实源可完全信任的 provider，返回当前可见 thread 集合。"""
     tool_name = getattr(ws_info, "tool", "")
-    if tool_name not in _AUTHORITATIVE_THREAD_FACT_TOOLS:
+    provider = get_provider(tool_name)
+    facts = provider.facts if provider is not None else None
+    if not bool(getattr(facts, "thread_list_is_authoritative", False)):
         return None
 
     try:
@@ -73,7 +71,9 @@ def clear_stale_thread_archive_if_active(state: AppState, ws_info, thread_info, 
     """当 source 事实源显示 thread 仍活跃时，清除本地误标 archived。"""
     if not getattr(thread_info, "archived", False):
         return False
-    if getattr(ws_info, "tool", "") == "claude":
+    provider = get_provider(getattr(ws_info, "tool", ""))
+    facts = provider.facts if provider is not None else None
+    if bool(getattr(facts, "preserve_archived_threads", False)):
         return False
 
     if active_ids is None:
@@ -128,10 +128,13 @@ def reconcile_workspace_threads_with_source(
     authoritative_ids = _load_authoritative_thread_ids(ws_info)
     if authoritative_ids is not None:
         authoritative_ids |= set(active_ids or set())
+    provider = get_provider(getattr(ws_info, "tool", ""))
+    facts = provider.facts if provider is not None else None
+    preserve_archived = bool(getattr(facts, "preserve_archived_threads", False))
 
     for thread_id, thread_info in list(ws_info.threads.items()):
         if (
-            getattr(ws_info, "tool", "") == "claude"
+            preserve_archived
             and authoritative_ids is not None
             and thread_id not in authoritative_ids
             and get_route_aware_thread_topic_id(state, ws_info, thread_info) is None
@@ -160,7 +163,7 @@ def reconcile_workspace_threads_with_source(
             continue
         next_active = thread_id in active_ids
         if (
-            getattr(ws_info, "tool", "") == "claude"
+            preserve_archived
             and not next_active
             and not getattr(thread_info, "archived", False)
             and get_route_aware_thread_topic_id(state, ws_info, thread_info) is None
@@ -196,7 +199,9 @@ def _status_provider_names(state: AppState) -> list[str]:
             if is_provider_exposed(tool.name) and tool.name not in names:
                 names.append(tool.name)
     if not names:
-        names.append("codex")
+        for provider in filter(None, (get_provider(name) for name in state.registered_adapter_names())):
+            if provider.name not in names:
+                names.append(provider.name)
     for name in state.registered_adapter_names():
         if is_provider_exposed(name) and name not in names:
             names.append(name)
@@ -211,16 +216,6 @@ def tg_processing_ack_text() -> str:
 def tg_send_failed_text(error: object) -> str:
     """TG 发送失败时的统一提示。"""
     return f"❌ 发送失败：{error}"
-
-
-def is_codex_unmaterialized_error(error: object) -> bool:
-    """判断 codex 是否因 thread 尚未 materialize 而拒绝 resume/archive。"""
-    text = str(error).lower()
-    return (
-        "not materialized yet" in text
-        or "no rollout found for thread id" in text
-        or "thread not found:" in text
-    )
 
 
 def tg_empty_turn_completed_text() -> str:

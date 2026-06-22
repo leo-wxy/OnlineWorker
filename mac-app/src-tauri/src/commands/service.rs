@@ -47,8 +47,11 @@ pub struct ServiceStatus {
     pub pid: Option<u32>,
 }
 
-const OWNER_BRIDGE_SOCKET_FILENAMES: [&str; 2] =
-    ["provider_owner_bridge.sock", "codex_owner_bridge.sock"];
+const OWNER_BRIDGE_SOCKET_FILENAMES: [&str; 2] = [
+    "provider_owner_bridge.sock",
+    LEGACY_OWNER_BRIDGE_SOCKET_FILENAME,
+];
+const LEGACY_OWNER_BRIDGE_SOCKET_FILENAME: &str = "codex_owner_bridge.sock";
 
 fn cleanup_owner_bridge_socket_files_in_dir(data_dir: &Path) {
     for filename in OWNER_BRIDGE_SOCKET_FILENAMES {
@@ -137,8 +140,16 @@ fn cleanup_process_matchers(policy: ManagedProcessCleanupPolicy) -> Vec<String> 
     matchers
 }
 
+fn has_onlineworker_ownership_marker(matcher: &str) -> bool {
+    let normalized = matcher.to_ascii_lowercase();
+    normalized.contains("onlineworker")
+        || normalized.contains("--ow-")
+        || normalized.contains("--data-dir")
+}
+
 fn is_unsafe_global_cleanup_matcher(matcher: &str) -> bool {
-    matches!(matcher, "codex.*app-server" | "codex-aar")
+    let normalized = matcher.to_ascii_lowercase();
+    normalized.contains("app-server") && !has_onlineworker_ownership_marker(&normalized)
 }
 
 fn cleanup_policy_from_config() -> ManagedProcessCleanupPolicy {
@@ -151,27 +162,22 @@ fn cleanup_policy_from_config() -> ManagedProcessCleanupPolicy {
                 .collect(),
         };
     }
-
-    let Ok(policies) = read_provider_runtime_policies_from_disk() else {
-        return ManagedProcessCleanupPolicy {
-            provider_matchers: vec!["codex.*app-server".to_string(), "codex-aar".to_string()],
-        };
-    };
-    let mut provider_matchers = Vec::new();
-    if policies
-        .get("codex")
-        .map(|policy| policy.managed)
-        .unwrap_or(false)
-    {
-        provider_matchers.push("codex.*app-server".to_string());
-        provider_matchers.push("codex-aar".to_string());
-    }
-    ManagedProcessCleanupPolicy { provider_matchers }
+    ManagedProcessCleanupPolicy::default()
 }
 
 fn is_onlineworker_cli_wrapper_command(command_line: &str) -> bool {
     let mut args = command_line.split_whitespace();
-    args.any(|arg| matches!(arg, "--ow-codex" | "--ow-claude" | "--codex-tui-host"))
+    args.any(|arg| {
+        let normalized = arg.trim();
+        (normalized.starts_with("--ow-") && normalized.len() > "--ow-".len())
+            || normalized.ends_with("-tui-host")
+            || normalized == "--provider-session-bridge"
+            // Keep legacy provider-specific wrapper flags as compatibility-only markers.
+            || normalized == "--codex-hook-bridge"
+            || normalized == "--claude-hook-bridge"
+            || normalized == "--codex-tui-host"
+            || normalized == "--provider-tui-host"
+    })
 }
 
 fn is_packaged_onlineworker_bot_command(command: &str) -> bool {
@@ -246,17 +252,6 @@ fn cleanup_managed_processes(policy: ManagedProcessCleanupPolicy) {
     cleanup_owner_bridge_socket_files();
 }
 
-fn pids_from_output(output: &[u8]) -> Vec<u32> {
-    std::str::from_utf8(output)
-        .ok()
-        .map(|text| {
-            text.lines()
-                .filter_map(|line| line.trim().parse::<u32>().ok())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 fn pids_from_bot_process_rows(output: &[u8], data_dir: &Path) -> Vec<u32> {
     let expected_arg = format!(" --data-dir {}", data_dir.to_string_lossy());
     std::str::from_utf8(output)
@@ -272,7 +267,11 @@ fn pids_from_bot_process_rows(output: &[u8], data_dir: &Path) -> Vec<u32> {
                         return None;
                     }
                     if command_line.contains(&expected_arg) {
-                        Some(pid)
+                        if is_onlineworker_cli_wrapper_command(command_line) {
+                            None
+                        } else {
+                            Some(pid)
+                        }
                     } else {
                         None
                     }
@@ -397,25 +396,8 @@ fn cleanup_tracked_process_tree(root_pid: Option<u32>) {
 }
 
 fn find_external_bot_pid(data_dir: &std::path::Path) -> Option<u32> {
-    let output = std::process::Command::new("pgrep")
-        .args(["-x", "onlineworker-bot"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let pids = pids_from_output(&output.stdout);
-    if pids.is_empty() {
-        return None;
-    }
-
-    let pid_arg = pids
-        .iter()
-        .map(u32::to_string)
-        .collect::<Vec<_>>()
-        .join(",");
     let command_output = std::process::Command::new("ps")
-        .args(["-o", "pid=,command=", "-p", &pid_arg])
+        .args(["-axo", "pid=,command="])
         .output()
         .ok()?;
     if !command_output.status.success() {
@@ -857,7 +839,7 @@ fn expand_home_path(value: &str) -> String {
 }
 
 /// Check if a CLI command is installed.
-/// Accepts command lines such as `/path/to/claude-launcher claude`; only the executable token
+/// Accepts command lines such as `/path/to/provider-launcher run`; only the executable token
 /// is checked. .app bundles have minimal PATH, so we set a rich PATH for `which`.
 #[tauri::command]
 pub async fn check_cli(bin: String) -> Result<bool, String> {
@@ -919,8 +901,9 @@ mod tests {
         cleanup_owner_bridge_socket_files_in_dir, cleanup_process_matchers, command_program_token,
         compute_service_status, managed_bot_cleanup_pids_from_rows, overlay_env_spec,
         overlay_env_spec_from_app_env, pid_parent_pairs_from_output, pids_from_bot_process_rows,
-        pids_from_output, probe_http_health, process_tree_pids, read_env_key, select_primary_pid,
+        probe_http_health, process_tree_pids, read_env_key, select_primary_pid,
         should_attempt_background_service_recovery, BotState, ManagedProcessCleanupPolicy,
+        LEGACY_OWNER_BRIDGE_SOCKET_FILENAME,
     };
     use std::collections::HashMap;
     use std::fs;
@@ -934,12 +917,12 @@ mod tests {
     #[test]
     fn command_program_token_accepts_command_lines_with_arguments() {
         assert_eq!(
-            command_program_token("/Users/example/bin/claude-launcher claude"),
-            "/Users/example/bin/claude-launcher"
+            command_program_token("/Users/example/bin/provider-launcher run"),
+            "/Users/example/bin/provider-launcher"
         );
         assert_eq!(
-            command_program_token("\"/some path/bin/claude-launcher\" claude"),
-            "/some path/bin/claude-launcher"
+            command_program_token("\"/some path/bin/provider-launcher\" run"),
+            "/some path/bin/provider-launcher"
         );
     }
 
@@ -1082,7 +1065,6 @@ mod tests {
         });
         assert!(!matchers.contains(&"onlineworker-bot".to_string()));
         assert!(!matchers.contains(&"python.*main.py".to_string()));
-        assert!(!matchers.contains(&"codex.*app-server".to_string()));
         assert!(!matchers.contains(&"custom-provider.*serve".to_string()));
     }
 
@@ -1090,24 +1072,30 @@ mod tests {
     fn cleanup_process_matchers_include_managed_provider_processes() {
         let matchers = cleanup_process_matchers(ManagedProcessCleanupPolicy {
             provider_matchers: vec![
-                "codex.*app-server".to_string(),
-                "codex-aar".to_string(),
+                "primary.*app-server.*--ow-primary".to_string(),
+                "primary-aar".to_string(),
                 "custom-provider.*serve".to_string(),
             ],
         });
-        assert!(!matchers.contains(&"codex.*app-server".to_string()));
-        assert!(!matchers.contains(&"codex-aar".to_string()));
+        assert!(matchers.contains(&"primary.*app-server.*--ow-primary".to_string()));
+        assert!(matchers.contains(&"primary-aar".to_string()));
         assert!(matchers.contains(&"custom-provider.*serve".to_string()));
     }
 
     #[test]
-    fn cleanup_process_matchers_skip_legacy_codex_global_matchers() {
+    fn cleanup_process_matchers_rejects_external_app_server_patterns() {
         let matchers = cleanup_process_matchers(ManagedProcessCleanupPolicy {
-            provider_matchers: vec!["codex.*app-server".to_string(), "codex-aar".to_string()],
+            provider_matchers: vec![
+                "codex.*app-server".to_string(),
+                "third-party.*app-server".to_string(),
+                "custom-provider.*serve".to_string(),
+                "onlineworker-bot --ow-primary".to_string(),
+            ],
         });
-
         assert!(!matchers.contains(&"codex.*app-server".to_string()));
-        assert!(!matchers.contains(&"codex-aar".to_string()));
+        assert!(!matchers.contains(&"third-party.*app-server".to_string()));
+        assert!(matchers.contains(&"custom-provider.*serve".to_string()));
+        assert!(matchers.contains(&"onlineworker-bot --ow-primary".to_string()));
     }
 
     #[test]
@@ -1116,16 +1104,16 @@ mod tests {
             std::env::temp_dir().join(format!("ow-service-socket-cleanup-{}", std::process::id()));
         fs::create_dir_all(&dir).expect("create temp dir");
         let provider_socket = dir.join("provider_owner_bridge.sock");
-        let codex_socket = dir.join("codex_owner_bridge.sock");
+        let legacy_socket = dir.join(LEGACY_OWNER_BRIDGE_SOCKET_FILENAME);
         let unrelated = dir.join("onlineworker_state.json");
         fs::write(&provider_socket, "").expect("write provider socket placeholder");
-        fs::write(&codex_socket, "").expect("write codex socket placeholder");
+        fs::write(&legacy_socket, "").expect("write legacy socket placeholder");
         fs::write(&unrelated, "{}").expect("write unrelated file");
 
         cleanup_owner_bridge_socket_files_in_dir(&dir);
 
         assert!(!provider_socket.exists());
-        assert!(!codex_socket.exists());
+        assert!(!legacy_socket.exists());
         assert!(unrelated.exists());
 
         let _ = fs::remove_dir_all(&dir);
@@ -1199,11 +1187,6 @@ mod tests {
     }
 
     #[test]
-    fn pids_from_output_parses_multiple_rows() {
-        assert_eq!(pids_from_output(b"21014\n21035\n"), vec![21014, 21035]);
-    }
-
-    #[test]
     fn pid_parent_pairs_from_output_parses_ps_rows() {
         let pairs = pid_parent_pairs_from_output(b"21014 1\n21035 21014\n");
         assert_eq!(pairs.get(&21014), Some(&1));
@@ -1266,7 +1249,7 @@ mod tests {
     #[test]
     fn pids_from_bot_process_rows_matches_data_dir_with_spaces() {
         let data_dir = Path::new("/Users/example/Library/Application Support/OnlineWorker");
-        let rows = b" 123 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker\n 456 /usr/bin/python3 -c sleep onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker\n";
+        let rows = b" 123 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker\n 456 /usr/bin/python3 -c sleep onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker\n 789 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --provider-session-bridge --provider-id codex\n";
 
         assert_eq!(pids_from_bot_process_rows(rows, data_dir), vec![123]);
     }
@@ -1276,12 +1259,14 @@ mod tests {
         let data_dir = Path::new("/Users/example/Library/Application Support/OnlineWorker");
         let rows = b"\
  101 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker
- 102 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-codex
- 103 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-claude
- 104 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --ow-claude --data-dir /Users/example/Library/Application Support/OnlineWorker
+ 102 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-primary
+ 103 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-secondary
+ 104 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --ow-secondary --data-dir /Users/example/Library/Application Support/OnlineWorker
+ 108 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --provider-session-bridge --provider-id primary
+ 109 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --codex-hook-bridge
  105 /usr/bin/python3 /repo/main.py --data-dir /Users/example/Library/Application Support/OnlineWorker
- 106 /usr/bin/python3 /repo/main.py --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-codex
- 107 /usr/bin/python3 /repo/main.py --ow-claude --data-dir /Users/example/Library/Application Support/OnlineWorker
+ 106 /usr/bin/python3 /repo/main.py --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-primary
+ 107 /usr/bin/python3 /repo/main.py --ow-secondary --data-dir /Users/example/Library/Application Support/OnlineWorker
 ";
 
         assert_eq!(

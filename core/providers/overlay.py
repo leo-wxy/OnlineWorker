@@ -102,7 +102,7 @@ def manifest_to_provider_raw(manifest: dict[str, Any]) -> dict[str, Any]:
         "description": str(provider_raw.get("description") or manifest.get("description") or ""),
         "managed": bool(provider_raw.get("managed", False)),
         "autostart": bool(provider_raw.get("autostart", False)),
-        "codex_bin": str(bin_value),
+        "bin": str(bin_value),
         "protocol": str(
             provider_raw.get("owner_transport")
             or manifest.get("owner_transport")

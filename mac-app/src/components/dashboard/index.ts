@@ -6,7 +6,7 @@ export { ProviderStatusList } from "./ProviderStatusList";
 export type { ServiceAction } from "./model";
 export {
   buildServiceControlStatus,
-  canOpenCodexTuiHost,
+  canOpenProviderTuiHost,
   getOverallStyles,
   resolveProviders,
 } from "./model";

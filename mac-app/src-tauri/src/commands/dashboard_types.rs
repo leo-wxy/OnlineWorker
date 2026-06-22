@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::commands::config_provider::ProviderIconEntry;
+use crate::commands::config_provider::{ProviderIconEntry, ProviderTuiHostEntry};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -72,6 +72,7 @@ pub struct ProviderDashboardStatus {
     pub live_transport: Option<String>,
     pub control_mode: Option<String>,
     pub bin: Option<String>,
+    pub tui_host: ProviderTuiHostEntry,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

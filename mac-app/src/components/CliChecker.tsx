@@ -7,8 +7,14 @@ import { getCliInstallInfo } from "../utils/cliTools.js";
 // ─── Types ─────────────────────────────────────────────────────────────────
 
 interface CliEntry {
-  name: string;   // tool name, e.g. "codex"
-  bin: string;    // raw bin path from config
+  name: string;
+  bin: string;
+  install?: {
+    label?: string;
+    method?: string;
+    command?: string;
+    docsUrl?: string;
+  } | null;
 }
 
 interface CliStatus extends CliEntry {
@@ -107,7 +113,7 @@ export function CliChecker({ configRaw }: { configRaw: string }) {
       {/* Status rows */}
       <div className="divide-y divide-gray-100">
         {statuses.map((s) => {
-          const info = getCliInstallInfo(s.name, s.bin, t.cliChecker as AppTexts["cliChecker"]);
+          const info = getCliInstallInfo(s.name, s.bin, t.cliChecker as AppTexts["cliChecker"], s.install ?? null);
           return (
             <div key={s.name}>
               {/* CLI row */}

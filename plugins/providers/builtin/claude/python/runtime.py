@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import inspect
+import hashlib
 import logging
+from datetime import datetime
 
 from core.providers.interactions import (
     ProviderApprovalRequest,
@@ -20,6 +22,7 @@ from core.providers.thread_runtime import (
     interrupt_default_thread,
     resolve_default_thread_adapter,
 )
+from core.storage import save_storage
 from core.providers.workspace_runtime import default_normalize_server_threads
 from plugins.providers.builtin.claude.python.adapter import (
     ClaudeAdapter,
@@ -29,6 +32,78 @@ from plugins.providers.builtin.claude.python.adapter import (
 from plugins.providers.builtin.claude.python.storage_runtime import infer_claude_thread_source_from_logs
 
 logger = logging.getLogger(__name__)
+
+
+def read_provider_thread_history(tool_name: str, thread_id: str, limit: int = 50, sessions_dir=None):
+    from core.providers.facts import read_provider_thread_history as _read_provider_thread_history
+
+    return _read_provider_thread_history(
+        tool_name,
+        thread_id,
+        limit=limit,
+        sessions_dir=sessions_dir,
+    )
+
+
+def _history_turn_signature(turn: dict) -> str:
+    role = str(turn.get("role") or "").strip()
+    timestamp = _normalize_history_turn_timestamp(turn.get("timestamp"))
+    text = str(turn.get("text") or "").strip()
+    payload = f"{role}\n{timestamp}\n{text}".encode("utf-8")
+    return hashlib.blake2s(payload, digest_size=16).hexdigest()
+
+
+def _normalize_history_turn_timestamp(value) -> int | str:
+    if isinstance(value, (int, float)):
+        return int(value)
+
+    text = str(value or "").strip()
+    if not text:
+        return 0
+
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        return int(datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp() * 1000)
+    except (TypeError, ValueError):
+        return text
+
+
+def _format_history_turn_message(turn: dict) -> str | None:
+    role = str(turn.get("role") or "").strip()
+    text = str(turn.get("text") or "").strip()
+    if not text:
+        return None
+    if role == "user":
+        return f"👤 {text[:3000]}"
+    if role == "assistant":
+        truncated = text[:3000]
+        if len(text) > 3000:
+            truncated += "\n…（截断）"
+        return f"🤖 {truncated}"
+    return None
+
+
+def _build_history_sync_batches(header: str, turn_messages: list[str], *, max_chars: int = 3500) -> list[str]:
+    batches: list[str] = []
+    current = header.strip()
+
+    for msg in turn_messages:
+        if not msg:
+            continue
+        addition = f"\n\n{msg}" if current else msg
+        if current and len(current) + len(addition) > max_chars:
+            batches.append(current)
+            current = msg
+            continue
+        current += addition
+
+    if current:
+        batches.append(current)
+    return batches
 
 
 def _list_value(value) -> list:
@@ -117,6 +192,113 @@ def build_approval_reply(approval, action: str) -> tuple[str, dict]:
     return "✅ 已允许", {"behavior": "allow"}
 
 
+async def handle_approval_callback(state, approval, action: str, query, msg_id: int) -> bool:
+    return False
+
+
+def thread_control_intro_extra(thread_id: str, state_text: str) -> str:
+    return ""
+
+
+async def sync_existing_thread_history(
+    *,
+    bot,
+    group_chat_id: int,
+    topic_id: int,
+    thread_info,
+    thread_id: str,
+    storage,
+) -> bool:
+    from bot.handlers.common import _send_to_group
+
+    lookback = 50
+    thread_sync_limit = 10
+    try:
+        history = read_provider_thread_history(
+            "claude",
+            thread_id,
+            limit=lookback,
+            sessions_dir=None,
+        )
+    except Exception as e:
+        logger.warning(f"[thread_open] 读取 Claude thread {thread_id[:8]}… 历史失败：{e}")
+        return False
+
+    if not history:
+        logger.info(
+            "[provider-history-sync] provider=%s thread=%s topic=%s 无历史可同步",
+            "claude",
+            thread_id[:12],
+            topic_id,
+        )
+        return False
+
+    current_cursor = thread_info.history_sync_cursor or None
+    latest_cursor = _history_turn_signature(history[-1])
+    turns_to_send: list[dict] = []
+    snapshot_mode = False
+
+    if current_cursor:
+        matched_index = -1
+        for index in range(len(history) - 1, -1, -1):
+            if _history_turn_signature(history[index]) == current_cursor:
+                matched_index = index
+                break
+        if matched_index >= 0:
+            turns_to_send = history[matched_index + 1:]
+        else:
+            snapshot_mode = True
+            turns_to_send = history[-thread_sync_limit:]
+    else:
+        snapshot_mode = True
+        turns_to_send = history[-thread_sync_limit:]
+
+    if not turns_to_send:
+        if thread_info.history_sync_cursor != latest_cursor:
+            thread_info.history_sync_cursor = latest_cursor
+            if storage:
+                save_storage(storage)
+        logger.info(
+            "[provider-history-sync] provider=%s thread=%s topic=%s 已是最新，无需补齐",
+            "claude",
+            thread_id[:12],
+            topic_id,
+        )
+        return False
+
+    header = (
+        f"🔄 当前会话快照（最近 {len(turns_to_send)} 条）："
+        if snapshot_mode
+        else f"🔄 同步到 {len(turns_to_send)} 条新消息："
+    )
+    rendered_turns = [
+        msg
+        for msg in (_format_history_turn_message(turn) for turn in turns_to_send)
+        if msg
+    ]
+    for batch in _build_history_sync_batches(header, rendered_turns):
+        await _send_to_group(
+            bot,
+            group_chat_id,
+            batch,
+            topic_id=topic_id,
+        )
+
+    if thread_info.history_sync_cursor != latest_cursor:
+        thread_info.history_sync_cursor = latest_cursor
+        if storage:
+            save_storage(storage)
+    logger.info(
+        "[provider-history-sync] provider=%s thread=%s topic=%s mode=%s sent=%s",
+        "claude",
+        thread_id[:12],
+        topic_id,
+        "snapshot" if snapshot_mode else "incremental",
+        len(turns_to_send),
+    )
+    return True
+
+
 async def _refresh_inferred_thread_source(state, ws_info, thread_info) -> None:
     if ws_info.tool != "claude":
         return
@@ -197,7 +379,7 @@ async def prepare_send(
 
 async def start_runtime(manager, bot, tool_cfg) -> None:
     """Start Claude local adapter backed by the provider-owned CLI runtime."""
-    configured_claude_bin = str(tool_cfg.codex_bin or "claude").strip() or "claude"
+    configured_claude_bin = str(getattr(tool_cfg, "bin", "") or "claude").strip() or "claude"
     configured_auth = getattr(tool_cfg, "auth", None) or None
     launch_methods = getattr(tool_cfg, "launch_methods", None) or None
     if launch_methods:
@@ -272,7 +454,6 @@ async def setup_connection(manager, bot, adapter, **kwargs) -> None:
 async def sync_existing_topics_after_startup(manager, bot) -> None:
     """启动后为已映射的 Claude topic 自动补齐当前会话历史。"""
     from bot.handlers.common import reconcile_workspace_threads_with_source
-    from bot.handlers.workspace import _sync_existing_claude_thread_history
     from bot.utils import TopicNotFoundError
     from core.providers.facts import query_provider_active_thread_ids
     from core.storage import save_storage
@@ -306,7 +487,7 @@ async def sync_existing_topics_after_startup(manager, bot) -> None:
                 continue
 
             try:
-                synced = await _sync_existing_claude_thread_history(
+                synced = await sync_existing_thread_history(
                     bot=bot,
                     group_chat_id=manager.gid,
                     topic_id=topic_id,

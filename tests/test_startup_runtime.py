@@ -67,14 +67,14 @@ async def test_post_init_starts_codex_and_overlay_provider_concurrently():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
             ),
             ToolConfig(
                 name="overlay-tool",
                 enabled=True,
-                codex_bin="overlay-tool",
+                bin="overlay-tool",
                 app_server_port=4096,
                 protocol="http",
             ),
@@ -141,14 +141,14 @@ async def test_post_init_continues_starting_overlay_provider_when_codex_startup_
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
             ),
             ToolConfig(
                 name="overlay-tool",
                 enabled=True,
-                codex_bin="overlay-tool",
+                bin="overlay-tool",
                 app_server_port=4096,
                 protocol="http",
             ),
@@ -208,7 +208,7 @@ async def test_post_init_only_autostarts_managed_providers():
                 enabled=True,
                 managed=True,
                 autostart=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
             ),
@@ -217,7 +217,7 @@ async def test_post_init_only_autostarts_managed_providers():
                 enabled=True,
                 managed=True,
                 autostart=False,
-                codex_bin="overlay-tool",
+                bin="overlay-tool",
                 app_server_port=4096,
                 protocol="http",
             ),
@@ -226,7 +226,7 @@ async def test_post_init_only_autostarts_managed_providers():
                 enabled=False,
                 managed=False,
                 autostart=False,
-                codex_bin="claude",
+                bin="claude",
                 protocol="stdio",
             ),
         ],
@@ -303,7 +303,7 @@ async def test_post_init_starts_claude_when_provider_is_managed_and_enabled():
             ToolConfig(
                 name="claude",
                 enabled=True,
-                codex_bin="claude",
+                bin="claude",
                 protocol="stdio",
             ),
         ],
@@ -352,7 +352,7 @@ async def test_post_init_syncs_existing_claude_topics_after_startup():
             ToolConfig(
                 name="claude",
                 enabled=True,
-                codex_bin="claude",
+                bin="claude",
                 protocol="stdio",
             ),
         ],
@@ -406,7 +406,7 @@ async def test_post_init_syncs_existing_codex_topics_after_startup():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="unix",
                 app_server_url="unix://",
                 live_transport="shared_unix",
@@ -462,7 +462,7 @@ async def test_start_claude_defers_cli_touching_work_until_send():
             ToolConfig(
                 name="claude",
                 enabled=True,
-                codex_bin="claude",
+                bin="claude",
                 protocol="stdio",
             ),
         ],
@@ -496,7 +496,7 @@ async def test_start_claude_defers_cli_touching_work_until_send():
     adapter.refresh_auth_status.assert_not_awaited()
     setup_mock.assert_awaited_once()
     assert state.get_adapter("claude") is adapter
-    adapter_cls.assert_called_once_with(claude_bin="claude")
+    adapter_cls.assert_called_once_with(claude_bin="claude", auth=None)
 
 
 @pytest.mark.asyncio
@@ -512,7 +512,7 @@ async def test_start_claude_runtime_passes_configured_auth_token_to_adapter():
             ToolConfig(
                 name="claude",
                 enabled=True,
-                codex_bin="claude",
+                bin="claude",
                 protocol="stdio",
                 external_cli={"auth_token": "configured-token"},
             )
@@ -580,7 +580,7 @@ async def test_setup_claude_connection_hides_stale_threads_from_authoritative_fa
             ToolConfig(
                 name="claude",
                 enabled=True,
-                codex_bin="claude",
+                bin="claude",
                 protocol="stdio",
             )
         ],
@@ -640,7 +640,7 @@ async def test_post_init_uses_registry_start_hook_for_custom_provider(monkeypatc
             ToolConfig(
                 name="custom",
                 enabled=True,
-                codex_bin="custom",
+                bin="custom",
                 protocol="stdio",
             ),
         ],
@@ -686,7 +686,7 @@ async def test_post_init_prefers_descriptor_runtime_start_hook(monkeypatch):
             ToolConfig(
                 name="custom",
                 enabled=True,
-                codex_bin="custom",
+                bin="custom",
                 protocol="stdio",
             ),
         ],
@@ -737,7 +737,7 @@ async def test_post_init_starts_shared_provider_owner_bridge_before_provider_run
             ToolConfig(
                 name="custom",
                 enabled=True,
-                codex_bin="custom",
+                bin="custom",
                 protocol="stdio",
             ),
         ],
@@ -792,7 +792,7 @@ async def test_pre_telegram_init_starts_shared_provider_owner_bridge_and_provide
             ToolConfig(
                 name="custom",
                 enabled=True,
-                codex_bin="custom",
+                bin="custom",
                 protocol="stdio",
             ),
         ],
@@ -839,7 +839,7 @@ async def test_post_shutdown_uses_registry_shutdown_hook_for_custom_provider(mon
             ToolConfig(
                 name="custom",
                 enabled=True,
-                codex_bin="custom",
+                bin="custom",
                 protocol="stdio",
             ),
         ],
@@ -873,7 +873,7 @@ async def test_post_shutdown_prefers_descriptor_runtime_shutdown_hook(monkeypatc
             ToolConfig(
                 name="custom",
                 enabled=True,
-                codex_bin="custom",
+                bin="custom",
                 protocol="stdio",
             ),
         ],
@@ -912,7 +912,7 @@ async def test_post_shutdown_cancels_reconnect_tasks_before_provider_shutdown(mo
             ToolConfig(
                 name="custom",
                 enabled=True,
-                codex_bin="custom",
+                bin="custom",
                 protocol="stdio",
             ),
         ],
@@ -965,7 +965,7 @@ async def test_post_shutdown_does_not_force_codex_when_not_present(monkeypatch):
             ToolConfig(
                 name="custom",
                 enabled=True,
-                codex_bin="custom",
+                bin="custom",
                 protocol="stdio",
             ),
         ],
@@ -1004,7 +1004,7 @@ async def test_setup_provider_connection_uses_registry_lifecycle_hook_for_custom
             ToolConfig(
                 name="custom",
                 enabled=True,
-                codex_bin="custom",
+                bin="custom",
                 protocol="stdio",
             ),
         ],
@@ -1053,7 +1053,7 @@ async def test_post_init_passes_codex_stdio_protocol_to_app_server_process():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="stdio",
             )
@@ -1131,7 +1131,7 @@ async def test_post_init_prefers_external_codex_ws_server_without_spawning_proce
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
                 app_server_url="ws://127.0.0.1:4722",
@@ -1182,7 +1182,7 @@ async def test_post_init_can_disable_codex_shared_live_sync_even_when_owner_uses
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
                 owner_transport="ws",
@@ -1235,7 +1235,7 @@ async def test_post_init_prefers_existing_codex_ws_service_without_spawning_proc
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
             )
@@ -1285,7 +1285,7 @@ async def test_post_init_shared_unix_starts_realtime_mirror_without_legacy_final
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="unix",
                 app_server_url="unix://",
                 owner_transport="unix",
@@ -1348,7 +1348,7 @@ async def test_post_init_in_tui_control_mode_starts_local_runtime_without_persis
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
                 control_mode="tui",
@@ -1403,7 +1403,7 @@ async def test_post_init_in_app_mode_cleans_stale_codex_tui_host_artifacts(tmp_p
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="stdio",
                 control_mode="app",
             )
@@ -1468,7 +1468,7 @@ async def test_post_init_in_tui_control_mode_reuses_existing_server_without_pers
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
                 control_mode="tui",
@@ -1521,7 +1521,7 @@ async def test_post_init_in_hybrid_control_mode_reuses_existing_server_with_pers
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
                 control_mode="hybrid",
@@ -1720,7 +1720,7 @@ async def test_post_init_passes_codex_unix_url_to_app_server_process(tmp_path):
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="unix",
                 app_server_url=socket_url,
             )
@@ -1844,7 +1844,7 @@ async def test_connect_adapter_with_retry_logs_process_snapshot_on_disconnect(ca
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
             )
@@ -1893,7 +1893,7 @@ async def test_connect_adapter_with_retry_schedules_reconnect_after_initial_fail
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="unix",
                 app_server_url="unix://",
             )
@@ -1945,7 +1945,7 @@ async def test_connect_adapter_with_retry_does_not_start_codex_hook_bridge(tmp_p
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
             )
@@ -1999,7 +1999,7 @@ async def test_schedule_codex_reconnect_is_single_flight():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
             )
@@ -2057,7 +2057,7 @@ async def test_codex_reconnect_loop_routes_notifications_to_codex_global_topic_w
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
             )
@@ -2112,7 +2112,7 @@ async def test_codex_reconnect_loop_prefers_active_codex_workspace_topic():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
             )
@@ -2151,7 +2151,7 @@ async def test_codex_reconnect_loop_uses_provider_notify_topic_hook(monkeypatch)
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
             )
@@ -2222,7 +2222,7 @@ async def test_setup_codex_connection_clears_stale_streaming_state():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
             )
         ],
@@ -2276,7 +2276,7 @@ async def test_prime_codex_thread_mappings_revives_stale_archived_active_thread(
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
             )
         ],
@@ -2343,7 +2343,7 @@ async def test_cleanup_subagent_threads_archives_codex_subagents_and_deletes_top
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
             )
         ],
@@ -2415,7 +2415,7 @@ async def test_cleanup_subagent_threads_skips_non_codex_workspaces():
             ToolConfig(
                 name="customprovider",
                 enabled=True,
-                codex_bin="customprovider",
+                bin="customprovider",
                 app_server_port=4096,
             )
         ],
@@ -2476,7 +2476,7 @@ async def test_cleanup_subagent_threads_uses_registry_detector_for_custom_provid
             ToolConfig(
                 name="custom",
                 enabled=True,
-                codex_bin="custom",
+                bin="custom",
                 app_server_port=7777,
             )
         ],
@@ -2541,7 +2541,7 @@ async def test_ensure_thread_topics_replays_history_via_provider_defaults_for_co
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
             )
         ],
@@ -2620,7 +2620,7 @@ async def test_ensure_thread_topics_respects_unbound_topic_policy(
             ToolConfig(
                 name=provider_name,
                 enabled=True,
-                codex_bin=provider_name,
+                bin=provider_name,
                 protocol="http",
             )
         ],
@@ -2714,7 +2714,7 @@ async def test_sync_existing_claude_topics_syncs_active_threads_with_topic(monke
             ToolConfig(
                 name="claude",
                 enabled=True,
-                codex_bin="claude",
+                bin="claude",
                 protocol="stdio",
             ),
         ],
@@ -2728,7 +2728,7 @@ async def test_sync_existing_claude_topics_syncs_active_threads_with_topic(monke
     )
     sync_mock = AsyncMock(return_value=True)
     monkeypatch.setattr(
-        "bot.handlers.workspace._sync_existing_claude_thread_history",
+        "plugins.providers.builtin.claude.python.runtime.sync_existing_thread_history",
         sync_mock,
         raising=False,
     )
@@ -2773,7 +2773,7 @@ async def test_ensure_thread_topics_revives_stale_archived_active_thread(monkeyp
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
             )
         ],
@@ -2838,7 +2838,7 @@ async def test_cleanup_archived_threads_revives_stale_archived_active_thread(mon
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
             )
         ],
@@ -2909,13 +2909,13 @@ async def test_setup_codex_connection_ignores_non_codex_workspaces():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
             ),
             ToolConfig(
                 name="customprovider",
                 enabled=True,
-                codex_bin="customprovider",
+                bin="customprovider",
                 app_server_port=4096,
             ),
         ],
@@ -2971,7 +2971,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_from_hist
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
             )
         ],
@@ -3039,7 +3039,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_after_del
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
             )
         ],
@@ -3116,7 +3116,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_via_backg
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
             )
         ],
@@ -3212,7 +3212,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_from_task
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
             )
         ],
@@ -3288,7 +3288,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_with_mark
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
             )
         ],
@@ -3364,7 +3364,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_from_same
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
             )
         ],
@@ -3440,7 +3440,7 @@ async def test_setup_codex_connection_marks_stale_streaming_message_as_incomplet
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
             )
         ],
@@ -3490,7 +3490,7 @@ async def test_codex_disconnect_callback_only_starts_one_reconnect_loop():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
                 app_server_url="ws://127.0.0.1:4722",

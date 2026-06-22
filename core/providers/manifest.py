@@ -37,6 +37,48 @@ def _string_tuple(value: Any, default: tuple[str, ...] = ()) -> tuple[str, ...]:
     return default
 
 
+def ai_services_from_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    ai = _mapping(manifest.get("ai"))
+    services = ai.get("services")
+    if not isinstance(services, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    for item in services:
+        if not isinstance(item, dict):
+            continue
+        service_id = _str_value(item.get("id")).strip()
+        if not service_id:
+            continue
+        models = list(_string_tuple(item.get("models")))
+        try:
+            timeout_seconds = max(1, int(item.get("timeout_seconds") or item.get("timeoutSeconds") or 20))
+        except (TypeError, ValueError):
+            timeout_seconds = 20
+        normalized.append(
+            {
+                "id": service_id,
+                "name": _str_value(item.get("name"), service_id).strip() or service_id,
+                "label": _str_value(item.get("label"), _str_value(item.get("name"), service_id)).strip()
+                or service_id,
+                "description": _str_value(item.get("description")).strip(),
+                "protocol": _str_value(item.get("protocol"), "openai_compatible_chat").strip()
+                or "openai_compatible_chat",
+                "base_url": _str_value(item.get("base_url") or item.get("baseUrl")).strip().rstrip("/"),
+                "endpoint": _str_value(item.get("endpoint")).strip(),
+                "api_key_env": _str_value(item.get("api_key_env") or item.get("apiKeyEnv")).strip(),
+                "models": models,
+                "default_model": _str_value(item.get("default_model") or item.get("defaultModel")).strip()
+                or (models[0] if models else ""),
+                "timeout_seconds": timeout_seconds,
+                "enabled": _bool_value(item.get("enabled"), False),
+                "default_for_scenarios": _bool_value(item.get("default_for_scenarios"), False),
+                "owner_provider_id": _str_value(manifest.get("id")).strip(),
+                "plugin_owned": True,
+            }
+        )
+    return normalized
+
+
 def capabilities_from_manifest(raw: dict[str, Any] | None) -> ProviderManifestCapabilities:
     data = _mapping(raw)
     return ProviderManifestCapabilities(

@@ -32,8 +32,8 @@ class AiClient:
                 prompt=prompt,
                 timeout_seconds=timeout_seconds,
             )
-        if protocol == "claude_messages":
-            return await self._complete_claude_messages(
+        if protocol == "anthropic_messages":
+            return await self._complete_anthropic_messages(
                 service=service,
                 model=model,
                 prompt=prompt,
@@ -68,7 +68,7 @@ class AiClient:
         text = _openai_chat_text(data)
         return AiHttpResponse(text=text, raw=data)
 
-    async def _complete_claude_messages(
+    async def _complete_anthropic_messages(
         self,
         *,
         service: AiServiceConfig,
@@ -92,7 +92,7 @@ class AiClient:
             response = await client.post(endpoint, headers=headers, json=payload)
             response.raise_for_status()
         data = response.json()
-        text = _claude_messages_text(data)
+        text = _anthropic_messages_text(data)
         return AiHttpResponse(text=text, raw=data)
 
 
@@ -121,7 +121,7 @@ def _openai_chat_text(data: dict[str, Any]) -> str:
     return ""
 
 
-def _claude_messages_text(data: dict[str, Any]) -> str:
+def _anthropic_messages_text(data: dict[str, Any]) -> str:
     content = data.get("content")
     if not isinstance(content, list):
         return ""

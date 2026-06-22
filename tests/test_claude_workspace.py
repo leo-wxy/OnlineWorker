@@ -34,6 +34,8 @@ async def test_open_workspace_syncs_claude_threads_from_adapter(monkeypatch):
 
     bot = MagicMock()
     bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=4101))
+    bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=4102))
+    bot.pin_chat_message = AsyncMock()
 
     monkeypatch.setattr("bot.handlers.workspace.save_storage", lambda storage: None)
     monkeypatch.setattr("bot.handlers.common.save_storage", lambda storage: None)
@@ -52,16 +54,16 @@ async def test_open_workspace_syncs_claude_threads_from_adapter(monkeypatch):
         state=state,
         storage=storage,
         group_chat_id=GROUP_CHAT_ID,
-        tool_cfg=ToolConfig(name="claude", enabled=True, codex_bin="claude", protocol="stdio"),
+        tool_cfg=ToolConfig(name="claude", enabled=True, bin="claude", protocol="stdio"),
         name="onlineWorker",
         path="/Users/example/Projects/onlineWorker",
     )
 
     adapter.register_workspace_cwd.assert_called_once_with(
-        "claude:onlineWorker",
+        "claude:/Users/example/Projects/onlineWorker",
         "/Users/example/Projects/onlineWorker",
     )
-    adapter.list_threads.assert_awaited_once_with("claude:onlineWorker", limit=30)
+    adapter.list_threads.assert_awaited_once_with("claude:/Users/example/Projects/onlineWorker", limit=30)
     assert ws_info.tool == "claude"
     assert "ses-1" in ws_info.threads
     assert ws_info.threads["ses-1"].preview == "继续 phase16"
@@ -88,7 +90,7 @@ async def test_list_thread_handler_uses_claude_local_threads(monkeypatch):
         allowed_user_id=1,
         group_chat_id=GROUP_CHAT_ID,
         log_level="INFO",
-        tools=[ToolConfig(name="claude", enabled=True, codex_bin="claude", protocol="stdio")],
+        tools=[ToolConfig(name="claude", enabled=True, bin="claude", protocol="stdio")],
         delete_archived_topics=True,
     )
     state.config = cfg
@@ -152,7 +154,7 @@ async def test_list_thread_handler_hides_archived_claude_threads(monkeypatch):
         allowed_user_id=1,
         group_chat_id=GROUP_CHAT_ID,
         log_level="INFO",
-        tools=[ToolConfig(name="claude", enabled=True, codex_bin="claude", protocol="stdio")],
+        tools=[ToolConfig(name="claude", enabled=True, bin="claude", protocol="stdio")],
         delete_archived_topics=True,
     )
     state.config = cfg

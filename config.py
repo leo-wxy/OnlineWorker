@@ -2,22 +2,21 @@
 import os
 import sys
 import yaml
+import importlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 from dotenv import dotenv_values
 
 from core.ai.config import (
-    build_ai_scenario_config,
-    build_ai_service_config,
-    default_ai_service_raw,
-    iter_ai_scenario_raws,
-    iter_ai_service_raws,
     load_ai_config,
-    positive_int_value,
 )
 from core.ai.contracts import AiConfig, AiScenarioConfig, AiServiceConfig
-from core.providers.overlay import load_overlay_provider_raws, manifest_to_provider_raw
+from core.providers.contracts import (
+    ProviderConfigNormalizationResult,
+    ProviderDocumentNormalizationResult,
+)
+from core.providers.overlay import iter_overlay_manifest_paths, load_overlay_provider_raws, manifest_to_provider_raw
 
 DEFAULT_CONFIG_PATH = "config.yaml"
 
@@ -27,7 +26,7 @@ DEFAULT_CONFIG_PATH = "config.yaml"
 # ---------------------------------------------------------------------------
 _data_dir: str | None = None
 _dotenv_loaded: bool = False  # track whether CWD .env has been loaded
-# 当前 App surface 已正式暴露 claude，运行时链路不再额外隐藏 provider。
+# 当前 App surface 已正式暴露内建 provider，运行时链路不再额外隐藏 provider。
 HIDDEN_PROVIDER_IDS = frozenset()
 BUILTIN_PROVIDER_PLUGIN_DIR = Path(__file__).resolve().parent / "plugins" / "providers" / "builtin"
 OWNED_ENV_KEYS = frozenset(
@@ -109,7 +108,7 @@ def _bool_config_value(value: Any, *, default: bool) -> bool:
 @dataclass
 class ToolConfig:
     """单个 CLI 工具的配置。"""
-    name: str                        # 工具名，如 "codex" / "opencode"
+    name: str                        # provider id / CLI 工具名
     enabled: bool = True
     visible: bool = True
     runtime_id: str = ""
@@ -119,7 +118,7 @@ class ToolConfig:
     autostart: bool = True
     app_server_port: int = 0         # 0 = 动态端口（app-server 自选），>0 = 固定端口
     app_server_url: str = ""         # 若设置，优先连接外部 app-server
-    codex_bin: str = "codex"         # codex 可执行文件路径（用于启动 app-server）
+    bin: str = ""                    # provider CLI 可执行文件路径（用于启动 runtime / app-server）
     protocol: str = "ws"             # 协议类型："stdio" / "ws" / "unix" / "http"
     owner_transport: str = ""        # owner 主链实际使用的 transport
     live_transport: str = ""         # live 辅助链路语义："owner_bridge" / "shared_ws" / "shared_unix" / 其他 provider 原生 transport
@@ -142,7 +141,9 @@ class ToolConfig:
         self.label = str(self.label or self.name).strip()
         self.description = str(self.description or "").strip()
         self.autostart = bool(self.autostart) and managed
-        self.codex_bin = os.path.expanduser(self.codex_bin or "codex")
+        raw_bin = str(self.bin or "").strip()
+        resolved_bin = raw_bin or str(self.name or "").strip() or "codex"
+        self.bin = os.path.expanduser(resolved_bin)
         self.owner_transport = _normalize_transport_name(self.owner_transport or self.protocol or "")
         if not self.owner_transport:
             self.owner_transport = _default_owner_transport(self.name)
@@ -167,7 +168,6 @@ class ToolConfig:
         if "model" in self.external_cli and "model" not in self.auth:
             self.auth["model"] = str(self.external_cli.get("model") or "").strip()
         self.launch_methods = _normalize_launch_methods(self.launch_methods)
-
 
 @dataclass
 class NotificationChannelConfig:
@@ -419,12 +419,6 @@ def _normalize_launch_methods(raw: Any) -> list[dict[str, str]]:
     return methods
 
 
-_positive_int_value = positive_int_value
-_build_ai_service_config = build_ai_service_config
-_default_ai_service_raw = default_ai_service_raw
-_build_ai_scenario_config = build_ai_scenario_config
-_iter_ai_service_raws = iter_ai_service_raws
-_iter_ai_scenario_raws = iter_ai_scenario_raws
 _load_ai_config = load_ai_config
 
 
@@ -433,84 +427,6 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
     if plugin_blueprint is not None:
         return plugin_blueprint
 
-    if name == "codex":
-        return {
-            "visible": True,
-            "runtime_id": "codex",
-            "label": "Codex",
-            "description": "OpenAI Codex CLI sessions",
-            "managed": True,
-            "autostart": True,
-            "codex_bin": "codex",
-            "protocol": "unix",
-            "app_server_port": 0,
-            "app_server_url": "",
-            "control_mode": "app",
-            "capabilities": {
-                "sessions": True,
-                "send": True,
-                "approvals": True,
-                "questions": False,
-                "photos": False,
-                "files": False,
-                "usage": True,
-                "commands": True,
-                "launch_methods": False,
-                "command_wrappers": ["model", "review"],
-                "control_modes": ["app", "tui", "hybrid"],
-            },
-            "process": {
-                "cleanup_matchers": ["codex.*app-server", "codex-aar"],
-            },
-            "health": {},
-            "auth": {},
-            "external_cli": {},
-            "launch_methods": [],
-            "message_hooks": {
-                "abusive_language_normalization": {
-                    "enabled": True,
-                }
-            },
-        }
-    if name == "claude":
-        return {
-            "visible": True,
-            "runtime_id": "claude",
-            "label": "Claude",
-            "description": "Anthropic Claude Code CLI sessions",
-            "managed": False,
-            "autostart": False,
-            "codex_bin": "claude",
-            "protocol": "stdio",
-            "app_server_port": 0,
-            "app_server_url": "",
-            "control_mode": "app",
-            "capabilities": {
-                "sessions": True,
-                "send": True,
-                "approvals": True,
-                "questions": True,
-                "photos": False,
-                "files": False,
-                "usage": True,
-                "commands": True,
-                "launch_methods": True,
-                "command_wrappers": [],
-                "control_modes": ["app"],
-            },
-            "process": {
-                "cleanup_matchers": [],
-            },
-            "health": {},
-            "auth": {},
-            "external_cli": {},
-            "launch_methods": [],
-            "message_hooks": {
-                "abusive_language_normalization": {
-                    "enabled": False,
-                }
-            },
-        }
     return {
         "visible": True,
         "runtime_id": name,
@@ -518,7 +434,7 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
         "description": "",
         "managed": False,
         "autostart": False,
-        "codex_bin": name,
+        "bin": name,
         "protocol": "stdio",
         "app_server_port": 0,
         "app_server_url": "",
@@ -531,6 +447,108 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
         "launch_methods": [],
         "message_hooks": None,
     }
+
+
+def _ensure_manifest_import_path(manifest_path: Path) -> None:
+    overlay_root = manifest_path.parent.parent
+    overlay_root_str = str(overlay_root)
+    if overlay_root_str not in sys.path:
+        sys.path.insert(0, overlay_root_str)
+
+
+def _provider_manifest_paths() -> dict[str, Path]:
+    manifests: dict[str, Path] = {}
+    for plugin_path in sorted(BUILTIN_PROVIDER_PLUGIN_DIR.glob("*/plugin.yaml")):
+        try:
+            with plugin_path.open("r", encoding="utf-8") as f:
+                plugin_data = yaml.safe_load(f) or {}
+        except Exception:
+            continue
+        if not isinstance(plugin_data, dict) or plugin_data.get("kind") != "provider":
+            continue
+        provider_id = str(plugin_data.get("id") or "").strip()
+        if provider_id:
+            manifests[provider_id] = plugin_path
+    for plugin_path in iter_overlay_manifest_paths():
+        try:
+            with plugin_path.open("r", encoding="utf-8") as f:
+                plugin_data = yaml.safe_load(f) or {}
+        except Exception:
+            continue
+        if not isinstance(plugin_data, dict) or plugin_data.get("kind") != "provider":
+            continue
+        provider_id = str(plugin_data.get("id") or "").strip()
+        if provider_id:
+            manifests[provider_id] = plugin_path
+    return manifests
+
+
+def _load_provider_config_normalizer(provider_id: str):
+    return _load_provider_manifest_entrypoint(provider_id, "python_config_normalizer")
+
+
+def _load_provider_manifest_entrypoint(provider_id: str, entrypoint_key: str):
+    normalized_provider_id = str(provider_id or "").strip()
+    if not normalized_provider_id:
+        return None
+    manifest_path = _provider_manifest_paths().get(normalized_provider_id)
+    if manifest_path is None:
+        return None
+    with manifest_path.open("r", encoding="utf-8") as f:
+        manifest = yaml.safe_load(f) or {}
+    entrypoint = ((manifest.get("entrypoints") or {}).get(entrypoint_key) or "").strip()
+    if not entrypoint:
+        return None
+    module_name, separator, factory_name = entrypoint.partition(":")
+    if not separator or not module_name or not factory_name:
+        raise ValueError(
+            f"Provider manifest entrypoint {entrypoint_key!r} must use module:function syntax: {entrypoint}"
+        )
+    _ensure_manifest_import_path(manifest_path)
+    module = importlib.import_module(module_name)
+    return getattr(module, factory_name)
+
+
+def _normalize_provider_raw(
+    tool_name: str,
+    raw: dict[str, Any],
+    *,
+    legacy: bool,
+) -> tuple[dict[str, Any], bool]:
+    normalizer = _load_provider_config_normalizer(tool_name)
+    if normalizer is None:
+        sanitized_raw, changed = _sanitize_provider_cleanup_matchers(raw)
+        return sanitized_raw, changed
+    result = normalizer(raw, defaults=_default_provider_blueprint(tool_name), legacy=legacy)
+    if isinstance(result, ProviderConfigNormalizationResult):
+        normalized_raw = result.raw if isinstance(result.raw, dict) else {}
+        sanitized_raw, cleanup_changed = _sanitize_provider_cleanup_matchers(normalized_raw)
+        return sanitized_raw, bool(result.persist) or cleanup_changed
+    if isinstance(result, dict):
+        sanitized_raw, changed = _sanitize_provider_cleanup_matchers(result)
+        return sanitized_raw, changed
+    raise TypeError(f"Provider config normalizer for {tool_name!r} must return dict or ProviderConfigNormalizationResult")
+
+
+def _normalize_config_document(data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    changed = False
+    normalized_document = data
+    for provider_id in _provider_manifest_paths():
+        normalizer = _load_provider_manifest_entrypoint(provider_id, "python_document_normalizer")
+        if normalizer is None:
+            continue
+        result = normalizer(normalized_document)
+        if isinstance(result, ProviderDocumentNormalizationResult):
+            normalized_document = result.document if isinstance(result.document, dict) else {}
+            changed = changed or bool(result.persist)
+            continue
+        if isinstance(result, dict):
+            normalized_document = result
+            continue
+        raise TypeError(
+            f"Provider document normalizer for {provider_id!r} must return dict or ProviderDocumentNormalizationResult"
+        )
+    return normalized_document, changed
 
 
 def _load_builtin_provider_plugin_blueprint(name: str) -> dict[str, Any] | None:
@@ -564,7 +582,7 @@ def _load_builtin_provider_plugin_blueprint(name: str) -> dict[str, Any] | None:
         "description": metadata.description,
         "managed": metadata.managed,
         "autostart": metadata.autostart,
-        "codex_bin": metadata.bin,
+        "bin": metadata.bin,
         "protocol": metadata.transport.owner,
         "app_server_port": metadata.transport.app_server_port,
         "app_server_url": metadata.transport.app_server_url,
@@ -596,11 +614,63 @@ def _load_builtin_provider_plugin_blueprint(name: str) -> dict[str, Any] | None:
     }
 
 
+def _builtin_provider_plugin_defaults() -> list[tuple[int, str, str, dict[str, Any]]]:
+    defaults: list[tuple[int, str, str, dict[str, Any]]] = []
+    if not BUILTIN_PROVIDER_PLUGIN_DIR.exists():
+        return defaults
+
+    for plugin_path in sorted(BUILTIN_PROVIDER_PLUGIN_DIR.glob("*/plugin.yaml")):
+        with plugin_path.open("r", encoding="utf-8") as f:
+            plugin_data = yaml.safe_load(f) or {}
+        if not isinstance(plugin_data, dict) or plugin_data.get("kind") != "provider":
+            continue
+
+        provider_id = str(plugin_data.get("id") or "").strip()
+        if not provider_id:
+            continue
+
+        blueprint = _load_builtin_provider_plugin_blueprint(provider_id)
+        if blueprint is None:
+            continue
+
+        try:
+            order = int(plugin_data.get("order") or sys.maxsize)
+        except (TypeError, ValueError):
+            order = sys.maxsize
+        visibility = str(plugin_data.get("visibility") or "private").strip().lower()
+        defaults.append((order, provider_id, visibility, blueprint))
+
+    defaults.sort(key=lambda item: (item[0], item[1]))
+    return defaults
+
+
+def _public_default_provider_ids() -> list[str]:
+    return [
+        provider_id
+        for _, provider_id, visibility, _ in _builtin_provider_plugin_defaults()
+        if visibility == "public"
+    ]
+
+
 def _public_default_provider_raw() -> dict[str, dict[str, Any]]:
     return {
-        "codex": _default_provider_blueprint("codex"),
-        "claude": _default_provider_blueprint("claude"),
+        provider_id: blueprint
+        for _, provider_id, visibility, blueprint in _builtin_provider_plugin_defaults()
+        if visibility == "public"
     }
+
+
+def _backfill_missing_public_providers(
+    providers: dict[str, ToolConfig],
+    *,
+    include_managed_defaults: bool,
+) -> None:
+    for provider_name, provider_raw in _public_default_provider_raw().items():
+        if provider_name in providers:
+            continue
+        if not include_managed_defaults and bool(provider_raw.get("managed", False)):
+            continue
+        providers[provider_name] = _build_tool_config(provider_name, provider_raw, legacy=False)
 
 
 def _deep_merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -658,14 +728,67 @@ def _load_provider_overlay() -> dict[str, Any]:
     return merged
 
 
+def _has_onlineworker_cleanup_marker(matcher: str) -> bool:
+    normalized = str(matcher or "").strip().lower()
+    return (
+        "onlineworker" in normalized
+        or "--ow-" in normalized
+        or "--data-dir" in normalized
+    )
+
+
+def _sanitize_provider_cleanup_matchers(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    process = raw.get("process")
+    if not isinstance(process, dict):
+        return raw, False
+
+    cleanup_matchers = process.get("cleanup_matchers")
+    if not isinstance(cleanup_matchers, list):
+        cleanup_matchers = process.get("cleanupMatchers")
+    if not isinstance(cleanup_matchers, list):
+        return raw, False
+
+    sanitized: list[str] = []
+    changed = False
+    seen: set[str] = set()
+    for matcher in cleanup_matchers:
+        value = str(matcher or "").strip()
+        if not value:
+            changed = True
+            continue
+        normalized = value.lower()
+        if "app-server" in normalized and not _has_onlineworker_cleanup_marker(normalized):
+            changed = True
+            continue
+        if normalized.endswith("-aar") and not _has_onlineworker_cleanup_marker(normalized):
+            changed = True
+            continue
+        if value in seen:
+            changed = True
+            continue
+        seen.add(value)
+        sanitized.append(value)
+
+    current_normalized = [str(item or "").strip() for item in cleanup_matchers if str(item or "").strip()]
+    if sanitized != current_normalized or "cleanupMatchers" in process or "cleanup_matchers" not in process:
+        changed = True
+
+    next_process = dict(process)
+    if sanitized:
+        next_process["cleanup_matchers"] = sanitized
+    else:
+        next_process.pop("cleanup_matchers", None)
+    next_process.pop("cleanupMatchers", None)
+
+    next_raw = dict(raw)
+    next_raw["process"] = next_process
+    return next_raw, changed
+
+
 def _resolve_protocol(
-    tool_name: str,
-    *,
     explicit_protocol: str,
     app_server_url: str,
-    raw_port: int,
     default_protocol: str,
-    legacy: bool,
 ) -> str:
     if explicit_protocol:
         return explicit_protocol
@@ -675,12 +798,6 @@ def _resolve_protocol(
         return "unix"
     if app_server_url.startswith("http://") or app_server_url.startswith("https://"):
         return "http"
-    if tool_name == "codex":
-        if legacy:
-            return "ws" if raw_port else "stdio"
-        return default_protocol
-    if tool_name == "claude":
-        return "stdio"
     return default_protocol
 
 
@@ -699,11 +816,11 @@ def _normalize_live_transport_name(value: Any) -> str:
 
 
 def _default_owner_transport(tool_name: str) -> str:
-    if tool_name == "codex":
-        return "unix"
-    if tool_name == "claude":
-        return "stdio"
-    return "ws"
+    defaults = _default_provider_blueprint(tool_name)
+    configured = _normalize_transport_name(
+        defaults.get("owner_transport") or defaults.get("protocol")
+    )
+    return configured or "ws"
 
 
 def _default_live_transport(
@@ -712,13 +829,23 @@ def _default_live_transport(
     owner_transport: str,
     control_mode: str,
 ) -> str:
-    if tool_name == "codex":
-        if owner_transport == "ws" and control_mode in {"app", "hybrid"}:
-            return "shared_ws"
-        if owner_transport == "unix" and control_mode in {"app", "hybrid"}:
-            return "shared_unix"
-        return "owner_bridge"
-    return owner_transport or _default_owner_transport(tool_name)
+    defaults = _default_provider_blueprint(tool_name)
+    configured_live_transport = _normalize_live_transport_name(defaults.get("live_transport"))
+    normalized_provider_raw, _ = _normalize_provider_raw(
+        tool_name,
+        {
+            "owner_transport": owner_transport,
+            "control_mode": control_mode,
+            "live_transport": "",
+        },
+        legacy=False,
+    )
+    normalized_live_transport = _normalize_live_transport_name(
+        normalized_provider_raw.get("live_transport")
+    )
+    if normalized_live_transport:
+        return normalized_live_transport
+    return configured_live_transport or owner_transport or _default_owner_transport(tool_name)
 
 
 def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> ToolConfig:
@@ -726,12 +853,12 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
     if legacy:
         managed = bool(raw.get("enabled", True))
         autostart = managed
-        codex_bin = raw.get("codex_bin") or defaults["codex_bin"]
+        bin_value = raw.get("bin") or defaults["bin"]
         transport = {}
     else:
         managed = bool(raw.get("enabled", raw.get("managed", defaults["managed"])))
         autostart = bool(raw.get("autostart", defaults["autostart"]))
-        codex_bin = raw.get("bin") or raw.get("codex_bin") or defaults["codex_bin"]
+        bin_value = raw.get("bin") or defaults["bin"]
         transport = raw.get("transport") or {}
         if not isinstance(transport, dict):
             transport = {}
@@ -752,74 +879,33 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
         or ""
     )
     explicit_protocol = str(raw_explicit_protocol or "").strip()
-    explicit_url_protocol = _resolve_protocol(
-        tool_name,
-        explicit_protocol="",
-        app_server_url=app_server_url,
-        raw_port=0,
-        default_protocol="",
-        legacy=False,
-    )
-    if (
-        tool_name == "codex"
-        and explicit_url_protocol
-        and not transport.get("type")
-        and not raw.get("owner_transport")
-        and "protocol" in defaults
-        and raw.get("protocol") == defaults.get("protocol")
-    ):
-        explicit_protocol = ""
     explicit_owner_transport = _normalize_transport_name(
         raw.get("owner_transport") or transport.get("owner")
     )
     protocol = _resolve_protocol(
-        tool_name,
         explicit_protocol=explicit_protocol,
         app_server_url=app_server_url,
-        raw_port=raw_port,
         default_protocol=str(defaults["protocol"]),
-        legacy=legacy,
     )
     if explicit_owner_transport:
         protocol = explicit_owner_transport
 
     explicit_control_mode = str(raw.get("control_mode") or "").strip()
     app_server_port = raw_port
-    if (
-        legacy
-        and tool_name == "codex"
-        and explicit_protocol == "ws"
-        and not app_server_url
-        and raw_port == 4722
-        and not explicit_control_mode
-    ):
-        protocol = "stdio"
-        app_server_port = 0
-
-    codex_stdio_upgraded = False
-    if tool_name == "codex" and protocol == "stdio" and not app_server_url:
-        protocol = "unix"
-        app_server_port = 0
-        codex_stdio_upgraded = True
-
-    if tool_name == "codex" and protocol == "stdio":
+    if protocol == "stdio":
         app_server_port = 0
         app_server_url = ""
-    elif tool_name == "codex" and protocol == "unix":
+    elif protocol == "unix":
         app_server_port = 0
 
     if explicit_control_mode in ("app", "tui", "hybrid"):
         control_mode = explicit_control_mode
-    elif tool_name == "codex" and protocol in {"ws", "unix"}:
-        control_mode = "app"
     else:
         control_mode = str(defaults["control_mode"])
 
     explicit_live_transport = _normalize_live_transport_name(
         raw.get("live_transport") or transport.get("live")
     )
-    if codex_stdio_upgraded and explicit_live_transport in {"stdio", "owner_bridge"}:
-        explicit_live_transport = ""
     live_transport = explicit_live_transport or _default_live_transport(
         tool_name,
         owner_transport=protocol,
@@ -847,7 +933,7 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
         autostart=autostart,
         app_server_port=app_server_port,
         app_server_url=app_server_url,
-        codex_bin=str(codex_bin or defaults["codex_bin"]),
+        bin=str(bin_value or defaults["bin"]),
         protocol=protocol,
         owner_transport=protocol,
         live_transport=live_transport,
@@ -860,50 +946,6 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
         launch_methods=raw.get("launch_methods") if isinstance(raw.get("launch_methods"), list) else defaults["launch_methods"],
         message_hooks=_message_hooks_from_raw(raw_message_hooks),
     )
-
-
-def _persist_provider_transport_migrations(
-    config_path: str,
-    data: dict[str, Any],
-    providers: dict[str, ToolConfig],
-) -> None:
-    raw_providers = data.get("providers")
-    if not isinstance(raw_providers, dict):
-        return
-    codex_raw = raw_providers.get("codex")
-    codex_cfg = providers.get("codex")
-    if not isinstance(codex_raw, dict) or codex_cfg is None:
-        return
-    if codex_cfg.protocol != "unix":
-        return
-
-    changed = False
-    transport = codex_raw.get("transport")
-    if not isinstance(transport, dict):
-        transport = {}
-        codex_raw["transport"] = transport
-        changed = True
-
-    if transport.get("type") != "unix":
-        transport["type"] = "unix"
-        changed = True
-    if "app_server_port" in transport:
-        transport.pop("app_server_port", None)
-        changed = True
-    if codex_raw.get("owner_transport") != "unix":
-        codex_raw["owner_transport"] = "unix"
-        changed = True
-    if codex_raw.get("live_transport") != "shared_unix":
-        codex_raw["live_transport"] = "shared_unix"
-        changed = True
-    if codex_raw.get("control_mode") != "app":
-        codex_raw["control_mode"] = "app"
-        changed = True
-
-    if changed:
-        with open(config_path, "w", encoding="utf-8") as f:
-            yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
-
 
 def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None) -> Config:
     """加载配置。
@@ -938,6 +980,9 @@ def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None)
 
     with open(config_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        data = {}
+    data, document_changed = _normalize_config_document(data)
 
     log = data.get("logging", {})
     telegram_config = data.get("telegram", {})
@@ -986,16 +1031,34 @@ def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None)
     providers: dict[str, ToolConfig] = {}
 
     raw_providers = data.get("providers")
+    provider_document_changed = False
     if isinstance(raw_providers, dict) and raw_providers:
+        normalized_raw_providers: dict[str, Any] = {}
+        for provider_name, provider_raw in raw_providers.items():
+            normalized_name = str(provider_name or "").strip()
+            if not normalized_name:
+                continue
+            normalized_raw, changed = _normalize_provider_raw(
+                normalized_name,
+                provider_raw if isinstance(provider_raw, dict) else {},
+                legacy=False,
+            )
+            normalized_raw_providers[normalized_name] = normalized_raw
+            provider_document_changed = provider_document_changed or changed
         provider_raw_map = _public_default_provider_raw()
         provider_raw_map = _merge_provider_raw(provider_raw_map, _load_provider_overlay())
-        provider_raw_map = _merge_provider_raw(provider_raw_map, raw_providers)
+        provider_raw_map = _merge_provider_raw(provider_raw_map, normalized_raw_providers)
         for provider_name, provider_raw in provider_raw_map.items():
             if not provider_name:
                 continue
-            providers[provider_name] = _build_tool_config(
+            normalized_provider_raw, _ = _normalize_provider_raw(
                 str(provider_name),
                 provider_raw if isinstance(provider_raw, dict) else {},
+                legacy=False,
+            )
+            providers[provider_name] = _build_tool_config(
+                str(provider_name),
+                normalized_provider_raw,
                 legacy=False,
             )
     else:
@@ -1003,32 +1066,43 @@ def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None)
             tool_name = str(raw_tool.get("name") or "").strip()
             if not tool_name:
                 continue
-            providers[tool_name] = _build_tool_config(tool_name, raw_tool, legacy=True)
+            normalized_raw, _ = _normalize_provider_raw(
+                tool_name,
+                raw_tool if isinstance(raw_tool, dict) else {},
+                legacy=True,
+            )
+            providers[tool_name] = _build_tool_config(tool_name, normalized_raw, legacy=True)
         if not providers:
             provider_raw_map = _public_default_provider_raw()
             provider_raw_map = _merge_provider_raw(provider_raw_map, _load_provider_overlay())
             for provider_name, provider_raw in provider_raw_map.items():
-                providers[provider_name] = _build_tool_config(provider_name, provider_raw, legacy=False)
+                normalized_provider_raw, _ = _normalize_provider_raw(
+                    provider_name,
+                    provider_raw if isinstance(provider_raw, dict) else {},
+                    legacy=False,
+                )
+                providers[provider_name] = _build_tool_config(provider_name, normalized_provider_raw, legacy=False)
         else:
             overlay_raw = _load_provider_overlay()
             if overlay_raw:
                 provider_raw_map = _merge_provider_raw({}, overlay_raw)
                 for provider_name, provider_raw in provider_raw_map.items():
-                    providers[provider_name] = _build_tool_config(provider_name, provider_raw, legacy=False)
+                    normalized_provider_raw, _ = _normalize_provider_raw(
+                        provider_name,
+                        provider_raw if isinstance(provider_raw, dict) else {},
+                        legacy=False,
+                    )
+                    providers[provider_name] = _build_tool_config(provider_name, normalized_provider_raw, legacy=False)
 
-    if not providers:
-        for provider_name, provider_raw in _public_default_provider_raw().items():
-            providers[provider_name] = _build_tool_config(provider_name, provider_raw, legacy=False)
-
-    if "claude" not in providers:
-        providers["claude"] = _build_tool_config(
-            "claude",
-            _default_provider_blueprint("claude"),
-            legacy=False,
-        )
+    if isinstance(raw_providers, dict) and raw_providers:
+        _backfill_missing_public_providers(providers, include_managed_defaults=True)
+    elif providers:
+        _backfill_missing_public_providers(providers, include_managed_defaults=False)
+    else:
+        _backfill_missing_public_providers(providers, include_managed_defaults=True)
 
     ordered_names = []
-    for name in ("codex", "claude"):
+    for name in _public_default_provider_ids():
         if name in providers:
             ordered_names.append(name)
     for name in providers.keys():
@@ -1036,7 +1110,15 @@ def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None)
             ordered_names.append(name)
     tools = [providers[name] for name in ordered_names]
     if data_dir is not None:
-        _persist_provider_transport_migrations(config_path, data, providers)
+        should_persist = False
+        if isinstance(raw_providers, dict) and raw_providers and provider_document_changed:
+            data["providers"] = normalized_raw_providers
+            should_persist = True
+        if document_changed:
+            should_persist = True
+        if should_persist:
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
 
     return Config(
         telegram_token=telegram_token,

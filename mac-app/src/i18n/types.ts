@@ -72,9 +72,6 @@ export interface AppTexts {
     saveChanges: string;
     notSet: string;
     botToken: string;
-    claudeApiKey: string;
-    claudeBaseUrl: string;
-    claudeModel: string;
     userId: string;
     groupChatId: string;
     connectivityTest: string;
@@ -130,16 +127,7 @@ export interface AppTexts {
     commandList: string;
     step0Title: string;
     step0Description: string;
-    step0CodexLabel: string;
-    step0CodexCmd: string;
-    step0CodexDocs: string;
-    step0ClaudeLabel: string;
-    step0ClaudeCmd: string;
-    step0ClaudeDocs: string;
     step0Hint: string;
-    step0RealtimeHint: string;
-    step0AliasHint: string;
-    step0AliasCodex: string;
     step1Title: string;
     step1Description: string;
     step1Instructions: readonly string[];
@@ -236,8 +224,6 @@ export interface AppTexts {
   };
   sessions: {
     refresh: string;
-    claudeTitle: string;
-    codexTitle: string;
     activeSummary: (active: number, archived: number) => string;
     sessionsCount: (count: number) => string;
     selectWorkspace: string;
@@ -256,8 +242,6 @@ export interface AppTexts {
     waitingExpired: string;
     you: string;
     workspaceFallback: string;
-    claudeConnectionError: string;
-    codexConnectionError: string;
     attachFile: string;
     attachImage: string;
     stagingAttachments: string;
@@ -370,18 +354,18 @@ export interface AppTexts {
     civilityModeDescription: string;
     cliConfigTitle: string;
     externalCliBin: string;
-    externalCliCodexAliasTitle: string;
-    externalCliCodexAliasDescription: string;
-    claudeAuthToken: string;
-    claudeAuthTokenPlaceholder: string;
-    claudeBaseUrl: string;
-    claudeBaseUrlPlaceholder: string;
-    claudeModel: string;
-    claudeModelPlaceholder: string;
+    externalCliProxyAliasTitle: string;
+    externalCliProxyAliasDescription: string;
+    externalCliAuthToken: string;
+    externalCliAuthTokenPlaceholder: string;
+    externalCliBaseUrl: string;
+    externalCliBaseUrlPlaceholder: string;
+    externalCliModel: string;
+    externalCliModelPlaceholder: string;
     launchMethodCommands: string;
     launchMethodCommandsPlaceholder: string;
     launchMethodCommandsHint: string;
-    externalCliLauncherWrapsClaude: string;
+    externalCliLaunchesManagedChildCli: string;
     externalCliSave: string;
   };
   notifications: {
@@ -434,10 +418,6 @@ export interface AppTexts {
     saveConfiguration: string;
     configured: string;
     needsConfig: string;
-    openaiService: string;
-    claudeService: string;
-    openaiServiceDescription: string;
-    claudeServiceDescription: string;
     customServiceDescription: string;
     notificationSummaryScenario: string;
     serviceConfigTitle: string;
@@ -479,7 +459,6 @@ export interface AppTexts {
     telegramBotDescription: string;
     telegramLabel: string;
     pidLabel: string;
-    codexTitle: string;
     providerUnmanagedDetail: string;
     providerAutostartDisabledDetail: string;
     portLabel: string;
@@ -507,8 +486,8 @@ export interface AppTexts {
     openSetupDescription: string;
     openSessionsTitle: string;
     openSessionsDescription: string;
-    openCodexTuiHostTitle: string;
-    openCodexTuiHostDescription: string;
+    openCliHostTitle: string;
+    openCliHostDescription: string;
     openLogsTitle: string;
     openLogsDescription: string;
   };

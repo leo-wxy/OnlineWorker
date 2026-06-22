@@ -89,8 +89,8 @@ rules needed to work safely in this codebase.
   config templates.
 - Treat `config.yaml` as a user-state artifact: first-run creation,
   migration, and settings writes may materialize a readable full file, but
-  development changes must not rely on editing `config.yaml` or
-  `default-config.yaml` to change runtime defaults.
+  development changes must not rely on editing `config.yaml` or user-facing
+  template files to change runtime defaults.
 - When adding or changing defaults, update the owning manifest/schema/default
   builder and add regression coverage for first-run or migration behavior.
 - Installed app data lives under:

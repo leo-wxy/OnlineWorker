@@ -29,14 +29,14 @@ export function parseCliEntriesFromConfigRaw(raw) {
         if (!providerVisibleByDefault(name, record)) {
           continue;
         }
-        upsertEntry(entries, name, record.bin ?? record.codex_bin ?? record.codexBin);
+        upsertEntry(entries, name, record.bin);
       }
     }
 
     if (Array.isArray(doc?.tools)) {
       for (const tool of doc.tools) {
         const record = tool && typeof tool === "object" ? tool : {};
-        upsertEntry(entries, record.name, record.codex_bin ?? record.codexBin ?? record.bin);
+        upsertEntry(entries, record.name, record.bin);
       }
     }
 
@@ -56,6 +56,7 @@ export function providerCliEntriesFromMetadata(providers) {
       name: provider.id,
       label: provider.label || provider.id,
       bin: provider.bin || provider.install?.cliNames?.[0] || provider.id,
+      install: provider.install ?? null,
     }))
     .filter((entry) => entry.name && entry.bin);
 }

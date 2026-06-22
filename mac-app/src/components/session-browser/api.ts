@@ -1,12 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  ClaudeSession,
   ComposerAttachment,
-  CodexSession,
-  CodexSendResult,
-  CodexThreadCursor,
-  CodexThreadReadResult,
   ProviderMetadata,
+  ProviderSessionSendResult,
   ProviderUsageQuery,
   ProviderUsageSummary,
   SessionTurn,
@@ -24,58 +20,6 @@ function normalizeSessionTurns(turns: SessionTurn[] | null | undefined): Session
   }));
 }
 
-interface CodexThreadRaw {
-  id: string;
-  title: string;
-  cwd: string;
-  archived: boolean;
-  rollout_path?: string;
-  rolloutPath?: string;
-  model_provider?: string | null;
-  modelProvider?: string | null;
-  source?: string | null;
-  sandbox_policy?: unknown | null;
-  sandboxPolicy?: unknown | null;
-  approval_mode?: string | null;
-  approvalMode?: string | null;
-  is_smoke?: boolean;
-  isSmoke?: boolean;
-}
-
-interface ClaudeSessionRaw {
-  id: string;
-  title: string;
-  directory: string;
-  archived: boolean;
-}
-
-interface ClaudeTurnRow {
-  role: string;
-  content: string;
-}
-
-interface ClaudeSendResult {
-  sessionId: string;
-  createdNewSession: boolean;
-}
-
-export async function fetchCodexSessions(): Promise<CodexSession[]> {
-  const threads = await invoke<CodexThreadRaw[]>("list_codex_threads");
-  return threads
-    .map((thread) => ({
-      threadId: thread.id,
-      cwd: thread.cwd,
-      title: thread.title || thread.cwd.split("/").pop() || thread.id.slice(0, 8),
-      rolloutPath: thread.rolloutPath ?? thread.rollout_path,
-      archived: thread.archived,
-      modelProvider: thread.modelProvider ?? thread.model_provider ?? null,
-      source: thread.source ?? null,
-      sandboxPolicy: thread.sandboxPolicy ?? thread.sandbox_policy ?? null,
-      approvalMode: thread.approvalMode ?? thread.approval_mode ?? null,
-      isSmoke: Boolean(thread.isSmoke ?? thread.is_smoke),
-    }));
-}
-
 export async function fetchProviderMetadata(): Promise<ProviderMetadata[]> {
   return invoke<ProviderMetadata[]>("get_provider_metadata");
 }
@@ -91,8 +35,14 @@ export async function fetchProviderUsageSummary(
   });
 }
 
-export async function fetchProviderSessions(providerId: string): Promise<unknown[]> {
-  return invoke<unknown[]>("list_provider_sessions", { providerId });
+export async function fetchProviderSessions(
+  providerId: string,
+  options?: { forceRefresh?: boolean },
+): Promise<unknown[]> {
+  return invoke<unknown[]>("list_provider_sessions", {
+    providerId,
+    forceRefresh: options?.forceRefresh ?? false,
+  });
 }
 
 export async function fetchProviderSession(
@@ -114,14 +64,44 @@ export async function sendProviderSessionMessage(
   text: string,
   attachments: ComposerAttachment[] = [],
   workspaceDir?: string | null,
-): Promise<unknown> {
-  return invoke("send_provider_session_message", {
+): Promise<ProviderSessionSendResult> {
+  const result = await invoke<Record<string, unknown> | null>("send_provider_session_message", {
     providerId,
     sessionId,
     text,
     attachments,
     workspaceDir: workspaceDir ?? null,
   });
+  const payload = result ?? {};
+  return {
+    accepted: typeof payload.accepted === "boolean" ? payload.accepted : undefined,
+    providerId: typeof payload.provider_id === "string"
+      ? payload.provider_id
+      : typeof payload.providerId === "string"
+        ? payload.providerId
+        : null,
+    threadId: typeof payload.thread_id === "string"
+      ? payload.thread_id
+      : typeof payload.threadId === "string"
+        ? payload.threadId
+        : null,
+    requestedThreadId: typeof payload.requested_thread_id === "string"
+      ? payload.requested_thread_id
+      : typeof payload.requestedThreadId === "string"
+        ? payload.requestedThreadId
+        : null,
+    workspaceId: typeof payload.workspace_id === "string"
+      ? payload.workspace_id
+      : typeof payload.workspaceId === "string"
+        ? payload.workspaceId
+        : null,
+    remapped: typeof payload.remapped === "boolean" ? payload.remapped : undefined,
+    createdNewThread: typeof payload.created_new_thread === "boolean"
+      ? payload.created_new_thread
+      : typeof payload.createdNewThread === "boolean"
+        ? payload.createdNewThread
+        : undefined,
+  };
 }
 
 export async function archiveProviderSession(
@@ -136,80 +116,6 @@ export async function archiveProviderSession(
     workspaceDir: workspaceDir ?? null,
     sessionTitle: sessionTitle ?? null,
   });
-}
-
-export async function fetchCodexThreadState(rolloutPath: string): Promise<CodexThreadReadResult> {
-  const result = await invoke<CodexThreadReadResult>("read_codex_thread_state", { rolloutPath });
-  return {
-    ...result,
-    turns: limitSessionTurns(normalizeSessionTurns(result.turns)),
-  };
-}
-
-export async function fetchCodexThreadUpdates(
-  rolloutPath: string,
-  cursor: CodexThreadCursor,
-): Promise<CodexThreadReadResult> {
-  const result = await invoke<CodexThreadReadResult>("read_codex_thread_updates", { rolloutPath, cursor });
-  return {
-    ...result,
-    turns: limitSessionTurns(normalizeSessionTurns(result.turns)),
-  };
-}
-
-export async function sendCodexMessage(
-  threadId: string,
-  text: string,
-  attachments: ComposerAttachment[] = [],
-  cwd?: string | null,
-  approvalMode?: string | null,
-  sandboxPolicy?: unknown | null,
-): Promise<CodexSendResult> {
-  return invoke<CodexSendResult>("send_codex_thread_message", {
-    threadId,
-    text,
-    attachments,
-    cwd: cwd ?? null,
-    approvalMode: approvalMode ?? null,
-    sandboxPolicy: sandboxPolicy ?? null,
-  });
-}
-
-export async function fetchClaudeSessions(): Promise<ClaudeSession[]> {
-  const rows = await invoke<ClaudeSessionRaw[]>("list_claude_sessions");
-  return rows.map((session) => ({
-    sessionId: session.id,
-    title: session.title,
-    workspace: session.directory,
-    archived: session.archived,
-  }));
-}
-
-export async function fetchClaudeMessages(
-  sessionId: string,
-  workspaceDir?: string | null,
-): Promise<SessionTurn[]> {
-  const turns = await invoke<ClaudeTurnRow[]>("read_claude_session", {
-    sessionId,
-    workspaceDir: workspaceDir ?? null,
-  });
-  return limitSessionTurns(normalizeSessionTurns(turns.map((turn) => ({
-    role: (turn.role === "user" ? "user" : "assistant") as "user" | "assistant",
-    content: turn.content,
-  }))));
-}
-
-export async function sendClaudeMessage(
-  sessionId: string,
-  text: string,
-  attachments: ComposerAttachment[] = [],
-  workspaceDir?: string | null,
-): Promise<ClaudeSendResult> {
-  await sendProviderSessionMessage("claude", sessionId, text, attachments, workspaceDir);
-  return {
-    sessionId,
-    createdNewSession: false,
-  };
 }
 
 export async function stageComposerAttachments(

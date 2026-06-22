@@ -211,10 +211,11 @@ async def run_ow_claude_once(
     state = AppState(config=config)
 
     tool_cfg = _claude_tool_config(config)
-    configured_bin = str(claude_bin or getattr(tool_cfg, "codex_bin", "") or "claude")
+    configured_bin = str(claude_bin or getattr(tool_cfg, "bin", "") or "claude")
     configured_upstream_base_url = str(upstream_base_url or "").strip()
     configured_launcher_wraps_claude = bool(
         launcher_wraps_claude
+        or _truthy_config_value(_external_cli_value(tool_cfg, "launches_managed_child_cli"))
         or _truthy_config_value(_external_cli_value(tool_cfg, "launcher_wraps_claude"))
     )
     base_env = dict(os.environ)

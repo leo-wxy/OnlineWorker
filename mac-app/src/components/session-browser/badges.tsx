@@ -1,11 +1,11 @@
 import { useI18n } from "../../i18n";
-import type { CodexSession } from "../../types";
+import type { ProviderSessionMetadata } from "../../types";
 
-export function CodexSessionBadges({
+export function ProviderSessionBadges({
   session,
   compact = false,
 }: {
-  session: CodexSession;
+  session: ProviderSessionMetadata;
   compact?: boolean;
 }) {
   const { t } = useI18n();

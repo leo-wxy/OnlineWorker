@@ -11,19 +11,17 @@ test("session composer exposes attachment staging and selected attachment render
   const shared = readFileSync(join(root, "src", "components", "session-browser", "shared.tsx"), "utf8");
   const api = readFileSync(join(root, "src", "components", "session-browser", "api.ts"), "utf8");
   const attachmentHook = readFileSync(join(root, "src", "components", "session-browser", "composerAttachments.ts"), "utf8");
-  const codexChat = readFileSync(join(root, "src", "components", "session-browser", "CodexChat.tsx"), "utf8");
-  const claudeChat = readFileSync(join(root, "src", "components", "session-browser", "ClaudeChat.tsx"), "utf8");
   const genericChat = readFileSync(join(root, "src", "components", "session-browser", "GenericProviderChat.tsx"), "utf8");
   const types = readFileSync(join(root, "src", "types.ts"), "utf8");
 
   assert.match(types, /export interface ComposerAttachment \{/);
   assert.match(types, /kind: "image" \| "file";/);
-  assert.match(types, /export interface CodexSendResult \{/);
+  assert.match(types, /export interface ProviderSessionSendResult \{/);
 
   assert.match(api, /export async function stageComposerAttachments\(/);
   assert.match(api, /invoke<ComposerAttachment\[]>\("stage_session_composer_attachments"/);
-  assert.match(api, /export async function sendCodexMessage\(/);
-  assert.match(api, /Promise<CodexSendResult>/);
+  assert.match(api, /export async function sendProviderSessionMessage\(/);
+  assert.match(api, /Promise<ProviderSessionSendResult>/);
 
   assert.match(shared, /attachments,\s*onAttachmentsChange,\s*onPickFiles,\s*supportsAttachments = true,\s*attachmentButtonLabel,\s*imageButtonLabel,/);
   assert.match(shared, /supportsAttachments\?: boolean;/);
@@ -39,10 +37,8 @@ test("session composer exposes attachment staging and selected attachment render
   assert.match(attachmentHook, /const staged = await stageBrowserFiles\(Array\.from\(files\)\)/);
   assert.match(attachmentHook, /setAttachments\(\(current\) => \[\.\.\.current, \.\.\.staged\]\)/);
   assert.match(attachmentHook, /setStagingAttachments\(false\)/);
-  assert.match(codexChat, /onPickFiles=\{handlePickFiles\}/);
-  assert.match(claudeChat, /onPickFiles=\{handlePickFiles\}/);
   assert.match(genericChat, /onPickFiles=\{handlePickFiles\}/);
-  assert.match(codexChat, /const sendResult = await sendCodexMessage/);
-  assert.match(codexChat, /if \(sendResult\.threadId && sendResult\.threadId !== threadId\)/);
-  assert.match(codexChat, /resolveCodexSessionByThreadId\(sendResult\.threadId\)/);
+  assert.match(genericChat, /const sendResult = await sendProviderSessionMessage/);
+  assert.match(genericChat, /const remappedSessionId = sendResult\.threadId\?\.trim\(\)/);
+  assert.match(genericChat, /await onSessionRemapped\?\.\(activeSession, sendResult\)/);
 });

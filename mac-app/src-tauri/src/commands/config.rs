@@ -79,7 +79,7 @@ const SENSITIVE_KEYS: &[&str] = &[
     "SECRET",
     "PASSWORD",
 ];
-const CLAUDE_ENV_KEYS: &[&str] = &[
+const LEGACY_EXTERNAL_CLI_ENV_KEYS: &[&str] = &[
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_BASE_URL",
@@ -99,16 +99,16 @@ fn is_sensitive_key(key: &str) -> bool {
         .any(|k| key.to_uppercase().contains(k))
 }
 
-fn is_claude_env_key(key: &str) -> bool {
+fn is_legacy_external_cli_env_key(key: &str) -> bool {
     let upper = key.trim().to_uppercase();
-    upper.starts_with("ANTHROPIC_") || CLAUDE_ENV_KEYS.iter().any(|candidate| *candidate == upper)
+    upper.starts_with("ANTHROPIC_") || LEGACY_EXTERNAL_CLI_ENV_KEYS.iter().any(|candidate| *candidate == upper)
 }
 
 fn sanitize_env_content(raw: &str) -> String {
     let mut lines = Vec::new();
     for line in raw.lines() {
         if let Some((key, _)) = line.split_once('=') {
-            if is_claude_env_key(key) {
+            if is_legacy_external_cli_env_key(key) {
                 continue;
             }
         }
@@ -121,7 +121,7 @@ fn sanitize_env_content(raw: &str) -> String {
     }
 }
 
-fn cleanup_legacy_claude_config(dir: &PathBuf) -> Result<(), String> {
+fn cleanup_legacy_external_cli_config(dir: &PathBuf) -> Result<(), String> {
     let env = dir.join(".env");
     if env.exists() {
         let raw = std::fs::read_to_string(&env).map_err(|e| format!("Cannot read .env: {}", e))?;
@@ -183,7 +183,7 @@ pub async fn check_first_run() -> Result<bool, String> {
 #[tauri::command]
 pub async fn create_default_config() -> Result<(), String> {
     let dir = ensure_data_dir()?;
-    cleanup_legacy_claude_config(&dir)?;
+    cleanup_legacy_external_cli_config(&dir)?;
     let env = dir.join(".env");
     if !env.exists() {
         let template = default_env_template();
@@ -205,7 +205,7 @@ pub async fn set_provider_flags(
     autostart: bool,
 ) -> Result<(), String> {
     let dir = ensure_data_dir()?;
-    cleanup_legacy_claude_config(&dir)?;
+    cleanup_legacy_external_cli_config(&dir)?;
     let path = dir.join("config.yaml");
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
     let raw = read_config_or_materialize_default(&path, &env_raw)?;
@@ -223,7 +223,7 @@ pub async fn set_provider_message_hook_enabled(
     enabled: bool,
 ) -> Result<(), String> {
     let dir = ensure_data_dir()?;
-    cleanup_legacy_claude_config(&dir)?;
+    cleanup_legacy_external_cli_config(&dir)?;
     let path = dir.join("config.yaml");
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
     let raw = read_config_or_materialize_default(&path, &env_raw)?;
@@ -242,7 +242,7 @@ pub async fn set_provider_cli_config(
     launch_methods: Option<Vec<ProviderLaunchMethodConfig>>,
 ) -> Result<(), String> {
     let dir = ensure_data_dir()?;
-    cleanup_legacy_claude_config(&dir)?;
+    cleanup_legacy_external_cli_config(&dir)?;
     let path = dir.join("config.yaml");
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
     let raw = read_config_or_materialize_default(&path, &env_raw)?;
@@ -319,7 +319,7 @@ pub async fn set_ai_config(
     scenarios: BTreeMap<String, AiScenarioConfigEntry>,
 ) -> Result<(), String> {
     let dir = ensure_data_dir()?;
-    cleanup_legacy_claude_config(&dir)?;
+    cleanup_legacy_external_cli_config(&dir)?;
     let path = dir.join("config.yaml");
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
     let raw = read_config_or_materialize_default(&path, &env_raw)?;
@@ -336,7 +336,7 @@ pub async fn set_notification_channel_enabled(
     enabled: bool,
 ) -> Result<(), String> {
     let dir = ensure_data_dir()?;
-    cleanup_legacy_claude_config(&dir)?;
+    cleanup_legacy_external_cli_config(&dir)?;
     let path = dir.join("config.yaml");
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
     let raw = read_config_or_materialize_default(&path, &env_raw)?;
@@ -353,7 +353,7 @@ pub async fn set_notification_channel_config(
     config: BTreeMap<String, serde_yaml::Value>,
 ) -> Result<(), String> {
     let dir = ensure_data_dir()?;
-    cleanup_legacy_claude_config(&dir)?;
+    cleanup_legacy_external_cli_config(&dir)?;
     let path = dir.join("config.yaml");
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
     let raw = read_config_or_materialize_default(&path, &env_raw)?;
@@ -450,7 +450,7 @@ pub async fn write_env(content: String) -> Result<(), String> {
 /// Read a single field from .env (returns masked value for sensitive fields)
 #[tauri::command]
 pub async fn read_env_field(key: String) -> Result<String, String> {
-    if is_claude_env_key(&key) {
+    if is_legacy_external_cli_env_key(&key) {
         return Err(format!(
             "Key '{}' is no longer managed by OnlineWorker",
             key
@@ -480,7 +480,7 @@ pub async fn read_env_field(key: String) -> Result<String, String> {
 pub async fn reveal_env_field(key: String) -> Result<String, String> {
     use std::time::SystemTime;
 
-    if is_claude_env_key(&key) {
+    if is_legacy_external_cli_env_key(&key) {
         return Err(format!(
             "Key '{}' is no longer managed by OnlineWorker",
             key
@@ -515,7 +515,7 @@ pub async fn reveal_env_field(key: String) -> Result<String, String> {
 /// Write/update a single field in .env (patch style - preserves other fields and comments)
 #[tauri::command]
 pub async fn write_env_field(key: String, value: String) -> Result<(), String> {
-    if is_claude_env_key(&key) {
+    if is_legacy_external_cli_env_key(&key) {
         return Err(format!(
             "Key '{}' is no longer managed by OnlineWorker",
             key
@@ -595,6 +595,9 @@ mod tests {
         read_config, sanitize_env_content, set_provider_flags, set_test_home_override,
         write_config,
     };
+    use crate::commands::config_provider::{
+        provider_default_metadata, public_default_provider_ids,
+    };
 
     struct TestHomeGuard {
         root: PathBuf,
@@ -624,6 +627,18 @@ mod tests {
         }
     }
 
+    fn default_provider_ids_for_test() -> Vec<String> {
+        let ids = public_default_provider_ids();
+        assert!(!ids.is_empty());
+        ids
+    }
+
+    fn provider_value<'a>(doc: &'a Value, provider_id: &str, key: &str) -> Option<&'a Value> {
+        doc.get("providers")
+            .and_then(|providers| providers.get(provider_id))
+            .and_then(|provider| provider.get(key))
+    }
+
     #[test]
     fn default_env_template_only_contains_telegram_fields() {
         let template = default_env_template();
@@ -644,7 +659,7 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_env_content_removes_legacy_claude_env_keys() {
+    fn sanitize_env_content_removes_legacy_external_cli_env_keys() {
         let raw = "\
 # OnlineWorker .env
 TELEGRAM_TOKEN=token
@@ -679,27 +694,18 @@ GROUP_CHAT_ID=-1001
             doc.get("schema_version").and_then(|value| value.as_i64()),
             Some(2)
         );
-        assert_eq!(
-            doc.get("providers")
-                .and_then(|providers| providers.get("codex"))
-                .and_then(|provider| provider.get("bin"))
-                .and_then(|value| value.as_str()),
-            Some("codex")
-        );
-        assert_eq!(
-            doc.get("providers")
-                .and_then(|providers| providers.get("codex"))
-                .and_then(|provider| provider.get("owner_transport"))
-                .and_then(|value| value.as_str()),
-            Some("unix")
-        );
-        assert_eq!(
-            doc.get("providers")
-                .and_then(|providers| providers.get("claude"))
-                .and_then(|provider| provider.get("bin"))
-                .and_then(|value| value.as_str()),
-            Some("claude")
-        );
+        for provider_id in default_provider_ids_for_test() {
+            let metadata = provider_default_metadata(&provider_id);
+            assert_eq!(
+                provider_value(&doc, &provider_id, "bin").and_then(|value| value.as_str()),
+                metadata.bin.as_deref()
+            );
+            assert_eq!(
+                provider_value(&doc, &provider_id, "owner_transport")
+                    .and_then(|value| value.as_str()),
+                Some(metadata.transport.owner.as_str())
+            );
+        }
         assert!(doc
             .get("notifications")
             .and_then(|notifications| notifications.get("channels"))
@@ -727,14 +733,12 @@ GROUP_CHAT_ID=-1001
         let raw = fs::read_to_string(config_path()).expect("read migrated config");
         let doc: Value = serde_yaml::from_str(&raw).expect("parse migrated config");
 
-        assert!(doc
-            .get("providers")
-            .and_then(|providers| providers.get("codex"))
-            .is_some());
-        assert!(doc
-            .get("providers")
-            .and_then(|providers| providers.get("claude"))
-            .is_some());
+        for provider_id in default_provider_ids_for_test() {
+            assert!(doc
+                .get("providers")
+                .and_then(|providers| providers.get(&provider_id))
+                .is_some());
+        }
         assert!(doc
             .get("notifications")
             .and_then(|notifications| notifications.get("channels"))
@@ -757,20 +761,13 @@ GROUP_CHAT_ID=-1001
         let content = tauri::async_runtime::block_on(read_config()).expect("read config");
         let doc: Value = serde_yaml::from_str(&content.raw).expect("parse rendered config");
 
-        assert_eq!(
-            doc.get("providers")
-                .and_then(|providers| providers.get("codex"))
-                .and_then(|provider| provider.get("bin"))
-                .and_then(|value| value.as_str()),
-            Some("codex")
-        );
-        assert_eq!(
-            doc.get("providers")
-                .and_then(|providers| providers.get("claude"))
-                .and_then(|provider| provider.get("bin"))
-                .and_then(|value| value.as_str()),
-            Some("claude")
-        );
+        for provider_id in default_provider_ids_for_test() {
+            let metadata = provider_default_metadata(&provider_id);
+            assert_eq!(
+                provider_value(&doc, &provider_id, "bin").and_then(|value| value.as_str()),
+                metadata.bin.as_deref()
+            );
+        }
         assert_eq!(
             doc.get("ai")
                 .and_then(|ai| ai.get("services"))
@@ -798,13 +795,14 @@ GROUP_CHAT_ID=-1001
         assert!(doc.get("providers").is_some());
         assert!(doc.get("notifications").is_some());
         assert!(doc.get("ai").is_some());
-        assert_eq!(
-            doc.get("providers")
-                .and_then(|providers| providers.get("codex"))
-                .and_then(|provider| provider.get("owner_transport"))
-                .and_then(|value| value.as_str()),
-            Some("unix")
-        );
+        for provider_id in default_provider_ids_for_test() {
+            let metadata = provider_default_metadata(&provider_id);
+            assert_eq!(
+                provider_value(&doc, &provider_id, "owner_transport")
+                    .and_then(|value| value.as_str()),
+                Some(metadata.transport.owner.as_str())
+            );
+        }
     }
 
     #[test]
@@ -814,8 +812,12 @@ GROUP_CHAT_ID=-1001
 
         let content = tauri::async_runtime::block_on(read_config()).expect("read config");
         let mut doc: Value = serde_yaml::from_str(&content.raw).expect("parse rendered config");
-        doc["providers"]["codex"]["managed"] = Value::Bool(false);
-        doc["providers"]["codex"]["autostart"] = Value::Bool(false);
+        let provider_id = default_provider_ids_for_test()
+            .into_iter()
+            .next()
+            .expect("default provider");
+        doc["providers"][&provider_id]["managed"] = Value::Bool(false);
+        doc["providers"][&provider_id]["autostart"] = Value::Bool(false);
 
         let edited = serde_yaml::to_string(&doc).expect("serialize edited config");
         tauri::async_runtime::block_on(write_config(edited)).expect("write config");
@@ -826,7 +828,7 @@ GROUP_CHAT_ID=-1001
         assert_eq!(
             persisted
                 .get("providers")
-                .and_then(|providers| providers.get("codex"))
+                .and_then(|providers| providers.get(&provider_id))
                 .and_then(|provider| provider.get("managed"))
                 .and_then(|value| value.as_bool()),
             Some(false)
@@ -834,15 +836,17 @@ GROUP_CHAT_ID=-1001
         assert_eq!(
             persisted
                 .get("providers")
-                .and_then(|providers| providers.get("codex"))
+                .and_then(|providers| providers.get(&provider_id))
                 .and_then(|provider| provider.get("autostart"))
                 .and_then(|value| value.as_bool()),
             Some(false)
         );
-        assert!(persisted
-            .get("providers")
-            .and_then(|providers| providers.get("claude"))
-            .is_some());
+        for default_provider_id in default_provider_ids_for_test() {
+            assert!(persisted
+                .get("providers")
+                .and_then(|providers| providers.get(&default_provider_id))
+                .is_some());
+        }
         assert!(persisted.get("ai").is_some());
         assert!(persisted.get("notifications").is_some());
     }
@@ -850,8 +854,12 @@ GROUP_CHAT_ID=-1001
     #[test]
     fn set_provider_flags_materializes_missing_config_without_template_fallback() {
         let _guard = TestHomeGuard::new();
+        let provider_id = default_provider_ids_for_test()
+            .into_iter()
+            .next()
+            .expect("default provider");
 
-        tauri::async_runtime::block_on(set_provider_flags("codex".to_string(), false, false))
+        tauri::async_runtime::block_on(set_provider_flags(provider_id.clone(), false, false))
             .expect("set provider flags");
 
         let raw = fs::read_to_string(config_path()).expect("read materialized config");
@@ -859,22 +867,25 @@ GROUP_CHAT_ID=-1001
 
         assert_eq!(
             doc.get("providers")
-                .and_then(|providers| providers.get("codex"))
+                .and_then(|providers| providers.get(&provider_id))
                 .and_then(|provider| provider.get("managed"))
                 .and_then(|value| value.as_bool()),
             Some(false)
         );
+        let metadata = provider_default_metadata(&provider_id);
         assert_eq!(
             doc.get("providers")
-                .and_then(|providers| providers.get("codex"))
+                .and_then(|providers| providers.get(&provider_id))
                 .and_then(|provider| provider.get("owner_transport"))
                 .and_then(|value| value.as_str()),
-            Some("unix")
+            Some(metadata.transport.owner.as_str())
         );
-        assert!(doc
-            .get("providers")
-            .and_then(|providers| providers.get("claude"))
-            .is_some());
+        for default_provider_id in default_provider_ids_for_test() {
+            assert!(doc
+                .get("providers")
+                .and_then(|providers| providers.get(&default_provider_id))
+                .is_some());
+        }
         assert!(doc.get("notifications").is_some());
         assert!(doc.get("ai").is_some());
     }

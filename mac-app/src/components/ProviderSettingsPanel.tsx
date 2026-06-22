@@ -39,19 +39,36 @@ function providerSettingClass(enabled: boolean) {
 }
 
 function supportsLaunchMethods(provider: ProviderMetadata | undefined) {
-  return provider?.capabilities.launchMethods === true || provider?.id === "claude";
+  return provider?.capabilities.launchMethods === true;
+}
+
+function supportsExternalCliAuthConfig(provider: ProviderMetadata | undefined) {
+  return provider?.capabilities.messageRewrite?.externalCli === "http_proxy";
+}
+
+function supportsExternalCliLauncherWrap(provider: ProviderMetadata | undefined) {
+  return supportsLaunchMethods(provider) && supportsExternalCliAuthConfig(provider);
+}
+
+function showsManagedRemoteProxyAlias(provider: ProviderMetadata | undefined) {
+  return Boolean(managedRemoteProxyAlias(provider));
 }
 
 const CIVILITY_MODE_SEALED = true;
-const CODEX_REMOTE_PROXY_ALIAS =
-  "alias codexR='/opt/homebrew/bin/codex --remote \"unix://$HOME/Library/Application Support/OnlineWorker/codex_remote_proxy.sock\" --cd \"$(pwd)\"'";
+
+function managedRemoteProxyAlias(provider: ProviderMetadata | undefined) {
+  if (provider?.capabilities.messageRewrite?.externalCli !== "remote_proxy") {
+    return "";
+  }
+  return provider.capabilities.messageRewrite.proxyAlias?.trim() ?? "";
+}
 
 interface ProviderCliDraft {
   bin: string;
   authToken: string;
   baseUrl: string;
   model: string;
-  launcherWrapsClaude: boolean;
+  launchesManagedChildCli: boolean;
   launchCommands: string;
 }
 
@@ -131,7 +148,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
             authToken: provider.externalCli?.authToken ?? "",
             baseUrl: provider.externalCli?.upstreamBaseUrl ?? "",
             model: provider.externalCli?.model ?? "",
-            launcherWrapsClaude: provider.externalCli?.launcherWrapsClaude ?? false,
+            launchesManagedChildCli: provider.externalCli?.launchesManagedChildCli ?? false,
             launchCommands: (provider.launchMethods?.length
               ? provider.launchMethods.map((method) => method.bin).join("\n")
               : provider.bin ?? provider.install?.cliNames?.[0] ?? provider.id),
@@ -209,7 +226,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
           authToken: provider?.externalCli?.authToken ?? "",
           baseUrl: provider?.externalCli?.upstreamBaseUrl ?? "",
           model: provider?.externalCli?.model ?? "",
-          launcherWrapsClaude: provider?.externalCli?.launcherWrapsClaude ?? false,
+          launchesManagedChildCli: provider?.externalCli?.launchesManagedChildCli ?? false,
           launchCommands: provider?.launchMethods?.length
             ? provider.launchMethods.map((method) => method.bin).join("\n")
             : provider?.bin ?? provider?.install?.cliNames?.[0] ?? providerId,
@@ -230,12 +247,14 @@ export function ProviderSettingsPanel({ mode }: Props) {
       authToken: provider.externalCli?.authToken ?? "",
       baseUrl: provider.externalCli?.upstreamBaseUrl ?? "",
       model: provider.externalCli?.model ?? "",
-      launcherWrapsClaude: provider.externalCli?.launcherWrapsClaude ?? false,
+      launchesManagedChildCli: provider.externalCli?.launchesManagedChildCli ?? false,
       launchCommands: provider.launchMethods?.length
         ? provider.launchMethods.map((method) => method.bin).join("\n")
         : provider.bin ?? provider.install?.cliNames?.[0] ?? provider.id,
     };
     const canEditLaunchMethods = supportsLaunchMethods(provider);
+    const supportsExternalCliAuth = supportsExternalCliAuthConfig(provider);
+    const supportsExternalCliLauncher = supportsExternalCliLauncherWrap(provider);
     const launchCommands = draft.launchCommands
       .split("\n")
       .map((line) => line.trim())
@@ -256,10 +275,10 @@ export function ProviderSettingsPanel({ mode }: Props) {
         providerId: provider.id,
         bin: primaryBin,
         externalCli: {
-          upstreamBaseUrl: provider.id === "claude" ? draft.baseUrl.trim() || null : null,
-          authToken: provider.id === "claude" ? draft.authToken.trim() || null : null,
-          model: provider.id === "claude" ? draft.model.trim() || null : null,
-          launcherWrapsClaude: provider.id === "claude" && draft.launcherWrapsClaude,
+          upstreamBaseUrl: supportsExternalCliAuth ? draft.baseUrl.trim() || null : null,
+          authToken: supportsExternalCliAuth ? draft.authToken.trim() || null : null,
+          model: supportsExternalCliAuth ? draft.model.trim() || null : null,
+          launchesManagedChildCli: supportsExternalCliLauncher && draft.launchesManagedChildCli,
         },
         launchMethods,
       });
@@ -338,9 +357,11 @@ export function ProviderSettingsPanel({ mode }: Props) {
           const cliAvailable = cliAvailability[setting.id] !== false;
           const canEnable = setting.enabled || cliAvailable;
           const supportsExternalCliRewrite = Boolean(provider?.capabilities.messageRewrite?.externalCli);
-          const showCodexRemoteProxyAlias = provider?.id === "codex";
+          const remoteProxyAlias = managedRemoteProxyAlias(provider);
+          const showManagedRemoteProxyAlias = showsManagedRemoteProxyAlias(provider);
           const canEditLaunchMethods = supportsLaunchMethods(provider);
-          const supportsClaudeCliLauncher = provider?.id === "claude";
+          const supportsExternalCliAuth = supportsExternalCliAuthConfig(provider);
+          const supportsExternalCliChildLauncher = supportsExternalCliLauncherWrap(provider);
           const supportsMessageRewrite = !CIVILITY_MODE_SEALED && Boolean(
             provider?.capabilities.messageRewrite?.appSend ||
             provider?.capabilities.messageRewrite?.telegram ||
@@ -352,7 +373,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
             authToken: provider?.externalCli?.authToken ?? "",
             baseUrl: provider?.externalCli?.upstreamBaseUrl ?? "",
             model: provider?.externalCli?.model ?? "",
-            launcherWrapsClaude: provider?.externalCli?.launcherWrapsClaude ?? false,
+            launchesManagedChildCli: provider?.externalCli?.launchesManagedChildCli ?? false,
             launchCommands: provider?.launchMethods?.length
               ? provider.launchMethods.map((method) => method.bin).join("\n")
               : provider?.bin ?? provider?.install?.cliNames?.[0] ?? setting.id,
@@ -449,23 +470,23 @@ export function ProviderSettingsPanel({ mode }: Props) {
                 )}
               </div>
 
-              {provider && (supportsExternalCliRewrite || showCodexRemoteProxyAlias || canEditLaunchMethods) && (
+              {provider && (supportsExternalCliRewrite || showManagedRemoteProxyAlias || canEditLaunchMethods) && (
                 <div className="mt-5 grid gap-3 rounded-xl border border-slate-200/80 bg-white/70 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <h4 className="text-sm font-bold text-gray-900">{texts.cliConfigTitle}</h4>
                     {cliBusy && <span className="text-xs font-semibold text-blue-600">{texts.saving}</span>}
                   </div>
-                  {showCodexRemoteProxyAlias && (
+                  {showManagedRemoteProxyAlias && (
                     <div className="grid gap-2 border-l-2 border-blue-200 pl-3">
                       <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-xs font-bold text-blue-900">{texts.externalCliCodexAliasTitle}</div>
-                          <div className="mt-0.5 text-xs font-medium text-blue-700">{texts.externalCliCodexAliasDescription}</div>
+                          <div className="min-w-0">
+                          <div className="text-xs font-bold text-blue-900">{texts.externalCliProxyAliasTitle}</div>
+                          <div className="mt-0.5 text-xs font-medium text-blue-700">{texts.externalCliProxyAliasDescription}</div>
                         </div>
-                        <CopyCommandButton text={CODEX_REMOTE_PROXY_ALIAS} />
+                        <CopyCommandButton text={remoteProxyAlias} />
                       </div>
                       <code className="block break-all rounded-md bg-slate-950 px-2.5 py-2 text-xs font-semibold text-slate-100">
-                        {CODEX_REMOTE_PROXY_ALIAS}
+                        {remoteProxyAlias}
                       </code>
                     </div>
                   )}
@@ -500,43 +521,43 @@ export function ProviderSettingsPanel({ mode }: Props) {
                             {texts.launchMethodCommandsHint}
                           </p>
                         )}
-                        {provider?.id === "claude" && (
+                        {supportsExternalCliAuth && (
                           <>
                             <label className="grid gap-1.5 text-xs font-bold text-slate-600">
-                              {texts.claudeAuthToken}
+                              {texts.externalCliAuthToken}
                               <input
                                 type="password"
                                 value={draft.authToken}
                                 disabled={cliBusy}
                                 onChange={(event) => updateCliDraft(setting.id, { authToken: event.currentTarget.value })}
                                 className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-mono text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
-                                placeholder={texts.claudeAuthTokenPlaceholder}
+                                placeholder={texts.externalCliAuthTokenPlaceholder}
                                 autoComplete="off"
                                 spellCheck={false}
                               />
                             </label>
                             <label className="grid gap-1.5 text-xs font-bold text-slate-600">
-                              {texts.claudeBaseUrl}
+                              {texts.externalCliBaseUrl}
                               <input
                                 type="text"
                                 value={draft.baseUrl}
                                 disabled={cliBusy}
                                 onChange={(event) => updateCliDraft(setting.id, { baseUrl: event.currentTarget.value })}
                                 className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-mono text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
-                                placeholder={texts.claudeBaseUrlPlaceholder}
+                                placeholder={texts.externalCliBaseUrlPlaceholder}
                                 autoComplete="off"
                                 spellCheck={false}
                               />
                             </label>
                             <label className="grid gap-1.5 text-xs font-bold text-slate-600">
-                              {texts.claudeModel}
+                              {texts.externalCliModel}
                               <input
                                 type="text"
                                 value={draft.model}
                                 disabled={cliBusy}
                                 onChange={(event) => updateCliDraft(setting.id, { model: event.currentTarget.value })}
                                 className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-mono text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
-                                placeholder={texts.claudeModelPlaceholder}
+                                placeholder={texts.externalCliModelPlaceholder}
                                 autoComplete="off"
                                 spellCheck={false}
                               />
@@ -545,14 +566,14 @@ export function ProviderSettingsPanel({ mode }: Props) {
                         )}
                       </div>
                       <div className="flex flex-wrap items-center justify-end gap-3">
-                        {supportsClaudeCliLauncher && (
+                        {supportsExternalCliChildLauncher && (
                           <label className={`mr-auto flex items-center gap-3 ${cliBusy ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
                             <Toggle
-                              checked={draft.launcherWrapsClaude}
+                              checked={draft.launchesManagedChildCli}
                               disabled={cliBusy}
-                              onChange={(checked) => updateCliDraft(setting.id, { launcherWrapsClaude: checked })}
+                              onChange={(checked) => updateCliDraft(setting.id, { launchesManagedChildCli: checked })}
                             />
-                            <span className="text-sm font-semibold text-gray-700">{texts.externalCliLauncherWrapsClaude}</span>
+                            <span className="text-sm font-semibold text-gray-700">{texts.externalCliLaunchesManagedChildCli}</span>
                           </label>
                         )}
                         <button

@@ -7,9 +7,9 @@ import {
 } from "../src/utils/settingsProviders.js";
 
 const PROVIDERS = [
-  { id: "codex", label: "Codex", visible: true, managed: true, autostart: true },
+  { id: "codex", label: "Codex", visible: true, visibility: "public", managed: true, autostart: true },
   { id: "customprovider", label: "Custom Provider", visible: true, managed: false, autostart: false },
-  { id: "claude", label: "Claude", visible: true, managed: true, autostart: false },
+  { id: "claude", label: "Claude", visible: true, visibility: "public", managed: true, autostart: false },
   { id: "hidden", label: "Hidden", visible: false, managed: true, autostart: true },
 ];
 
@@ -47,5 +47,22 @@ test("provider settings preserve the configured CLI bin for availability checks"
       autostart: false,
       bin: "~/.customprovider/bin/customprovider",
     },
+  ]);
+});
+
+test("primaryProviderSettings follows public visibility instead of a hard-coded provider id list", () => {
+  const providers = [
+    { id: "zeta", label: "Zeta", visible: true, visibility: "private", managed: false, autostart: false },
+    { id: "alpha", label: "Alpha", visible: true, visibility: "public", managed: true, autostart: false },
+    { id: "beta", label: "Beta", visible: true, visibility: "public", managed: true, autostart: true },
+  ];
+
+  assert.deepEqual(primaryProviderSettings(providers), [
+    { id: "alpha", label: "Alpha", enabled: true, autostart: false },
+    { id: "beta", label: "Beta", enabled: true, autostart: true },
+  ]);
+
+  assert.deepEqual(extensionProviderSettings(providers), [
+    { id: "zeta", label: "Zeta", enabled: false, autostart: false },
   ]);
 });

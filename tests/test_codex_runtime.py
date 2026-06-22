@@ -28,7 +28,7 @@ async def test_setup_connection_does_not_start_codex_hook_bridge(tmp_path, monke
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 app_server_port=4722,
                 protocol="ws",
             )
@@ -66,6 +66,67 @@ async def test_setup_connection_does_not_start_codex_hook_bridge(tmp_path, monke
 
 
 @pytest.mark.asyncio
+async def test_setup_connection_backfills_live_thread_mapping(tmp_path, monkeypatch):
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-live"] = ThreadInfo(
+        thread_id="tid-live",
+        preview="live preview",
+        archived=False,
+        is_active=True,
+        source="app",
+    )
+    storage.workspaces["codex:onlineWorker"] = ws
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=2,
+        log_level="INFO",
+        tools=[ToolConfig(name="codex", enabled=True, bin="codex")],
+        data_dir=str(tmp_path),
+    )
+    state = AppState(config=cfg, storage=storage)
+    manager = MagicMock()
+    manager.state = state
+    manager.storage = storage
+    manager.gid = 2
+
+    adapter = MagicMock()
+    adapter.configure_hook_bridge = MagicMock()
+    adapter.start_hook_bridge = AsyncMock()
+    adapter.on_event = MagicMock()
+    adapter.on_server_request = MagicMock()
+    adapter.register_workspace_cwd = MagicMock()
+    adapter.list_threads = AsyncMock(
+        return_value=[
+            {
+                "id": "tid-live",
+                "preview": "live preview",
+                "source": "app",
+                "updatedAt": 123,
+            }
+        ]
+    )
+    adapter._thread_workspace_map = {}
+
+    monkeypatch.setattr(codex_runtime, "prime_thread_mappings", AsyncMock())
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.owner_bridge.ensure_codex_owner_bridge_started",
+        AsyncMock(),
+    )
+
+    await codex_runtime.setup_connection(manager, MagicMock(), adapter)
+
+    adapter.list_threads.assert_awaited_once_with("codex:onlineWorker", limit=50)
+    assert adapter._thread_workspace_map["tid-live"] == "codex:onlineWorker"
+
+
+@pytest.mark.asyncio
 async def test_codex_setup_connection_wraps_handlers_for_approval_sync(tmp_path, monkeypatch):
     storage = AppStorage()
     storage.workspaces["codex:onlineWorker"] = WorkspaceInfo(
@@ -79,7 +140,7 @@ async def test_codex_setup_connection_wraps_handlers_for_approval_sync(tmp_path,
         allowed_user_id=1,
         group_chat_id=2,
         log_level="INFO",
-        tools=[ToolConfig(name="codex", enabled=True, codex_bin="codex")],
+        tools=[ToolConfig(name="codex", enabled=True, bin="codex")],
         data_dir=str(tmp_path),
     )
     state = AppState(config=cfg, storage=storage)
@@ -104,6 +165,153 @@ async def test_codex_setup_connection_wraps_handlers_for_approval_sync(tmp_path,
 
     assert adapter.on_event.call_count == 1
     assert adapter.on_server_request.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_setup_connection_auto_continues_capacity_abort_once(tmp_path, monkeypatch):
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-123"] = ThreadInfo(
+        thread_id="tid-123",
+        preview="live preview",
+        archived=False,
+        is_active=True,
+        source="app",
+    )
+    storage.workspaces["codex:onlineWorker"] = ws
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=2,
+        log_level="INFO",
+        tools=[ToolConfig(name="codex", enabled=True, bin="codex")],
+        data_dir=str(tmp_path),
+    )
+    state = AppState(config=cfg, storage=storage)
+    manager = MagicMock()
+    manager.state = state
+    manager.storage = storage
+    manager.gid = 2
+
+    adapter = MagicMock()
+    adapter.on_event = MagicMock()
+    adapter.on_server_request = MagicMock()
+    adapter.register_workspace_cwd = MagicMock()
+    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.send_user_message = AsyncMock(return_value={})
+    adapter._thread_workspace_map = {}
+
+    event_handler = AsyncMock()
+    monkeypatch.setattr("bot.events.make_event_handler", lambda *_args: event_handler)
+    monkeypatch.setattr("bot.events.make_server_request_handler", lambda *_args: AsyncMock())
+    monkeypatch.setattr(codex_runtime, "prime_thread_mappings", AsyncMock())
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.owner_bridge.ensure_codex_owner_bridge_started",
+        AsyncMock(),
+    )
+
+    await codex_runtime.setup_connection(manager, MagicMock(), adapter)
+
+    callback = adapter.on_event.call_args.args[0]
+    capacity_event = {
+        "workspace_id": "codex:onlineWorker",
+        "message": {
+            "method": "turn/completed",
+            "params": {
+                "threadId": "tid-123",
+                "turn": {
+                    "id": "turn-1",
+                    "status": "aborted",
+                    "reason": "Selected model is at capacity. Please try a different model.",
+                },
+            },
+        },
+    }
+
+    await callback("app-server-event", capacity_event)
+    await callback("app-server-event", capacity_event)
+
+    event_handler.assert_awaited()
+    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-123")
+    adapter.send_user_message.assert_awaited_once_with(
+        "codex:onlineWorker",
+        "tid-123",
+        "继续",
+        approvals_reviewer="user",
+    )
+    runtime = state.get_provider_runtime("codex")
+    assert runtime.thread_capacity_auto_continue_attempts["tid-123"] == 1
+
+
+@pytest.mark.asyncio
+async def test_setup_connection_ignores_non_capacity_abort(tmp_path, monkeypatch):
+    storage = AppStorage()
+    storage.workspaces["codex:onlineWorker"] = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=2,
+        log_level="INFO",
+        tools=[ToolConfig(name="codex", enabled=True, bin="codex")],
+        data_dir=str(tmp_path),
+    )
+    state = AppState(config=cfg, storage=storage)
+    manager = MagicMock()
+    manager.state = state
+    manager.storage = storage
+    manager.gid = 2
+
+    adapter = MagicMock()
+    adapter.on_event = MagicMock()
+    adapter.on_server_request = MagicMock()
+    adapter.register_workspace_cwd = MagicMock()
+    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.send_user_message = AsyncMock(return_value={})
+    adapter._thread_workspace_map = {}
+
+    event_handler = AsyncMock()
+    monkeypatch.setattr("bot.events.make_event_handler", lambda *_args: event_handler)
+    monkeypatch.setattr("bot.events.make_server_request_handler", lambda *_args: AsyncMock())
+    monkeypatch.setattr(codex_runtime, "prime_thread_mappings", AsyncMock())
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.owner_bridge.ensure_codex_owner_bridge_started",
+        AsyncMock(),
+    )
+
+    await codex_runtime.setup_connection(manager, MagicMock(), adapter)
+
+    callback = adapter.on_event.call_args.args[0]
+    await callback(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "tid-123",
+                    "turn": {
+                        "id": "turn-1",
+                        "status": "aborted",
+                        "reason": "interrupted",
+                    },
+                },
+            },
+        },
+    )
+
+    event_handler.assert_awaited_once()
+    adapter.resume_thread.assert_not_awaited()
+    adapter.send_user_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio

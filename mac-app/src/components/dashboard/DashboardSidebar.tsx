@@ -5,9 +5,9 @@ import { TelegramBadge } from "./TelegramBadge";
 
 interface Props {
   dashboardState: DashboardState | null;
-  canOpenCodexTuiHost: boolean;
+  canOpenProviderTuiHost: boolean;
   texts: AppTexts;
-  onOpenCodexTuiHost: () => void;
+  onOpenProviderTuiHost: () => void;
   onOpenLogs: () => void;
   onOpenSetup: () => void;
   onOpenSessions: () => void;
@@ -15,9 +15,9 @@ interface Props {
 
 export function DashboardSidebar({
   dashboardState,
-  canOpenCodexTuiHost,
+  canOpenProviderTuiHost,
   texts,
-  onOpenCodexTuiHost,
+  onOpenProviderTuiHost,
   onOpenLogs,
   onOpenSetup,
   onOpenSessions,
@@ -83,9 +83,9 @@ export function DashboardSidebar({
         </div>
 
         <div className="space-y-3">
-          {canOpenCodexTuiHost && (
+          {canOpenProviderTuiHost && (
             <button
-              onClick={onOpenCodexTuiHost}
+              onClick={onOpenProviderTuiHost}
               className="group flex w-full items-center gap-4 rounded-2xl border border-slate-200/70 bg-slate-50/80 p-4 text-left transition-all hover:border-emerald-200 hover:bg-emerald-50/70"
             >
               <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-emerald-100 text-emerald-600">
@@ -100,10 +100,10 @@ export function DashboardSidebar({
               </div>
               <div className="min-w-0">
                 <h4 className="font-semibold text-gray-900 group-hover:text-emerald-800">
-                  {texts.dashboard.openCodexTuiHostTitle}
+                  {texts.dashboard.openCliHostTitle}
                 </h4>
                 <p className="mt-1 text-xs leading-5 text-slate-500">
-                  {texts.dashboard.openCodexTuiHostDescription}
+                  {texts.dashboard.openCliHostDescription}
                 </p>
               </div>
             </button>

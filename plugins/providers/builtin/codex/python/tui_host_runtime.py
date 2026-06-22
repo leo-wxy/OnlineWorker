@@ -127,9 +127,11 @@ async def run_codex_tui_host_once(
     cwd: str,
     target: Optional[str] = None,
     remote_url: Optional[str] = None,
+    provider_bin: Optional[str] = None,
     codex_bin: str = "codex",
     extra_args: Optional[list[str]] = None,
 ) -> int:
+    resolved_bin = str(provider_bin or codex_bin or "codex")
     normalized_target = str(target or "").strip()
     explicit_thread_id = normalized_target or None
     explicit_topic_id = None
@@ -148,7 +150,7 @@ async def run_codex_tui_host_once(
         thread_id=thread_id,
         cwd=cwd,
         remote_url=remote_url,
-        codex_bin=codex_bin,
+        codex_bin=resolved_bin,
         extra_args=extra_args,
     )
     return await host.run()

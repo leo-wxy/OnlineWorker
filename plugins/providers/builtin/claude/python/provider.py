@@ -46,6 +46,10 @@ def _query_active_thread_ids(workspace_path: str):
     return storage_runtime.query_claude_active_session_ids(workspace_path)
 
 
+def _query_running_thread_ids(workspace_path: str):
+    return storage_runtime.query_claude_running_session_ids(workspace_path)
+
+
 def _read_thread_history(thread_id: str, *, limit: int = 10, sessions_dir: Optional[str] = None):
     return storage_runtime.read_claude_thread_history(
         thread_id,
@@ -65,6 +69,10 @@ def create_provider_descriptor() -> ProviderDescriptor:
             list_threads=_list_threads,
             read_thread_history=_read_thread_history,
             query_active_thread_ids=_query_active_thread_ids,
+            query_running_thread_ids=_query_running_thread_ids,
+            include_state_only_thread=lambda thread_info: False,
+            thread_list_is_authoritative=True,
+            preserve_archived_threads=True,
         ),
         capabilities=runtime_capabilities_from_manifest(capabilities),
         message_hooks=ProviderMessageHooks(
@@ -82,10 +90,14 @@ def create_provider_descriptor() -> ProviderDescriptor:
             reply_question=runtime.reply_question_via_adapter,
             parse_approval_request=runtime.parse_approval_request,
             parse_question_request=runtime.parse_question_request,
+            handle_approval_callback=runtime.handle_approval_callback,
             server_request_methods=("item/commandExecution/requestApproval",),
         ),
         workspace_hooks=ProviderWorkspaceHooks(
             normalize_server_threads=default_normalize_server_threads,
+            sync_existing_thread_history=runtime.sync_existing_thread_history,
+            prefer_provider_thread_overview=True,
+            thread_control_intro_extra=runtime.thread_control_intro_extra,
         ),
         thread_hooks=ProviderThreadHooks(
             resolve_adapter=resolve_default_thread_adapter,
@@ -93,6 +105,7 @@ def create_provider_descriptor() -> ProviderDescriptor:
             activate_new_thread=activate_default_new_thread,
             archive_thread=archive_default_thread,
             interrupt_thread=interrupt_default_thread,
+            interrupt_supported=lambda state, ws: True,
         ),
         lifecycle_hooks=ProviderLifecycleHooks(
             on_connected=runtime.setup_connection,

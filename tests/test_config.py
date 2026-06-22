@@ -9,7 +9,7 @@ VALID_YAML = """
 tools:
   - name: codex
     enabled: true
-    codex_bin: "codex"
+    bin: "codex"
     app_server_port: 0
 
 logging:
@@ -71,7 +71,7 @@ def test_load_config_from_yaml(tmp_path, monkeypatch):
     # codex tool 配置
     codex = cfg.get_tool("codex")
     assert codex is not None
-    assert codex.codex_bin == "codex"
+    assert codex.bin == "codex"
     assert codex.app_server_port == 0
     assert codex.protocol == "unix"
     assert codex.owner_transport == "unix"
@@ -250,7 +250,7 @@ providers:
     claude = cfg.get_provider("claude")
 
     assert claude is not None
-    assert claude.codex_bin == "company-launcher start"
+    assert claude.bin == "company-launcher start"
     assert claude.external_cli == {
         "upstream_base_url": "https://upstream.example.test/anthropic",
         "launcher_wraps_claude": True,
@@ -421,7 +421,7 @@ providers:
     assert overlay_tool.managed is True
     assert overlay_tool.enabled is True
     assert overlay_tool.autostart is False
-    assert overlay_tool.codex_bin == "overlay-tool"
+    assert overlay_tool.bin == "overlay-tool"
     assert overlay_tool.protocol == "stdio"
     assert overlay_tool.capabilities["sessions"] is True
     assert overlay_tool.capabilities["send"] is True
@@ -615,7 +615,7 @@ def test_load_config_from_provider_schema(tmp_path, monkeypatch):
     assert codex is not None
     assert codex.managed is True
     assert codex.autostart is True
-    assert codex.codex_bin == "codex"
+    assert codex.bin == "codex"
     assert codex.protocol == "ws"
     assert codex.owner_transport == "ws"
     assert codex.live_transport == "shared_ws"
@@ -627,7 +627,7 @@ def test_load_config_from_provider_schema(tmp_path, monkeypatch):
     assert claude is not None
     assert claude.managed is False
     assert claude.autostart is False
-    assert claude.codex_bin == "claude"
+    assert claude.bin == "claude"
     assert claude.protocol == "stdio"
     assert claude.auth == {}
     assert cfg.log_level == "DEBUG"
@@ -641,12 +641,12 @@ def test_load_config_migrates_legacy_tools_to_provider_flags(tmp_path, monkeypat
 tools:
   - name: codex
     enabled: true
-    codex_bin: "codex"
+    bin: "codex"
     protocol: "ws"
     app_server_port: 4722
   - name: claude
     enabled: true
-    codex_bin: "claude"
+    bin: "claude"
     protocol: "stdio"
 """,
         encoding="utf-8",
@@ -685,7 +685,7 @@ def test_load_config_backfills_disabled_claude_provider_when_missing(tmp_path, m
     assert claude is not None
     assert claude.managed is False
     assert claude.autostart is False
-    assert claude.codex_bin == "claude"
+    assert claude.bin == "claude"
     assert claude.protocol == "stdio"
     assert cfg.get_tool("claude") is None
 
@@ -776,7 +776,7 @@ def test_load_config_ignores_legacy_unknown_fields(tmp_path, monkeypatch):
 tools:
   - name: codex
     enabled: true
-    codex_bin: "codex"
+    bin: "codex"
     app_server_port: 4722
     app_server_url: "ws://127.0.0.1:4722"
 """,
@@ -802,7 +802,7 @@ def test_load_config_preserves_external_codex_app_server_url(tmp_path, monkeypat
 tools:
   - name: codex
     enabled: true
-    codex_bin: "codex"
+    bin: "codex"
     protocol: "ws"
     app_server_port: 4722
     app_server_url: "ws://127.0.0.1:4722"
@@ -924,7 +924,7 @@ def test_load_config_migrates_legacy_codex_stdio_default_to_unix(tmp_path, monke
 tools:
   - name: codex
     enabled: true
-    codex_bin: "codex"
+    bin: "codex"
     protocol: "stdio"
     app_server_port: 0
 """,
@@ -953,7 +953,7 @@ def test_load_config_migrates_legacy_codex_default_ws_without_control_mode_to_un
 tools:
   - name: codex
     enabled: true
-    codex_bin: "codex"
+    bin: "codex"
     protocol: "ws"
     app_server_port: 4722
 """,
@@ -982,7 +982,7 @@ def test_load_config_treats_legacy_codex_fixed_port_without_protocol_as_shared_w
 tools:
   - name: codex
     enabled: true
-    codex_bin: "codex"
+    bin: "codex"
     app_server_port: 4722
 """,
         encoding="utf-8",
@@ -1010,7 +1010,7 @@ def test_load_config_preserves_explicit_codex_app_control_mode(tmp_path, monkeyp
 tools:
   - name: codex
     enabled: true
-    codex_bin: "codex"
+    bin: "codex"
     protocol: "ws"
     app_server_port: 4722
     control_mode: "app"
@@ -1038,7 +1038,7 @@ def test_load_config_preserves_explicit_codex_hybrid_control_mode(tmp_path, monk
 tools:
   - name: codex
     enabled: true
-    codex_bin: "codex"
+    bin: "codex"
     protocol: "ws"
     app_server_port: 4722
     control_mode: "hybrid"
@@ -1137,6 +1137,59 @@ logging:
     assert codex_raw["live_transport"] == "shared_unix"
 
 
+def test_load_config_persists_unsafe_cleanup_matcher_migration(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        """
+schema_version: 2
+providers:
+  codex:
+    managed: true
+    process:
+      cleanupMatchers:
+      - codex.*app-server
+      - codex-aar
+      - onlineworker-bot --ow-codex
+      - custom-provider.*serve
+logging:
+  level: INFO
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / ".env").write_text(
+        "\n".join(
+            [
+                "TELEGRAM_TOKEN=123:abc",
+                "ALLOWED_USER_ID=456789",
+                "GROUP_CHAT_ID=-100987654321",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
+    monkeypatch.delenv("ALLOWED_USER_ID", raising=False)
+    monkeypatch.delenv("GROUP_CHAT_ID", raising=False)
+
+    from config import load_config
+
+    cfg = load_config(data_dir=str(tmp_path))
+
+    assert cfg.providers["codex"].process == {
+        "cleanup_matchers": [
+            "onlineworker-bot --ow-codex",
+            "custom-provider.*serve",
+        ],
+    }
+    migrated = yaml.safe_load(p.read_text(encoding="utf-8"))
+    codex_process = migrated["providers"]["codex"]["process"]
+    assert codex_process == {
+        "cleanup_matchers": [
+            "onlineworker-bot --ow-codex",
+            "custom-provider.*serve",
+        ],
+    }
+
+
 def test_load_config_defaults_claude_to_stdio_and_app_control_mode(tmp_path, monkeypatch):
     p = tmp_path / "config.yaml"
     p.write_text(
@@ -1144,7 +1197,7 @@ def test_load_config_defaults_claude_to_stdio_and_app_control_mode(tmp_path, mon
 tools:
   - name: claude
     enabled: true
-    codex_bin: "claude"
+    bin: "claude"
 """,
         encoding="utf-8",
     )
@@ -1156,7 +1209,7 @@ tools:
     cfg = load_config(str(p))
     claude = cfg.get_tool("claude")
     assert claude is not None
-    assert claude.codex_bin == "claude"
+    assert claude.bin == "claude"
     assert claude.protocol == "stdio"
     assert claude.control_mode == "app"
     assert [tool.name for tool in cfg.enabled_tools] == ["claude"]

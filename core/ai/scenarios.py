@@ -73,7 +73,7 @@ def _service_target(service: AiScenarioConfig | Any) -> str:
         return endpoint
     if protocol == "openai_compatible_chat":
         return f"{base_url or 'https://api.openai.com/v1'}/chat/completions"
-    if protocol == "claude_messages":
+    if protocol == "anthropic_messages":
         return "https://api.anthropic.com/v1/messages"
     return base_url
 

@@ -55,11 +55,11 @@ test("parseCliEntriesFromConfigRaw still supports legacy tools schema", () => {
   const raw = `
 tools:
   - name: codex
-    codex_bin: codex
+    bin: codex
   - name: customprovider
-    codex_bin: customprovider
+    bin: customprovider
   - name: claude
-    codex_bin: claude
+    bin: claude
 `;
 
   assert.deepEqual(parseCliEntriesFromConfigRaw(raw), [
@@ -81,7 +81,7 @@ test("visibleProviderMetadata omits runtime-enabled hidden customprovider", () =
     "claude",
   ]);
   assert.deepEqual(providerCliEntriesFromMetadata(providers), [
-    { name: "codex", label: "Codex", bin: "codex" },
-    { name: "claude", label: "Claude", bin: "claude" },
+    { name: "codex", label: "Codex", bin: "codex", install: null },
+    { name: "claude", label: "Claude", bin: "claude", install: null },
   ]);
 });

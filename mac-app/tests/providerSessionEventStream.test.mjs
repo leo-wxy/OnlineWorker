@@ -21,7 +21,7 @@ test("provider session event stream hook uses dedicated owner-bridge commands", 
   );
 });
 
-test("provider session event stream Tauri commands stay separate from legacy session stream", () => {
+test("provider session event stream Tauri commands use owner-bridge event streaming only", () => {
   const commands = readFileSync(
     join(root, "src-tauri", "src", "commands", "provider_sessions.rs"),
     "utf8",
@@ -31,29 +31,20 @@ test("provider session event stream Tauri commands stay separate from legacy ses
   assert.match(commands, /pub async fn stop_provider_session_event_stream\(\)/);
   assert.match(commands, /"type": "session_event_stream"/);
   assert.match(commands, /Channel<ProviderSessionStreamEvent>/);
-  assert.doesNotMatch(
-    commands,
-    /start_provider_session_stream[\s\S]*owner_bridge_bus/,
-  );
+  assert.doesNotMatch(commands, /pub async fn start_provider_session_stream\(/);
+  assert.doesNotMatch(commands, /pub async fn stop_provider_session_stream\(/);
 });
 
 test("session browser chats handle stream-ready and stream errors as non-destructive live updates", () => {
-  const claudeChat = readFileSync(
-    join(root, "src", "components", "session-browser", "ClaudeChat.tsx"),
-    "utf8",
-  );
   const genericChat = readFileSync(
     join(root, "src", "components", "session-browser", "GenericProviderChat.tsx"),
     "utf8",
   );
 
-  for (const source of [claudeChat, genericChat]) {
-    assert.match(source, /if \(event\?\.kind === "stream_ready"\) \{\s*return;\s*\}/s);
-    assert.match(source, /if \(event\?\.kind === "error"\)/);
-    assert.match(source, /messagesRef\.current\.length === 0/);
-    assert.match(source, /setReplyWatchState\(\(current\) => \(current \? "expired" : current\)\)/);
-    assert.match(source, /applySessionStreamEvent\(previousMessages, event\)/);
-    assert.match(source, /shouldClearReplyWatch\(previousMessages, nextMessages, event\)/);
-  }
+  assert.match(genericChat, /if \(event\?\.kind === "stream_ready"\) \{\s*return;\s*\}/s);
+  assert.match(genericChat, /if \(event\?\.kind === "error"\)/);
+  assert.match(genericChat, /messagesRef\.current\.length === 0/);
+  assert.match(genericChat, /setReplyWatchState\(\(current\) => \(current \? "expired" : current\)\)/);
+  assert.match(genericChat, /applySessionStreamEvent\(previousMessages, event\)/);
+  assert.match(genericChat, /shouldClearReplyWatch\(previousMessages, nextMessages, event\)/);
 });
-

@@ -1,6 +1,6 @@
 # bot/handlers/thread.py
 """
-/new  — 在当前 workspace 下新建 codex thread，并创建对应 Telegram Topic
+/new  — 在当前 workspace 下新建 provider thread，并创建对应 Telegram Topic
 /list — 列出当前 workspace 的 thread
 /archive — 归档指定（或当前）thread：关闭 Telegram Topic，标记 archived=True
 
@@ -14,12 +14,6 @@ workspace 上下文优先级：
 """
 import logging
 from typing import Callable, Optional
-from plugins.providers.builtin.codex.python.tui_bridge import (
-    archive_codex_thread_via_tui_bridge,
-    enqueue_codex_tui_message,
-    is_codex_local_owner_mode,
-    start_thread_via_tui_bridge,
-)
 from core.providers.facts import (
     list_provider_threads,
     query_provider_active_thread_ids,
@@ -176,6 +170,16 @@ def _list_provider_subagent_thread_ids(tool_name: str, thread_ids: list[str]) ->
     return set(list_subagent_thread_ids(thread_ids) or set())
 
 
+def _provider_thread_source(tool_name: str, *, default: str = "unknown") -> str:
+    hooks = _get_thread_hooks(tool_name)
+    callback = getattr(hooks, "new_imported_thread_source", None) if hooks is not None else None
+    if callable(callback):
+        value = str(callback() or "").strip()
+        if value:
+            return value
+    return default
+
+
 def _collect_session_ids(sessions: list[dict]) -> set[str]:
     return {
         str(session.get("id") or "")
@@ -233,9 +237,12 @@ def _list_sort_key(session: dict) -> tuple[int, int, str]:
 
 
 def _should_include_state_only_thread(tool_name: str, thread_info: ThreadInfo) -> bool:
-    if tool_name != "codex":
-        return True
-    return str(thread_info.source or "unknown").strip().lower() == "app"
+    provider = _get_thread_provider(tool_name)
+    facts = provider.facts if provider is not None else None
+    callback = getattr(facts, "include_state_only_thread", None) if facts is not None else None
+    if callable(callback):
+        return bool(callback(thread_info))
+    return True
 
 
 def _resolve_thread_from_topic(
@@ -575,7 +582,7 @@ async def handle_thread_control_callback(
 def make_new_thread_handler(state: AppState, group_chat_id: int) -> Callable:
     """
     /new [<初始消息>]
-    在当前 workspace 下新建 codex thread + Telegram Topic。
+    在当前 workspace 下新建 provider thread + Telegram Topic。
     可在 workspace Topic 或全局 Topic 里调用。
     """
     async def new_thread(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -820,7 +827,12 @@ def make_list_thread_handler(state: AppState, group_chat_id: int) -> Callable:
             db_ids -= subagent_ids
             local_ids -= subagent_ids
 
-        if ws.tool == "claude":
+        provider = _get_thread_provider(ws.tool)
+        facts = provider.facts if provider is not None else None
+        preserve_archived = bool(getattr(facts, "preserve_archived_threads", False))
+        authoritative_list = bool(getattr(facts, "thread_list_is_authoritative", False))
+
+        if preserve_archived:
             archived_ids = {
                 tid
                 for tid, tinfo in ws.threads.items()
@@ -844,7 +856,7 @@ def make_list_thread_handler(state: AppState, group_chat_id: int) -> Callable:
         ) if (db_sessions or local_sessions) else 0
 
         state_only_sessions = []
-        if ws.tool != "claude":
+        if not authoritative_list:
             synthetic_created_at = max_persisted_created_at + len(ws.threads) + 1
             for tid, tinfo in reversed(list(ws.threads.items())):
                 if (

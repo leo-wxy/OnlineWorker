@@ -165,7 +165,7 @@ async def test_run_ow_claude_once_starts_proxy_then_runs_claude(monkeypatch, tmp
     config = SimpleNamespace(
         providers={
             "claude": SimpleNamespace(
-                codex_bin="configured-claude",
+                bin="configured-claude",
                 message_hooks=SimpleNamespace(enabled=True),
             )
         },
@@ -238,7 +238,7 @@ async def test_run_ow_claude_once_uses_configured_auth_token_when_process_env_mi
     config = SimpleNamespace(
         providers={
             "claude": SimpleNamespace(
-                codex_bin="configured-claude",
+                bin="configured-claude",
                 external_cli={
                     "auth_token": "configured-token",
                     "upstream_base_url": "https://gateway.example.test/anthropic",
@@ -251,6 +251,7 @@ async def test_run_ow_claude_once_uses_configured_auth_token_when_process_env_mi
 
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
     monkeypatch.setattr(cli_wrapper, "ClaudeHttpProxy", FakeProxy)
     monkeypatch.setattr(cli_wrapper, "load_config", lambda data_dir=None: config)
     monkeypatch.setattr(cli_wrapper, "set_data_dir", lambda path: None)
@@ -301,7 +302,7 @@ async def test_run_ow_claude_once_can_disable_rewrite_for_probe(monkeypatch, tmp
         return 0
 
     config = SimpleNamespace(
-        providers={"claude": SimpleNamespace(codex_bin="claude")},
+        providers={"claude": SimpleNamespace(bin="claude")},
         get_provider=lambda name: config.providers.get(name),
     )
 
@@ -367,7 +368,7 @@ async def test_run_ow_claude_once_wraps_external_launcher_with_claude_path_shim(
         return 0
 
     config = SimpleNamespace(
-        providers={"claude": SimpleNamespace(codex_bin="company-launcher start")},
+        providers={"claude": SimpleNamespace(bin="company-launcher start")},
         get_provider=lambda name: config.providers.get(name),
     )
 
@@ -437,7 +438,7 @@ async def test_run_ow_claude_once_uses_configured_upstream_base_url(monkeypatch,
     config = SimpleNamespace(
         providers={
             "claude": SimpleNamespace(
-                codex_bin="company-launcher start",
+                bin="company-launcher start",
                 external_cli={
                     "upstream_base_url": "https://config.example.test/anthropic",
                     "launcher_wraps_claude": True,

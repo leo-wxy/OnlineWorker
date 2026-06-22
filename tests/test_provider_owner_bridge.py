@@ -539,6 +539,51 @@ async def test_provider_owner_bridge_session_activities_not_blocked_by_slow_list
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_marks_provider_active_sessions(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    class Facts:
+        thread_list_is_authoritative = False
+
+        @staticmethod
+        def scan_workspaces(sessions_dir=None):
+            return [{"path": "/tmp/project"}]
+
+        @staticmethod
+        def query_active_thread_ids(workspace_path):
+            assert workspace_path == "/tmp/project"
+            return {"tid-active", "tid-idle"}
+
+        @staticmethod
+        def query_running_thread_ids(workspace_path):
+            assert workspace_path == "/tmp/project"
+            return {"tid-active"}
+
+        @staticmethod
+        def list_threads(workspace_path, limit=100):
+            assert workspace_path == "/tmp/project"
+            return [
+                {"id": "tid-active", "preview": "Active task", "updatedAt": 2000, "createdAt": 1000},
+                {"id": "tid-idle", "preview": "Idle task", "updatedAt": 1500, "createdAt": 900},
+            ]
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(facts=Facts) if name == "overlay-tool" else None,
+    )
+
+    bridge = ProviderOwnerBridge(AppState(storage=AppStorage()), data_dir=str(tmp_path))
+    response = await bridge._handle_list_sessions({"provider_id": "overlay-tool", "limit": 20})
+
+    assert response["ok"] is True
+    sessions = {item["id"]: item for item in response["sessions"]}
+    assert sessions["tid-active"]["providerActive"] is True
+    assert sessions["tid-active"]["archived"] is False
+    assert sessions["tid-idle"]["providerActive"] is False
+    assert sessions["tid-idle"]["archived"] is False
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_uses_registry_message_hooks(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
@@ -619,6 +664,8 @@ async def test_provider_owner_bridge_uses_registry_message_hooks(monkeypatch, tm
         "tid-1",
         "hello owner bridge",
     )
+    if bridge._pending_send_tasks:
+        await asyncio.gather(*tuple(bridge._pending_send_tasks), return_exceptions=True)
     assert called["send"][2:] == (
         "overlay-tool:/tmp/project-a",
         "tid-1",
@@ -688,6 +735,8 @@ async def test_provider_owner_bridge_keeps_text_before_registry_message_hooks_wh
 
     assert response["ok"] is True
     assert called["prepare_text"] == "这什么傻逼问题"
+    if bridge._pending_send_tasks:
+        await asyncio.gather(*tuple(bridge._pending_send_tasks), return_exceptions=True)
     assert called["send_text"] == "这什么傻逼问题"
 
 
@@ -1037,7 +1086,10 @@ async def test_provider_owner_bridge_rolls_back_remapped_thread_when_send_errors
         }
     )
 
-    assert response["ok"] is False
+    assert response["ok"] is True
+    assert response["accepted"] is True
+    if bridge._pending_send_tasks:
+        await asyncio.gather(*tuple(bridge._pending_send_tasks), return_exceptions=True)
     assert set(ws.threads) == {"ses-imported"}
     assert ws.threads["ses-imported"].thread_id == "ses-imported"
     assert ws.threads["ses-imported"].source == "imported"
@@ -1167,6 +1219,8 @@ async def test_provider_owner_bridge_prefers_existing_workspace_thread_binding(m
 
     assert response["ok"] is True
     assert response["workspace_id"] == "ws-1"
+    if bridge._pending_send_tasks:
+        await asyncio.gather(*tuple(bridge._pending_send_tasks), return_exceptions=True)
     assert send.await_args.args[2] is ws
     assert send.await_args.args[3] is ws.threads["tid-1"]
 
@@ -1379,16 +1433,20 @@ async def test_provider_owner_bridge_lists_sessions_via_provider_facts(monkeypat
             {
                 "id": "tid-2",
                 "title": "Beta",
+                "preview": "Beta",
                 "workspace": "/tmp/beta",
                 "archived": False,
+                "providerActive": False,
                 "updatedAt": 20,
                 "createdAt": 20,
             },
             {
                 "id": "tid-1",
                 "title": "Alpha",
+                "preview": "Alpha",
                 "workspace": "/tmp/alpha",
                 "archived": False,
+                "providerActive": False,
                 "updatedAt": 10,
                 "createdAt": 10,
             },
@@ -1398,6 +1456,306 @@ async def test_provider_owner_bridge_lists_sessions_via_provider_facts(monkeypat
         ("/tmp/beta", 77),
         ("/tmp/alpha", 77),
     ]
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_prefers_provider_level_list_sessions(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(storage=AppStorage())
+    observed = {"limit": None}
+
+    class Facts:
+        @staticmethod
+        def list_sessions(*, limit=100, sessions_dir=None):
+            observed["limit"] = limit
+            return [
+                {
+                    "id": "tid-2",
+                    "title": "Beta",
+                    "workspace": "/tmp/beta",
+                    "archived": False,
+                    "providerActive": True,
+                    "updatedAt": 20,
+                    "createdAt": 19,
+                },
+                {
+                    "id": "tid-1",
+                    "title": "Alpha",
+                    "workspace": "/tmp/alpha",
+                    "archived": False,
+                    "providerActive": False,
+                    "updatedAt": 10,
+                    "createdAt": 9,
+                },
+            ]
+
+        @staticmethod
+        def scan_workspaces(sessions_dir=None):
+            raise AssertionError("provider-level list_sessions should bypass workspace scans")
+
+        @staticmethod
+        def query_active_thread_ids(workspace_path):
+            raise AssertionError("provider-level list_sessions should bypass active id queries")
+
+        @staticmethod
+        def list_threads(workspace_path, limit=100):
+            raise AssertionError("provider-level list_sessions should bypass thread listing")
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(facts=Facts) if name == "overlay-tool" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_list_sessions(
+        {
+            "provider_id": "overlay-tool",
+            "limit": 55,
+        }
+    )
+
+    assert response == {
+        "ok": True,
+        "sessions": [
+            {
+                "id": "tid-2",
+                "title": "Beta",
+                "preview": "",
+                "workspace": "/tmp/beta",
+                "archived": False,
+                "providerActive": True,
+                "updatedAt": 20,
+                "createdAt": 19,
+            },
+            {
+                "id": "tid-1",
+                "title": "Alpha",
+                "preview": "",
+                "workspace": "/tmp/alpha",
+                "archived": False,
+                "providerActive": False,
+                "updatedAt": 10,
+                "createdAt": 9,
+            },
+        ],
+    }
+    assert observed["limit"] == 55
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_hydrates_missing_preview_from_history_and_caches(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(storage=AppStorage())
+    observed = {"list_calls": 0, "read_calls": 0}
+
+    class Facts:
+        @staticmethod
+        def list_sessions(*, limit=100, sessions_dir=None):
+            observed["list_calls"] += 1
+            return [
+                {
+                    "id": "tid-2",
+                    "title": "继续phase17 的实现",
+                    "workspace": "/tmp/beta",
+                    "archived": False,
+                    "providerActive": True,
+                    "updatedAt": 20,
+                    "createdAt": 19,
+                }
+            ]
+
+        @staticmethod
+        def read_thread_history(session_id, limit=20, sessions_dir=None):
+            observed["read_calls"] += 1
+            assert session_id == "tid-2"
+            return [
+                {
+                    "role": "user",
+                    "text": "继续phase17 的实现。工作区在 /Users/wxy/Projects/onlineworker-combined。",
+                },
+                {
+                    "role": "assistant",
+                    "text": "我现在继续修 Session 列表预览，并检查 /Users/wxy/Projects/onlineworker-combined 里的 owner bridge 数据链。",
+                },
+            ]
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(facts=Facts) if name == "overlay-tool" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    first = await bridge._handle_list_sessions(
+        {
+            "provider_id": "overlay-tool",
+            "limit": 20,
+        }
+    )
+    second = await bridge._handle_list_sessions(
+        {
+            "provider_id": "overlay-tool",
+            "limit": 20,
+        }
+    )
+
+    assert first == {
+        "ok": True,
+        "sessions": [
+                {
+                    "id": "tid-2",
+                    "title": "继续phase17 的实现",
+                    "preview": "我现在继续修 Session 列表预览，并检查 [path] 里的 owner bridge 数据链。",
+                    "workspace": "/tmp/beta",
+                    "archived": False,
+                    "providerActive": True,
+                "updatedAt": 20,
+                "createdAt": 19,
+            }
+        ],
+    }
+    assert second == first
+    assert observed["list_calls"] == 1
+    assert observed["read_calls"] == 1
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_list_sessions_uses_cached_snapshot_on_timeout(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(storage=AppStorage())
+    calls = {"count": 0}
+
+    class Facts:
+        @staticmethod
+        def list_sessions(*, limit=100, sessions_dir=None):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return [
+                    {
+                        "id": "tid-cached",
+                        "title": "Cached",
+                        "workspace": "/tmp/cached",
+                        "archived": False,
+                        "providerActive": True,
+                        "updatedAt": 20,
+                        "createdAt": 19,
+                    }
+                ]
+            time.sleep(0.05)
+            return []
+
+    monkeypatch.setattr("core.provider_owner_bridge.OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(facts=Facts) if name == "overlay-tool" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    first = await bridge._handle_list_sessions(
+        {
+            "provider_id": "overlay-tool",
+            "limit": 20,
+        }
+    )
+    second = await bridge._handle_list_sessions(
+        {
+            "provider_id": "overlay-tool",
+            "limit": 20,
+            "force_refresh": True,
+        }
+    )
+
+    assert first["ok"] is True
+    assert first["sessions"][0]["id"] == "tid-cached"
+    assert second == first
+    assert calls["count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_list_sessions_returns_cached_snapshot_without_reloading(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(storage=AppStorage())
+    calls = {"count": 0}
+
+    class Facts:
+        @staticmethod
+        def list_sessions(*, limit=100, sessions_dir=None):
+            calls["count"] += 1
+            return [
+                {
+                    "id": "tid-cached",
+                    "title": "Cached",
+                    "workspace": "/tmp/cached",
+                    "archived": False,
+                    "providerActive": True,
+                    "updatedAt": 20,
+                    "createdAt": 19,
+                }
+            ]
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(facts=Facts) if name == "overlay-tool" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    first = await bridge._handle_list_sessions(
+        {
+            "provider_id": "overlay-tool",
+            "limit": 20,
+        }
+    )
+    second = await bridge._handle_list_sessions(
+        {
+            "provider_id": "overlay-tool",
+            "limit": 20,
+        }
+    )
+
+    assert first == second
+    assert calls["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_skips_active_query_for_authoritative_facts(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(storage=AppStorage())
+
+    class Facts:
+        thread_list_is_authoritative = True
+
+        @staticmethod
+        def scan_workspaces(sessions_dir=None):
+            return [{"path": "/tmp/alpha"}]
+
+        @staticmethod
+        def query_active_thread_ids(workspace_path):
+            raise AssertionError("authoritative thread list should not need active id query")
+
+        @staticmethod
+        def list_threads(workspace_path, limit=100):
+            return [{"id": "tid-1", "preview": "Alpha", "updatedAt": 10}]
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(facts=Facts) if name == "overlay-tool" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_list_sessions(
+        {
+            "provider_id": "overlay-tool",
+            "limit": 20,
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["sessions"][0]["id"] == "tid-1"
+    assert response["sessions"][0]["archived"] is False
 
 
 @pytest.mark.asyncio

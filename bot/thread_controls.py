@@ -1,11 +1,16 @@
-from plugins.providers.builtin.codex.python.tui_bridge import is_codex_local_owner_mode
+from core.providers.registry import get_provider
 from core.storage import ThreadInfo, WorkspaceInfo
 from bot.handlers.common import _send_to_group
 from bot.keyboards import build_thread_control_keyboard
 
 
 def thread_interrupt_supported(state, ws: WorkspaceInfo) -> bool:
-    return not (ws.tool == "codex" and is_codex_local_owner_mode(state, ws))
+    provider = get_provider(ws.tool)
+    hooks = provider.thread_hooks if provider is not None else None
+    callback = getattr(hooks, "interrupt_supported", None) if hooks is not None else None
+    if callable(callback):
+        return bool(callback(state, ws))
+    return True
 
 
 def build_thread_control_text(state, ws: WorkspaceInfo, thread_info: ThreadInfo, *, intro: str | None = None) -> str:

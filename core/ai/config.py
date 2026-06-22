@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+import yaml
+
+from core.providers.manifest import ai_services_from_manifest
+from core.providers.overlay import iter_overlay_manifest_paths
 
 from .contracts import AiConfig, AiScenarioConfig, AiServiceConfig
 
@@ -35,7 +41,6 @@ Final assistant message:
 {{final_message}}
 """
 
-
 def positive_int_value(value: Any, default: int) -> int:
     try:
         parsed = int(value)
@@ -44,14 +49,24 @@ def positive_int_value(value: Any, default: int) -> int:
     return parsed if parsed > 0 else default
 
 
+def normalize_ai_service_id(service_id: Any) -> str:
+    return str(service_id or "").strip()
+
+
+def normalize_ai_protocol(protocol: Any, default: str = "openai_compatible_chat") -> str:
+    return str(protocol or default).strip()
+
+
 def build_ai_service_config(service_id: str, raw: dict[str, Any] | None) -> AiServiceConfig:
     raw = raw if isinstance(raw, dict) else {}
+    normalized_service_id = normalize_ai_service_id(service_id)
     raw_models = raw.get("models") if isinstance(raw.get("models"), list) else []
     models = tuple(str(model or "").strip() for model in raw_models if str(model or "").strip())
+    protocol = normalize_ai_protocol(raw.get("protocol"))
     return AiServiceConfig(
-        id=service_id,
-        name=str(raw.get("name") or service_id),
-        protocol=str(raw.get("protocol") or "openai_compatible_chat"),
+        id=normalized_service_id,
+        name=str(raw.get("name") or normalized_service_id),
+        protocol=protocol,
         base_url=str(raw.get("base_url") or raw.get("baseUrl") or ""),
         endpoint=str(raw.get("endpoint") or ""),
         api_key=str(raw.get("api_key") or raw.get("apiKey") or ""),
@@ -63,26 +78,19 @@ def build_ai_service_config(service_id: str, raw: dict[str, Any] | None) -> AiSe
     )
 
 
-def default_ai_service_raw(service_id: str) -> dict[str, Any]:
-    if service_id == "claude_default":
-        return {
-            "name": "Claude",
-            "protocol": "claude_messages",
-            "endpoint": "https://api.anthropic.com/v1/messages",
-            "models": ["claude-sonnet-4-6"],
-            "default_model": "claude-sonnet-4-6",
-            "timeout_seconds": 20,
-            "enabled": False,
-        }
-    return {
-        "name": "OpenAI",
-        "protocol": "openai_compatible_chat",
-        "base_url": "https://api.openai.com/v1",
-        "models": ["gpt-5.4"],
-        "default_model": "gpt-5.4",
-        "timeout_seconds": 20,
-        "enabled": False,
-    }
+def builtin_ai_service_raws() -> list[dict[str, Any]]:
+    plugin_root = Path(__file__).resolve().parents[2] / "plugins" / "providers" / "builtin"
+    services: list[dict[str, Any]] = []
+    manifest_paths = sorted(plugin_root.glob("*/plugin.yaml")) if plugin_root.exists() else []
+    manifest_paths.extend(iter_overlay_manifest_paths())
+    if not manifest_paths:
+        return services
+    for manifest_path in manifest_paths:
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(manifest, dict) or manifest.get("kind") != "provider":
+            continue
+        services.extend(ai_services_from_manifest(manifest))
+    return services
 
 
 def build_ai_scenario_config(
@@ -132,17 +140,20 @@ def build_ai_scenario_config(
 
 def iter_ai_service_raws(raw_services: Any) -> list[tuple[str, dict[str, Any]]]:
     if isinstance(raw_services, dict):
-        return [
-            (str(service_id or "").strip(), service_raw if isinstance(service_raw, dict) else {})
-            for service_id, service_raw in raw_services.items()
-            if str(service_id or "").strip()
-        ]
+        entries: list[tuple[str, dict[str, Any]]] = []
+        for service_id, service_raw in raw_services.items():
+            normalized_id = normalize_ai_service_id(service_id)
+            if normalized_id:
+                entries.append(
+                    (normalized_id, service_raw if isinstance(service_raw, dict) else {})
+                )
+        return entries
     if isinstance(raw_services, list):
         entries: list[tuple[str, dict[str, Any]]] = []
         for item in raw_services:
             if not isinstance(item, dict):
                 continue
-            service_id = str(item.get("id") or "").strip()
+            service_id = normalize_ai_service_id(item.get("id"))
             if service_id:
                 entries.append((service_id, item))
         return entries
@@ -175,11 +186,13 @@ def load_ai_config(data: dict[str, Any]) -> AiConfig:
         service_id: build_ai_service_config(service_id, service_raw)
         for service_id, service_raw in iter_ai_service_raws(raw.get("services"))
     }
-    for builtin_service_id in ("openai_default", "claude_default"):
-        if builtin_service_id not in services:
+    builtin_services = builtin_ai_service_raws()
+    for builtin in builtin_services:
+        builtin_service_id = normalize_ai_service_id(builtin.get("id"))
+        if builtin_service_id and builtin_service_id not in services:
             services[builtin_service_id] = build_ai_service_config(
                 builtin_service_id,
-                default_ai_service_raw(builtin_service_id),
+                builtin,
             )
     scenarios = {
         scenario_id: build_ai_scenario_config(scenario_id, scenario_raw)
@@ -187,7 +200,15 @@ def load_ai_config(data: dict[str, Any]) -> AiConfig:
     }
     if "notification_summary" not in scenarios:
         scenarios["notification_summary"] = build_ai_scenario_config("notification_summary", None)
-    fallback_service_id = "openai_default" if "openai_default" in services else next(iter(services), "")
+    fallback_service_id = next(
+        (
+            normalize_ai_service_id(service.get("id"))
+            for service in builtin_services
+            if bool(service.get("default_for_scenarios"))
+            and normalize_ai_service_id(service.get("id")) in services
+        ),
+        next(iter(services), ""),
+    )
     if fallback_service_id:
         scenarios = {
             scenario_id: (

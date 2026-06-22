@@ -27,10 +27,6 @@ from typing import Any, Optional
 from telegram import Bot
 from core.messages.events import create_message_event
 from core.state import AppState, PendingApproval, PendingQuestion, PendingQuestionGroup, StreamingTurn
-from plugins.providers.builtin.codex.python import runtime_state as codex_state
-from plugins.providers.builtin.codex.python.tui_bridge import (
-    remember_codex_tg_synced_final_reply,
-)
 from core.messages.session_bridge import message_event_from_session_event
 from core.providers.session_events import SessionEvent, normalize_session_event
 from core.providers.topic_policy import provider_allows_unbound_thread_topic_materialization
@@ -70,8 +66,7 @@ from bot.handlers.workspace import (
 from bot.handlers.workspace_helpers import workspace_path_for_topic_hint
 from bot.event_helpers import (
     build_incomplete_turn_text as _build_incomplete_turn_text,
-    codex_semantic_kind as _codex_semantic_kind,
-    codex_semantic_payload as _codex_semantic_payload,
+    event_semantic_payload as _event_semantic_payload,
     extract_thread_id as _extract_thread_id,
     extract_turn_id as _extract_turn_id,
     is_network_error as _is_network_error,
@@ -106,6 +101,60 @@ def _workspace_path_from_id(workspace_id: str) -> str:
     if ":" not in workspace_id:
         return ""
     return workspace_id.split(":", 1)[1]
+
+
+def _provider_for_thread_id(state: AppState, thread_id: str) -> str:
+    if not thread_id:
+        return ""
+    found = state.find_thread_by_id_global(thread_id)
+    if found:
+        return str(found[0].tool or "").strip()
+    for provider_id in state.provider_runtime_state.keys():
+        if state.get_provider_current_run(provider_id, thread_id) is not None:
+            return provider_id
+        runtime = state.get_provider_runtime(provider_id)
+        if thread_id in runtime.active_threads:
+            return provider_id
+    return ""
+
+
+def _provider_final_reply_signature(text: str) -> str:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return ""
+    return f"__text__\n{normalized}"
+
+
+def _remember_provider_tg_synced_final_reply(state: AppState, provider_id: str, thread_id: str, text: str) -> None:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return
+    runtime = state.get_provider_runtime(provider_id)
+    runtime.last_synced_assistant[thread_id] = _provider_final_reply_signature(normalized)
+
+
+def _provider_final_reply_already_synced(
+    state: AppState,
+    provider_id: str,
+    thread_id: Optional[str],
+    event_turn_id: Optional[str] = None,
+) -> bool:
+    if not thread_id:
+        return False
+    run = state.get_provider_current_run(provider_id, thread_id)
+    if run is None or not run.final_reply_synced_to_tg:
+        return False
+    if event_turn_id and run.turn_id and str(run.turn_id) != str(event_turn_id):
+        return False
+    return True
+
+
+def _is_tui_mirror_completion(ctx: "EventContext", run_status: str, turn: Any) -> bool:
+    if str(run_status or "completed").strip().lower() != "completed":
+        return False
+    if isinstance(turn, dict) and str(turn.get("source") or "").strip() == "tui-mirror":
+        return True
+    return str(ctx.event_params.get("source") or "").strip() == "tui-mirror"
 
 
 def _provider_should_materialize_unbound_thread_topic(
@@ -683,11 +732,11 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         name = str(agent_id or "").strip()
         if not name:
             return "Agent"
-        known = {
-            "codex": "Codex",
-            "claude": "Claude",
-        }
-        return known.get(name.lower(), name[:1].upper() + name[1:])
+        provider = get_provider(name)
+        label = str(getattr(provider, "label", "") or "").strip() if provider is not None else ""
+        if label:
+            return label
+        return name[:1].upper() + name[1:]
 
     def _notification_explicit_task_summary(agent_id: str, thread_id: Optional[str]) -> str:
         if not agent_id or not thread_id:
@@ -913,28 +962,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 error_text = str(ctx.event_params.get("error") or "").strip()
             return "failed", f"任务失败：{error_text}" if error_text else "任务失败"
         return "completed", "任务已完成"
-
-    def _is_codex_tui_mirror_completion(ctx: "EventContext", run_status: str, turn: Any) -> bool:
-        if ctx.event.provider != "codex":
-            return False
-        if str(run_status or "completed").strip().lower() != "completed":
-            return False
-        if isinstance(turn, dict) and str(turn.get("source") or "").strip() == "tui-mirror":
-            return True
-        return str(ctx.event_params.get("source") or "").strip() == "tui-mirror"
-
-    def _codex_final_reply_already_synced(
-        thread_id: Optional[str],
-        event_turn_id: Optional[str] = None,
-    ) -> bool:
-        if not thread_id:
-            return False
-        run = codex_state.get_current_run(state, thread_id)
-        if run is None or not run.final_reply_synced_to_tg:
-            return False
-        if event_turn_id and run.turn_id and str(run.turn_id) != str(event_turn_id):
-            return False
-        return True
 
     def _claim_streaming_notification(
         st: StreamingTurn | None,
@@ -1171,7 +1198,9 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 logger.debug(f"[streaming] 收口被替换旧 turn 失败 thread={thread_id[:8]}: {e}")
 
         state.streaming_turns.pop(thread_id, None)
-        codex_state.mark_tui_turn_completed(state, thread_id)
+        provider_id = _provider_for_thread_id(state, thread_id)
+        if provider_id:
+            state.mark_provider_tui_turn_completed(provider_id, thread_id)
 
     def _ensure_throttle_task(thread_id: str, st: StreamingTurn) -> None:
         """
@@ -1296,15 +1325,14 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             if found:
                 provider_name = str(found[0].tool or "").strip()
         if not provider_name and thread_id:
-            if codex_state.get_current_run(state, thread_id) is not None:
-                provider_name = "codex"
+            provider_name = _provider_for_thread_id(state, thread_id)
         if not provider_name and ctx.ws_daemon_id:
             provider_name = str(
                 state.get_tool_for_workspace(ctx.ws_daemon_id) or ""
             ).strip()
 
         info = _parse_provider_approval_request(
-            provider_name or "codex",
+            provider_name or "unknown",
             approval_params,
             request_id=request_id,
             default_thread_id=thread_id,
@@ -1331,9 +1359,9 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             )
             return
 
-        if info.tool_type == "codex" and thread_id and request_id is not None:
-            codex_state.add_interruption(
-                state,
+        if info.tool_type and thread_id and request_id is not None:
+            state.add_provider_interruption(
+                info.tool_type,
                 thread_id=thread_id,
                 interruption_id=str(request_id),
             )
@@ -1417,13 +1445,14 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             return
 
         if (
-            ctx.event.provider == "codex"
+            ctx.event.provider
             and turn_id
-            and _codex_final_reply_already_synced(thread_id, turn_id)
+            and _provider_final_reply_already_synced(state, ctx.event.provider, thread_id, turn_id)
         ):
-            codex_state.mark_tui_turn_completed(state, thread_id)
+            state.mark_provider_tui_turn_completed(ctx.event.provider, thread_id)
             logger.info(
-                "[streaming] 跳过已同步 codex turn/started duplicate thread=%s turn=%s",
+                "[streaming] 跳过已同步 provider turn/started duplicate provider=%s thread=%s turn=%s",
+                ctx.event.provider,
                 thread_id[:8],
                 turn_id[:12],
             )
@@ -1470,25 +1499,27 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             else:
                 if turn_id:
                     st.turn_id = turn_id
-                codex_state.mark_tui_turn_started(state, thread_id)
+                if ctx.event.provider:
+                    state.mark_provider_tui_turn_started(ctx.event.provider, thread_id)
                 logger.debug(f"[streaming] turn/started 重复，复用已有占位 thread={thread_id[:8]}")
                 return
 
         try:
             sent = await _send_to_group(bot, group_chat_id, "⏳ 思考中...", topic_id=topic_id)
             if sent:
-                if ctx.event.provider == "codex" and turn_id:
-                    current_run = codex_state.get_current_run(state, thread_id)
+                if ctx.event.provider and turn_id:
+                    current_run = state.get_provider_current_run(ctx.event.provider, thread_id)
                     if current_run is None or current_run.turn_id != turn_id:
-                        codex_state.start_run(
-                            state,
+                        state.start_provider_run(
+                            ctx.event.provider,
                             workspace_id=ctx.ws_daemon_id,
                             thread_id=thread_id,
                             turn_id=turn_id,
                         )
                     else:
-                        codex_state.mark_run(state, thread_id=thread_id, status="started")
-                codex_state.mark_tui_turn_started(state, thread_id)
+                        state.mark_provider_run(ctx.event.provider, thread_id=thread_id, status="started")
+                if ctx.event.provider:
+                    state.mark_provider_tui_turn_started(ctx.event.provider, thread_id)
                 state.streaming_turns[thread_id] = StreamingTurn(
                     message_id=sent.message_id,
                     topic_id=topic_id,
@@ -1537,8 +1568,8 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 f"event_turn={event_turn_id[:12]} current_turn={st.turn_id[:12]}"
             )
             return
-        if ctx.event.provider == "codex":
-            codex_state.mark_run(state, thread_id=thread_id, first_progress_at=True)
+        if ctx.event.provider:
+            state.mark_provider_run(ctx.event.provider, thread_id=thread_id, first_progress_at=True)
 
         # 第一个 delta：删除占位消息，发新消息，切换 message_id
         if not st.placeholder_deleted:
@@ -1575,7 +1606,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         """item/completed — agentMessage or shellCommand."""
         item = ctx.event_params.get("item", {})
         item_type = item.get("type", "") if isinstance(item, dict) else ""
-        semantic_payload = _codex_semantic_payload(ctx)
+        semantic_payload = _event_semantic_payload(ctx)
         is_final_answer = ctx.message_kind == "message.assistant.final"
 
         thread_id = ctx.thread_id
@@ -1608,13 +1639,19 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
 
             if (
                 is_final_answer
-                and ctx.event.provider == "codex"
+                and ctx.event.provider
                 and st is None
-                and _codex_final_reply_already_synced(thread_id, event_turn_id)
+                and _provider_final_reply_already_synced(
+                    state,
+                    ctx.event.provider,
+                    thread_id,
+                    event_turn_id,
+                )
             ):
-                codex_state.mark_run(state, thread_id=thread_id, status="completed")
+                state.mark_provider_run(ctx.event.provider, thread_id=thread_id, status="completed")
                 logger.info(
-                    "[event→TG] 跳过已同步 codex final duplicate thread=%s turn=%s",
+                    "[event→TG] 跳过已同步 provider final duplicate provider=%s thread=%s turn=%s",
+                    ctx.event.provider,
                     thread_id[:8],
                     (event_turn_id or "")[:12] or "?",
                 )
@@ -1669,23 +1706,24 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                             delivered_to_tg = True
                         except Exception as e:
                             logger.error(f"[event→TG] fallback 发 agentMessage 失败：{e}")
-            if delivered_to_tg and phase == "final_answer" and ws is not None and ws.tool == "codex":
+            if delivered_to_tg and phase == "final_answer" and ws is not None and ctx.event.provider:
                 if event_turn_id:
-                    current_run = codex_state.get_current_run(state, thread_id)
+                    current_run = state.get_provider_current_run(ctx.event.provider, thread_id)
                     if current_run is None or current_run.turn_id != event_turn_id:
-                        codex_state.start_run(
-                            state,
+                        state.start_provider_run(
+                            ctx.event.provider,
                             workspace_id=ctx.ws_daemon_id or ws.daemon_workspace_id,
                             thread_id=thread_id,
                             turn_id=event_turn_id,
                         )
-                remember_codex_tg_synced_final_reply(
+                _remember_provider_tg_synced_final_reply(
                     state,
+                    ctx.event.provider,
                     thread_id,
-                    text=text,
+                    text,
                 )
-                codex_state.mark_run(
-                    state,
+                state.mark_provider_run(
+                    ctx.event.provider,
                     thread_id=thread_id,
                     final_reply_synced_to_tg=True,
                 )
@@ -1737,7 +1775,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         st = state.streaming_turns.get(thread_id)
         event_turn_id = _extract_turn_id(ctx.event_params)
         run_status = status or "completed"
-        is_tui_mirror_completion = _is_codex_tui_mirror_completion(ctx, run_status, turn)
+        is_tui_mirror_completion = _is_tui_mirror_completion(ctx, run_status, turn)
         completed_reply_text = ""
         if st is not None:
             if st.completed:
@@ -1751,10 +1789,10 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                         tinfo.streaming_msg_id = None
                         save_storage(_storage)
                 state.streaming_turns.pop(thread_id, None)
-                codex_state.mark_tui_turn_completed(state, thread_id)
-                if ctx.event.provider == "codex":
-                    codex_state.mark_run(
-                        state,
+                if ctx.event.provider:
+                    state.mark_provider_tui_turn_completed(ctx.event.provider, thread_id)
+                    state.mark_provider_run(
+                        ctx.event.provider,
                         thread_id=thread_id,
                         status=run_status,
                     )
@@ -1847,14 +1885,15 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
 
             logger.info(f"[streaming] turn/completed thread={thread_id[:8]} status={status}")
             ws = _resolve_workspace_info(state, ctx.ws_daemon_id, thread_id)
-            if streamed_reply_text and ws is not None and ws.tool == "codex":
-                remember_codex_tg_synced_final_reply(
+            if streamed_reply_text and ws is not None and ctx.event.provider:
+                _remember_provider_tg_synced_final_reply(
                     state,
+                    ctx.event.provider,
                     thread_id,
-                    text=streamed_reply_text,
+                    streamed_reply_text,
                 )
-                codex_state.mark_run(
-                    state,
+                state.mark_provider_run(
+                    ctx.event.provider,
                     thread_id=thread_id,
                     final_reply_synced_to_tg=True,
                 )
@@ -1867,23 +1906,34 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                     save_storage(_storage)
             # 从内存中移除，确保下一次 turn/started 不会误"复用"
             state.streaming_turns.pop(thread_id, None)
-            codex_state.mark_tui_turn_completed(state, thread_id)
+            if ctx.event.provider:
+                state.mark_provider_tui_turn_completed(ctx.event.provider, thread_id)
         else:
-            codex_state.mark_tui_turn_completed(state, thread_id)
+            if ctx.event.provider:
+                state.mark_provider_tui_turn_completed(ctx.event.provider, thread_id)
             logger.debug(f"[streaming] turn/completed 无 streaming state thread={thread_id[:8]}")
 
-        if ctx.event.provider == "codex":
-            codex_state.mark_run(
-                state,
+        if ctx.event.provider:
+            state.mark_provider_run(
+                ctx.event.provider,
                 thread_id=thread_id,
                 status=run_status,
             )
         if st is None:
             if is_tui_mirror_completion:
                 return
-            if ctx.event.provider == "codex" and _codex_final_reply_already_synced(thread_id, event_turn_id):
+            if (
+                ctx.event.provider
+                and _provider_final_reply_already_synced(
+                    state,
+                    ctx.event.provider,
+                    thread_id,
+                    event_turn_id,
+                )
+            ):
                 logger.info(
-                    "[notification] 跳过已同步 codex completion duplicate thread=%s turn=%s",
+                    "[notification] 跳过已同步 provider completion duplicate provider=%s thread=%s turn=%s",
+                    ctx.event.provider,
                     thread_id[:8],
                     (event_turn_id or "")[:12] or "?",
                 )
@@ -2053,7 +2103,7 @@ def make_server_request_handler(state: AppState, bot: Bot, group_chat_id: int):
     返回 daemon server request 回调（处理需要用户响应的请求）。
 
     目前处理：
-        Codex/Provider app-server approval requests → 推送沙盒权限授权请求
+        Provider app-server approval requests → 推送沙盒权限授权请求
     """
     async def on_server_request(method: str, params: dict, request_id: int) -> None:
         provider_id = _provider_for_server_request_method(state, method, params)

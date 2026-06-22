@@ -17,13 +17,6 @@
 import logging
 import os
 from typing import Callable, Optional
-from plugins.providers.builtin.codex.python.tui_bridge import (
-    enqueue_codex_tui_message,
-    is_codex_local_owner_mode,
-    should_route_codex_messages_to_tui_host,
-)
-from plugins.providers.builtin.codex.python import runtime_state as codex_state
-from plugins.providers.builtin.codex.python.approval_policy import SOURCE_REMOTE_PROXY
 from core.providers.registry import classify_provider, get_provider, provider_not_enabled_message
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -57,6 +50,17 @@ from bot.handlers.common import (
 from bot.handlers.thread import handle_thread_control_callback
 
 logger = logging.getLogger(__name__)
+
+
+def _provider_has_interruption(state: AppState, interruption_id: str) -> str:
+    request_id = str(interruption_id or "").strip()
+    if not request_id:
+        return ""
+    for provider_id in state.provider_runtime_state.keys():
+        runtime = state.get_provider_runtime(provider_id)
+        if request_id in runtime.interruptions:
+            return provider_id
+    return ""
 
 
 def _attachment_download_dir() -> str:
@@ -454,6 +458,16 @@ def _build_provider_approval_reply(approval, action: str) -> tuple[str, dict]:
     return "✅ 已允许", {"decision": "accept"}
 
 
+async def _handle_provider_approval_callback(state: AppState, approval, action: str, query, msg_id: int) -> bool:
+    tool_name = getattr(approval, "tool_type", "") or ""
+    provider = get_provider(tool_name) if tool_name else None
+    interactions = getattr(provider, "interactions", None) if provider is not None else None
+    callback = getattr(interactions, "handle_approval_callback", None) if interactions is not None else None
+    if not callable(callback):
+        return False
+    return bool(await callback(state, approval, action, query, msg_id))
+
+
 def _escape_approval_markdown(value: str) -> str:
     return (value or "").replace("*", "\\*").replace("_", "\\_").replace("`", "\\`")
 
@@ -820,24 +834,7 @@ def make_callback_handler(state: AppState, group_chat_id: int) -> Callable:
             label, reply_body = _build_provider_approval_reply(approval, action)
 
             try:
-                if approval.tool_type == "codex" and approval.approval_source == SOURCE_REMOTE_PROXY:
-                    resolved = state.resolve_pending_approval_decision(
-                        "codex",
-                        str(approval.request_id),
-                        action,
-                        message="TG 已拒绝" if action == "exec_deny" else "",
-                    )
-                    if not resolved:
-                        state.pending_approvals.pop(msg_id, None)
-                        await query.edit_message_text(  # type: ignore[union-attr]
-                            "❌ 回复授权失败：remote proxy 已不再等待该审批。",
-                        )
-                        logger.warning(
-                            f"[approval] codex_remote_proxy pending decision missing "
-                            f"request_id={approval.request_id} action={action} msg_id={msg_id}"
-                        )
-                        return
-                    state.pending_approvals.pop(msg_id, None)
+                if await _handle_provider_approval_callback(state, approval, action, query, msg_id):
                     publish_approval_answered(
                         state,
                         approval,
@@ -847,10 +844,6 @@ def make_callback_handler(state: AppState, group_chat_id: int) -> Callable:
                     await query.edit_message_text(  # type: ignore[union-attr]
                         _approval_completion_text(label, approval),
                         parse_mode="Markdown",
-                    )
-                    logger.info(
-                        f"[approval] codex_remote_proxy request_id={approval.request_id} "
-                        f"action={action} msg_id={msg_id}"
                     )
                     return
 
@@ -874,9 +867,13 @@ def make_callback_handler(state: AppState, group_chat_id: int) -> Callable:
                     approval.request_id,
                     reply_body,
                 )
-                if approval.tool_type == "codex" or codex_state.has_interruption(state, approval.request_id):
-                    codex_state.resolve_interruption(
-                        state,
+                interruption_provider = approval.tool_type or _provider_has_interruption(
+                    state,
+                    approval.request_id,
+                )
+                if interruption_provider:
+                    state.resolve_provider_interruption(
+                        interruption_provider,
                         approval.request_id,
                         status="resolved",
                         tg_message_id=msg_id,

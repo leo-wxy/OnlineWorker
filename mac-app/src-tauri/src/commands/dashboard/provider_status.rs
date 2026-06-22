@@ -8,7 +8,10 @@ use std::process::Command;
 use std::time::{Duration, SystemTime};
 
 use super::super::config_provider::{
-    provider_metadata_from_raw, ProviderIconEntry, ProviderMetadata,
+    infer_provider_legacy_transport, provider_default_live_transport,
+    provider_default_metadata, provider_metadata_from_raw,
+    provider_uses_shared_app_server_transport, public_default_provider_ids,
+    ProviderIconEntry, ProviderMetadata, ProviderTuiHostEntry,
 };
 use super::{ProviderDashboardStatus, ServiceHealth};
 
@@ -24,7 +27,6 @@ struct RawProviderConfig {
     managed: Option<bool>,
     autostart: Option<bool>,
     bin: Option<String>,
-    codex_bin: Option<String>,
     owner_transport: Option<String>,
     live_transport: Option<String>,
     transport: Option<RawTransportConfig>,
@@ -47,7 +49,7 @@ struct RawTransportConfig {
 struct LegacyToolConfig {
     name: String,
     enabled: Option<bool>,
-    codex_bin: Option<String>,
+    bin: Option<String>,
     owner_transport: Option<String>,
     live_transport: Option<String>,
     protocol: Option<String>,
@@ -69,6 +71,7 @@ pub(super) struct ProviderConfigSnapshot {
     pub(super) app_server_url: Option<String>,
     pub(super) control_mode: Option<String>,
     pub(super) bin: Option<String>,
+    pub(super) tui_host: ProviderTuiHostEntry,
 }
 
 #[derive(Deserialize)]
@@ -80,47 +83,7 @@ struct OwnerBridgeRuntimeStatusResponse {
 }
 
 fn default_provider_snapshot(id: &str) -> ProviderConfigSnapshot {
-    match id {
-        "codex" => ProviderConfigSnapshot {
-            id: "codex".to_string(),
-            icon: None,
-            visible: true,
-            managed: true,
-            autostart: true,
-            transport: "stdio".to_string(),
-            live_transport: "owner_bridge".to_string(),
-            port: None,
-            app_server_url: None,
-            control_mode: Some("app".to_string()),
-            bin: Some("codex".to_string()),
-        },
-        "claude" => ProviderConfigSnapshot {
-            id: "claude".to_string(),
-            icon: None,
-            visible: true,
-            managed: false,
-            autostart: false,
-            transport: "stdio".to_string(),
-            live_transport: "stdio".to_string(),
-            port: None,
-            app_server_url: None,
-            control_mode: Some("app".to_string()),
-            bin: Some("claude".to_string()),
-        },
-        other => ProviderConfigSnapshot {
-            id: other.to_string(),
-            icon: None,
-            visible: true,
-            managed: false,
-            autostart: false,
-            transport: "stdio".to_string(),
-            live_transport: "stdio".to_string(),
-            port: None,
-            app_server_url: None,
-            control_mode: Some("app".to_string()),
-            bin: Some(other.to_string()),
-        },
-    }
+    provider_snapshot_from_metadata(provider_default_metadata(id))
 }
 
 fn provider_snapshot_from_metadata(provider: ProviderMetadata) -> ProviderConfigSnapshot {
@@ -136,6 +99,7 @@ fn provider_snapshot_from_metadata(provider: ProviderMetadata) -> ProviderConfig
         app_server_url: provider.transport.app_server_url,
         control_mode: provider.control_mode,
         bin: provider.bin,
+        tui_host: provider.tui_host,
     }
 }
 
@@ -150,31 +114,7 @@ fn infer_legacy_transport(
     app_server_url: Option<&str>,
     raw_port: Option<u16>,
 ) -> String {
-    if let Some(protocol) = explicit_protocol.filter(|value| !value.trim().is_empty()) {
-        return protocol.trim().to_string();
-    }
-    if let Some(url) = app_server_url {
-        if url.starts_with("unix://") {
-            return "unix".to_string();
-        }
-        if url.starts_with("ws://") || url.starts_with("wss://") {
-            return "ws".to_string();
-        }
-        if url.starts_with("http://") || url.starts_with("https://") {
-            return "http".to_string();
-        }
-    }
-    match tool_name {
-        "codex" => {
-            if raw_port.unwrap_or(0) > 0 {
-                "ws".to_string()
-            } else {
-                "stdio".to_string()
-            }
-        }
-        "claude" => "stdio".to_string(),
-        _ => "stdio".to_string(),
-    }
+    infer_provider_legacy_transport(tool_name, explicit_protocol, app_server_url, raw_port)
 }
 
 fn normalize_transport(value: Option<String>) -> Option<String> {
@@ -204,16 +144,7 @@ fn default_live_transport(
     owner_transport: &str,
     control_mode: Option<&str>,
 ) -> String {
-    if tool_name == "codex" {
-        if owner_transport == "ws" && matches!(control_mode, Some("app" | "hybrid")) {
-            return "shared_ws".to_string();
-        }
-        if owner_transport == "unix" && matches!(control_mode, Some("app" | "hybrid")) {
-            return "shared_unix".to_string();
-        }
-        return "owner_bridge".to_string();
-    }
-    owner_transport.to_string()
+    provider_default_live_transport(tool_name, owner_transport, control_mode)
 }
 
 pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<ProviderConfigSnapshot> {
@@ -239,7 +170,7 @@ pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<Provi
             snapshot.managed = provider.managed.unwrap_or(snapshot.managed);
             snapshot.autostart =
                 provider.autostart.unwrap_or(snapshot.autostart) && snapshot.managed;
-            snapshot.bin = provider.bin.or(provider.codex_bin).or(snapshot.bin);
+            snapshot.bin = provider.bin.or(snapshot.bin);
             let transport = provider.transport.unwrap_or_default();
             snapshot.transport = normalize_transport(
                 provider
@@ -257,9 +188,11 @@ pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<Provi
                 .or(provider.app_server_url)
                 .or(snapshot.app_server_url);
             snapshot.control_mode = provider.control_mode.or(snapshot.control_mode);
-            if id == "codex" && snapshot.transport == "stdio" {
+            if provider_uses_shared_app_server_transport(&id) && snapshot.transport == "stdio" {
                 snapshot.port = None;
                 snapshot.app_server_url = None;
+            } else if provider_uses_shared_app_server_transport(&id) && snapshot.transport == "unix" {
+                snapshot.port = None;
             }
             snapshot.live_transport = normalize_live_transport(provider.live_transport)
                 .unwrap_or_else(|| {
@@ -283,7 +216,7 @@ pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<Provi
             let managed = tool.enabled.unwrap_or(true);
             snapshot.managed = managed;
             snapshot.autostart = managed;
-            snapshot.bin = tool.codex_bin.or(snapshot.bin);
+            snapshot.bin = tool.bin.or(snapshot.bin);
             let mut transport = infer_legacy_transport(
                 &tool.name,
                 tool.protocol.as_deref(),
@@ -293,22 +226,24 @@ pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<Provi
             let mut port = tool.app_server_port.or(snapshot.port);
             if let Some(owner_transport) = normalize_transport(tool.owner_transport) {
                 transport = owner_transport;
-            } else if tool.name == "codex"
+            } else if provider_uses_shared_app_server_transport(&tool.name)
                 && tool.protocol.as_deref() == Some("ws")
                 && tool.app_server_url.as_deref().unwrap_or("").is_empty()
                 && tool.app_server_port.unwrap_or(0) == 4722
                 && tool.control_mode.as_deref().unwrap_or("").is_empty()
             {
-                transport = "stdio".to_string();
+                transport = "unix".to_string();
                 port = None;
             }
             snapshot.transport = transport;
             snapshot.port = port;
             snapshot.app_server_url = tool.app_server_url.or(snapshot.app_server_url);
             snapshot.control_mode = tool.control_mode.or(snapshot.control_mode);
-            if tool.name == "codex" && snapshot.transport == "stdio" {
+            if provider_uses_shared_app_server_transport(&tool.name) && snapshot.transport == "stdio" {
                 snapshot.port = None;
                 snapshot.app_server_url = None;
+            } else if provider_uses_shared_app_server_transport(&tool.name) && snapshot.transport == "unix" {
+                snapshot.port = None;
             }
             snapshot.live_transport =
                 normalize_live_transport(tool.live_transport).unwrap_or_else(|| {
@@ -323,8 +258,8 @@ pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<Provi
     }
 
     let mut ordered = Vec::new();
-    for builtin in ["codex", "claude"] {
-        if let Some(snapshot) = resolved.remove(builtin) {
+    for builtin in public_default_provider_ids() {
+        if let Some(snapshot) = resolved.remove(&builtin) {
             if snapshot.visible {
                 ordered.push(snapshot);
             }
@@ -467,6 +402,7 @@ pub(super) fn build_provider_statuses(
                 live_transport: Some(provider.live_transport),
                 control_mode: provider.control_mode,
                 bin: provider.bin,
+                tui_host: provider.tui_host,
             }
         })
         .collect()

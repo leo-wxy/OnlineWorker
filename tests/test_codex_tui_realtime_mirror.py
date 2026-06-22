@@ -102,7 +102,7 @@ def _make_app_mode_config() -> Config:
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="stdio",
                 control_mode="app",
                 live_transport="owner_bridge",
@@ -122,7 +122,7 @@ def _make_shared_live_app_mode_config() -> Config:
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="unix",
                 control_mode="app",
                 live_transport="shared_unix",

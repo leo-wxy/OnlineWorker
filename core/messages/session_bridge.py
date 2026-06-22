@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.messages.events import MessageEvent, create_message_event
+from core.providers.registry import get_provider
 from core.providers.session_events import SessionEvent
 
 
@@ -31,6 +32,16 @@ def _workspace_path_from_id(workspace_id: str) -> str:
     return workspace_id.split(":", 1)[1]
 
 
+def _completed_agent_message_is_final_by_default(provider_id: str) -> bool:
+    descriptor = get_provider(provider_id)
+    hooks = descriptor.session_event_hooks if descriptor is not None else None
+    return bool(
+        getattr(hooks, "completed_agent_message_is_final_by_default", True)
+        if hooks is not None
+        else True
+    )
+
+
 def canonical_kind_for_session_event(event: SessionEvent) -> str:
     if event.kind == "turn_started":
         return "turn.started"
@@ -55,8 +66,8 @@ def canonical_kind_for_session_event(event: SessionEvent) -> str:
         phase = _text(event.semantic_payload.get("phase") or payload.get("phase"))
         if phase == "final_answer" or event.semantic_kind == "turn_completed":
             return "message.assistant.final"
-        if event.provider and event.provider != "codex":
-            # Non-Codex providers often omit an explicit final phase while still
+        if event.provider and _completed_agent_message_is_final_by_default(event.provider):
+            # Some providers omit an explicit final phase while still
             # emitting a completed assistant message as the user-visible final
             # reply. Preserve the existing Telegram/runtime behavior here so all
             # bus consumers share the same boundary.

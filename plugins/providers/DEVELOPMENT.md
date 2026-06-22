@@ -80,6 +80,22 @@ provider:
       scope: thread
       description: 查看 provider 会话状态
 
+ai:
+  services:
+    - id: my-provider-default
+      name: My Provider
+      label: My Provider
+      description: Shared AI service definition owned by this provider plugin.
+      protocol: openai_compatible_chat
+      base_url: https://api.example.com/v1
+      api_key_env: MY_PROVIDER_API_KEY
+      models:
+        - my-model
+      default_model: my-model
+      timeout_seconds: 20
+      enabled: false
+      default_for_scenarios: false
+
 entrypoints:
   python_descriptor: my_provider.python.provider:create_provider_descriptor
 ```
@@ -102,13 +118,19 @@ entrypoints:
 - `provider.bin`: CLI 可执行文件名或路径。
 - `provider.owner_transport`: App/服务与 provider owner runtime 的控制通道，当前支持 `stdio`、`ws`、`http`。
 - `provider.live_transport`: session live 通道，当前可用值包括 `owner_bridge`、`shared_ws`、`stdio`、`ws`、`http`。
-- `provider.control_mode`: 控制模式，通常为 `app`；Codex 还支持 `tui`、`hybrid`。
+- `provider.control_mode`: 控制模式。可用值由 provider manifest 和 descriptor 声明，常见值包括 `app`、`tui`、`hybrid`。
 - `provider.transport.type`: 与 `owner_transport` 保持一致，兼容旧字段读取。
 - `provider.transport.app_server_port` / `app_server_url`: 仅在 `ws` / `http` 类 transport 需要。
 - `provider.capabilities`: App 用于决定功能入口和发送能力。
+- `provider.capabilities.message_rewrite.proxy_alias`: 可选。仅当 provider 自己提供 remote proxy CLI 入口时填写，用于设置页展示可复制的代理 alias；共享 UI 不应硬编码 provider 专属命令。
 - `provider.process.cleanup_matchers`: 只填写该 provider 自己启动的子进程匹配规则，不能匹配通用 CLI、终端、编辑器或用户进程。
+- `provider.discovery.command_roots` / `skill_roots`: 可选。声明该 provider 的本地 command / skill 发现目录，支持 `~`。共享 command registry 只读取这里声明的 provider 专属路径。
+- `provider.tui_host.sidecar_args`: 可选。声明打开 provider TUI host 时传给 `onlineworker-bot` sidecar 的参数模板。支持 `{workspace}` 和 `{thread_id}` 占位符；共享 App 只做替换与执行，不硬编码 provider 专属 flag。
 - `provider.commands`: 下游 CLI command catalog。`scope` 支持 `global`、`workspace`、`thread`，默认是 `thread`。
+- `ai.services`: 可选。声明由该 provider plugin 拥有的内置 AI service defaults。Python 和 Rust 都会从这里物化首启默认值与 AI 设置面板元数据。
 - `entrypoints.python_descriptor`: Python descriptor 工厂，必须是 `module:function` 格式。
+- `entrypoints.python_config_normalizer`: 可选。provider 自己的原始配置兼容迁移入口，返回 `dict` 或 `ProviderConfigNormalizationResult`。
+- `entrypoints.python_document_normalizer`: 可选。provider 自己的整份 `config.yaml` 文档兼容迁移入口，返回 `dict` 或 `ProviderDocumentNormalizationResult`。
 
 Manifest 是共享边界。不要在 `plugin.yaml` 中写入本地用户路径、私有 token、临时端口、调试日志路径或仓库外实现细节。
 

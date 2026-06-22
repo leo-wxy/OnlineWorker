@@ -20,10 +20,14 @@ from plugins.providers.builtin.codex.python.approval_policy import (
     build_mirror_approval_policy,
     is_app_server_approval_source,
 )
+from plugins.providers.builtin.codex.python.errors import is_codex_unmaterialized_error
 from plugins.providers.builtin.codex.python.interactions import parse_approval_request
 from plugins.providers.builtin.codex.python.process import AppServerProcess
 from plugins.providers.builtin.codex.python.remote_proxy import ensure_codex_remote_message_proxy
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
+from plugins.providers.builtin.codex.python.semantic_events import (
+    parse_codex_app_server_semantic_event,
+)
 from plugins.providers.builtin.codex.python import storage_runtime
 from plugins.providers.builtin.codex.python.transport import (
     is_default_unix_endpoint,
@@ -45,6 +49,10 @@ CODEX_RECONNECT_GRACE_SECONDS = 3.0
 CODEX_RECONNECT_POLL_SECONDS = 0.1
 DEFAULT_REASONING_OPTIONS = ["minimal", "low", "medium", "high", "xhigh"]
 CODEX_APP_SERVER_RESOLVED_METHOD = "serverRequest/resolved"
+CODEX_CAPACITY_ABORT_REASON = "Selected model is at capacity. Please try a different model."
+CODEX_CAPACITY_AUTO_CONTINUE_TEXT = "继续"
+CODEX_CAPACITY_AUTO_CONTINUE_MAX_ATTEMPTS = 2
+CODEX_CAPACITY_AUTO_CONTINUE_COOLDOWN_SECONDS = 60.0
 
 
 def _thread_topic_id(state: "AppState", ws_info: "WorkspaceInfo", thread_info: "ThreadInfo") -> int | None:
@@ -102,6 +110,24 @@ def _is_pending_codex_app_server_approval(
     if str(getattr(approval, "tool_type", "") or "") != "codex":
         return False
     source = str(getattr(approval, "approval_source", "") or "")
+    if source == SOURCE_REMOTE_PROXY:
+        approval_request_id = _request_key(getattr(approval, "request_id", ""))
+        if approval_request_id == request_id:
+            if not thread_id and not command:
+                return True
+            approval_thread_id = str(getattr(approval, "thread_id", "") or "").strip()
+            if thread_id and approval_thread_id != thread_id:
+                return False
+            approval_command = str(getattr(approval, "cmd", "") or "").strip()
+            if command and approval_command != command:
+                return False
+            return True
+        return _is_remote_proxy_mirror_for_request(
+            approval,
+            request_id,
+            thread_id=thread_id,
+            command=command,
+        )
     if _request_key(getattr(approval, "request_id", "")) == request_id:
         return is_app_server_approval_source(source)
     return _is_remote_proxy_mirror_for_request(
@@ -128,15 +154,55 @@ def has_pending_codex_app_server_approval(
     if not request_key:
         return False
     thread_id, command = _approval_identity(params or {}, request_id)
-    return any(
-        _is_pending_codex_app_server_approval(
+    for approval in state.pending_approvals.values():
+        if _is_pending_codex_app_server_approval(
             approval,
             request_key,
             thread_id=thread_id,
             command=command,
-        )
-        for approval in state.pending_approvals.values()
+        ):
+            return True
+    return False
+
+
+async def handle_approval_callback(state, approval, action: str, query, msg_id: int) -> bool:
+    request_id = _request_key(getattr(approval, "request_id", ""))
+    if str(getattr(approval, "approval_source", "") or "") != SOURCE_REMOTE_PROXY:
+        return False
+    if not _is_pending_codex_app_server_approval(
+        approval,
+        request_id,
+        thread_id=str(getattr(approval, "thread_id", "") or "").strip(),
+        command=str(getattr(approval, "cmd", "") or "").strip(),
+    ):
+        return False
+
+    resolved = state.resolve_pending_approval_decision(
+        "codex",
+        request_id,
+        action,
+        message="TG 已拒绝" if action == "exec_deny" else "",
     )
+    if not resolved:
+        state.pending_approvals.pop(msg_id, None)
+        await query.edit_message_text("❌ 回复授权失败：remote proxy 已不再等待该审批。")
+        logger.warning(
+            "[approval] codex_remote_proxy pending decision missing "
+            "request_id=%s action=%s msg_id=%s",
+            getattr(approval, "request_id", ""),
+            action,
+            msg_id,
+        )
+        return True
+
+    state.pending_approvals.pop(msg_id, None)
+    logger.info(
+        "[approval] codex_remote_proxy request_id=%s action=%s msg_id=%s",
+        getattr(approval, "request_id", ""),
+        action,
+        msg_id,
+    )
+    return True
 
 
 async def mark_codex_app_server_approval_resolved(
@@ -222,6 +288,110 @@ async def handle_codex_app_server_resolution_event(
         request_id=request_id,
         thread_id=thread_id,
     )
+
+
+def is_codex_capacity_abort_reason(reason: str) -> bool:
+    return CODEX_CAPACITY_ABORT_REASON in str(reason or "").strip()
+
+
+def _resolve_codex_capacity_workspace_id(state: "AppState", adapter, params: dict, thread_id: str) -> str:
+    workspace_id = str(params.get("workspace_id") or "").strip()
+    if workspace_id:
+        return workspace_id
+    workspace_map = getattr(adapter, "_thread_workspace_map", {}) or {}
+    workspace_id = str(workspace_map.get(thread_id) or "").strip()
+    if workspace_id:
+        return workspace_id
+    found = state.find_thread_by_id_global(thread_id)
+    if not found:
+        return ""
+    ws_info, _thread_info = found
+    return str(getattr(ws_info, "daemon_workspace_id", "") or "").strip()
+
+
+async def maybe_auto_continue_capacity_abort(
+    state: "AppState",
+    adapter,
+    method: str,
+    params: dict,
+) -> bool:
+    if method != "app-server-event" or not isinstance(params, dict):
+        return False
+    message = params.get("message")
+    if not isinstance(message, dict):
+        return False
+    raw_method = str(message.get("method") or "").strip()
+    payload = message.get("params")
+    if not isinstance(payload, dict):
+        payload = {}
+
+    event = parse_codex_app_server_semantic_event(raw_method, payload)
+    if event is None or event.kind != "turn_aborted" or not is_codex_capacity_abort_reason(event.reason):
+        return False
+
+    thread_id = str(event.thread_id or "").strip()
+    if not thread_id:
+        logger.warning("[codex-capacity] 容量中断缺少 thread_id，跳过自动续跑")
+        return False
+
+    runtime = codex_state.get_runtime(state)
+    now = asyncio.get_running_loop().time()
+    attempts = runtime.thread_capacity_auto_continue_attempts.get(thread_id, 0)
+    last_at = runtime.thread_capacity_auto_continue_last_at.get(thread_id, 0.0)
+    if attempts >= CODEX_CAPACITY_AUTO_CONTINUE_MAX_ATTEMPTS:
+        logger.warning(
+            "[codex-capacity] 自动续跑已达上限 thread=%s attempts=%s",
+            thread_id[:12],
+            attempts,
+        )
+        return False
+    if last_at and (now - last_at) < CODEX_CAPACITY_AUTO_CONTINUE_COOLDOWN_SECONDS:
+        logger.info(
+            "[codex-capacity] 冷却中跳过自动续跑 thread=%s delta=%.2fs",
+            thread_id[:12],
+            now - last_at,
+        )
+        return False
+
+    workspace_id = _resolve_codex_capacity_workspace_id(state, adapter, params, thread_id)
+    if not workspace_id:
+        logger.warning(
+            "[codex-capacity] 无法解析 workspace，跳过自动续跑 thread=%s",
+            thread_id[:12],
+        )
+        return False
+
+    runtime.thread_capacity_auto_continue_last_at[thread_id] = now
+    runtime.thread_capacity_auto_continue_attempts[thread_id] = attempts + 1
+    workspace_map = getattr(adapter, "_thread_workspace_map", None)
+    if isinstance(workspace_map, dict):
+        workspace_map[thread_id] = workspace_id
+
+    try:
+        await adapter.resume_thread(workspace_id, thread_id)
+        await adapter.send_user_message(
+            workspace_id,
+            thread_id,
+            CODEX_CAPACITY_AUTO_CONTINUE_TEXT,
+            approvals_reviewer="user",
+        )
+    except Exception as exc:
+        logger.warning(
+            "[codex-capacity] 自动续跑失败 thread=%s workspace=%s attempt=%s err=%s",
+            thread_id[:12],
+            workspace_id,
+            attempts + 1,
+            exc,
+        )
+        return False
+
+    logger.warning(
+        "[codex-capacity] 已自动补发继续 thread=%s workspace=%s attempt=%s",
+        thread_id[:12],
+        workspace_id,
+        attempts + 1,
+    )
+    return True
 
 
 def make_codex_server_request_handler(state: "AppState", fallback_handler):
@@ -332,6 +502,20 @@ def build_approval_reply(approval, action: str) -> tuple[str, dict]:
         return "✅ 已总是允许", {"decision": "acceptForSession"}
 
     return "✅ 已允许", {"decision": "accept"}
+
+
+def include_state_only_thread(thread_info) -> bool:
+    return str(getattr(thread_info, "source", "") or "unknown").strip().lower() == "app"
+
+
+def thread_control_intro_extra(thread_id: str, state_text: str) -> str:
+    return "\n此 Topic 由 OnlineWorker 托管；Codex app-server 权限请求会在这里显示 TG 审批按钮。"
+
+
+def thread_interrupt_supported(state, ws) -> bool:
+    from plugins.providers.builtin.codex.python.tui_bridge import is_codex_local_owner_mode
+
+    return not is_codex_local_owner_mode(state, ws)
 
 
 def _load_codex_defaults(config_path: str | None = None) -> tuple[str | None, str | None]:
@@ -792,14 +976,17 @@ async def handle_local_owner(
     attachments=None,
 ) -> bool:
     from bot.handlers.common import _send_to_group, tg_send_failed_text
-    from bot.handlers import message as message_handler
+    from plugins.providers.builtin.codex.python.tui_bridge import (
+        enqueue_codex_tui_message,
+        should_route_codex_messages_to_tui_host,
+    )
 
-    should_route_to_tui = message_handler.should_route_codex_messages_to_tui_host(state, ws_info)
+    should_route_to_tui = should_route_codex_messages_to_tui_host(state, ws_info)
     if not should_route_to_tui:
         return False
 
     try:
-        await message_handler.enqueue_codex_tui_message(
+        await enqueue_codex_tui_message(
             state,
             ws_info,
             context.bot,
@@ -812,7 +999,8 @@ async def handle_local_owner(
         if not thread_info.preview:
             thread_info.preview = text[:80]
             if state.storage is not None:
-                message_handler.save_storage(state.storage)
+                from core.storage import save_storage
+                save_storage(state.storage)
 
         logger.info("[provider-message] codex 本地 owner 已接管 thread=%s", thread_info.thread_id[:8])
     except Exception as e:
@@ -945,8 +1133,6 @@ async def prepare_send(
     has_photo: bool,
     attachments=None,
 ) -> bool:
-    from bot.handlers.common import is_codex_unmaterialized_error
-
     workspace_id = ws_info.daemon_workspace_id
     try:
         await adapter.resume_thread(workspace_id, thread_info.thread_id)
@@ -1008,7 +1194,7 @@ def resolve_thread_adapter(state, ws):
 
 
 def validate_new_thread(state, ws, initial_text: str | None) -> str | None:
-    from bot.handlers import thread as thread_handler
+    from plugins.providers.builtin.codex.python.tui_bridge import is_codex_local_owner_mode
 
     if not initial_text:
         return (
@@ -1016,7 +1202,7 @@ def validate_new_thread(state, ws, initial_text: str | None) -> str | None:
             "请使用 `/new <初始消息>`，这样源端 thread 才会 materialize，"
             "后续 `/archive` 才能走真实归档。"
         )
-    if thread_handler.is_codex_local_owner_mode(state, ws):
+    if is_codex_local_owner_mode(state, ws):
         return (
             "当前主控模式暂不支持 /new。\n"
             "请先在现有 thread 中继续对话，后续再补 thread 创建链路。"
@@ -1036,11 +1222,10 @@ async def activate_new_thread(
 
 
 async def archive_thread(state, ws, thread_id: str, active_adapter) -> None:
-    from bot.handlers.common import is_codex_unmaterialized_error
-    from bot.handlers import thread as thread_handler
+    from plugins.providers.builtin.codex.python.tui_bridge import archive_codex_thread_via_tui_bridge
 
     try:
-        await thread_handler.archive_codex_thread_via_tui_bridge(state, ws, thread_id)
+        await archive_codex_thread_via_tui_bridge(state, ws, thread_id)
     except Exception as e:
         if is_codex_unmaterialized_error(e):
             raise RuntimeError(
@@ -1373,6 +1558,7 @@ async def setup_connection(manager, bot, adapter, **kwargs) -> None:
             params,
         )
         await event_handler(method, params)
+        await maybe_auto_continue_capacity_abort(manager.state, adapter, method, params)
 
     adapter.on_event(codex_event_handler)
     adapter.on_server_request(
@@ -1393,6 +1579,23 @@ async def setup_connection(manager, bot, adapter, **kwargs) -> None:
 
         adapter.register_workspace_cwd(ws_info.daemon_workspace_id, ws_info.path)
         logger.info("workspace cwd 已注册：%s", ws_name)
+
+        try:
+            # 预热 app-server 当前可见 thread 的 workspace 映射。
+            # 否则运行中的 live thread 若尚未落入本地 storage，首批事件会因空 workspace_id 被消息总线丢弃。
+            live_threads = await adapter.list_threads(ws_info.daemon_workspace_id, limit=50)
+            for thread in live_threads or []:
+                if not isinstance(thread, dict):
+                    continue
+                thread_id = str(thread.get("id") or "").strip()
+                if thread_id:
+                    adapter._thread_workspace_map[thread_id] = ws_info.daemon_workspace_id
+        except Exception as e:
+            logger.warning(
+                "预热 codex thread 映射失败：workspace=%s err=%s",
+                ws_name,
+                e,
+            )
 
         needs_save = False
         for thread_id, thread_info in ws_info.threads.items():
@@ -1759,7 +1962,7 @@ async def start_runtime(manager, bot, tool_cfg) -> None:
     ws_url = await resolve_connection_target(tool_cfg)
     if ws_url is None:
         proc = AppServerProcess(
-            codex_bin=tool_cfg.codex_bin,
+            codex_bin=tool_cfg.bin,
             port=tool_cfg.app_server_port,
             protocol=tool_cfg.protocol,
             **({"listen_url": tool_cfg.app_server_url} if tool_cfg.protocol == "unix" else {}),

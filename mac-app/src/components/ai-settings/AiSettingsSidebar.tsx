@@ -81,7 +81,7 @@ export function AiSettingsSidebar({
               <span className="min-w-0">
                 <span className="block truncate text-sm font-bold text-gray-950">{serviceTitle(service, labels)}</span>
                 <span className="mt-1 block truncate text-xs font-medium text-slate-500">
-                  {service.defaultModel || labels.noModel}
+                  {service.description || service.defaultModel || labels.noModel}
                 </span>
               </span>
               <span className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold ${

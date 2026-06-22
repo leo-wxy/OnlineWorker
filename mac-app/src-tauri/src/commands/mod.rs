@@ -1,7 +1,5 @@
 pub mod ai_config;
 pub mod attachment_cache;
-pub mod claude;
-pub mod codex;
 pub mod command_catalog;
 pub mod command_registry;
 pub mod config;

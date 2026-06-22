@@ -82,7 +82,7 @@ async def test_status_handler(mock_update, mock_context, state):
     mock_context.bot.send_message.assert_called_once()
     text = mock_context.bot.send_message.call_args[1]["text"]
     assert "已启动" in text
-    assert "app-server" in text
+    assert "活跃 workspace：无" in text
 
 
 @pytest.mark.asyncio
@@ -98,7 +98,7 @@ async def test_status_handler_reports_codex_hybrid_mode(state, mock_update, mock
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="hybrid",
@@ -130,7 +130,7 @@ async def test_status_handler_reports_codex_app_mode_without_local_owner(state, 
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -160,7 +160,7 @@ async def test_status_handler_reports_claude_auth_missing_when_connected(state, 
             ToolConfig(
                 name="claude",
                 enabled=True,
-                codex_bin="claude",
+                bin="claude",
                 protocol="stdio",
             )
         ],
@@ -200,7 +200,7 @@ async def test_status_handler_reports_claude_connected_without_provider_auth_det
             ToolConfig(
                 name="claude",
                 enabled=True,
-                codex_bin="claude",
+                bin="claude",
                 protocol="stdio",
             )
         ],
@@ -234,7 +234,7 @@ async def test_status_handler_uses_registry_status_builder_for_custom_provider(s
             ToolConfig(
                 name="custom",
                 enabled=True,
-                codex_bin="custom",
+                bin="custom",
                 protocol="stdio",
             )
         ],
@@ -272,7 +272,7 @@ async def test_status_handler_revives_stale_archived_active_thread_in_count(stat
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -804,7 +804,7 @@ async def test_message_handler_tracks_current_task_summary_per_thread():
 
 
 @pytest.mark.asyncio
-async def test_message_handler_reports_claude_not_ready_before_provider_send():
+async def test_message_handler_allows_claude_logged_out_runtime_send_path():
     from bot.handlers.message import make_message_handler
     from core.providers.message_runtime import ensure_default_connected, send_default_message
     from plugins.providers.builtin.claude.python import runtime as claude_runtime
@@ -871,11 +871,9 @@ async def test_message_handler_reports_claude_not_ready_before_provider_send():
         message_module.get_provider = original_get_provider  # type: ignore[assignment]
 
     adapter.check_readiness.assert_awaited_once()
-    adapter.resume_thread.assert_not_awaited()
-    adapter.send_user_message.assert_not_awaited()
-    text = ctx.bot.send_message.await_args.kwargs["text"]
-    assert "Claude provider unavailable" in text
-    assert "not logged in" in text
+    adapter.resume_thread.assert_awaited_once_with("claude:demo", "tid-claude")
+    adapter.send_user_message.assert_awaited_once_with("claude:demo", "tid-claude", "hello")
+    ctx.bot.send_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio

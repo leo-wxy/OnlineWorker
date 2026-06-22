@@ -1,5 +1,6 @@
 # tests/test_storage.py
 import json
+import os
 import sqlite3
 import pytest
 from core.storage import (
@@ -10,8 +11,10 @@ from core.storage import (
     save_storage,
 )
 from plugins.providers.builtin.codex.python.storage_runtime import (
+    list_codex_sessions,
     list_codex_threads_by_cwd,
     query_codex_active_thread_ids,
+    query_codex_running_thread_ids,
     read_codex_turn_terminal_message,
     read_codex_turn_terminal_outcome,
     read_thread_history,
@@ -376,6 +379,395 @@ def test_query_codex_active_thread_ids_excludes_subagents(tmp_path, monkeypatch)
     monkeypatch.setattr("plugins.providers.builtin.codex.python.storage_runtime.os.path.expanduser", fake_expanduser)
 
     assert query_codex_active_thread_ids("/tmp/workspace") == {"main-active"}
+
+
+def test_list_codex_threads_by_cwd_includes_jsonl_session_missing_from_sqlite(tmp_path, monkeypatch):
+    db_path = tmp_path / "state_5.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE threads (
+            id TEXT PRIMARY KEY,
+            rollout_path TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            source TEXT NOT NULL,
+            model_provider TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            title TEXT NOT NULL,
+            sandbox_policy TEXT NOT NULL,
+            approval_mode TEXT NOT NULL,
+            tokens_used INTEGER NOT NULL DEFAULT 0,
+            has_user_event INTEGER NOT NULL DEFAULT 0,
+            archived INTEGER NOT NULL DEFAULT 0,
+            archived_at INTEGER,
+            git_sha TEXT,
+            git_branch TEXT,
+            git_origin_url TEXT,
+            cli_version TEXT NOT NULL DEFAULT '',
+            first_user_message TEXT NOT NULL DEFAULT '',
+            agent_nickname TEXT,
+            agent_role TEXT,
+            memory_mode TEXT NOT NULL DEFAULT 'enabled',
+            model TEXT,
+            reasoning_effort TEXT,
+            agent_path TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO threads VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        )
+        """,
+        (
+            "sqlite-thread", "rollout", 1000, 2000, "vscode", "openai",
+            "/tmp/workspace", "SQLite thread", "workspace-write", "default",
+            0, 1, 0, None, None, None, None, "", "SQLite thread", None, None, "enabled", None, None, None,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    sessions_dir = tmp_path / "sessions"
+    day_dir = sessions_dir / "2026" / "06" / "16"
+    day_dir.mkdir(parents=True)
+    session_path = day_dir / "rollout-2026-06-16T12-00-00-jsonl-thread.jsonl"
+    lines = [
+        {
+            "type": "session_meta",
+            "payload": {
+                "id": "jsonl-thread",
+                "cwd": "/tmp/workspace",
+                "timestamp": "2026-06-16T12:00:00Z",
+                "source": "vscode",
+            },
+        },
+        {
+            "timestamp": "2026-06-16T12:00:01Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "JSONL only task"}],
+            },
+        },
+    ]
+    with open(session_path, "w", encoding="utf-8") as f:
+        for line in lines:
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    os.utime(session_path, None)
+
+    real_expanduser = __import__("os").path.expanduser
+
+    def fake_expanduser(path: str) -> str:
+        if path == "~/.codex/state_5.sqlite":
+            return str(db_path)
+        if path == "~/.codex/sessions":
+            return str(sessions_dir)
+        return real_expanduser(path)
+
+    monkeypatch.setattr("plugins.providers.builtin.codex.python.storage_runtime.os.path.expanduser", fake_expanduser)
+
+    result = list_codex_threads_by_cwd("/tmp/workspace", limit=20)
+
+    assert [r["id"] for r in result] == ["jsonl-thread", "sqlite-thread"]
+    assert result[0]["preview"] == "JSONL only task"
+
+
+def test_query_codex_running_thread_ids_includes_recent_jsonl_open_turn(tmp_path, monkeypatch):
+    db_path = tmp_path / "state_5.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE threads (
+            id TEXT PRIMARY KEY,
+            cwd TEXT NOT NULL,
+            archived INTEGER NOT NULL DEFAULT 0,
+            source TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("INSERT INTO threads VALUES (?, ?, ?, ?)", ("sqlite-active", "/tmp/workspace", 0, "vscode"))
+    conn.commit()
+    conn.close()
+
+    sessions_dir = tmp_path / "sessions"
+    day_dir = sessions_dir / "2026" / "06" / "16"
+    day_dir.mkdir(parents=True)
+    active_path = day_dir / "rollout-2026-06-16T12-00-00-jsonl-active.jsonl"
+    completed_path = day_dir / "rollout-2026-06-16T11-00-00-jsonl-completed.jsonl"
+    subagent_path = day_dir / "rollout-2026-06-16T10-00-00-jsonl-subagent.jsonl"
+    for path, session_id, source, extra in [
+        (active_path, "jsonl-active", "vscode", []),
+        (
+            completed_path,
+            "jsonl-completed",
+            "vscode",
+            [{
+                "timestamp": "2026-06-16T12:00:02Z",
+                "type": "event_msg",
+                "payload": {"type": "task_complete", "turn_id": "turn-jsonl-completed"},
+            }],
+        ),
+        (
+            subagent_path,
+            "jsonl-subagent",
+            {"subagent": {"thread_spawn": {"parent_thread_id": "jsonl-active"}}},
+            [],
+        ),
+    ]:
+        lines = [
+                {
+                    "type": "session_meta",
+                    "payload": {
+                        "id": session_id,
+                        "cwd": "/tmp/workspace",
+                        "timestamp": "2026-06-16T12:00:00Z",
+                        "source": source,
+                    },
+                },
+                {
+                    "timestamp": "2026-06-16T12:00:01Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": f"turn-{session_id}"},
+                },
+                *extra,
+            ]
+        with open(path, "w", encoding="utf-8") as f:
+            for line in lines:
+                f.write(json.dumps(line, ensure_ascii=False) + "\n")
+        os.utime(path, None)
+
+    real_expanduser = __import__("os").path.expanduser
+
+    def fake_expanduser(path: str) -> str:
+        if path == "~/.codex/state_5.sqlite":
+            return str(db_path)
+        if path == "~/.codex/sessions":
+            return str(sessions_dir)
+        return real_expanduser(path)
+
+    monkeypatch.setattr("plugins.providers.builtin.codex.python.storage_runtime.os.path.expanduser", fake_expanduser)
+
+    assert query_codex_active_thread_ids("/tmp/workspace") == {"sqlite-active"}
+    assert query_codex_running_thread_ids("/tmp/workspace") == {"jsonl-active"}
+
+
+def test_list_codex_sessions_merges_sqlite_jsonl_and_running_state(tmp_path, monkeypatch):
+    db_path = tmp_path / "state_5.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE threads (
+            id TEXT PRIMARY KEY,
+            rollout_path TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            source TEXT NOT NULL,
+            model_provider TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            title TEXT NOT NULL,
+            sandbox_policy TEXT NOT NULL,
+            approval_mode TEXT NOT NULL,
+            tokens_used INTEGER NOT NULL DEFAULT 0,
+            has_user_event INTEGER NOT NULL DEFAULT 0,
+            archived INTEGER NOT NULL DEFAULT 0,
+            archived_at INTEGER,
+            git_sha TEXT,
+            git_branch TEXT,
+            git_origin_url TEXT,
+            cli_version TEXT NOT NULL DEFAULT '',
+            first_user_message TEXT NOT NULL DEFAULT '',
+            agent_nickname TEXT,
+            agent_role TEXT,
+            memory_mode TEXT NOT NULL DEFAULT 'enabled',
+            model TEXT,
+            reasoning_effort TEXT,
+            agent_path TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO threads VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        )
+        """,
+        (
+            "sqlite-active", "rollout", 1000, 2000, "vscode", "openai",
+            "/tmp/workspace", "SQLite thread", "workspace-write", "default",
+            0, 1, 0, None, None, None, None, "", "SQLite thread", None, None, "enabled", None, None, None,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    sessions_dir = tmp_path / "sessions"
+    day_dir = sessions_dir / "2026" / "06" / "16"
+    day_dir.mkdir(parents=True)
+    jsonl_only_path = day_dir / "rollout-2026-06-16T12-00-00-jsonl-only.jsonl"
+    running_path = day_dir / "rollout-2026-06-16T12-01-00-jsonl-running.jsonl"
+    files = [
+        (
+            jsonl_only_path,
+            "jsonl-only",
+            "vscode",
+            [
+                {
+                    "timestamp": "2026-06-16T12:00:01Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "JSONL only task"}],
+                    },
+                },
+            ],
+        ),
+        (
+            running_path,
+            "jsonl-running",
+            "vscode",
+            [
+                {
+                    "timestamp": "2026-06-16T12:01:01Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "Running task"}],
+                    },
+                },
+                {
+                    "timestamp": "2026-06-16T12:01:02Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": "turn-jsonl-running"},
+                },
+            ],
+        ),
+    ]
+    for path, session_id, source, extra in files:
+        lines = [
+            {
+                "type": "session_meta",
+                "payload": {
+                    "id": session_id,
+                    "cwd": "/tmp/workspace",
+                    "timestamp": "2026-06-16T12:00:00Z",
+                    "source": source,
+                },
+            },
+            *extra,
+        ]
+        with open(path, "w", encoding="utf-8") as f:
+            for line in lines:
+                f.write(json.dumps(line, ensure_ascii=False) + "\n")
+        os.utime(path, None)
+
+    real_expanduser = __import__("os").path.expanduser
+
+    def fake_expanduser(path: str) -> str:
+        if path == "~/.codex/state_5.sqlite":
+            return str(db_path)
+        if path == "~/.codex/sessions":
+            return str(sessions_dir)
+        return real_expanduser(path)
+
+    monkeypatch.setattr("plugins.providers.builtin.codex.python.storage_runtime.os.path.expanduser", fake_expanduser)
+
+    result = list_codex_sessions(limit=20)
+
+    assert [item["id"] for item in result] == [
+        "jsonl-running",
+        "jsonl-only",
+        "sqlite-active",
+    ]
+    assert result[0]["providerActive"] is True
+    assert result[0]["title"] == "Running task"
+    assert result[1]["title"] == "JSONL only task"
+    assert result[2]["title"] == "SQLite thread"
+    assert all(item["workspace"] == "/tmp/workspace" for item in result)
+
+
+def test_query_codemaker_running_session_ids_uses_time_compacting_only(tmp_path):
+    from codemaker.python.storage_runtime import (
+        query_codemaker_active_session_ids,
+        query_codemaker_running_session_ids,
+    )
+
+    db_path = tmp_path / "opencode.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE session (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            parent_id TEXT,
+            slug TEXT NOT NULL,
+            directory TEXT NOT NULL,
+            title TEXT NOT NULL,
+            version TEXT NOT NULL,
+            share_url TEXT,
+            summary_additions INTEGER,
+            summary_deletions INTEGER,
+            summary_files INTEGER,
+            summary_diffs TEXT,
+            revert TEXT,
+            permission TEXT,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL,
+            time_compacting INTEGER,
+            time_archived INTEGER,
+            workspace_id TEXT,
+            path TEXT,
+            agent TEXT,
+            model TEXT,
+            cost REAL DEFAULT 0 NOT NULL,
+            tokens_input INTEGER DEFAULT 0 NOT NULL,
+            tokens_output INTEGER DEFAULT 0 NOT NULL,
+            tokens_reasoning INTEGER DEFAULT 0 NOT NULL,
+            tokens_cache_read INTEGER DEFAULT 0 NOT NULL,
+            tokens_cache_write INTEGER DEFAULT 0 NOT NULL
+        )
+        """
+    )
+    rows = [
+        (
+            "cm-running", "proj-1", None, "running", "/tmp/workspace", "Running task", "1",
+            None, None, None, None, None, None, None, 1000, 2000, 3000, None,
+            None, None, None, None, 0, 0, 0, 0, 0, 0,
+        ),
+        (
+            "cm-idle", "proj-1", None, "idle", "/tmp/workspace", "Idle task", "1",
+            None, None, None, None, None, None, None, 1100, 2100, None, None,
+            None, None, None, None, 0, 0, 0, 0, 0, 0,
+        ),
+        (
+            "cm-archived", "proj-1", None, "archived", "/tmp/workspace", "Archived task", "1",
+            None, None, None, None, None, None, None, 1200, 2200, 3300, 4400,
+            None, None, None, None, 0, 0, 0, 0, 0, 0,
+        ),
+    ]
+    conn.executemany(
+        """
+        INSERT INTO session VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        )
+        """,
+        rows,
+    )
+    conn.commit()
+    conn.close()
+
+    assert query_codemaker_active_session_ids("/tmp/workspace", db_path=str(db_path)) == {
+        "cm-running",
+        "cm-idle",
+    }
+    assert query_codemaker_running_session_ids("/tmp/workspace", db_path=str(db_path)) == {
+        "cm-running",
+    }
 
 
 def test_read_thread_history_preserves_phase_from_session_jsonl(tmp_path):

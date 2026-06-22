@@ -39,7 +39,7 @@ async def test_message_handler_uses_tui_bridge_without_persistent_codex_adapter(
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="tui",
@@ -60,10 +60,10 @@ async def test_message_handler_uses_tui_bridge_without_persistent_codex_adapter(
     ctx.bot.send_message = AsyncMock()
 
     with patch(
-        "bot.handlers.message.enqueue_codex_tui_message",
+        "plugins.providers.builtin.codex.python.tui_bridge.enqueue_codex_tui_message",
         new=AsyncMock(return_value=0),
     ) as enqueue_mock, patch(
-        "bot.handlers.message.save_storage",
+        "core.storage.save_storage",
     ) as save_storage_mock:
             handler = make_message_handler(state, GROUP_CHAT_ID)
             await handler(update, ctx)
@@ -98,7 +98,7 @@ async def test_message_handler_in_app_ws_mode_routes_to_codex_tui_host():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -124,10 +124,10 @@ async def test_message_handler_in_app_ws_mode_routes_to_codex_tui_host():
     ctx.bot.send_message = AsyncMock()
 
     with patch(
-        "bot.handlers.message.enqueue_codex_tui_message",
+        "plugins.providers.builtin.codex.python.tui_bridge.enqueue_codex_tui_message",
         new=AsyncMock(return_value=0),
     ) as enqueue_mock, patch(
-        "bot.handlers.message.save_storage",
+        "core.storage.save_storage",
     ) as save_storage_mock:
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
@@ -171,7 +171,7 @@ async def test_message_handler_in_app_stdio_mode_keeps_ordinary_messages_on_app_
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="stdio",
                 control_mode="app",
             )
@@ -201,7 +201,7 @@ async def test_message_handler_in_app_stdio_mode_keeps_ordinary_messages_on_app_
         "plugins.providers.builtin.codex.python.runtime.can_route_cli_approval_to_tui_host",
         return_value=True,
     ), patch(
-        "bot.handlers.message.enqueue_codex_tui_message",
+        "plugins.providers.builtin.codex.python.tui_bridge.enqueue_codex_tui_message",
         new=AsyncMock(return_value=0),
     ) as enqueue_mock, patch(
         "bot.handlers.message.save_storage",
@@ -240,7 +240,7 @@ async def test_message_handler_in_app_stdio_owner_bridge_mode_uses_app_adapter_f
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="stdio",
                 live_transport="owner_bridge",
                 control_mode="app",
@@ -268,7 +268,7 @@ async def test_message_handler_in_app_stdio_owner_bridge_mode_uses_app_adapter_f
     ctx.bot.send_message = AsyncMock()
 
     with patch(
-        "bot.handlers.message.enqueue_codex_tui_message",
+        "plugins.providers.builtin.codex.python.tui_bridge.enqueue_codex_tui_message",
         new=AsyncMock(return_value=0),
     ) as enqueue_mock:
         handler = make_message_handler(state, GROUP_CHAT_ID)
@@ -304,7 +304,7 @@ async def test_message_handler_in_app_stdio_owner_bridge_mode_uses_app_adapter_w
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="stdio",
                 live_transport="owner_bridge",
                 control_mode="app",
@@ -335,7 +335,7 @@ async def test_message_handler_in_app_stdio_owner_bridge_mode_uses_app_adapter_w
         "plugins.providers.builtin.codex.python.runtime.can_route_cli_approval_to_tui_host",
         return_value=True,
     ), patch(
-        "bot.handlers.message.enqueue_codex_tui_message",
+        "plugins.providers.builtin.codex.python.tui_bridge.enqueue_codex_tui_message",
         new=AsyncMock(return_value=0),
     ) as enqueue_mock:
         handler = make_message_handler(state, GROUP_CHAT_ID)
@@ -372,7 +372,7 @@ async def test_ensure_codex_tui_host_bound_starts_host_in_app_ws_mode(tmp_path, 
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -470,7 +470,7 @@ async def test_message_handler_in_app_ws_mode_uses_tui_host_without_materialized
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -500,10 +500,10 @@ async def test_message_handler_in_app_ws_mode_uses_tui_host_without_materialized
     ctx.bot.send_message = AsyncMock()
 
     with patch(
-        "bot.handlers.message.enqueue_codex_tui_message",
+        "plugins.providers.builtin.codex.python.tui_bridge.enqueue_codex_tui_message",
         new=AsyncMock(return_value=0),
     ) as enqueue_mock, patch(
-        "bot.handlers.message.save_storage",
+        "core.storage.save_storage",
     ) as save_storage_mock:
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
@@ -547,7 +547,7 @@ async def test_message_handler_in_app_ws_mode_waits_for_reconnected_codex_adapte
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -593,10 +593,10 @@ async def test_message_handler_in_app_ws_mode_waits_for_reconnected_codex_adapte
         0.01,
         create=True,
     ), patch(
-        "bot.handlers.message.enqueue_codex_tui_message",
+        "plugins.providers.builtin.codex.python.tui_bridge.enqueue_codex_tui_message",
         new=AsyncMock(return_value=0),
     ) as enqueue_mock, patch(
-        "bot.handlers.message.save_storage",
+        "core.storage.save_storage",
     ) as save_storage_mock:
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
@@ -645,7 +645,7 @@ async def test_message_handler_in_app_ws_mode_reports_unconnected_after_reconnec
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -680,10 +680,10 @@ async def test_message_handler_in_app_ws_mode_reports_unconnected_after_reconnec
         0.005,
         create=True,
     ), patch(
-        "bot.handlers.message.enqueue_codex_tui_message",
+        "plugins.providers.builtin.codex.python.tui_bridge.enqueue_codex_tui_message",
         new=AsyncMock(return_value=0),
     ) as enqueue_mock, patch(
-        "bot.handlers.message.save_storage",
+        "core.storage.save_storage",
     ) as save_storage_mock:
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
@@ -727,7 +727,7 @@ async def test_message_handler_in_app_ws_mode_interrupts_active_turn_before_send
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -766,10 +766,10 @@ async def test_message_handler_in_app_ws_mode_interrupts_active_turn_before_send
     ctx.bot.send_message = AsyncMock()
 
     with patch(
-        "bot.handlers.message.enqueue_codex_tui_message",
+        "plugins.providers.builtin.codex.python.tui_bridge.enqueue_codex_tui_message",
         new=AsyncMock(return_value=0),
     ) as enqueue_mock, patch(
-        "bot.handlers.message.save_storage",
+        "core.storage.save_storage",
     ) as save_storage_mock:
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
@@ -813,7 +813,7 @@ async def test_message_handler_in_app_ws_mode_continues_when_interrupt_fails():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -845,7 +845,7 @@ async def test_message_handler_in_app_ws_mode_continues_when_interrupt_fails():
     ctx.bot.send_message = AsyncMock()
 
     with patch(
-        "bot.handlers.message.enqueue_codex_tui_message",
+        "plugins.providers.builtin.codex.python.tui_bridge.enqueue_codex_tui_message",
         new=AsyncMock(return_value=0),
     ) as enqueue_mock:
         handler = make_message_handler(state, GROUP_CHAT_ID)
@@ -888,7 +888,7 @@ async def test_message_handler_keeps_active_claude_turn_without_preemptive_inter
             ToolConfig(
                 name="claude",
                 enabled=True,
-                codex_bin="claude",
+                bin="claude",
                 protocol="stdio",
                 control_mode="app",
             )
@@ -961,7 +961,7 @@ async def test_message_handler_blocks_external_busy_claude_thread():
             ToolConfig(
                 name="claude",
                 enabled=True,
-                codex_bin="claude",
+                bin="claude",
                 protocol="stdio",
                 control_mode="app",
             )
@@ -1038,7 +1038,7 @@ async def test_message_handler_resumes_imported_claude_thread_without_remapping(
             ToolConfig(
                 name="claude",
                 enabled=True,
-                codex_bin="claude",
+                bin="claude",
                 protocol="stdio",
                 control_mode="app",
             )
@@ -1119,7 +1119,7 @@ async def test_message_handler_keeps_unknown_claude_thread_when_logs_mark_app_ow
             ToolConfig(
                 name="claude",
                 enabled=True,
-                codex_bin="claude",
+                bin="claude",
                 protocol="stdio",
                 control_mode="app",
             )
@@ -1194,7 +1194,7 @@ async def test_message_handler_keeps_imported_claude_thread_when_send_fails():
             ToolConfig(
                 name="claude",
                 enabled=True,
-                codex_bin="claude",
+                bin="claude",
                 protocol="stdio",
                 control_mode="app",
             )
@@ -1267,7 +1267,7 @@ async def test_message_handler_in_hybrid_mode_prefers_connected_codex_adapter():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="hybrid",
@@ -1293,7 +1293,7 @@ async def test_message_handler_in_hybrid_mode_prefers_connected_codex_adapter():
     ctx.bot.send_message = AsyncMock()
 
     with patch(
-        "bot.handlers.message.enqueue_codex_tui_message",
+        "plugins.providers.builtin.codex.python.tui_bridge.enqueue_codex_tui_message",
         new=AsyncMock(return_value=0),
     ) as enqueue_mock, patch(
         "bot.handlers.message.save_storage",
@@ -1324,7 +1324,7 @@ def test_codex_shared_live_transport_accepts_shared_unix():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="unix",
                 app_server_url="unix:///tmp/onlineworker-codex.sock",
                 live_transport="shared_unix",
@@ -1363,7 +1363,7 @@ async def test_message_handler_in_app_shared_unix_mode_uses_app_adapter_for_tg_m
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="unix",
                 app_server_url="unix:///tmp/onlineworker-codex.sock",
                 live_transport="shared_unix",
@@ -1395,7 +1395,7 @@ async def test_message_handler_in_app_shared_unix_mode_uses_app_adapter_for_tg_m
     ctx.bot.send_message = AsyncMock()
 
     with patch(
-        "bot.handlers.message.enqueue_codex_tui_message",
+        "plugins.providers.builtin.codex.python.tui_bridge.enqueue_codex_tui_message",
         new=AsyncMock(return_value=0),
     ) as enqueue_mock, patch(
         "bot.handlers.message.save_storage",
@@ -1423,7 +1423,7 @@ async def test_codex_tui_host_remote_url_uses_unix_endpoint_through_remote_proxy
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="unix",
                 app_server_url="unix:///tmp/onlineworker-codex.sock",
                 live_transport="shared_unix",
@@ -1471,7 +1471,7 @@ async def test_new_thread_handler_rejects_tui_mode_thread_creation():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="tui",
@@ -1491,19 +1491,11 @@ async def test_new_thread_handler_rejects_tui_mode_thread_creation():
     ctx.bot.send_message = AsyncMock()
 
     with patch(
-        "bot.handlers.thread.start_thread_via_tui_bridge",
-        new=AsyncMock(return_value="tid-new"),
-    ) as start_mock, patch(
-        "bot.handlers.thread.enqueue_codex_tui_message",
-        new=AsyncMock(return_value=0),
-    ) as enqueue_mock, patch(
         "bot.handlers.thread.save_storage",
     ) as save_storage_mock:
         handler = make_new_thread_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    start_mock.assert_not_awaited()
-    enqueue_mock.assert_not_awaited()
     save_storage_mock.assert_not_called()
     ctx.bot.create_forum_topic.assert_not_called()
 
@@ -1532,7 +1524,7 @@ async def test_new_thread_handler_in_app_mode_creates_thread_and_topic():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -1599,7 +1591,7 @@ async def test_new_thread_handler_in_app_mode_requires_initial_text_for_codex():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -1661,7 +1653,7 @@ async def test_new_thread_handler_in_app_mode_accepts_top_level_thread_id():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -1724,7 +1716,7 @@ async def test_new_thread_handler_rolls_back_when_topic_creation_fails():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -1786,7 +1778,7 @@ async def test_new_thread_handler_rolls_back_when_initial_message_send_fails():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -1851,7 +1843,7 @@ async def test_archive_thread_handler_uses_codex_bridge_without_persistent_adapt
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="tui",
@@ -1872,7 +1864,7 @@ async def test_archive_thread_handler_uses_codex_bridge_without_persistent_adapt
     ctx.bot.delete_forum_topic = AsyncMock()
 
     with patch(
-        "bot.handlers.thread.archive_codex_thread_via_tui_bridge",
+        "plugins.providers.builtin.codex.python.tui_bridge.archive_codex_thread_via_tui_bridge",
         new=AsyncMock(return_value={"id": "tid-1"}),
     ) as archive_mock, patch(
         "bot.handlers.thread.save_storage",
@@ -1914,7 +1906,7 @@ async def test_codex_new_then_archive_keeps_same_thread_id_across_full_flow():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -2006,7 +1998,7 @@ async def test_new_thread_handler_in_app_mode_requires_connected_adapter():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -2026,19 +2018,11 @@ async def test_new_thread_handler_in_app_mode_requires_connected_adapter():
     ctx.bot.send_message = AsyncMock()
 
     with patch(
-        "bot.handlers.thread.start_thread_via_tui_bridge",
-        new=AsyncMock(return_value="tid-new"),
-    ) as start_mock, patch(
-        "bot.handlers.thread.enqueue_codex_tui_message",
-        new=AsyncMock(return_value=0),
-    ) as enqueue_mock, patch(
         "bot.handlers.thread.save_storage",
     ) as save_storage_mock:
         handler = make_new_thread_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    start_mock.assert_not_awaited()
-    enqueue_mock.assert_not_awaited()
     save_storage_mock.assert_not_called()
     ctx.bot.create_forum_topic.assert_not_called()
     kwargs = ctx.bot.send_message.call_args.kwargs
@@ -2608,7 +2592,7 @@ async def test_send_message_via_tui_bridge_seeds_and_refreshes_watch_state():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="stdio",
                 control_mode="tui",
             )
@@ -2666,7 +2650,7 @@ async def test_send_message_via_tui_bridge_uses_local_tui_host_client():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="stdio",
                 control_mode="tui",
             )
@@ -2717,7 +2701,7 @@ async def test_send_message_via_tui_bridge_in_app_mode_does_not_seed_or_watch_se
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -2769,7 +2753,7 @@ async def test_send_message_via_tui_host_auto_starts_managed_host_for_app_mode(t
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -2839,7 +2823,7 @@ async def test_send_message_via_tui_host_uses_dynamic_app_server_proxy_url(tmp_p
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=0,
                 control_mode="app",
@@ -2905,7 +2889,7 @@ async def test_send_message_via_tui_host_fails_closed_when_remote_proxy_fails(tm
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -2961,7 +2945,7 @@ async def test_try_route_owner_bridge_send_auto_starts_tui_host_for_app_ws_mode(
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",
@@ -3043,7 +3027,7 @@ async def test_try_route_owner_bridge_send_auto_starts_tui_host_for_app_stdio_ow
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="stdio",
                 live_transport="owner_bridge",
                 control_mode="app",
@@ -3117,7 +3101,7 @@ async def test_try_route_owner_bridge_send_skips_tui_host_for_unmaterialized_thr
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="stdio",
                 live_transport="owner_bridge",
                 control_mode="app",
@@ -3172,7 +3156,7 @@ async def test_try_route_owner_bridge_send_skips_tui_host_for_app_source_thread(
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="stdio",
                 live_transport="owner_bridge",
                 control_mode="app",
@@ -3227,7 +3211,7 @@ async def test_try_route_owner_bridge_send_raises_when_tui_host_binding_did_not_
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="stdio",
                 live_transport="owner_bridge",
                 control_mode="app",
@@ -3279,7 +3263,7 @@ async def test_send_message_via_tui_host_raises_when_binding_did_not_activate(tm
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="stdio",
                 live_transport="owner_bridge",
                 control_mode="app",
@@ -3354,7 +3338,7 @@ async def test_send_message_via_tui_bridge_propagates_local_host_error():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="stdio",
                 control_mode="tui",
             )
@@ -3436,7 +3420,7 @@ async def test_enqueue_codex_tui_message_serializes_same_thread_sends():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="stdio",
                 control_mode="tui",
             )
@@ -3504,7 +3488,7 @@ async def test_enqueue_codex_tui_message_waits_until_thread_turn_completed():
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="stdio",
                 control_mode="tui",
             )
@@ -3569,7 +3553,7 @@ async def test_enqueue_codex_tui_message_in_app_mode_skips_final_reply_polling()
             ToolConfig(
                 name="codex",
                 enabled=True,
-                codex_bin="codex",
+                bin="codex",
                 protocol="ws",
                 app_server_port=4722,
                 control_mode="app",

@@ -50,3 +50,11 @@ def read_provider_thread_history(
 def query_provider_active_thread_ids(tool_name: str, workspace_path: str, *, config=None):
     provider = _require_provider(tool_name, config=config)
     return provider.facts.query_active_thread_ids(workspace_path)
+
+
+def query_provider_running_thread_ids(tool_name: str, workspace_path: str, *, config=None):
+    provider = _require_provider(tool_name, config=config)
+    hook = getattr(provider.facts, "query_running_thread_ids", None)
+    if callable(hook):
+        return hook(workspace_path)
+    return set()

@@ -12,22 +12,18 @@ use std::sync::{
 };
 use tauri::ipc::Channel;
 use tauri::AppHandle;
-use tauri_plugin_shell::ShellExt;
 
-use super::claude::{list_claude_sessions, read_claude_session};
-use super::codex::{
-    list_codex_threads, read_codex_thread_updates, send_codex_thread_message, CodexThreadCursor,
-};
 use super::config::ensure_data_dir;
 use super::config_provider::{ProviderMetadata, ProviderSessionAccessCapabilities};
 use super::provider_bridge_common::{
     provider_bridge_env, provider_owner_bridge_socket_path, require_runtime_provider,
+    run_provider_bridge_sidecar,
 };
 use super::session_state::load_local_thread_overlays;
 
 static PROVIDER_SESSION_STREAM_GENERATION: OnceLock<Arc<AtomicU64>> = OnceLock::new();
 const PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_millis(1200);
+    std::time::Duration::from_secs(6);
 const PROVIDER_SESSION_BRIDGE_LIST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 const PROVIDER_SESSION_BRIDGE_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
@@ -112,15 +108,6 @@ fn provider_session_send_access(provider: &ProviderMetadata) -> String {
     }
 }
 
-fn provider_session_stream_access(provider: &ProviderMetadata) -> String {
-    let value = normalized_session_access_value(&provider_session_access(provider).stream);
-    if value.is_empty() {
-        "none".to_string()
-    } else {
-        value
-    }
-}
-
 fn composer_attachment_staging_dir(data_dir: &Path) -> std::path::PathBuf {
     data_dir.join("composer-attachments")
 }
@@ -172,12 +159,12 @@ fn send_provider_session_message_via_owner_bridge(
     text: &str,
     attachments: &[ComposerAttachment],
     workspace_dir: Option<&str>,
-) -> Result<bool, String> {
+) -> Result<Option<Value>, String> {
     let mut socket =
         match connect_owner_bridge_socket(data_dir, PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT) {
             Ok(socket) => socket,
             Err(error) if error.starts_with("provider owner bridge not ready: ") => {
-                return Ok(false)
+                return Ok(None)
             }
             Err(error) => return Err(error),
         };
@@ -217,7 +204,7 @@ fn send_provider_session_message_via_owner_bridge(
     let response = serde_json::from_str::<Value>(response_line.trim())
         .map_err(|e| format!("parse provider owner bridge response failed: {e}"))?;
     if response.get("ok").and_then(Value::as_bool) == Some(true) {
-        return Ok(true);
+        return Ok(Some(response));
     }
 
     Err(response
@@ -301,11 +288,13 @@ fn list_provider_sessions_via_owner_bridge(
     data_dir: &Path,
     provider_id: &str,
     limit: usize,
+    force_refresh: bool,
 ) -> Result<Value, String> {
     list_provider_sessions_via_owner_bridge_with_timeout(
         data_dir,
         provider_id,
         limit,
+        force_refresh,
         PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT,
     )
 }
@@ -314,6 +303,7 @@ fn list_provider_sessions_via_owner_bridge_with_timeout(
     data_dir: &Path,
     provider_id: &str,
     limit: usize,
+    force_refresh: bool,
     timeout: std::time::Duration,
 ) -> Result<Value, String> {
     let mut socket = connect_owner_bridge_socket(data_dir, timeout)?;
@@ -322,6 +312,7 @@ fn list_provider_sessions_via_owner_bridge_with_timeout(
         "type": "list_sessions",
         "provider_id": provider_id,
         "limit": limit,
+        "force_refresh": force_refresh,
     });
 
     let raw_request = format!("{}\n", payload);
@@ -563,7 +554,7 @@ fn send_provider_session_message_via_owner_bridge_with_retry(
     attachments: &[ComposerAttachment],
     workspace_dir: Option<&str>,
     timeout: std::time::Duration,
-) -> Result<(), String> {
+) -> Result<Value, String> {
     let started_at = std::time::Instant::now();
     let poll_interval = std::time::Duration::from_millis(100);
     let socket_path = provider_owner_bridge_socket_path(data_dir);
@@ -578,8 +569,8 @@ fn send_provider_session_message_via_owner_bridge_with_retry(
             attachments,
             workspace_dir,
         ) {
-            Ok(true) => return Ok(()),
-            Ok(false) => {
+            Ok(Some(response)) => return Ok(response),
+            Ok(None) => {
                 last_error = format!("provider owner bridge not ready: {}", socket_path.display());
             }
             Err(error) => {
@@ -604,11 +595,6 @@ async fn run_provider_session_bridge(
     timeout: Option<std::time::Duration>,
 ) -> Result<Value, String> {
     let data_dir = ensure_data_dir()?;
-    let sidecar = app
-        .shell()
-        .sidecar("onlineworker-bot")
-        .map_err(|error| format!("Sidecar not found: {}", error))?;
-
     let mut args = vec![
         "--data-dir".to_string(),
         data_dir.to_string_lossy().to_string(),
@@ -630,25 +616,16 @@ async fn run_provider_session_bridge(
         args.push(workspace_dir.to_string());
     }
 
-    let mut sidecar = sidecar.args(args);
-    for (key, value) in provider_bridge_env(&data_dir) {
-        sidecar = sidecar.env(&key, value);
-    }
+    let output = run_provider_bridge_sidecar(
+        app,
+        args,
+        provider_bridge_env(&data_dir),
+        timeout,
+        "provider session bridge",
+    )
+    .await?;
 
-    let output = match timeout {
-        Some(timeout) => tokio::time::timeout(timeout, sidecar.output())
-            .await
-            .map_err(|_| {
-                format!(
-                    "provider session bridge timed out after {}ms",
-                    timeout.as_millis()
-                )
-            })?,
-        None => sidecar.output().await,
-    }
-    .map_err(|error| format!("provider session bridge failed: {}", error))?;
-
-    if !output.status.success() {
+    if !output.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let detail = if !stderr.is_empty() {
@@ -656,7 +633,7 @@ async fn run_provider_session_bridge(
         } else if !stdout.is_empty() {
             stdout
         } else {
-            format!("exit status {:?}", output.status.code())
+            format!("exit status {:?}, signal {:?}", output.code, output.signal)
         };
         return Err(detail);
     }
@@ -733,6 +710,9 @@ fn overlay_provider_sessions(data_dir: &Path, provider_id: &str, sessions: Value
             }
             if let Some(preview) = &overlay.preview {
                 object.insert("title".to_string(), Value::String(preview.clone()));
+                object
+                    .entry("preview".to_string())
+                    .or_insert_with(|| Value::String(preview.clone()));
             }
         }
     }
@@ -762,6 +742,82 @@ fn overlay_provider_sessions(data_dir: &Path, provider_id: &str, sessions: Value
     }
 
     Value::Array(rows)
+}
+
+pub(crate) async fn load_provider_sessions_with_overlays(
+    app: &AppHandle,
+    provider_id: &str,
+    force_refresh: bool,
+) -> Result<Value, String> {
+    let provider = require_runtime_provider(provider_id)?;
+    match provider_session_list_access(&provider).as_str() {
+        "owner_bridge" | "sidecar" => {
+            let data_dir = ensure_data_dir()?;
+            let sessions = match list_provider_sessions_via_owner_bridge(
+                    &data_dir,
+                    &provider.id,
+                    100,
+                    force_refresh,
+                ) {
+                    Ok(value) => Ok(value),
+                    Err(_) => {
+                        run_provider_session_bridge(
+                            app,
+                            &provider.id,
+                            "list",
+                            None,
+                            None,
+                            Some(PROVIDER_SESSION_BRIDGE_LIST_TIMEOUT),
+                        )
+                        .await
+                    }
+                }?;
+            Ok(overlay_provider_sessions(&data_dir, &provider.id, sessions))
+        }
+        other => Err(format!(
+            "Provider '{}' has unsupported session list access '{}'",
+            provider.id, other
+        )),
+    }
+}
+
+pub(crate) async fn load_provider_session(
+    app: &AppHandle,
+    provider_id: &str,
+    session_id: &str,
+    workspace_dir: Option<&str>,
+    limit: usize,
+) -> Result<Value, String> {
+    let provider = require_runtime_provider(provider_id)?;
+    match provider_session_read_access(&provider).as_str() {
+        "owner_bridge" | "sidecar" => {
+            let data_dir = ensure_data_dir()?;
+            match read_provider_session_via_owner_bridge(
+                &data_dir,
+                &provider.id,
+                session_id,
+                workspace_dir,
+                limit,
+            ) {
+                Ok(value) => Ok(value),
+                Err(_) => {
+                    run_provider_session_bridge(
+                        app,
+                        &provider.id,
+                        "read",
+                        Some(session_id),
+                        workspace_dir,
+                        Some(PROVIDER_SESSION_BRIDGE_READ_TIMEOUT),
+                    )
+                    .await
+                }
+            }
+        }
+        other => Err(format!(
+            "Provider '{}' has unsupported session read access '{}'",
+            provider.id, other
+        )),
+    }
 }
 
 fn persist_provider_session_archived_state(
@@ -883,39 +939,12 @@ fn persist_provider_session_archived_state(
 }
 
 #[tauri::command]
-pub async fn list_provider_sessions(app: AppHandle, provider_id: String) -> Result<Value, String> {
-    let provider = require_runtime_provider(&provider_id)?;
-    match provider_session_list_access(&provider).as_str() {
-        "codex_threads" => {
-            serde_json::to_value(list_codex_threads()?).map_err(|error| error.to_string())
-        }
-        "claude_projects" => {
-            serde_json::to_value(list_claude_sessions()?).map_err(|error| error.to_string())
-        }
-        "owner_bridge" | "sidecar" => {
-            let data_dir = ensure_data_dir()?;
-            let sessions =
-                match list_provider_sessions_via_owner_bridge(&data_dir, &provider.id, 100) {
-                    Ok(value) => Ok(value),
-                    Err(_) => {
-                        run_provider_session_bridge(
-                            &app,
-                            &provider.id,
-                            "list",
-                            None,
-                            None,
-                            Some(PROVIDER_SESSION_BRIDGE_LIST_TIMEOUT),
-                        )
-                        .await
-                    }
-                }?;
-            Ok(overlay_provider_sessions(&data_dir, &provider.id, sessions))
-        }
-        other => Err(format!(
-            "Provider '{}' has unsupported session list access '{}'",
-            provider.id, other
-        )),
-    }
+pub async fn list_provider_sessions(
+    app: AppHandle,
+    provider_id: String,
+    force_refresh: Option<bool>,
+) -> Result<Value, String> {
+    load_provider_sessions_with_overlays(&app, &provider_id, force_refresh.unwrap_or(false)).await
 }
 
 #[tauri::command]
@@ -925,38 +954,7 @@ pub async fn read_provider_session(
     session_id: String,
     workspace_dir: Option<String>,
 ) -> Result<Value, String> {
-    let provider = require_runtime_provider(&provider_id)?;
-    match provider_session_read_access(&provider).as_str() {
-        "owner_bridge" | "sidecar" => {
-            let data_dir = ensure_data_dir()?;
-            match read_provider_session_via_owner_bridge(
-                &data_dir,
-                &provider.id,
-                &session_id,
-                workspace_dir.as_deref(),
-                20,
-            ) {
-                Ok(value) => Ok(value),
-                Err(_) => {
-                    run_provider_session_bridge(
-                        &app,
-                        &provider.id,
-                        "read",
-                        Some(&session_id),
-                        workspace_dir.as_deref(),
-                        Some(PROVIDER_SESSION_BRIDGE_READ_TIMEOUT),
-                    )
-                    .await
-                }
-            }
-        }
-        "claude_project" => serde_json::to_value(read_claude_session(session_id, workspace_dir)?)
-            .map_err(|error| error.to_string()),
-        other => Err(format!(
-            "Provider '{}' has unsupported session read access '{}'",
-            provider.id, other
-        )),
-    }
+    load_provider_session(&app, &provider_id, &session_id, workspace_dir.as_deref(), 20).await
 }
 
 #[tauri::command]
@@ -971,11 +969,6 @@ pub async fn send_provider_session_message(
     let provider = require_runtime_provider(&provider_id)?;
     let attachments = attachments.unwrap_or_default();
     match provider_session_send_access(&provider).as_str() {
-        "codex_app_server" => {
-            send_codex_thread_message(session_id, text, attachments, workspace_dir, None, None)
-                .await?;
-            Ok(Value::Null)
-        }
         "owner_bridge" => {
             let _ = app;
             let data_dir = ensure_data_dir()?;
@@ -991,8 +984,7 @@ pub async fn send_provider_session_message(
                 &attachments,
                 workspace_dir.as_deref(),
                 std::time::Duration::from_secs(8),
-            )?;
-            Ok(Value::Null)
+            )
         }
         "none" | "unsupported" => Err(format!(
             "Provider '{}' has no session send implementation",
@@ -1154,74 +1146,6 @@ pub async fn stage_session_composer_attachments(
 }
 
 #[tauri::command]
-pub async fn start_provider_session_stream(
-    provider_id: String,
-    session_id: String,
-    cursor: Option<Value>,
-    channel: Channel<Value>,
-) -> Result<(), String> {
-    let provider = require_runtime_provider(&provider_id)?;
-    let generation = provider_session_stream_generation();
-    let my_generation = generation.fetch_add(1, Ordering::SeqCst) + 1;
-
-    match provider_session_stream_access(&provider).as_str() {
-        "codex_thread_jsonl" => {
-            let mut cursor = cursor
-                .and_then(|value| serde_json::from_value::<CodexThreadCursor>(value).ok())
-                .unwrap_or_default();
-            tauri::async_runtime::spawn(async move {
-                while generation.load(Ordering::SeqCst) == my_generation {
-                    match read_codex_thread_updates(session_id.clone(), cursor) {
-                        Ok(result) => {
-                            cursor = result.cursor;
-                            for turn in result.turns {
-                                let _ = channel.send(serde_json::json!({
-                                    "kind": if turn.role == "assistant" { "assistant_completed" } else { "user_message" },
-                                    "turn": turn,
-                                    "cursor": cursor,
-                                    "replace": result.replace,
-                                }));
-                            }
-                        }
-                        Err(error) => {
-                            let _ = channel.send(serde_json::json!({
-                                "kind": "error",
-                                "error": error,
-                            }));
-                            break;
-                        }
-                    }
-                    tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
-                }
-            });
-            Ok(())
-        }
-        "none" => Ok(()),
-        other => Err(format!(
-            "Provider '{}' has unsupported session stream access '{}'",
-            provider.id, other
-        )),
-    }
-}
-
-#[tauri::command]
-pub async fn stop_provider_session_stream(
-    provider_id: String,
-    session_id: String,
-) -> Result<(), String> {
-    let provider = require_runtime_provider(&provider_id)?;
-    let _ = session_id;
-    provider_session_stream_generation().fetch_add(1, Ordering::SeqCst);
-    match provider_session_stream_access(&provider).as_str() {
-        "codex_thread_jsonl" | "none" => Ok(()),
-        other => Err(format!(
-            "Provider '{}' has unsupported session stream access '{}'",
-            provider.id, other
-        )),
-    }
-}
-
-#[tauri::command]
 pub async fn start_provider_session_event_stream(
     provider_id: String,
     session_id: String,
@@ -1257,10 +1181,10 @@ mod tests {
         list_provider_sessions_via_owner_bridge_with_timeout,
         owner_bridge_archive_error_allows_sidecar, persist_provider_session_archived_state,
         provider_session_list_access, provider_session_read_access, provider_session_send_access,
-        provider_session_stream_access, send_provider_session_message_via_owner_bridge,
+        send_provider_session_message_via_owner_bridge,
         send_provider_session_message_via_owner_bridge_with_retry, ComposerAttachment,
     };
-    use crate::commands::config_provider::provider_metadata_from_raw;
+    use crate::commands::config_provider::{provider_metadata_from_raw, public_default_provider_ids};
     use crate::commands::provider_bridge_common::{
         provider_bridge_env, provider_bridge_path, provider_not_enabled_message,
         provider_owner_bridge_socket_path, PROVIDER_OVERLAY_ENV,
@@ -1277,24 +1201,17 @@ mod tests {
     #[test]
     fn provider_session_routes_are_declared_by_manifest_capabilities() {
         let providers = provider_metadata_from_raw("", None).expect("metadata");
-        let codex = providers
-            .iter()
-            .find(|provider| provider.id == "codex")
-            .expect("codex provider");
-        let claude = providers
-            .iter()
-            .find(|provider| provider.id == "claude")
-            .expect("claude provider");
+        let public_provider_ids = public_default_provider_ids();
 
-        assert_eq!(provider_session_list_access(codex), "codex_threads");
-        assert_eq!(provider_session_read_access(codex), "owner_bridge");
-        assert_eq!(provider_session_send_access(codex), "codex_app_server");
-        assert_eq!(provider_session_stream_access(codex), "codex_thread_jsonl");
-
-        assert_eq!(provider_session_list_access(claude), "claude_projects");
-        assert_eq!(provider_session_read_access(claude), "claude_project");
-        assert_eq!(provider_session_send_access(claude), "owner_bridge");
-        assert_eq!(provider_session_stream_access(claude), "none");
+        for provider_id in public_provider_ids {
+            let provider = providers
+                .iter()
+                .find(|provider| provider.id == provider_id)
+                .expect("public provider");
+            assert_eq!(provider_session_list_access(provider), "owner_bridge");
+            assert_eq!(provider_session_read_access(provider), "owner_bridge");
+            assert_eq!(provider_session_send_access(provider), "owner_bridge");
+        }
     }
 
     #[test]
@@ -1433,7 +1350,7 @@ mod tests {
         )
         .expect("send via owner bridge");
 
-        assert!(used_bridge);
+        assert_eq!(used_bridge, Some(serde_json::json!({ "ok": true, "accepted": true })));
         server.join().expect("join owner bridge server");
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -1462,7 +1379,7 @@ mod tests {
             writeln!(stream, "{response}").expect("write response");
         });
 
-        send_provider_session_message_via_owner_bridge_with_retry(
+        let response = send_provider_session_message_via_owner_bridge_with_retry(
             &temp_dir,
             "overlay-tool",
             "tid-1",
@@ -1473,6 +1390,7 @@ mod tests {
         )
         .expect("owner bridge should become ready within timeout");
 
+        assert_eq!(response, serde_json::json!({ "ok": true, "accepted": true }));
         server.join().expect("join owner bridge server");
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -1549,6 +1467,7 @@ mod tests {
             assert_eq!(payload["type"], "list_sessions");
             assert_eq!(payload["provider_id"], "overlay-tool");
             assert_eq!(payload["limit"], 100);
+            assert_eq!(payload["force_refresh"], false);
 
             let response = serde_json::json!({
                 "ok": true,
@@ -1566,7 +1485,7 @@ mod tests {
             writeln!(stream, "{response}").expect("write response");
         });
 
-        let result = super::list_provider_sessions_via_owner_bridge(&temp_dir, "overlay-tool", 100)
+        let result = super::list_provider_sessions_via_owner_bridge(&temp_dir, "overlay-tool", 100, false)
             .expect("list via owner bridge");
 
         assert_eq!(
@@ -1583,6 +1502,39 @@ mod tests {
             ])
         );
 
+        server.join().expect("join owner bridge server");
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn owner_bridge_list_provider_sessions_force_refresh_payload() {
+        let temp_dir = std::env::temp_dir().join(format!("ow-pobr-list-force-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let socket_path = provider_owner_bridge_socket_path(&temp_dir);
+        let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept owner bridge socket");
+            let mut request = String::new();
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            reader
+                .read_line(&mut request)
+                .expect("read owner bridge request");
+            let payload: serde_json::Value =
+                serde_json::from_str(request.trim()).expect("parse owner bridge request");
+            assert_eq!(payload["type"], "list_sessions");
+            assert_eq!(payload["provider_id"], "overlay-tool");
+            assert_eq!(payload["force_refresh"], true);
+
+            let response = serde_json::json!({ "ok": true, "sessions": [] });
+            writeln!(stream, "{response}").expect("write response");
+        });
+
+        let result = super::list_provider_sessions_via_owner_bridge(&temp_dir, "overlay-tool", 100, true)
+            .expect("list via owner bridge");
+
+        assert_eq!(result, serde_json::json!([]));
         server.join().expect("join owner bridge server");
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -1613,6 +1565,7 @@ mod tests {
             &temp_dir,
             "overlay-tool",
             100,
+            false,
             Duration::from_millis(50),
         )
         .expect_err("list should time out");
@@ -1689,7 +1642,7 @@ mod tests {
         ));
 
         assert!(!owner_bridge_archive_error_allows_sidecar(
-            "Provider 'claude' 不支持真实归档"
+            "Provider 'secondary' 不支持真实归档"
         ));
         assert!(!owner_bridge_archive_error_allows_sidecar(
             "source archive failed"

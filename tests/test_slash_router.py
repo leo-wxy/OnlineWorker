@@ -40,7 +40,7 @@ def _build_state(
             ToolConfig(
                 name=tool,
                 enabled=True,
-                codex_bin=tool,
+                bin=tool,
                 protocol=protocol or ("stdio" if tool == "codex" else "http"),
                 live_transport=live_transport or ("stdio" if tool == "codex" else "http"),
                 app_server_port=4722 if tool == "codex" else None,

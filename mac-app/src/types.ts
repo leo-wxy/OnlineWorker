@@ -41,6 +41,7 @@ export interface ProviderMessageRewriteCapabilities {
   telegram: boolean;
   externalCli?: string | null;
   wrapper?: string | null;
+  proxyAlias?: string | null;
 }
 
 export interface ProviderMessageHookStatus {
@@ -56,7 +57,7 @@ export interface ProviderExternalCliConfig {
   upstreamBaseUrl?: string | null;
   authToken?: string | null;
   model?: string | null;
-  launcherWrapsClaude: boolean;
+  launchesManagedChildCli: boolean;
 }
 
 export interface ProviderLaunchMethodConfig {
@@ -76,10 +77,23 @@ export interface ComposerAttachment {
 
 export interface ProviderInstallMetadata {
   cliNames?: string[];
+  label?: string;
+  method?: string;
+  command?: string;
+  docsUrl?: string;
 }
 
 export interface ProviderProcessMetadata {
   cleanupMatchers?: string[];
+}
+
+export interface ProviderDiscoveryMetadata {
+  commandRoots?: string[];
+  skillRoots?: string[];
+}
+
+export interface ProviderTuiHostMetadata {
+  sidecarArgs?: string[];
 }
 
 export interface ProviderIconMetadata {
@@ -94,6 +108,7 @@ export interface ProviderMetadata {
   label: string;
   description: string;
   visible: boolean;
+  visibility?: string | null;
   managed: boolean;
   autostart: boolean;
   bin?: string | null;
@@ -106,6 +121,8 @@ export interface ProviderMetadata {
   launchMethods?: ProviderLaunchMethodConfig[];
   install?: ProviderInstallMetadata;
   process?: ProviderProcessMetadata;
+  discovery?: ProviderDiscoveryMetadata;
+  tuiHost?: ProviderTuiHostMetadata;
   icon?: ProviderIconMetadata | null;
 }
 
@@ -146,6 +163,10 @@ export interface NotificationSettingsField {
 export interface AiServiceMetadata {
   id: string;
   name: string;
+  label?: string | null;
+  description?: string | null;
+  ownerProviderId?: string | null;
+  pluginOwned?: boolean | null;
   protocol: string;
   baseUrl?: string | null;
   endpoint?: string | null;
@@ -210,6 +231,7 @@ export interface ProviderDashboardStatus {
   liveTransport?: string | null;
   controlMode?: string | null;
   bin?: string | null;
+  tuiHost?: ProviderTuiHostMetadata | null;
 }
 
 export interface RecentActivitySummary {
@@ -273,7 +295,7 @@ export interface EnvLine {
 }
 
 // Session types
-export interface CodexSession {
+export interface ProviderSessionMetadata {
   threadId: string;
   cwd: string;
   title?: string;
@@ -294,23 +316,14 @@ export interface SessionTurn {
   displayMode?: "plain" | "markdown";
 }
 
-export type CodexTurn = SessionTurn;
-
-export interface CodexThreadCursor {
-  offset: number;
-}
-
-export interface CodexThreadReadResult {
-  turns: SessionTurn[];
-  cursor: CodexThreadCursor;
-  replace: boolean;
-}
-
-export interface CodexSendResult {
-  threadId: string;
+export interface ProviderSessionSendResult {
+  accepted?: boolean;
+  providerId?: string | null;
+  threadId?: string | null;
   requestedThreadId?: string | null;
   workspaceId?: string | null;
-  createdNewThread: boolean;
+  remapped?: boolean;
+  createdNewThread?: boolean;
 }
 
 export interface SessionStreamEvent {
@@ -318,22 +331,11 @@ export interface SessionStreamEvent {
   semanticKind?: string | null;
   turn?: SessionTurn | null;
   snapshot?: SessionTurn[] | null;
-  cursor?: CodexThreadCursor | null;
+  cursor?: { offset: number } | null;
   reason?: string | null;
   error?: string | null;
   sessionTabVisibleAt?: number | null;
 }
-
-export type CodexThreadStreamEvent = SessionStreamEvent;
-
-export interface ClaudeSession {
-  sessionId: string;
-  title?: string;
-  workspace?: string;
-  archived?: boolean;
-}
-
-export type ClaudeSessionTurn = SessionTurn;
 
 // Log streaming
 export interface LogLine {

@@ -149,3 +149,21 @@ def test_codex_abort_semantics_align_between_app_server_and_rollout():
     assert rollout_event.kind == "turn_aborted"
     assert app_event.reason == "interrupted"
     assert rollout_event.reason == "interrupted"
+
+
+def test_codex_capacity_error_turn_completed_is_treated_as_turn_aborted():
+    app_event = parse_codex_app_server_semantic_event(
+        "turn/completed",
+        {
+            "threadId": "tid-123",
+            "turn": {
+                "id": "turn-1",
+                "status": "aborted",
+                "reason": "Selected model is at capacity. Please try a different model.",
+            },
+        },
+    )
+
+    assert app_event is not None
+    assert app_event.kind == "turn_aborted"
+    assert app_event.reason == "Selected model is at capacity. Please try a different model."

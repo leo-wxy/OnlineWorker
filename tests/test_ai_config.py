@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 from config import load_config
-from core.ai.config import load_ai_config
+from core.ai.config import builtin_ai_service_raws, load_ai_config
 from core.ai.contracts import AiScenarioConfig, AiServiceConfig
 
 
@@ -59,11 +59,11 @@ ai:
 def test_ai_config_adds_notification_summary_default_scenario():
     ai_config = load_ai_config({})
 
-    assert set(ai_config.services) == {"openai_default", "claude_default"}
+    assert set(ai_config.services) == {"openai_default", "anthropic_default"}
     assert ai_config.services["openai_default"].name == "OpenAI"
     assert ai_config.services["openai_default"].enabled is False
-    assert ai_config.services["claude_default"].name == "Claude"
-    assert ai_config.services["claude_default"].protocol == "claude_messages"
+    assert ai_config.services["anthropic_default"].name == "Anthropic"
+    assert ai_config.services["anthropic_default"].protocol == "anthropic_messages"
     scenario = ai_config.scenarios["notification_summary"]
     assert scenario.enabled is False
     assert scenario.service_id == "openai_default"
@@ -72,6 +72,17 @@ def test_ai_config_adds_notification_summary_default_scenario():
     assert scenario.limits == {"preview_title": 16}
     assert "{{final_message}}" in scenario.prompt_template
     assert "complete short Chinese title" in scenario.prompt_template
+
+
+def test_builtin_ai_service_defaults_come_from_provider_manifests():
+    services = {service["id"]: service for service in builtin_ai_service_raws()}
+
+    assert set(services) == {"openai_default", "anthropic_default"}
+    assert services["openai_default"]["owner_provider_id"] == "codex"
+    assert services["openai_default"]["api_key_env"] == "OPENAI_API_KEY"
+    assert services["openai_default"]["default_for_scenarios"] is True
+    assert services["anthropic_default"]["owner_provider_id"] == "claude"
+    assert services["anthropic_default"]["api_key_env"] == "ANTHROPIC_API_KEY"
 
 
 def test_ai_config_migrates_legacy_notification_summary_prompt():
@@ -136,8 +147,44 @@ def test_load_config_exposes_ai_namespace(tmp_path, monkeypatch):
 schema_version: 2
 ai:
   services:
+    - id: anthropic_default
+      name: Anthropic
+      protocol: anthropic_messages
+      endpoint: https://api.anthropic.com/v1/messages
+      api_key: sk-claude
+      models:
+        - claude-sonnet-4-6
+      default_model: claude-sonnet-4-6
+  scenarios:
+    notification_summary:
+      enabled: true
+      service_id: anthropic_default
+      prompt_template: "Summarize {{final_message}}"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
+    monkeypatch.setenv("ALLOWED_USER_ID", "123")
+    monkeypatch.setenv("GROUP_CHAT_ID", "-456")
+
+    config = load_config(str(config_path))
+
+    assert "anthropic_default" in config.ai.services
+    assert config.ai.services["anthropic_default"].endpoint == "https://api.anthropic.com/v1/messages"
+    assert config.ai.services["anthropic_default"].api_key == "sk-claude"
+    assert config.ai.scenarios["notification_summary"].enabled is True
+    assert config.ai.scenarios["notification_summary"].prompt_template == "Summarize {{final_message}}"
+
+
+def test_load_config_data_dir_migrates_legacy_ai_aliases(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+schema_version: 2
+ai:
+  services:
     - id: claude_default
-      name: Claude
+      name: Anthropic
       protocol: claude_messages
       endpoint: https://api.anthropic.com/v1/messages
       api_key: sk-claude
@@ -152,14 +199,23 @@ ai:
 """.strip(),
         encoding="utf-8",
     )
-    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
-    monkeypatch.setenv("ALLOWED_USER_ID", "123")
-    monkeypatch.setenv("GROUP_CHAT_ID", "-456")
+    (tmp_path / ".env").write_text(
+        "TELEGRAM_TOKEN=token\nALLOWED_USER_ID=123\nGROUP_CHAT_ID=-456\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
+    monkeypatch.delenv("ALLOWED_USER_ID", raising=False)
+    monkeypatch.delenv("GROUP_CHAT_ID", raising=False)
 
-    config = load_config(str(config_path))
+    config = load_config(data_dir=str(tmp_path))
 
-    assert "claude_default" in config.ai.services
-    assert config.ai.services["claude_default"].endpoint == "https://api.anthropic.com/v1/messages"
-    assert config.ai.services["claude_default"].api_key == "sk-claude"
-    assert config.ai.scenarios["notification_summary"].enabled is True
-    assert config.ai.scenarios["notification_summary"].prompt_template == "Summarize {{final_message}}"
+    assert "anthropic_default" in config.ai.services
+    assert "claude_default" not in config.ai.services
+    assert config.ai.services["anthropic_default"].protocol == "anthropic_messages"
+    assert config.ai.scenarios["notification_summary"].service_id == "anthropic_default"
+
+    migrated = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    services = migrated["ai"]["services"]
+    assert services[0]["id"] == "anthropic_default"
+    assert services[0]["protocol"] == "anthropic_messages"
+    assert migrated["ai"]["scenarios"]["notification_summary"]["service_id"] == "anthropic_default"

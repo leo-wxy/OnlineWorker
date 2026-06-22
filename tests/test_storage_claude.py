@@ -1,6 +1,9 @@
 import json
 
 from plugins.providers.builtin.claude.python import storage_runtime as storage_module
+from plugins.providers.builtin.claude.python.storage_runtime import (
+    query_claude_running_session_ids,
+)
 
 
 def _write_claude_project_session(path, *, session_id: str, cwd: str, timestamp: str) -> None:
@@ -360,6 +363,43 @@ def test_scan_claude_session_cwds_reads_project_jsonl_store_by_default(tmp_path,
     assert result[1]["thread_count"] == 1
 
 
+def test_default_claude_storage_snapshot_is_reused_across_facts(tmp_path, monkeypatch):
+    sessions_dir = tmp_path / "sessions"
+    projects_dir = tmp_path / "projects"
+    cwd = "/Users/example/Projects/onlineWorker"
+
+    _write_claude_project_session(
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-a.jsonl",
+        session_id="ses-a",
+        cwd=cwd,
+        timestamp="2026-04-07T09:31:18.002Z",
+    )
+    monkeypatch.setattr(storage_module, "CLAUDE_SESSIONS_DIR", str(sessions_dir))
+    monkeypatch.setattr(storage_module, "CLAUDE_PROJECTS_DIR", str(projects_dir))
+    monkeypatch.setattr(storage_module, "CLAUDE_HISTORY_PATH", str(tmp_path / "empty-history.jsonl"))
+    storage_module.clear_claude_storage_cache()
+
+    snapshot_calls = {"count": 0}
+    real_builder = storage_module._build_claude_thread_snapshot
+
+    def counted_builder(session_rows, history_index):
+        snapshot_calls["count"] += 1
+        return real_builder(session_rows, history_index)
+
+    monkeypatch.setattr(storage_module, "_build_claude_thread_snapshot", counted_builder)
+
+    workspaces = storage_module.scan_claude_session_cwds()
+    threads = storage_module.list_claude_threads_by_cwd(cwd, limit=20)
+    active_ids = storage_module.query_claude_active_session_ids(cwd)
+
+    assert workspaces[0]["path"] == cwd
+    assert [item["id"] for item in threads] == ["ses-a"]
+    assert active_ids == {"ses-a"}
+    assert snapshot_calls["count"] == 1
+
+    storage_module.clear_claude_storage_cache()
+
+
 def test_list_claude_threads_by_cwd_reads_project_jsonl_store(tmp_path):
     projects_dir = tmp_path / "projects"
     history_path = tmp_path / "history.jsonl"
@@ -476,6 +516,64 @@ def test_query_claude_active_session_ids_reads_project_jsonl_store(tmp_path):
     )
 
     assert result == {"ses-a", "ses-b"}
+
+
+def test_query_claude_running_session_ids_filters_by_workspace_and_busy_signal(tmp_path, monkeypatch):
+    cwd = "/Users/example/Projects/onlineWorker"
+    other_cwd = "/Users/example/Projects/other"
+
+    session_rows = [
+        {
+            "id": "ses-busy",
+            "cwd": cwd,
+            "sessionFile": "/tmp/ses-busy.jsonl",
+            "createdAt": 1000,
+            "entrypoints": {"sdk-cli"},
+            "firstUserText": "继续处理",
+            "userTurnCount": 1,
+            "assistantTurnCount": 1,
+            "assistantAllLoginFailed": False,
+        },
+        {
+            "id": "ses-idle",
+            "cwd": cwd,
+            "sessionFile": "/tmp/ses-idle.jsonl",
+            "createdAt": 1100,
+            "entrypoints": {"sdk-cli"},
+            "firstUserText": "总结一下",
+            "userTurnCount": 1,
+            "assistantTurnCount": 1,
+            "assistantAllLoginFailed": False,
+        },
+        {
+            "id": "ses-other",
+            "cwd": other_cwd,
+            "sessionFile": "/tmp/ses-other.jsonl",
+            "createdAt": 1200,
+            "entrypoints": {"sdk-cli"},
+            "firstUserText": "别的 workspace",
+            "userTurnCount": 1,
+            "assistantTurnCount": 1,
+            "assistantAllLoginFailed": False,
+        },
+    ]
+    monkeypatch.setattr(
+        storage_module,
+        "_load_claude_storage_snapshot",
+        lambda sessions_dir=None, history_path=None: (session_rows, {}),
+    )
+
+    def fake_inspect(session_file: str, now_ms=None, recent_window_ms=5 * 60 * 1000, sample_limit=60):
+        return {"busy": session_file.endswith("ses-busy.jsonl")}
+
+    monkeypatch.setattr(
+        "plugins.providers.builtin.claude.python.adapter.inspect_claude_thread_busy_state",
+        fake_inspect,
+    )
+
+    result = query_claude_running_session_ids(cwd)
+
+    assert result == {"ses-busy"}
 
 
 def test_list_claude_threads_by_cwd_filters_single_turn_login_failed_sessions(tmp_path):
@@ -1181,6 +1279,131 @@ def test_list_claude_threads_by_cwd_skips_smoke_prompt_and_login_failed_sessions
     )
 
     assert [item["id"] for item in result] == ["ses-real"]
+
+
+def test_should_skip_claude_session_from_workspace_list_uses_summary_fields_for_smoke_prompt(
+    tmp_path, monkeypatch
+):
+    session_file = tmp_path / "ses-smoke.jsonl"
+    session_file.write_text("", encoding="utf-8")
+    cwd = "/Users/example/Projects/onlineWorker"
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("fallback should not be used when summary fields are present")
+
+    monkeypatch.setattr(storage_module, "_collect_claude_session_entrypoints", _fail)
+    monkeypatch.setattr(storage_module, "_read_claude_project_turns", _fail)
+
+    session_info = {
+        "sessionFileCwd": cwd,
+        "entrypoints": {"sdk-cli"},
+        "firstUserText": "请只回复 OK",
+        "userTurnCount": 1,
+        "assistantTurnCount": 1,
+        "assistantAllLoginFailed": False,
+    }
+
+    assert storage_module._should_skip_claude_session_from_workspace_list(
+        str(session_file),
+        session_info,
+    )
+
+
+def test_should_skip_claude_session_from_workspace_list_uses_summary_fields_for_login_failed_session(
+    tmp_path, monkeypatch
+):
+    session_file = tmp_path / "ses-login.jsonl"
+    session_file.write_text("", encoding="utf-8")
+    cwd = "/Users/example/Projects/onlineWorker"
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("fallback should not be used when summary fields are present")
+
+    monkeypatch.setattr(storage_module, "_collect_claude_session_entrypoints", _fail)
+    monkeypatch.setattr(storage_module, "_read_claude_project_turns", _fail)
+
+    session_info = {
+        "sessionFileCwd": cwd,
+        "entrypoints": {"sdk-cli"},
+        "firstUserText": "你好",
+        "userTurnCount": 1,
+        "assistantTurnCount": 1,
+        "assistantAllLoginFailed": True,
+    }
+
+    assert storage_module._should_skip_claude_session_from_workspace_list(
+        str(session_file),
+        session_info,
+    )
+
+
+def test_default_claude_storage_snapshot_reuses_cache_until_files_change(
+    tmp_path, monkeypatch
+):
+    sessions_dir = tmp_path / "sessions"
+    projects_dir = tmp_path / "projects"
+    history_path = tmp_path / "history.jsonl"
+    _write_claude_session(
+        sessions_dir / "1001.json",
+        session_id="ses-a",
+        cwd="/Users/example/Projects/onlineWorker",
+        started_at=1000,
+    )
+    _write_claude_project_rows(
+        projects_dir / "-Users-example-Projects-onlineWorker" / "ses-a.jsonl",
+        [
+            {
+                "type": "user",
+                "timestamp": "2026-04-07T09:31:18.002Z",
+                "cwd": "/Users/example/Projects/onlineWorker",
+                "sessionId": "ses-a",
+                "message": {"role": "user", "content": "继续"},
+            }
+        ],
+    )
+    _write_claude_history(history_path, [])
+    monkeypatch.setattr(storage_module, "CLAUDE_SESSIONS_DIR", str(sessions_dir))
+    monkeypatch.setattr(storage_module, "CLAUDE_PROJECTS_DIR", str(projects_dir))
+    monkeypatch.setattr(storage_module, "CLAUDE_HISTORY_PATH", str(history_path))
+    storage_module.clear_claude_storage_cache()
+
+    calls = {"sessions": 0}
+
+    def fake_load_claude_sessions(sessions_dir_arg=None):
+        calls["sessions"] += 1
+        return [
+            {
+                "id": f"ses-{calls['sessions']}",
+                "cwd": "/Users/example/Projects/onlineWorker",
+                "createdAt": calls["sessions"],
+            }
+        ]
+
+    monkeypatch.setattr(storage_module, "_load_claude_sessions", fake_load_claude_sessions)
+    monkeypatch.setattr(storage_module, "_build_claude_history_index", lambda history_path_arg=None: {})
+
+    first, _ = storage_module._load_default_claude_storage_snapshot()
+    second, _ = storage_module._load_default_claude_storage_snapshot()
+
+    assert calls["sessions"] == 1
+    assert first[0]["id"] == "ses-1"
+    assert second[0]["id"] == "ses-1"
+
+    _write_claude_history(
+        history_path,
+        [
+            {
+                "display": "继续",
+                "timestamp": 1775520000000,
+                "project": "/Users/example/Projects/onlineWorker",
+                "sessionId": "ses-a",
+            }
+        ],
+    )
+    third, _ = storage_module._load_default_claude_storage_snapshot()
+
+    assert calls["sessions"] == 2
+    assert third[0]["id"] == "ses-2"
 
 
 def test_list_claude_threads_by_cwd_keeps_plain_cli_project_sessions_with_assistant_turns(tmp_path):

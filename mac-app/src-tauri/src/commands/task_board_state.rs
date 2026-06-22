@@ -541,17 +541,17 @@ mod tests {
     #[test]
     fn pinning_adds_session_ref() {
         let mut state = TaskBoardState::default();
-        upsert_session_ref(&mut state.pinned, "codex", "thread-a");
+        upsert_session_ref(&mut state.pinned, "primary", "thread-a");
 
         assert_eq!(state.pinned.len(), 1);
-        assert_eq!(state.pinned[0].provider_id, "codex");
+        assert_eq!(state.pinned[0].provider_id, "primary");
         assert_eq!(state.pinned[0].session_id, "thread-a");
     }
 
     #[test]
     fn parses_task_board_activity_stream_snapshot() {
         let event = parse_task_board_activity_stream_event(
-            r#"{"ok":true,"kind":"snapshot","activities":[{"providerId":"codex","workspaceId":"codex:/tmp/project","workspacePath":"/tmp/project","sessionId":"thread-a","title":"Run tests","status":"running","attentionReason":"","lastUserMessage":"Run tests","lastAssistantMessage":"","lastFinalMessage":"","lastEventKind":"message.user.accepted","updatedAt":10.0}]}"#,
+            r#"{"ok":true,"kind":"snapshot","activities":[{"providerId":"primary","workspaceId":"primary:/tmp/project","workspacePath":"/tmp/project","sessionId":"thread-a","title":"Run tests","status":"running","attentionReason":"","lastUserMessage":"Run tests","lastAssistantMessage":"","lastFinalMessage":"","lastEventKind":"message.user.accepted","updatedAt":10.0}]}"#,
         )
         .expect("event");
 
@@ -563,7 +563,7 @@ mod tests {
     #[test]
     fn parses_task_board_activity_stream_activity() {
         let event = parse_task_board_activity_stream_event(
-            r#"{"ok":true,"kind":"activity","activity":{"providerId":"codex","workspaceId":"codex:/tmp/project","workspacePath":"/tmp/project","sessionId":"thread-a","title":"Run tests","status":"running","attentionReason":"","lastUserMessage":"Run tests","lastAssistantMessage":"working","lastFinalMessage":"","lastEventKind":"message.assistant.delta","updatedAt":20.0}}"#,
+            r#"{"ok":true,"kind":"activity","activity":{"providerId":"primary","workspaceId":"primary:/tmp/project","workspacePath":"/tmp/project","sessionId":"thread-a","title":"Run tests","status":"running","attentionReason":"","lastUserMessage":"Run tests","lastAssistantMessage":"working","lastFinalMessage":"","lastEventKind":"message.assistant.delta","updatedAt":20.0}}"#,
         )
         .expect("event");
 
@@ -577,7 +577,7 @@ mod tests {
     #[test]
     fn parses_task_board_activity_stream_activity_with_approval_metadata() {
         let event = parse_task_board_activity_stream_event(
-            r#"{"ok":true,"kind":"activity","activity":{"providerId":"claude","workspaceId":"claude:/tmp/project","workspacePath":"/tmp/project","sessionId":"thread-a","title":"Run tests","status":"needs_attention","attentionReason":"需要处理授权请求","attentionKind":"approval","requestId":"req-1","approvalSource":"item/commandExecution/requestApproval","mirroredOnly":true,"lastUserMessage":"Run tests","lastAssistantMessage":"","lastFinalMessage":"","lastEventKind":"approval.requested","updatedAt":20.0}}"#,
+            r#"{"ok":true,"kind":"activity","activity":{"providerId":"secondary","workspaceId":"secondary:/tmp/project","workspacePath":"/tmp/project","sessionId":"thread-a","title":"Run tests","status":"needs_attention","attentionReason":"需要处理授权请求","attentionKind":"approval","requestId":"req-1","approvalSource":"item/commandExecution/requestApproval","mirroredOnly":true,"lastUserMessage":"Run tests","lastAssistantMessage":"","lastFinalMessage":"","lastEventKind":"approval.requested","updatedAt":20.0}}"#,
         )
         .expect("event");
 

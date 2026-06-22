@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::command_catalog::{bot_commands, downstream_commands_for_visible_provider_ids};
 use super::config::ensure_data_dir;
-use super::config::read_visible_provider_ids_from_disk;
+use super::config::{read_provider_metadata_from_disk, read_visible_provider_ids_from_disk};
 use super::config_provider::public_default_provider_ids;
 use super::telegram::{publish_scoped_commands, TelegramCommandScope};
 
@@ -331,23 +331,28 @@ fn discover_downstream_commands(_skill_names: &HashSet<String>) -> Vec<Discovere
     let visible_provider_ids =
         read_visible_provider_ids_from_disk().unwrap_or_else(|_| public_default_provider_ids());
     let mut commands = downstream_commands_for_visible_provider_ids(&visible_provider_ids);
-    commands.extend(discover_codex_file_commands());
+    commands.extend(discover_provider_file_commands());
     sort_discovered_commands(&mut commands);
     commands
 }
 
-fn discover_codex_file_commands() -> Vec<DiscoveredCommand> {
-    discover_codex_file_commands_from_roots(&codex_command_roots())
+fn discover_provider_file_commands() -> Vec<DiscoveredCommand> {
+    discover_provider_file_commands_from_roots(&provider_command_roots())
 }
 
-fn discover_codex_file_commands_from_roots(roots: &[PathBuf]) -> Vec<DiscoveredCommand> {
+fn discover_provider_file_commands_from_roots(
+    roots: &[(PathBuf, CommandBackend)],
+) -> Vec<DiscoveredCommand> {
     let mut discovered = Vec::new();
-    let mut seen_names = HashSet::new();
+    let mut seen_ids = HashSet::new();
 
-    for root in roots {
+    for (root, backend) in roots {
         if !root.exists() {
             continue;
         }
+        let Some(provider_id) = backend.provider_id() else {
+            continue;
+        };
 
         let mut command_files = Vec::new();
         collect_markdown_files(root, &mut command_files, None);
@@ -360,16 +365,17 @@ fn discover_codex_file_commands_from_roots(roots: &[PathBuf]) -> Vec<DiscoveredC
             let Some(name) = command_name_from_relative_path(relative_path) else {
                 continue;
             };
-            if !seen_names.insert(name.clone()) {
+            let command_id = format!("downstream:{provider_id}:file:{name}");
+            if !seen_ids.insert(command_id.clone()) {
                 continue;
             }
             let description = parse_frontmatter_description(&command_file)
-                .unwrap_or_else(|| "Codex command".to_string());
+                .unwrap_or_else(|| "Provider command".to_string());
             discovered.push(DiscoveredCommand {
-                id: format!("downstream:codex:file:{name}"),
+                id: command_id,
                 name,
                 source: CommandSource::Downstream,
-                backend: CommandBackend::provider("codex"),
+                backend: backend.clone(),
                 scope: CommandScope::Thread,
                 description,
             });
@@ -421,40 +427,65 @@ fn discover_skill_commands_from_roots(
 }
 
 fn skill_roots() -> Vec<(PathBuf, CommandBackend)> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    if home.is_empty() {
-        return Vec::new();
+    let mut roots = provider_skill_roots();
+    if let Some(shared_root) = expand_home_path("~/.agents/skills") {
+        roots.push((shared_root, CommandBackend::Shared));
     }
-    let home = PathBuf::from(home);
-    vec![
-        // Prefer platform-specific roots before shared roots so duplicate names keep their backend.
-        (
-            home.join(".codex/skills"),
-            CommandBackend::provider("codex"),
-        ),
-        (
-            home.join(".codex/superpowers/skills"),
-            CommandBackend::provider("codex"),
-        ),
-        (
-            home.join(".claude/skills"),
-            CommandBackend::provider("claude"),
-        ),
-        (home.join(".agents/skills"), CommandBackend::Shared),
-    ]
+    roots
 }
 
-fn codex_command_roots() -> Vec<PathBuf> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    if home.is_empty() {
-        return Vec::new();
+fn provider_command_roots() -> Vec<(PathBuf, CommandBackend)> {
+    read_provider_metadata_from_disk()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|provider| provider.visible)
+        .flat_map(|provider| {
+            let backend = CommandBackend::provider(&provider.id);
+            provider
+                .discovery
+                .command_roots
+                .into_iter()
+                .filter_map(|root| expand_home_path(&root).map(|path| (path, backend.clone())))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn provider_skill_roots() -> Vec<(PathBuf, CommandBackend)> {
+    read_provider_metadata_from_disk()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|provider| provider.visible)
+        .flat_map(|provider| {
+            let backend = CommandBackend::provider(&provider.id);
+            provider
+                .discovery
+                .skill_roots
+                .into_iter()
+                .filter_map(|root| expand_home_path(&root).map(|path| (path, backend.clone())))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn expand_home_path(raw: &str) -> Option<PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
     }
-    let home = PathBuf::from(home);
-    vec![
-        home.join(".codex/commands"),
-        home.join(".codex/superpowers/commands"),
-        home.join(".codex/get-shit-done/commands"),
-    ]
+    if trimmed == "~" {
+        return std::env::var("HOME")
+            .ok()
+            .filter(|home| !home.trim().is_empty())
+            .map(PathBuf::from);
+    }
+    if let Some(rest) = trimmed.strip_prefix("~/") {
+        return std::env::var("HOME")
+            .ok()
+            .filter(|home| !home.trim().is_empty())
+            .map(|home| PathBuf::from(home).join(rest));
+    }
+    Some(PathBuf::from(trimmed))
 }
 
 fn collect_markdown_files(
@@ -882,7 +913,7 @@ pub async fn publish_telegram_commands() -> Result<CommandRegistryResponse, Stri
 mod tests {
     use super::{
         apply_publish_success, build_publish_scopes, build_publishable_commands, build_response,
-        command_registry_path, discover_codex_file_commands_from_roots,
+        command_registry_path, discover_provider_file_commands_from_roots,
         discover_downstream_commands, discover_skill_commands_from_roots, load_or_initialize_store,
         load_registry_store, merge_registry_with_discovery, preferred_telegram_name,
         save_registry_store, CommandBackend, CommandRegistryEntry, CommandRegistryStore,
@@ -1048,14 +1079,14 @@ mod tests {
                 "bot help",
             ),
             entry(
-                "downstream:codex:help",
+                "downstream:primary:help",
                 "help",
                 CommandSource::Downstream,
-                CommandBackend::provider("codex"),
+                CommandBackend::provider("primary"),
                 CommandStatus::Active,
                 true,
                 false,
-                "codex help",
+                "primary help",
             ),
         ]);
 
@@ -1284,7 +1315,7 @@ mod tests {
     }
 
     #[test]
-    fn discover_codex_file_commands_reads_nested_command_files() {
+    fn discover_provider_file_commands_reads_nested_command_files() {
         let temp_dir = std::env::temp_dir().join(format!(
             "onlineworker-command-discovery-test-{}",
             std::time::SystemTime::now()
@@ -1305,23 +1336,26 @@ mod tests {
         )
         .expect("write workstreams command");
 
-        let discovered = discover_codex_file_commands_from_roots(&[root]);
+        let discovered = discover_provider_file_commands_from_roots(&[(
+            root,
+            CommandBackend::provider("primary"),
+        )]);
 
         assert_eq!(discovered.len(), 2);
 
         let brainstorm = discovered
             .iter()
-            .find(|command| command.id == "downstream:codex:file:brainstorm")
+            .find(|command| command.id == "downstream:primary:file:brainstorm")
             .expect("brainstorm command");
         assert_eq!(brainstorm.name, "brainstorm");
         assert_eq!(brainstorm.source, CommandSource::Downstream);
-        assert_eq!(brainstorm.backend, CommandBackend::provider("codex"));
+        assert_eq!(brainstorm.backend, CommandBackend::provider("primary"));
         assert_eq!(brainstorm.scope, CommandScope::Thread);
         assert_eq!(brainstorm.description, "Brainstorm command");
 
         let workstreams = discovered
             .iter()
-            .find(|command| command.id == "downstream:codex:file:gsd-workstreams")
+            .find(|command| command.id == "downstream:primary:file:gsd-workstreams")
             .expect("workstreams command");
         assert_eq!(workstreams.name, "gsd-workstreams");
         assert_eq!(workstreams.description, "Workstream command");
@@ -1338,24 +1372,24 @@ mod tests {
                 .expect("system time")
                 .as_nanos()
         ));
-        let codex_root = temp_dir.join("codex-skills");
-        let claude_root = temp_dir.join("claude-skills");
+        let primary_root = temp_dir.join("primary-skills");
+        let secondary_root = temp_dir.join("secondary-skills");
         let shared_root = temp_dir.join("shared-skills");
 
-        std::fs::create_dir_all(codex_root.join("brainstorm")).expect("create codex skill dir");
-        std::fs::create_dir_all(claude_root.join("triage")).expect("create claude skill dir");
+        std::fs::create_dir_all(primary_root.join("brainstorm")).expect("create primary skill dir");
+        std::fs::create_dir_all(secondary_root.join("triage")).expect("create secondary skill dir");
         std::fs::create_dir_all(shared_root.join("find-skills")).expect("create shared skill dir");
 
         std::fs::write(
-            codex_root.join("brainstorm/SKILL.md"),
-            "---\nname: brainstorm\ndescription: Codex brainstorm\n---\n",
+            primary_root.join("brainstorm/SKILL.md"),
+            "---\nname: brainstorm\ndescription: Primary brainstorm\n---\n",
         )
-        .expect("write codex skill");
+        .expect("write primary skill");
         std::fs::write(
-            claude_root.join("triage/SKILL.md"),
-            "---\nname: triage\ndescription: Claude triage\n---\n",
+            secondary_root.join("triage/SKILL.md"),
+            "---\nname: triage\ndescription: Secondary triage\n---\n",
         )
-        .expect("write claude skill");
+        .expect("write secondary skill");
         std::fs::write(
             shared_root.join("find-skills/SKILL.md"),
             "---\nname: find-skills\ndescription: Shared discovery\n---\n",
@@ -1363,24 +1397,24 @@ mod tests {
         .expect("write shared skill");
 
         let discovered = discover_skill_commands_from_roots(&[
-            (codex_root, CommandBackend::provider("codex")),
-            (claude_root, CommandBackend::provider("claude")),
+            (primary_root, CommandBackend::provider("primary")),
+            (secondary_root, CommandBackend::provider("secondary")),
             (shared_root, CommandBackend::Shared),
         ]);
 
         let brainstorm = discovered
             .iter()
             .find(|command| command.id == "skill:brainstorm")
-            .expect("codex skill");
-        assert_eq!(brainstorm.backend, CommandBackend::provider("codex"));
-        assert_eq!(brainstorm.description, "Codex brainstorm");
+            .expect("primary skill");
+        assert_eq!(brainstorm.backend, CommandBackend::provider("primary"));
+        assert_eq!(brainstorm.description, "Primary brainstorm");
 
         let triage = discovered
             .iter()
             .find(|command| command.id == "skill:triage")
-            .expect("claude skill");
-        assert_eq!(triage.backend, CommandBackend::provider("claude"));
-        assert_eq!(triage.description, "Claude triage");
+            .expect("secondary skill");
+        assert_eq!(triage.backend, CommandBackend::provider("secondary"));
+        assert_eq!(triage.description, "Secondary triage");
 
         let find_skills = discovered
             .iter()
@@ -1393,16 +1427,16 @@ mod tests {
     }
 
     #[test]
-    fn discover_downstream_commands_keeps_claude_static_fallback_catalog() {
+    fn discover_downstream_commands_keeps_manifest_fallback_catalog() {
         let commands = discover_downstream_commands(&HashSet::new());
 
-        let doctor = commands
+        let command = commands
             .iter()
-            .find(|command| command.id == "downstream:claude:doctor")
-            .expect("claude doctor fallback command");
-        assert_eq!(doctor.name, "doctor");
-        assert_eq!(doctor.source, CommandSource::Downstream);
-        assert_eq!(doctor.backend, CommandBackend::provider("claude"));
+            .find(|command| command.source == CommandSource::Downstream)
+            .expect("manifest fallback command");
+        assert!(command.id.starts_with("downstream:"));
+        assert_eq!(command.source, CommandSource::Downstream);
+        assert!(command.backend.provider_id().is_some());
     }
 
     #[test]

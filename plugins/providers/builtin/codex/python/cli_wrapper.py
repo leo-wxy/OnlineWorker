@@ -108,7 +108,7 @@ async def run_ow_codex_once(
     state = AppState(config=config)
 
     tool_cfg = _codex_tool_config(config)
-    codex_bin = str(getattr(tool_cfg, "codex_bin", "") or "codex")
+    codex_bin = str(getattr(tool_cfg, "bin", "") or "codex")
     app_server_port = int(getattr(tool_cfg, "app_server_port", 0) or 0)
 
     app_server = AppServerProcess(codex_bin=codex_bin, port=app_server_port, protocol="ws")

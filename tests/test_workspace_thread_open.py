@@ -301,7 +301,7 @@ async def test_open_workspace_uses_provider_workspace_hooks_for_custom_provider(
         state=state,
         storage=storage,
         group_chat_id=GROUP_CHAT_ID,
-        tool_cfg=ToolConfig(name="custom", enabled=True, codex_bin="custom"),
+        tool_cfg=ToolConfig(name="custom", enabled=True, bin="custom"),
         name="customWorker",
         path="/tmp/custom",
     )
@@ -515,7 +515,7 @@ async def test_thread_open_existing_claude_topic_without_cursor_sends_history_sn
         lambda tool_name, path, limit=100: [],
     )
     monkeypatch.setattr(
-        "bot.handlers.workspace.read_provider_thread_history",
+        "plugins.providers.builtin.claude.python.runtime.read_provider_thread_history",
         lambda tool_name, thread_id, limit=50, sessions_dir=None: [
             {"role": "user", "text": "你好么？", "timestamp": 1000},
             {"role": "assistant", "text": "目前还在排查。", "timestamp": 1001},
@@ -528,6 +528,10 @@ async def test_thread_open_existing_claude_topic_without_cursor_sends_history_sn
         "bot.handlers.workspace._send_to_group",
         send_to_group,
     )
+    monkeypatch.setattr(
+        "bot.handlers.common._send_to_group",
+        send_to_group,
+    )
     control_panel_mock = AsyncMock()
     monkeypatch.setattr(
         "bot.handlers.workspace.send_thread_control_panel",
@@ -535,7 +539,7 @@ async def test_thread_open_existing_claude_topic_without_cursor_sends_history_sn
     )
     save_storage_mock = MagicMock()
     monkeypatch.setattr(
-        "bot.handlers.workspace.save_storage",
+        "plugins.providers.builtin.claude.python.runtime.save_storage",
         save_storage_mock,
     )
 
@@ -611,7 +615,7 @@ async def test_thread_open_existing_claude_topic_only_syncs_turns_after_cursor(m
         lambda tool_name, path, limit=100: [],
     )
     monkeypatch.setattr(
-        "bot.handlers.workspace.read_provider_thread_history",
+        "plugins.providers.builtin.claude.python.runtime.read_provider_thread_history",
         lambda tool_name, thread_id, limit=50, sessions_dir=None: old_turns + [
             {"role": "user", "text": "新问题", "timestamp": 1002},
             {"role": "assistant", "text": "新回复", "timestamp": 1003},
@@ -623,12 +627,16 @@ async def test_thread_open_existing_claude_topic_only_syncs_turns_after_cursor(m
         send_to_group,
     )
     monkeypatch.setattr(
+        "bot.handlers.common._send_to_group",
+        send_to_group,
+    )
+    monkeypatch.setattr(
         "bot.handlers.workspace.send_thread_control_panel",
         AsyncMock(),
     )
     save_storage_mock = MagicMock()
     monkeypatch.setattr(
-        "bot.handlers.workspace.save_storage",
+        "plugins.providers.builtin.claude.python.runtime.save_storage",
         save_storage_mock,
     )
 

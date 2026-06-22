@@ -18,13 +18,15 @@ function formatCost(value?: number | null) {
 }
 
 function chartBackground(providerId: string) {
-  if (providerId === "codex") {
-    return "linear-gradient(180deg, rgba(139,92,246,0.95) 0%, rgba(167,139,250,0.82) 100%)";
-  }
-  if (providerId === "claude") {
-    return "linear-gradient(180deg, rgba(71,85,105,0.95) 0%, rgba(148,163,184,0.82) 100%)";
-  }
-  return "linear-gradient(180deg, rgba(71,85,105,0.95) 0%, rgba(148,163,184,0.82) 100%)";
+  const gradients = [
+    "linear-gradient(180deg, rgba(139,92,246,0.95) 0%, rgba(167,139,250,0.82) 100%)",
+    "linear-gradient(180deg, rgba(14,165,233,0.95) 0%, rgba(125,211,252,0.82) 100%)",
+    "linear-gradient(180deg, rgba(16,185,129,0.95) 0%, rgba(110,231,183,0.82) 100%)",
+    "linear-gradient(180deg, rgba(245,158,11,0.95) 0%, rgba(252,211,77,0.82) 100%)",
+    "linear-gradient(180deg, rgba(71,85,105,0.95) 0%, rgba(148,163,184,0.82) 100%)",
+  ];
+  const hash = providerId.split("").reduce((value, char) => ((value * 31) + char.charCodeAt(0)) >>> 0, 0);
+  return gradients[hash % gradients.length];
 }
 
 export function UsageBrowser() {

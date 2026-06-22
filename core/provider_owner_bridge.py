@@ -5,6 +5,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import time
 from types import SimpleNamespace
 from typing import Optional
@@ -23,10 +24,13 @@ from core.messages.publishing import (
 
 
 OWNER_BRIDGE_SOCKET_FILENAME = "provider_owner_bridge.sock"
-OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS = 1.5
-OWNER_BRIDGE_USAGE_TIMEOUT_SECONDS = 1.5
+OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS = 5.0
+OWNER_BRIDGE_USAGE_TIMEOUT_SECONDS = 5.0
 OWNER_BRIDGE_SLOW_REQUEST_WARNING_SECONDS = 0.25
+OWNER_BRIDGE_PREVIEW_HYDRATION_LIMIT = 6
+OWNER_BRIDGE_PREVIEW_MAX_LENGTH = 220
 logger = logging.getLogger(__name__)
+ABSOLUTE_PATH_RE = re.compile(r"(?:^|[\s(])(/(?:Users|Applications|Volumes|private|tmp|var)/[^\s)]+)")
 
 
 def provider_owner_bridge_socket_path(data_dir: Optional[str] = None) -> Optional[str]:
@@ -346,6 +350,54 @@ def _normalize_provider_turn(turn: dict) -> dict:
     return normalized
 
 
+def _compact_preview_text(value: str) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def _sanitize_preview_text(value: str) -> str:
+    text = _compact_preview_text(value)
+    if not text:
+        return ""
+    text = ABSOLUTE_PATH_RE.sub(lambda match: match.group(0).replace(match.group(1), "[path]"), text)
+    return text[:OWNER_BRIDGE_PREVIEW_MAX_LENGTH].strip()
+
+
+def _preview_equals_title(preview: str, title: str) -> bool:
+    normalized_preview = _compact_preview_text(preview)
+    normalized_title = _compact_preview_text(title)
+    return bool(normalized_preview and normalized_title and normalized_preview == normalized_title)
+
+
+def _preview_is_low_signal(preview: str, title: str) -> bool:
+    normalized_preview = _compact_preview_text(preview)
+    if not normalized_preview:
+        return True
+    if _preview_equals_title(normalized_preview, title):
+        return True
+    return False
+
+
+def _preview_from_turns(turns: list[dict], *, title: str) -> str:
+    for turn in reversed(turns or []):
+        if not isinstance(turn, dict):
+            continue
+        role = str(turn.get("role") or "").strip()
+        content = _sanitize_preview_text(_normalize_provider_turn_content(turn))
+        if not content:
+            continue
+        if role == "assistant" and not _preview_equals_title(content, title):
+            return content
+    for turn in reversed(turns or []):
+        if not isinstance(turn, dict):
+            continue
+        content = _sanitize_preview_text(_normalize_provider_turn_content(turn))
+        if not content:
+            continue
+        if not _preview_equals_title(content, title):
+            return content
+    return ""
+
+
 def _approval_mirror_dedupe_key(
     provider_id: str,
     thread_id: str,
@@ -479,6 +531,8 @@ class ProviderOwnerBridge:
         self.socket_path = provider_owner_bridge_socket_path(self.data_dir)
         self._server: Optional[asyncio.base_events.Server] = None
         self._pending_send_tasks: set[asyncio.Task] = set()
+        self._list_sessions_tasks: dict[tuple[str, int], asyncio.Task] = {}
+        self._list_sessions_cache: dict[tuple[str, int], dict] = {}
 
     @property
     def is_running(self) -> bool:
@@ -580,6 +634,7 @@ class ProviderOwnerBridge:
 
     async def _handle_list_sessions(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
+        force_refresh = bool(request.get("force_refresh", False))
         try:
             limit = int(request.get("limit") or 100)
         except (TypeError, ValueError):
@@ -597,6 +652,144 @@ class ProviderOwnerBridge:
         facts = getattr(provider, "facts", None)
         if facts is None:
             return {"ok": False, "error": f"Provider '{provider_id}' 不支持会话列表"}
+        list_sessions = getattr(facts, "list_sessions", None)
+        if callable(list_sessions):
+            cache_key = (provider_id, limit)
+            if not force_refresh:
+                cached = self._list_sessions_cache.get(cache_key)
+                if cached is not None:
+                    return cached
+
+            task = self._list_sessions_tasks.get(cache_key)
+            if task is None or task.done() or force_refresh:
+                async def _load_sessions() -> dict:
+                    raw_sessions = await _run_sync_with_timeout(
+                        f"{provider_id}.list_sessions",
+                        list_sessions,
+                        limit=limit,
+                        timeout=OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS,
+                    ) or []
+                    sessions = []
+                    for session in raw_sessions:
+                        if not isinstance(session, dict):
+                            continue
+                        thread_id = str(session.get("id") or session.get("thread_id") or "").strip()
+                        workspace_path = str(
+                            session.get("workspace")
+                            or session.get("path")
+                            or session.get("workspacePath")
+                            or ""
+                        ).strip()
+                        if not thread_id or not workspace_path:
+                            continue
+                        title = str(
+                            session.get("title")
+                            or session.get("preview")
+                            or session.get("name")
+                            or thread_id
+                        ).strip() or thread_id
+                        preview = str(
+                            session.get("preview")
+                            or session.get("lastAssistantMessage")
+                            or session.get("last_assistant_message")
+                            or session.get("lastFinalMessage")
+                            or session.get("last_final_message")
+                            or session.get("lastUserMessage")
+                            or session.get("last_user_message")
+                            or ""
+                        ).strip()
+                        sessions.append(
+                            {
+                                "id": thread_id,
+                                "title": title,
+                                "preview": preview,
+                                "workspace": workspace_path,
+                                "archived": bool(session.get("archived", False)),
+                                "providerActive": bool(session.get("providerActive", False)),
+                                "updatedAt": _safe_int(
+                                    session.get("updatedAt")
+                                    or session.get("updated_at")
+                                    or session.get("updated_at_epoch")
+                                    or session.get("createdAt")
+                                    or session.get("created_at")
+                                ),
+                                "createdAt": _safe_int(
+                                    session.get("createdAt")
+                                    or session.get("created_at")
+                                    or session.get("updatedAt")
+                                    or session.get("updated_at")
+                                ),
+                            }
+                        )
+                    read_thread_history = getattr(facts, "read_thread_history", None)
+                    if callable(read_thread_history):
+                        hydration_candidates = [
+                            session
+                            for session in sessions
+                            if bool(session.get("providerActive"))
+                            and _preview_is_low_signal(
+                                str(session.get("preview") or ""),
+                                str(session.get("title") or ""),
+                            )
+                        ][:OWNER_BRIDGE_PREVIEW_HYDRATION_LIMIT]
+
+                        async def hydrate_preview(session: dict) -> None:
+                            session_id = str(session.get("id") or "").strip()
+                            if not session_id:
+                                return
+                            turns = await _run_sync_with_timeout(
+                                f"{provider_id}.read_thread_history({session_id})",
+                                read_thread_history,
+                                session_id,
+                                limit=20,
+                                timeout=OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS,
+                            ) or []
+                            preview = _preview_from_turns(
+                                turns,
+                                title=str(session.get("title") or ""),
+                            )
+                            if preview:
+                                session["preview"] = preview
+
+                        if hydration_candidates:
+                            results = await asyncio.gather(
+                                *(hydrate_preview(session) for session in hydration_candidates),
+                                return_exceptions=True,
+                            )
+                            for result in results:
+                                if isinstance(result, Exception):
+                                    logger.debug(
+                                        "[provider-owner-bridge] list preview hydration skipped provider=%s error=%s",
+                                        provider_id,
+                                        result,
+                                    )
+                    sessions.sort(
+                        key=lambda item: (
+                            -_safe_int(item.get("updatedAt")),
+                            -_safe_int(item.get("createdAt")),
+                            str(item.get("id") or ""),
+                        )
+                    )
+                    response = {"ok": True, "sessions": sessions}
+                    self._list_sessions_cache[cache_key] = response
+                    return response
+
+                task = asyncio.create_task(_load_sessions())
+                self._list_sessions_tasks[cache_key] = task
+            try:
+                return await task
+            except Exception:
+                cached = self._list_sessions_cache.get(cache_key)
+                if cached is not None:
+                    return cached
+                raise
+            finally:
+                current = self._list_sessions_tasks.get(cache_key)
+                if current is task and task.done():
+                    self._list_sessions_tasks.pop(cache_key, None)
+        thread_list_is_authoritative = bool(
+            getattr(facts, "thread_list_is_authoritative", False)
+        )
 
         sessions = []
         seen: set[tuple[str, str]] = set()
@@ -618,18 +811,35 @@ class ProviderOwnerBridge:
             if not workspace_path:
                 continue
 
-            try:
-                active_ids = await _run_sync_with_timeout(
-                    f"{provider_id}.query_active_thread_ids({workspace_path})",
-                    facts.query_active_thread_ids,
-                    workspace_path,
-                    timeout=OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS,
-                )
-            except Exception:
-                active_ids = set()
-            normalized_active_ids = {
-                str(item).strip() for item in active_ids if str(item).strip()
-            }
+            normalized_active_ids: set[str] = set()
+            if not thread_list_is_authoritative:
+                try:
+                    active_ids = await _run_sync_with_timeout(
+                        f"{provider_id}.query_active_thread_ids({workspace_path})",
+                        facts.query_active_thread_ids,
+                        workspace_path,
+                        timeout=OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS,
+                    )
+                except Exception:
+                    active_ids = set()
+                normalized_active_ids = {
+                    str(item).strip() for item in active_ids if str(item).strip()
+                }
+            normalized_running_ids: set[str] = set()
+            running_hook = getattr(facts, "query_running_thread_ids", None)
+            if callable(running_hook):
+                try:
+                    running_ids = await _run_sync_with_timeout(
+                        f"{provider_id}.query_running_thread_ids({workspace_path})",
+                        running_hook,
+                        workspace_path,
+                        timeout=OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS,
+                    )
+                except Exception:
+                    running_ids = set()
+                normalized_running_ids = {
+                    str(item).strip() for item in running_ids if str(item).strip()
+                }
 
             try:
                 threads = await _run_sync_with_timeout(
@@ -656,6 +866,16 @@ class ProviderOwnerBridge:
 
                 preview = thread.get("preview") or thread.get("title") or thread.get("name")
                 title = str(preview or "").strip() or thread_id
+                preview_text = str(
+                    thread.get("preview")
+                    or thread.get("lastAssistantMessage")
+                    or thread.get("last_assistant_message")
+                    or thread.get("lastFinalMessage")
+                    or thread.get("last_final_message")
+                    or thread.get("lastUserMessage")
+                    or thread.get("last_user_message")
+                    or ""
+                ).strip()
                 updated_at = _safe_int(
                     thread.get("updatedAt")
                     or thread.get("updated_at")
@@ -670,6 +890,7 @@ class ProviderOwnerBridge:
                     or thread.get("updated_at")
                 )
                 archived = bool(thread.get("archived", False))
+                provider_active = thread_id in normalized_running_ids if normalized_running_ids else False
                 if normalized_active_ids:
                     archived = archived or thread_id not in normalized_active_ids
 
@@ -677,8 +898,10 @@ class ProviderOwnerBridge:
                     {
                         "id": thread_id,
                         "title": title,
+                        "preview": preview_text,
                         "workspace": workspace_path,
                         "archived": archived,
+                        "providerActive": provider_active,
                         "updatedAt": updated_at,
                         "createdAt": created_at,
                     }
@@ -1294,9 +1517,9 @@ class ProviderOwnerBridge:
         original_streaming_msg_id = getattr(thread_info, "streaming_msg_id", None)
         original_last_tg_user_message_id = getattr(thread_info, "last_tg_user_message_id", None)
 
-        def rollback_thread_remap() -> None:
+        def rollback_thread_remap() -> bool:
             if thread_info.thread_id == original_thread_id:
-                return
+                return False
             ws_info.threads.pop(thread_info.thread_id, None)
             thread_info.thread_id = original_thread_id
             thread_info.topic_id = original_topic_id
@@ -1307,6 +1530,7 @@ class ProviderOwnerBridge:
             thread_info.streaming_msg_id = original_streaming_msg_id
             thread_info.last_tg_user_message_id = original_last_tg_user_message_id
             ws_info.threads[original_thread_id] = thread_info
+            return True
 
         try:
             self.state.mark_provider_send_started(provider_id, thread_id)
@@ -1388,6 +1612,16 @@ class ProviderOwnerBridge:
                 if isinstance(send_result, dict) and str(send_result.get("status") or "") == "error":
                     raise RuntimeError(str(send_result.get("error") or f"{provider_id} send failed"))
             except Exception:
+                rolled_back = rollback_thread_remap()
+                if rolled_back and getattr(self.state, "storage", None) is not None:
+                    try:
+                        save_storage(self.state.storage)
+                    except Exception:
+                        logger.exception(
+                            "[provider-owner-bridge] 后台发送失败后保存回滚失败 provider=%s thread=%s",
+                            provider_id,
+                            thread_id[:12] if thread_id else "?",
+                        )
                 logger.exception(
                     "[provider-owner-bridge] 后台发送失败 provider=%s thread=%s",
                     provider_id,

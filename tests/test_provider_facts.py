@@ -13,6 +13,7 @@ from core.providers.contracts import (
 from core.providers.facts import (
     list_provider_threads,
     query_provider_active_thread_ids,
+    query_provider_running_thread_ids,
     read_provider_thread_history,
     scan_provider_workspaces,
 )
@@ -162,6 +163,29 @@ def test_query_provider_active_thread_ids_routes_to_codex(monkeypatch):
     assert called == {"workspace_path": "/tmp/proj"}
 
 
+def test_query_provider_running_thread_ids_routes_to_provider_hook(monkeypatch):
+    called = {}
+
+    def fake_query_running_thread_ids(workspace_path):
+        called["workspace_path"] = workspace_path
+        return {"tid-run"}
+
+    descriptor = SimpleNamespace(
+        facts=SimpleNamespace(
+            query_running_thread_ids=fake_query_running_thread_ids,
+        )
+    )
+    monkeypatch.setattr(
+        "core.providers.facts.get_provider",
+        lambda tool_name: descriptor if tool_name == "codex" else None,
+    )
+
+    result = query_provider_running_thread_ids("codex", "/tmp/proj")
+
+    assert result == {"tid-run"}
+    assert called == {"workspace_path": "/tmp/proj"}
+
+
 def test_list_provider_threads_routes_to_codex(monkeypatch):
     called = {}
 
@@ -292,6 +316,7 @@ def create_provider_descriptor():
             list_threads=_noop,
             read_thread_history=_noop,
             query_active_thread_ids=lambda *_args, **_kwargs: set(),
+            query_running_thread_ids=lambda *_args, **_kwargs: set(),
         ),
         capabilities=ProviderCapabilities(),
     )
@@ -406,6 +431,7 @@ def create_provider_descriptor():
             list_threads=lambda workspace_path, limit=20: [],
             read_thread_history=lambda thread_id, *, limit=10, sessions_dir=None: [],
             query_active_thread_ids=lambda workspace_path: set(),
+            query_running_thread_ids=lambda workspace_path: set(),
         ),
         capabilities=ProviderCapabilities(),
     )

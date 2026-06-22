@@ -13,9 +13,6 @@
       "allow": [
         {
           "path": "$APPDATA/*"
-        },
-        {
-          "path": "$HOME/.codex/**"
         }
       ]
     },
@@ -32,9 +29,6 @@
       "allow": [
         {
           "path": "$APPDATA"
-        },
-        {
-          "path": "$HOME/.codex/rollouts"
         }
       ]
     },

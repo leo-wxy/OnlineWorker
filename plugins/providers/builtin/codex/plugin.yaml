@@ -22,6 +22,8 @@ provider:
   control_mode: app
   transport:
     type: unix
+  compatibility:
+    transport_policy: shared_app_server
   message_hooks:
     abusive_language_normalization:
       enabled: true
@@ -46,17 +48,37 @@ provider:
       telegram: true
       external_cli: remote_proxy
       wrapper: ow-codex
+      proxy_alias: alias codexR='/opt/homebrew/bin/codex --remote "unix://$HOME/Library/Application Support/OnlineWorker/codex_remote_proxy.sock" --cd "$(pwd)"'
     session_access:
-      list: codex_threads
+      list: owner_bridge
       read: owner_bridge
-      send: codex_app_server
-      stream: codex_thread_jsonl
+      send: owner_bridge
+      stream: none
   process:
-    cleanup_matchers:
-      - "codex.*app-server"
-      - "codex-aar"
+    cleanup_matchers: []
+  discovery:
+    command_roots:
+      - ~/.codex/commands
+      - ~/.codex/superpowers/commands
+      - ~/.codex/get-shit-done/commands
+    skill_roots:
+      - ~/.codex/skills
+      - ~/.codex/superpowers/skills
+  tui_host:
+    sidecar_args:
+      - --codex-tui-host
+      - --codex-tui-cd={workspace}
+      - --codex-tui-target={thread_id}
+      - --codex-tui-extra-arg=--no-alt-screen
   health: {}
   auth: {}
+  install:
+    cli_names:
+      - codex
+    label: OpenAI Codex CLI
+    method: npm
+    command: npm install -g @openai/codex
+    docs_url: https://github.com/openai/codex
   commands:
     - name: help
       scope: thread
@@ -89,5 +111,22 @@ provider:
       scope: thread
       description: 规划下一步任务
 
+ai:
+  services:
+    - id: openai_default
+      name: OpenAI
+      label: OpenAI
+      description: OpenAI-compatible API service for OpenAI or compatible implementations.
+      protocol: openai_compatible_chat
+      base_url: https://api.openai.com/v1
+      api_key_env: OPENAI_API_KEY
+      models:
+        - gpt-5.4
+      default_model: gpt-5.4
+      timeout_seconds: 20
+      enabled: false
+      default_for_scenarios: true
+
 entrypoints:
   python_descriptor: plugins.providers.builtin.codex.python.provider:create_provider_descriptor
+  python_config_normalizer: plugins.providers.builtin.codex.python.config_normalizer:normalize_provider_config

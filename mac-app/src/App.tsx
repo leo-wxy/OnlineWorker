@@ -462,11 +462,13 @@ export default function App() {
               <UsageBrowser />
             </div>
           )}
-          {activeTab === "sessions" && (
-            <div className="flex min-h-0 flex-1 flex-col p-5 sm:p-6">
-              <SessionBrowser openTarget={sessionOpenTarget} />
-            </div>
-          )}
+          <div className={`min-h-0 flex-1 flex-col p-5 sm:p-6 ${activeTab === "sessions" ? "" : "hidden"}`}>
+            <SessionBrowser
+              openTarget={sessionOpenTarget}
+              taskBoardActivities={taskBoardActivities}
+              active={activeTab === "sessions"}
+            />
+          </div>
         </main>
       </div>
 

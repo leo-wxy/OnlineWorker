@@ -12,6 +12,216 @@ logger = logging.getLogger(__name__)
 CLAUDE_SESSIONS_DIR = "~/.claude/sessions"
 CLAUDE_PROJECTS_DIR = "~/.claude/projects"
 CLAUDE_HISTORY_PATH = "~/.claude/history.jsonl"
+_CLAUDE_STORAGE_CACHE: dict[str, object] = {
+    "key": None,
+    "signature": None,
+    "sessions": [],
+    "history": {},
+}
+_CLAUDE_THREAD_SNAPSHOT_CACHE: dict[str, object] = {
+    "key": None,
+    "signature": None,
+    "snapshot": None,
+}
+
+
+def clear_claude_storage_cache() -> None:
+    _CLAUDE_STORAGE_CACHE.update(
+        {
+            "key": None,
+            "signature": None,
+            "sessions": [],
+            "history": {},
+        }
+    )
+    _CLAUDE_THREAD_SNAPSHOT_CACHE.update(
+        {
+            "key": None,
+            "signature": None,
+            "snapshot": None,
+        }
+    )
+
+
+def _default_claude_storage_cache_key() -> tuple[str, str, str]:
+    return (
+        os.path.expanduser(CLAUDE_SESSIONS_DIR),
+        os.path.expanduser(CLAUDE_PROJECTS_DIR),
+        os.path.expanduser(CLAUDE_HISTORY_PATH),
+    )
+
+
+def _claude_path_signature(path: str) -> tuple[int, int]:
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return (0, 0)
+    return (int(stat.st_mtime_ns), int(stat.st_size))
+
+
+def _claude_tree_signature(root: str, suffixes: tuple[str, ...]) -> tuple:
+    if not os.path.isdir(root):
+        return ()
+
+    entries: list[tuple[str, int, int]] = []
+    for current_root, dirs, files in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if d != "subagents")
+        for fname in sorted(files):
+            if not fname.endswith(suffixes):
+                continue
+            path = os.path.join(current_root, fname)
+            mtime_ns, size = _claude_path_signature(path)
+            entries.append((os.path.relpath(path, root), mtime_ns, size))
+    return tuple(entries)
+
+
+def _default_claude_storage_signature() -> tuple:
+    sessions_root, projects_root, history_path = _default_claude_storage_cache_key()
+    return (
+        _claude_tree_signature(sessions_root, (".json",)),
+        _claude_tree_signature(projects_root, (".jsonl",)),
+        _claude_path_signature(history_path),
+    )
+
+
+def _clone_claude_session_row(row: dict) -> dict:
+    cloned = dict(row)
+    if isinstance(row.get("entrypoints"), set):
+        cloned["entrypoints"] = set(row["entrypoints"])
+    elif isinstance(row.get("entrypoints"), (list, tuple)):
+        cloned["entrypoints"] = list(row["entrypoints"])
+    return cloned
+
+
+def _load_default_claude_storage_snapshot() -> tuple[list[dict], dict[str, dict]]:
+    key = _default_claude_storage_cache_key()
+    signature = _default_claude_storage_signature()
+    if (
+        _CLAUDE_STORAGE_CACHE.get("key") == key
+        and _CLAUDE_STORAGE_CACHE.get("signature") == signature
+    ):
+        return (
+            [
+                _clone_claude_session_row(row)
+                for row in (_CLAUDE_STORAGE_CACHE.get("sessions") or [])
+                if isinstance(row, dict)
+            ],
+            dict(_CLAUDE_STORAGE_CACHE.get("history") or {}),
+        )
+
+    sessions = _load_claude_sessions(None)
+    history = _build_claude_history_index(None)
+    _CLAUDE_STORAGE_CACHE.update(
+        {
+            "key": key,
+            "signature": signature,
+            "sessions": sessions,
+            "history": history,
+        }
+    )
+    return [_clone_claude_session_row(row) for row in sessions], dict(history)
+
+
+def _load_claude_storage_snapshot(
+    sessions_dir: Optional[str] = None,
+    history_path: Optional[str] = None,
+) -> tuple[list[dict], dict[str, dict]]:
+    if sessions_dir is None and history_path is None:
+        return _load_default_claude_storage_snapshot()
+    return _load_claude_sessions(sessions_dir), _build_claude_history_index(history_path)
+
+
+def _load_claude_sessions_cached(sessions_dir: Optional[str] = None) -> list[dict]:
+    if sessions_dir is None:
+        sessions, _history = _load_default_claude_storage_snapshot()
+        return sessions
+    return _load_claude_sessions(sessions_dir)
+
+
+def _build_claude_thread_snapshot(
+    session_rows: list[dict],
+    history_index: dict[str, dict],
+) -> dict[str, list[dict]]:
+    session_by_id = {row["id"]: row for row in session_rows}
+    all_session_ids = set(session_by_id.keys()) | set(history_index.keys())
+    by_workspace: dict[str, list[dict]] = {}
+
+    for session_id in all_session_ids:
+        row = session_by_id.get(session_id)
+        history_info = history_index.get(session_id, {})
+        logical_cwd = _normalize_claude_project_path(history_info.get("project")) or (
+            row["cwd"] if row else ""
+        )
+        if not logical_cwd:
+            continue
+        if _is_claude_noise_workspace_path(logical_cwd):
+            continue
+        if row and _should_skip_claude_session_from_workspace_list(row.get("sessionFile"), row):
+            continue
+
+        preview = history_info.get("preview") or (row or {}).get("preview")
+        if row is None and not preview:
+            continue
+
+        created_at = int((row or {}).get("createdAt") or 0) or int(history_info.get("updatedAt") or 0)
+        updated_at = int(history_info.get("updatedAt") or 0) or created_at
+        by_workspace.setdefault(logical_cwd, []).append(
+            {
+                "id": session_id,
+                "preview": preview,
+                "createdAt": created_at,
+                "updatedAt": updated_at,
+            }
+        )
+
+    for threads in by_workspace.values():
+        threads.sort(
+            key=lambda item: (
+                int(item.get("createdAt") or 0),
+                int(item.get("updatedAt") or 0),
+                str(item.get("id") or ""),
+            ),
+            reverse=True,
+        )
+
+    return by_workspace
+
+
+def _load_claude_thread_snapshot(
+    sessions_dir: Optional[str] = None,
+    history_path: Optional[str] = None,
+) -> dict[str, list[dict]]:
+    if sessions_dir is not None or history_path is not None:
+        session_rows, history_index = _load_claude_storage_snapshot(sessions_dir, history_path)
+        return _build_claude_thread_snapshot(session_rows, history_index)
+
+    key = _default_claude_storage_cache_key()
+    signature = _default_claude_storage_signature()
+    if (
+        _CLAUDE_THREAD_SNAPSHOT_CACHE.get("key") == key
+        and _CLAUDE_THREAD_SNAPSHOT_CACHE.get("signature") == signature
+    ):
+        cached = _CLAUDE_THREAD_SNAPSHOT_CACHE.get("snapshot")
+        if isinstance(cached, dict):
+            return {
+                str(workspace): [_clone_claude_session_row(thread) for thread in threads]
+                for workspace, threads in cached.items()
+                if isinstance(threads, list)
+            }
+
+    session_rows, history_index = _load_default_claude_storage_snapshot()
+    snapshot = _build_claude_thread_snapshot(session_rows, history_index)
+    _CLAUDE_THREAD_SNAPSHOT_CACHE.update(
+        {
+            "key": key,
+            "signature": signature,
+            "snapshot": snapshot,
+        }
+    )
+    return {
+        workspace: [_clone_claude_session_row(thread) for thread in threads]
+        for workspace, threads in snapshot.items()
+    }
 
 
 def _normalize_claude_message_text(value) -> str:
@@ -312,6 +522,12 @@ def _load_claude_project_sessions_from_dir(projects_dir: str) -> list[dict]:
             session_id = os.path.splitext(entry)[0]
             cwd = ""
             created_at = 0
+            preview = None
+            entrypoints: set[str] = set()
+            first_user_text = ""
+            user_turn_count = 0
+            assistant_turn_count = 0
+            assistant_all_login_failed = True
             try:
                 with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
                     for line in f:
@@ -333,6 +549,32 @@ def _load_claude_project_sessions_from_dir(projects_dir: str) -> list[dict]:
                         row_timestamp = _parse_claude_timestamp(row.get("timestamp"))
                         if row_timestamp and (created_at == 0 or row_timestamp < created_at):
                             created_at = row_timestamp
+                        entrypoint = str(row.get("entrypoint") or "").strip()
+                        if entrypoint:
+                            entrypoints.add(entrypoint)
+
+                        if row.get("isSidechain") is True:
+                            continue
+                        row_type = str(row.get("type") or "").strip()
+                        if row_type in ("user", "last-prompt"):
+                            text = _extract_claude_row_text(row)
+                            if text and not _is_claude_display_command(text) and not preview:
+                                preview = text
+                        if row_type not in ("user", "assistant"):
+                            continue
+                        text = _extract_claude_row_text(row)
+                        if not text:
+                            continue
+                        if row_type == "user" and _is_claude_display_command(text):
+                            continue
+                        if row_type == "user":
+                            user_turn_count += 1
+                            if not first_user_text:
+                                first_user_text = text
+                        else:
+                            assistant_turn_count += 1
+                            if not _is_claude_login_failed_text(text):
+                                assistant_all_login_failed = False
             except Exception as e:
                 logger.debug(f"[scan_claude_projects] 跳过文件 {fpath}：{e}")
                 continue
@@ -347,37 +589,36 @@ def _load_claude_project_sessions_from_dir(projects_dir: str) -> list[dict]:
                     "cwd": cwd,
                     "createdAt": created_at,
                     "sessionFile": fpath,
+                    "preview": preview,
+                    "entrypoints": entrypoints,
+                    "sessionFileCwd": cwd,
+                    "firstUserText": first_user_text,
+                    "userTurnCount": user_turn_count,
+                    "assistantTurnCount": assistant_turn_count,
+                    "assistantAllLoginFailed": assistant_all_login_failed,
                 }
             )
     return result
 
 
 def _load_claude_sessions(sessions_dir: Optional[str] = None) -> list[dict]:
-    stores: list[str] = []
     if sessions_dir is None:
-        stores = [
-            os.path.expanduser(CLAUDE_SESSIONS_DIR),
-            os.path.expanduser(CLAUDE_PROJECTS_DIR),
+        stores: list[tuple[str, str]] = [
+            ("legacy", os.path.expanduser(CLAUDE_SESSIONS_DIR)),
+            ("project", os.path.expanduser(CLAUDE_PROJECTS_DIR)),
         ]
     else:
-        stores = [os.path.expanduser(sessions_dir)]
+        explicit_store = os.path.expanduser(sessions_dir)
+        stores = [("legacy", explicit_store), ("project", explicit_store)]
 
     deduped: dict[str, dict] = {}
-    for store in stores:
-        for row in _load_legacy_claude_sessions_from_dir(store):
-            existing = deduped.get(row["id"])
-            if existing is None:
-                deduped[row["id"]] = dict(row)
-                continue
-            existing_created_at = int(existing.get("createdAt") or 0)
-            row_created_at = int(row.get("createdAt") or 0)
-            if existing_created_at and row_created_at:
-                existing["createdAt"] = min(existing_created_at, row_created_at)
-            else:
-                existing["createdAt"] = existing_created_at or row_created_at
-            if not existing.get("cwd") and row.get("cwd"):
-                existing["cwd"] = row["cwd"]
-        for row in _load_claude_project_sessions_from_dir(store):
+    for store_kind, store in stores:
+        if store_kind == "legacy":
+            rows = _load_legacy_claude_sessions_from_dir(store)
+        else:
+            rows = _load_claude_project_sessions_from_dir(store)
+
+        for row in rows:
             existing = deduped.get(row["id"])
             if existing is None:
                 deduped[row["id"]] = dict(row)
@@ -486,7 +727,7 @@ def _find_claude_project_session_file(
     session_id: str,
     sessions_dir: Optional[str] = None,
 ) -> Optional[str]:
-    for row in _load_claude_sessions(sessions_dir):
+    for row in _load_claude_sessions_cached(sessions_dir):
         if row.get("id") == session_id and row.get("sessionFile"):
             return row["sessionFile"]
 
@@ -594,12 +835,49 @@ def _collect_claude_session_entrypoints(session_file: Optional[str]) -> set[str]
     return entrypoints
 
 
-def _should_skip_claude_session_from_workspace_list(session_file: Optional[str]) -> bool:
-    session_file_cwd = _read_claude_project_session_cwd(session_file)
+def _should_skip_claude_session_from_workspace_list(
+    session_file: Optional[str],
+    session_info: Optional[dict] = None,
+) -> bool:
+    session_file_cwd = (
+        _normalize_claude_project_path((session_info or {}).get("sessionFileCwd"))
+        or _read_claude_project_session_cwd(session_file)
+    )
     if session_file_cwd and _is_claude_noise_workspace_path(session_file_cwd):
         return True
 
-    entrypoints = _collect_claude_session_entrypoints(session_file)
+    raw_entrypoints = (session_info or {}).get("entrypoints")
+    if isinstance(raw_entrypoints, set):
+        entrypoints = raw_entrypoints
+    elif isinstance(raw_entrypoints, (list, tuple)):
+        entrypoints = {str(item).strip() for item in raw_entrypoints if str(item).strip()}
+    else:
+        entrypoints = _collect_claude_session_entrypoints(session_file)
+
+    if session_info is not None and all(
+        key in session_info
+        for key in (
+            "firstUserText",
+            "userTurnCount",
+            "assistantTurnCount",
+            "assistantAllLoginFailed",
+        )
+    ):
+        user_turn_count = int(session_info.get("userTurnCount") or 0)
+        assistant_turn_count = int(session_info.get("assistantTurnCount") or 0)
+        if entrypoints == {"cli"} and assistant_turn_count == 0:
+            return True
+        if user_turn_count + assistant_turn_count == 0:
+            return False
+        if assistant_turn_count == 0:
+            return False
+        if user_turn_count > 1:
+            return False
+        user_prompt = str(session_info.get("firstUserText") or "").strip()
+        if _is_claude_smoke_prompt_text(user_prompt):
+            return True
+        return bool(session_info.get("assistantAllLoginFailed"))
+
     turns = _read_claude_project_turns(session_file)
     assistant_turns = [turn for turn in turns if turn.get("role") == "assistant"]
     if entrypoints == {"cli"} and not assistant_turns:
@@ -624,46 +902,24 @@ def scan_claude_session_cwds(
     sessions_dir: Optional[str] = None,
     history_path: Optional[str] = None,
 ) -> list[dict]:
-    session_rows = _load_claude_sessions(sessions_dir)
-    history_index = _build_claude_history_index(history_path)
-    if not session_rows and not history_index:
+    thread_snapshot = _load_claude_thread_snapshot(sessions_dir, history_path)
+    if not thread_snapshot:
         return []
 
-    session_by_id = {row["id"]: row for row in session_rows}
-    all_session_ids = set(session_by_id.keys()) | set(history_index.keys())
-
     cwd_stats: dict[str, dict] = {}
-    for session_id in all_session_ids:
-        row = session_by_id.get(session_id)
-        history_info = history_index.get(session_id, {})
-        cwd = _normalize_claude_project_path(history_info.get("project")) or (
-            row["cwd"] if row else ""
+    for cwd, threads in thread_snapshot.items():
+        if not cwd or not threads:
+            continue
+        latest = max(
+            max(int(thread.get("createdAt") or 0), int(thread.get("updatedAt") or 0))
+            for thread in threads
         )
-        if not cwd:
-            continue
-        if _is_claude_noise_workspace_path(cwd):
-            continue
-        if row is None and not history_info.get("preview"):
-            continue
-        if row and _should_skip_claude_session_from_workspace_list(row.get("sessionFile")):
-            continue
-        created_at = int((row or {}).get("createdAt") or 0) or int(history_info.get("updatedAt") or 0)
-        updated_at = int(history_info.get("updatedAt") or 0) or created_at
-        stat = cwd_stats.setdefault(
-            cwd,
-            {
-                "path": cwd,
-                "name": os.path.basename(cwd),
-                "thread_count": 0,
-                "_latest_created_at": 0,
-            },
-        )
-        stat["thread_count"] += 1
-        stat["_latest_created_at"] = max(
-            stat["_latest_created_at"],
-            created_at,
-            updated_at,
-        )
+        cwd_stats[cwd] = {
+            "path": cwd,
+            "name": os.path.basename(cwd),
+            "thread_count": len(threads),
+            "_latest_created_at": latest,
+        }
 
     result = list(cwd_stats.values())
     result.sort(
@@ -685,49 +941,9 @@ def list_claude_threads_by_cwd(
     history_path: Optional[str] = None,
     limit: int = 20,
 ) -> list[dict]:
-    session_rows = _load_claude_sessions(sessions_dir)
-    history_index = _build_claude_history_index(history_path)
-    session_by_id = {row["id"]: row for row in session_rows}
-    all_session_ids = set(session_by_id.keys()) | set(history_index.keys())
-
-    result: list[dict] = []
-    for session_id in all_session_ids:
-        row = session_by_id.get(session_id)
-        history_info = history_index.get(session_id, {})
-        logical_cwd = _normalize_claude_project_path(history_info.get("project")) or (
-            row["cwd"] if row else ""
-        )
-        if logical_cwd != cwd:
-            continue
-        if _is_claude_noise_workspace_path(logical_cwd):
-            continue
-        if row and _should_skip_claude_session_from_workspace_list(row.get("sessionFile")):
-            continue
-        preview = history_info.get("preview")
-        if not preview and row and row.get("sessionFile"):
-            preview = _read_claude_project_session_preview(row.get("sessionFile"))
-        if row is None and not preview:
-            continue
-        created_at = int((row or {}).get("createdAt") or 0) or int(history_info.get("updatedAt") or 0)
-        updated_at = int(history_info.get("updatedAt") or 0) or created_at
-        result.append(
-            {
-                "id": session_id,
-                "preview": preview,
-                "createdAt": created_at,
-                "updatedAt": updated_at,
-            }
-        )
-
-    result.sort(
-        key=lambda item: (
-            int(item.get("createdAt") or 0),
-            int(item.get("updatedAt") or 0),
-            str(item.get("id") or ""),
-        ),
-        reverse=True,
-    )
-    return result[:limit]
+    thread_snapshot = _load_claude_thread_snapshot(sessions_dir, history_path)
+    result = thread_snapshot.get(cwd, [])
+    return [dict(item) for item in result[:limit]]
 
 
 def read_claude_thread_history(
@@ -763,18 +979,43 @@ def query_claude_active_session_ids(
     sessions_dir: Optional[str] = None,
     history_path: Optional[str] = None,
 ) -> set[str]:
-    history_index = _build_claude_history_index(history_path)
+    thread_snapshot = _load_claude_thread_snapshot(sessions_dir, history_path)
     return {
-        row["id"]
-        for row in _load_claude_sessions(sessions_dir)
-        if (
-            _normalize_claude_project_path(history_index.get(row["id"], {}).get("project"))
-            or row["cwd"]
-        )
-        == workspace_path
-        and not _is_claude_noise_workspace_path(
-            _normalize_claude_project_path(history_index.get(row["id"], {}).get("project"))
-            or row["cwd"]
-        )
-        and not _should_skip_claude_session_from_workspace_list(row.get("sessionFile"))
+        item["id"]
+        for item in thread_snapshot.get(workspace_path, [])
     }
+
+
+def query_claude_running_session_ids(
+    workspace_path: str,
+    sessions_dir: Optional[str] = None,
+    history_path: Optional[str] = None,
+) -> set[str]:
+    from plugins.providers.builtin.claude.python.adapter import inspect_claude_thread_busy_state
+
+    session_rows, history_index = _load_claude_storage_snapshot(sessions_dir, history_path)
+    running_ids: set[str] = set()
+    for row in session_rows:
+        session_id = str(row.get("id") or "").strip()
+        if not session_id:
+            continue
+        history_info = history_index.get(session_id, {})
+        logical_cwd = _normalize_claude_project_path(history_info.get("project")) or str(
+            row.get("cwd") or ""
+        )
+        if logical_cwd != workspace_path:
+            continue
+        if _is_claude_noise_workspace_path(logical_cwd):
+            continue
+        if _should_skip_claude_session_from_workspace_list(row.get("sessionFile"), row):
+            continue
+        session_file = str(row.get("sessionFile") or "").strip()
+        if not session_id or not session_file:
+            continue
+        try:
+            activity = inspect_claude_thread_busy_state(session_file)
+        except Exception:
+            continue
+        if isinstance(activity, dict) and activity.get("busy") is True:
+            running_ids.add(session_id)
+    return running_ids

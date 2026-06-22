@@ -63,7 +63,7 @@ test("session browser exposes provider-backed archive actions from visible and c
   assert.match(workspaceActions, /role="menuitem"/);
   assert.match(terminalCommands, /pub async fn open_finder\(workspace_path: String\) -> Result<\(\), String>/);
   assert.match(terminalCommands, /\.args\(\["-a", "Finder", normalized_workspace\]\)/);
-  assert.match(tauriLib, /use commands::terminal::\{open_codex_tui_host_terminal, open_finder, open_terminal\};/);
+  assert.match(tauriLib, /open_provider_tui_host_terminal/);
   assert.match(tauriLib, /open_finder,/);
 });
 

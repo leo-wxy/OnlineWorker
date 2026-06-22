@@ -373,7 +373,7 @@ async def ensure_codex_tui_host_bound(
             thread_id=thread_id,
             cwd=ws.path,
             remote_url=remote_url,
-            codex_bin=tool_cfg.codex_bin,
+            codex_bin=tool_cfg.bin,
         )
         await host.start()
         codex_state.set_tui_host(state, host)
@@ -403,7 +403,7 @@ async def _resolve_codex_ws_url(
         raise RuntimeError("codex TUI 模式未检测到 shared app-server，拒绝在 bridge 路径自启第二个实例")
 
     proc = AppServerProcess(
-        codex_bin=tool_cfg.codex_bin,
+        codex_bin=tool_cfg.bin,
         port=port,
         protocol="ws",
     )

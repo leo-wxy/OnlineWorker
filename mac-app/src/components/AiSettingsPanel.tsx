@@ -12,7 +12,6 @@ import { AiServiceEditor } from "./ai-settings/AiServiceEditor";
 import { AiSettingsSidebar } from "./ai-settings/AiSettingsSidebar";
 import type { AiView } from "./ai-settings/utils";
 import {
-  BUILTIN_SERVICE_IDS,
   scenariosForSave,
   serviceForSave,
   servicesForSave,
@@ -141,7 +140,8 @@ export function AiSettingsPanel() {
   };
 
   const deleteService = (serviceId: string) => {
-    if (BUILTIN_SERVICE_IDS.includes(serviceId)) {
+    const service = metadata.services.find((item) => item.id === serviceId);
+    if (service?.pluginOwned) {
       return;
     }
     setMetadata((current) => {
@@ -154,7 +154,7 @@ export function AiSettingsPanel() {
         )),
       };
     });
-    setSelectedServiceId((current) => current === serviceId ? metadata.services[0]?.id || "openai_default" : current);
+    setSelectedServiceId((current) => current === serviceId ? metadata.services[0]?.id || "" : current);
     setSaved(false);
   };
 

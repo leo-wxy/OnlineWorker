@@ -4,6 +4,7 @@ export interface SetupCliTool {
   name: string;
   label?: string;
   bin: string;
+  install?: ProviderMetadata["install"] | null;
 }
 
 export interface CliInstallStep {
@@ -30,5 +31,6 @@ export function buildSetupCliToolsFromProviderMetadata(
 export function getCliInstallInfo(
   toolName: string,
   bin: string,
-  texts: CliCheckerTexts
+  texts: CliCheckerTexts,
+  install?: ProviderMetadata["install"] | null
 ): CliInstallInfo;

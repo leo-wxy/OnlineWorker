@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,12 @@ class ProviderFactsHooks:
     list_threads: Callable
     read_thread_history: Callable
     query_active_thread_ids: Callable
+    list_sessions: Optional[Callable] = None
+    query_running_thread_ids: Optional[Callable] = None
     list_subagent_thread_ids: Optional[Callable] = None
+    include_state_only_thread: Optional[Callable] = None
+    thread_list_is_authoritative: bool = False
+    preserve_archived_threads: bool = False
 
 
 @dataclass(frozen=True)
@@ -44,6 +49,7 @@ class ProviderInteractionHooks:
     reply_question: Optional[Callable] = None
     parse_approval_request: Optional[Callable] = None
     parse_question_request: Optional[Callable] = None
+    handle_approval_callback: Optional[Callable] = None
     server_request_methods: tuple[str, ...] = ()
 
 
@@ -110,6 +116,18 @@ class ProviderMetadata:
 
 
 @dataclass(frozen=True)
+class ProviderConfigNormalizationResult:
+    raw: dict[str, Any]
+    persist: bool = False
+
+
+@dataclass(frozen=True)
+class ProviderDocumentNormalizationResult:
+    document: dict[str, Any]
+    persist: bool = False
+
+
+@dataclass(frozen=True)
 class ProviderCommandHooks:
     build_thread_command_wrapper: Optional[Callable] = None
     refresh_thread_command_wrapper: Optional[Callable] = None
@@ -121,6 +139,9 @@ class ProviderWorkspaceHooks:
     normalize_server_threads: Optional[Callable] = None
     on_workspace_opened: Optional[Callable] = None
     list_local_threads: Optional[Callable] = None
+    sync_existing_thread_history: Optional[Callable] = None
+    prefer_provider_thread_overview: bool = False
+    thread_control_intro_extra: Optional[Callable] = None
 
 
 @dataclass(frozen=True)
@@ -131,6 +152,7 @@ class ProviderThreadHooks:
     activate_new_thread: Optional[Callable] = None
     archive_thread: Optional[Callable] = None
     interrupt_thread: Optional[Callable] = None
+    interrupt_supported: Optional[Callable] = None
 
 
 @dataclass(frozen=True)
@@ -150,6 +172,7 @@ class ProviderRuntimeHooks:
 class ProviderSessionEventHooks:
     parse_semantic_event: Optional[Callable] = None
     should_materialize_unbound_thread_topic: Optional[Callable] = None
+    completed_agent_message_is_final_by_default: bool = True
 
 
 @dataclass(frozen=True)

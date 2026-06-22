@@ -1,5 +1,3 @@
-const PRIMARY_PROVIDER_IDS = ["codex", "claude"];
-
 function toProviderSetting(provider) {
   const setting = {
     id: provider.id,
@@ -13,22 +11,19 @@ function toProviderSetting(provider) {
   return setting;
 }
 
-export function primaryProviderSettings(providers) {
-  const byId = new Map(
-    (providers ?? [])
-      .filter((provider) => provider?.visible === true && provider?.id)
-      .map((provider) => [provider.id, provider])
-  );
+function isPublicProvider(provider) {
+  return provider?.visibility === "public";
+}
 
-  return PRIMARY_PROVIDER_IDS
-    .map((id) => byId.get(id))
-    .filter(Boolean)
+export function primaryProviderSettings(providers) {
+  return (providers ?? [])
+    .filter((provider) => provider?.visible === true && isPublicProvider(provider))
     .map(toProviderSetting);
 }
 
 export function extensionProviderSettings(providers) {
   return (providers ?? [])
     .filter((provider) => provider?.id)
-    .filter((provider) => !PRIMARY_PROVIDER_IDS.includes(provider.id))
+    .filter((provider) => !isPublicProvider(provider))
     .map(toProviderSetting);
 }

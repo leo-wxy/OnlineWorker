@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import main
 from core.state import AppState
@@ -82,7 +83,15 @@ def test_main_registers_unified_slash_handler_before_plain_text(monkeypatch):
     monkeypatch.setattr(main, "MessageHandler", lambda *args, **kwargs: ("message",))
     monkeypatch.setattr(main, "CallbackQueryHandler", lambda *args, **kwargs: ("callback",))
     monkeypatch.setattr(main, "TypeHandler", lambda *args, **kwargs: ("typehandler",))
-    monkeypatch.setattr(main, "LifecycleManager", lambda *args, **kwargs: SimpleNamespace(post_init=None, post_shutdown=None))
+    monkeypatch.setattr(
+        main,
+        "LifecycleManager",
+        lambda *args, **kwargs: SimpleNamespace(
+            post_init=None,
+            post_shutdown=None,
+            pre_telegram_init=AsyncMock(),
+        ),
+    )
 
     for factory_name in (
         "make_start_handler",
@@ -153,7 +162,15 @@ def test_main_registers_long_running_message_handlers_as_non_blocking(monkeypatc
     monkeypatch.setattr(main, "MessageHandler", fake_message_handler)
     monkeypatch.setattr(main, "CallbackQueryHandler", lambda *args, **kwargs: ("callback", kwargs))
     monkeypatch.setattr(main, "TypeHandler", lambda *args, **kwargs: ("typehandler", kwargs))
-    monkeypatch.setattr(main, "LifecycleManager", lambda *args, **kwargs: SimpleNamespace(post_init=None, post_shutdown=None))
+    monkeypatch.setattr(
+        main,
+        "LifecycleManager",
+        lambda *args, **kwargs: SimpleNamespace(
+            post_init=None,
+            post_shutdown=None,
+            pre_telegram_init=AsyncMock(),
+        ),
+    )
 
     for factory_name in (
         "make_start_handler",

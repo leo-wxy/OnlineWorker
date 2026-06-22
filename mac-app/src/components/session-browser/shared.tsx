@@ -395,24 +395,32 @@ export function SessionMessages({
   minHeight?: boolean;
 }) {
   const replyWatchText = getReplyWatchText(replyWatchState, labels);
+  const showLoadingPanel = loading && messages.length === 0;
+  const showErrorPanel = Boolean(error) && messages.length === 0;
+  const showEmptyPanel = !loading && !error && messages.length === 0;
 
   return (
     <div className={`chat-bg ${minHeight ? "min-h-0 " : ""}flex-1 overflow-y-auto px-5 py-5`}>
       <div className="mx-auto flex max-w-4xl flex-col gap-6">
-        {loading ? (
+        {showLoadingPanel ? (
           <StatePanel message={labels.loading} />
-        ) : error ? (
-          <StatePanel message={error} tone="error" />
-        ) : messages.length === 0 ? (
+        ) : showErrorPanel ? (
+          <StatePanel message={error ?? labels.noMessages} tone="error" />
+        ) : showEmptyPanel ? (
           <StatePanel message={labels.noMessages} />
         ) : (
-          messages.map((turn, index) => (
-            <TurnBubble
-              key={`${turn.role}-${index}-${turn.content}`}
-              turn={turn}
-              assistantLabel={assistantLabel}
-            />
-          ))
+          <>
+            {error ? (
+              <p className="px-3 text-center text-xs text-amber-600">{error}</p>
+            ) : null}
+            {messages.map((turn, index) => (
+              <TurnBubble
+                key={`${turn.role}-${index}-${turn.content}`}
+                turn={turn}
+                assistantLabel={assistantLabel}
+              />
+            ))}
+          </>
         )}
         {replyWatchText && (
           <p className={`px-3 pb-1 text-center text-xs ${replyWatchState === "expired" ? "text-amber-600" : "text-slate-400"}`}>

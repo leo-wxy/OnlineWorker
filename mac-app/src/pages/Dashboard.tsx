@@ -28,7 +28,7 @@ export function Dashboard({ onOpenLogs, onOpenSetup, onOpenSessions }: Props) {
     refresh,
     providers,
     serviceControlStatus,
-    canOpenCodexTuiHost,
+    canOpenProviderTuiHost,
   } = useDashboardState();
   const [savingProviderId, setSavingProviderId] = useState<string | null>(null);
   const [serviceAction, setServiceAction] = useState<ServiceAction | null>(null);
@@ -84,20 +84,22 @@ export function Dashboard({ onOpenLogs, onOpenSetup, onOpenSessions }: Props) {
     }
   };
 
-  const handleOpenCodexTuiHost = async () => {
+  const handleOpenProviderTuiHost = async () => {
     const activity = dashboardState?.recentActivity;
+    const providerId = activity?.activeSessionTool?.trim();
     const workspacePath = activity?.activeWorkspacePath?.trim();
     const threadId = activity?.activeSessionId?.trim();
-    if (!workspacePath || !threadId) {
+    if (!providerId || !workspacePath || !threadId) {
       return;
     }
     try {
-      await invoke("open_codex_tui_host_terminal", {
+      await invoke("open_provider_tui_host_terminal", {
+        providerId,
         workspacePath,
         threadId,
       });
     } catch (err) {
-      console.error("Open codex TUI host terminal error:", err);
+      console.error("Open provider TUI host terminal error:", err);
       alert(String(err));
     }
   };
@@ -120,9 +122,9 @@ export function Dashboard({ onOpenLogs, onOpenSetup, onOpenSessions }: Props) {
         <div className="space-y-6">
           <DashboardSidebar
             dashboardState={dashboardState}
-            canOpenCodexTuiHost={canOpenCodexTuiHost}
+            canOpenProviderTuiHost={canOpenProviderTuiHost}
             texts={t}
-            onOpenCodexTuiHost={() => void handleOpenCodexTuiHost()}
+            onOpenProviderTuiHost={() => void handleOpenProviderTuiHost()}
             onOpenLogs={onOpenLogs}
             onOpenSetup={onOpenSetup}
             onOpenSessions={onOpenSessions}

@@ -14,6 +14,7 @@ from core.messages.publishing import (
 from core.user_messages.contracts import UserMessageSendRequest
 from core.user_messages.gateway import prepare_user_message_text
 from plugins.providers.builtin.codex.python.adapter import DEFAULT_APPROVALS_REVIEWER
+from plugins.providers.builtin.codex.python.errors import is_codex_unmaterialized_error
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
 
 
@@ -117,8 +118,6 @@ async def _send_on_thread(
     approvals_reviewer=None,
     sandbox_policy=None,
 ):
-    from bot.handlers.common import is_codex_unmaterialized_error
-
     try:
         await adapter.resume_thread(workspace_id, thread_id)
     except Exception as exc:
@@ -243,8 +242,6 @@ class CodexOwnerBridge:
             await writer.wait_closed()
 
     async def _handle_send_message(self, request: dict) -> dict:
-        from bot.handlers.common import is_codex_unmaterialized_error
-
         thread_id = str(request.get("thread_id") or "").strip()
         text = str(request.get("text") or "").strip()
         cwd = str(request.get("cwd") or "").strip()

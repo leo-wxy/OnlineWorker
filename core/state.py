@@ -372,6 +372,10 @@ class AppState:
             return None
         if self.storage and workspace_id in self.storage.workspaces:
             return self.storage.workspaces[workspace_id].tool
+        if self.storage:
+            for ws in self.storage.workspaces.values():
+                if ws.daemon_workspace_id == workspace_id:
+                    return ws.tool or None
         prefix, _, _ = workspace_id.partition(":")
         if prefix and get_provider(prefix) is not None:
             return prefix
