@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from config import get_data_dir, load_config
+from config import get_data_dir, load_config, load_provider_runtime_config
 from core.providers.overlay import iter_overlay_manifest_paths, load_manifest
 from core.providers.registry import get_provider
 from core.storage import AppStorage, ThreadInfo, WorkspaceInfo
@@ -258,29 +258,73 @@ def _message_gateway_state():
     return SimpleNamespace(config=config)
 
 
-async def _provider_session_adapter(descriptor, provider_id: str):
+def _metadata_tool_cfg(descriptor, provider_id: str):
     metadata = getattr(descriptor, "metadata", None)
     bin_value = ""
     app_server_port = 0
+    app_server_url = ""
     transport_kind = ""
     owner_transport = ""
     live_transport = ""
+    control_mode = "app"
     if metadata is not None:
         bin_value = str(getattr(metadata, "bin", "") or "").strip()
         owner_transport = str(getattr(metadata, "owner_transport", "") or "").strip()
         live_transport = str(getattr(metadata, "live_transport", "") or "").strip()
+        control_mode = str(getattr(metadata, "control_mode", "") or "").strip() or "app"
         transport = getattr(metadata, "transport", None)
         if transport is not None:
             app_server_port = int(getattr(transport, "app_server_port", 0) or 0)
+            app_server_url = str(getattr(transport, "app_server_url", "") or "").strip()
             transport_kind = str(getattr(transport, "type", "") or "").strip()
 
+    return SimpleNamespace(
+        name=provider_id,
+        bin=bin_value or provider_id,
+        auth={},
+        external_cli={},
+        launch_methods=[],
+        app_server_port=app_server_port,
+        app_server_url=app_server_url,
+        protocol=transport_kind,
+        owner_transport=owner_transport or transport_kind,
+        live_transport=live_transport or transport_kind,
+        control_mode=control_mode,
+    )
+
+
+def _runtime_config_and_tool_cfg(descriptor, provider_id: str):
+    data_dir = get_data_dir()
+    try:
+        config = load_provider_runtime_config(provider_id, data_dir=data_dir)
+    except FileNotFoundError:
+        config = SimpleNamespace(data_dir=data_dir)
+
+    if not hasattr(config, "data_dir"):
+        config.data_dir = data_dir
+
+    get_provider_config = getattr(config, "get_provider", None)
+    configured_tool = get_provider_config(provider_id) if callable(get_provider_config) else None
+    if configured_tool is None:
+        get_tool = getattr(config, "get_tool", None)
+        configured_tool = get_tool(provider_id) if callable(get_tool) else None
+    if configured_tool is not None:
+        return config, configured_tool
+
+    return config, _metadata_tool_cfg(descriptor, provider_id)
+
+
+async def _provider_session_adapter(descriptor, provider_id: str):
     runtime_hooks = getattr(descriptor, "runtime_hooks", None)
     if not callable(getattr(runtime_hooks, "start", None)):
         raise ValueError(f"Provider '{provider_id}' does not expose runtime start hooks")
+    config, tool_cfg = _runtime_config_and_tool_cfg(descriptor, provider_id)
 
     class _State:
         def __init__(self):
+            self.config = config
             self.adapters: dict[str, Any] = {}
+            self.app_server_proc = None
 
         def set_adapter(self, tool_name: str, adapter_obj) -> None:
             if adapter_obj is None:
@@ -294,21 +338,54 @@ async def _provider_session_adapter(descriptor, provider_id: str):
     class _Manager:
         def __init__(self):
             self.state = _State()
-            self.storage = type("Storage", (), {"workspaces": {}})()
+            self.storage = AppStorage(workspaces={})
             self.gid = 0
+            self._tui_sync_tasks: dict[str, Any] = {}
+            self._tui_mirror_tasks: dict[str, Any] = {}
+            self._reconnect_tasks: dict[str, Any] = {}
+            self._reconnect_inflight: dict[str, bool] = {}
+            self._stale_recovery_tasks: dict[str, dict[str, Any]] = {}
 
-    tool_cfg = type(
-        "ToolCfg",
-        (),
-        {
-            "name": provider_id,
-            "bin": bin_value or provider_id,
-            "app_server_port": app_server_port,
-            "protocol": transport_kind,
-            "owner_transport": owner_transport or transport_kind,
-            "live_transport": live_transport or transport_kind,
-        },
-    )()
+        @staticmethod
+        def _set_task(tasks: dict[str, Any], provider: str, task) -> None:
+            if task is None:
+                tasks.pop(provider, None)
+            else:
+                tasks[provider] = task
+
+        def get_tui_sync_task(self, provider: str):
+            return self._tui_sync_tasks.get(provider)
+
+        def set_tui_sync_task(self, provider: str, task) -> None:
+            self._set_task(self._tui_sync_tasks, provider, task)
+
+        def get_tui_mirror_task(self, provider: str):
+            return self._tui_mirror_tasks.get(provider)
+
+        def set_tui_mirror_task(self, provider: str, task) -> None:
+            self._set_task(self._tui_mirror_tasks, provider, task)
+
+        def get_reconnect_task(self, provider: str):
+            return self._reconnect_tasks.get(provider)
+
+        def set_reconnect_task(self, provider: str, task) -> None:
+            self._set_task(self._reconnect_tasks, provider, task)
+
+        def get_reconnect_inflight(self, provider: str) -> bool:
+            return bool(self._reconnect_inflight.get(provider, False))
+
+        def is_reconnect_inflight(self, provider: str) -> bool:
+            return self.get_reconnect_inflight(provider)
+
+        def set_reconnect_inflight(self, provider: str, value: bool) -> None:
+            if value:
+                self._reconnect_inflight[provider] = True
+            else:
+                self._reconnect_inflight.pop(provider, None)
+
+        def get_stale_recovery_tasks(self, provider: str) -> dict[str, Any]:
+            return self._stale_recovery_tasks.setdefault(provider, {})
+
     manager = _Manager()
     await runtime_hooks.start(manager, bot=None, tool_cfg=tool_cfg)
     active_adapter = manager.state.get_adapter(provider_id)

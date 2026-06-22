@@ -257,6 +257,43 @@ providers:
     }
 
 
+def test_load_provider_runtime_config_skips_telegram_env_requirements(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        """
+schema_version: 2
+providers:
+  claude:
+    managed: true
+    bin: "company-launcher start"
+    auth:
+      auth_token: "token-123"
+    external_cli:
+      upstream_base_url: "https://upstream.example.test/anthropic"
+      model: "model-1"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
+    monkeypatch.delenv("ALLOWED_USER_ID", raising=False)
+    monkeypatch.delenv("GROUP_CHAT_ID", raising=False)
+
+    from config import load_provider_runtime_config
+
+    cfg = load_provider_runtime_config("claude", data_dir=str(tmp_path))
+    claude = cfg.get_provider("claude")
+
+    assert cfg.telegram_token == ""
+    assert cfg.group_chat_id == 0
+    assert claude is not None
+    assert claude.bin == "company-launcher start"
+    assert claude.auth == {
+        "auth_token": "token-123",
+        "base_url": "https://upstream.example.test/anthropic",
+        "model": "model-1",
+    }
+
+
 def test_load_config_reads_custom_notification_channel(tmp_path, monkeypatch):
     p = tmp_path / "config.yaml"
     p.write_text(

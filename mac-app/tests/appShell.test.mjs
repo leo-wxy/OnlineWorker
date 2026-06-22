@@ -115,6 +115,7 @@ test("session browser loads provider sessions only when the tab is active and ke
   assert.match(sessionBrowser, /\}, \[active, loadProvider, providerFilter, providerReloadTick\]\);/);
   assert.match(sessionBrowser, /if \(!active \|\| !openTarget \|\| openTarget\.providerId !== providerFilter\) \{\s*return;\s*\}/s);
   assert.match(sessionBrowser, /void loadProvider\(openTarget\.providerId, \{\s*force: true,\s*forceRefresh: true,\s*\}\);/s);
+  assert.match(sessionBrowser, /await loadProvider\(previousSession\.type, \{\s*force: true,\s*forceRefresh: true,\s*\}\);/s);
   assert.match(sessionBrowser, /acceptEmptySnapshot: true,/);
   assert.match(navigation, /loading = false/);
   assert.match(navigation, /\{loading \? \(\s*<StatePanel message=\{noSessionsLabel\} \/>/s);

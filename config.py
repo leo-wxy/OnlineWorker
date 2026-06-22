@@ -947,6 +947,133 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
         message_hooks=_message_hooks_from_raw(raw_message_hooks),
     )
 
+
+def _build_provider_configs_from_document(data: dict[str, Any]) -> tuple[
+    dict[str, ToolConfig],
+    dict[str, Any],
+    bool,
+]:
+    providers: dict[str, ToolConfig] = {}
+    raw_providers = data.get("providers")
+    provider_document_changed = False
+    normalized_raw_providers: dict[str, Any] = {}
+
+    if isinstance(raw_providers, dict) and raw_providers:
+        for provider_name, provider_raw in raw_providers.items():
+            normalized_name = str(provider_name or "").strip()
+            if not normalized_name:
+                continue
+            normalized_raw, changed = _normalize_provider_raw(
+                normalized_name,
+                provider_raw if isinstance(provider_raw, dict) else {},
+                legacy=False,
+            )
+            normalized_raw_providers[normalized_name] = normalized_raw
+            provider_document_changed = provider_document_changed or changed
+        provider_raw_map = _public_default_provider_raw()
+        provider_raw_map = _merge_provider_raw(provider_raw_map, _load_provider_overlay())
+        provider_raw_map = _merge_provider_raw(provider_raw_map, normalized_raw_providers)
+        for provider_name, provider_raw in provider_raw_map.items():
+            if not provider_name:
+                continue
+            normalized_provider_raw, _ = _normalize_provider_raw(
+                str(provider_name),
+                provider_raw if isinstance(provider_raw, dict) else {},
+                legacy=False,
+            )
+            providers[provider_name] = _build_tool_config(
+                str(provider_name),
+                normalized_provider_raw,
+                legacy=False,
+            )
+    else:
+        for raw_tool in data.get("tools", []):
+            tool_name = str(raw_tool.get("name") or "").strip()
+            if not tool_name:
+                continue
+            normalized_raw, _ = _normalize_provider_raw(
+                tool_name,
+                raw_tool if isinstance(raw_tool, dict) else {},
+                legacy=True,
+            )
+            providers[tool_name] = _build_tool_config(tool_name, normalized_raw, legacy=True)
+        if not providers:
+            provider_raw_map = _public_default_provider_raw()
+            provider_raw_map = _merge_provider_raw(provider_raw_map, _load_provider_overlay())
+            for provider_name, provider_raw in provider_raw_map.items():
+                normalized_provider_raw, _ = _normalize_provider_raw(
+                    provider_name,
+                    provider_raw if isinstance(provider_raw, dict) else {},
+                    legacy=False,
+                )
+                providers[provider_name] = _build_tool_config(provider_name, normalized_provider_raw, legacy=False)
+        else:
+            overlay_raw = _load_provider_overlay()
+            if overlay_raw:
+                provider_raw_map = _merge_provider_raw({}, overlay_raw)
+                for provider_name, provider_raw in provider_raw_map.items():
+                    normalized_provider_raw, _ = _normalize_provider_raw(
+                        provider_name,
+                        provider_raw if isinstance(provider_raw, dict) else {},
+                        legacy=False,
+                    )
+                    providers[provider_name] = _build_tool_config(provider_name, normalized_provider_raw, legacy=False)
+
+    if isinstance(raw_providers, dict) and raw_providers:
+        _backfill_missing_public_providers(providers, include_managed_defaults=True)
+    elif providers:
+        _backfill_missing_public_providers(providers, include_managed_defaults=False)
+    else:
+        _backfill_missing_public_providers(providers, include_managed_defaults=True)
+
+    return providers, normalized_raw_providers, provider_document_changed
+
+
+def _ordered_tools_from_providers(providers: dict[str, ToolConfig]) -> list[ToolConfig]:
+    ordered_names = []
+    for name in _public_default_provider_ids():
+        if name in providers:
+            ordered_names.append(name)
+    for name in providers.keys():
+        if name not in ordered_names:
+            ordered_names.append(name)
+    return [providers[name] for name in ordered_names]
+
+
+def load_provider_runtime_config(provider_id: str, *, data_dir: str | None = None) -> Config:
+    """Load provider runtime config without requiring Telegram credentials."""
+    if data_dir is not None:
+        config_path = os.path.join(data_dir, "config.yaml")
+        env_path = os.path.join(data_dir, ".env")
+        _load_owned_env(env_path, override=True)
+    else:
+        config_path = DEFAULT_CONFIG_PATH
+
+    with open(config_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        data = {}
+    data, _document_changed = _normalize_config_document(data)
+    schema_version = int(data.get("schema_version") or (2 if "providers" in data else 1))
+    providers, _normalized_raw_providers, _provider_document_changed = _build_provider_configs_from_document(data)
+
+    normalized_provider_id = str(provider_id or "").strip()
+    if normalized_provider_id and normalized_provider_id in providers:
+        providers = {normalized_provider_id: providers[normalized_provider_id]}
+
+    return Config(
+        telegram_token="",
+        allowed_user_id=0,
+        group_chat_id=0,
+        log_level=(data.get("logging", {}) if isinstance(data.get("logging"), dict) else {}).get("level", "INFO"),
+        tools=_ordered_tools_from_providers(providers),
+        providers=providers,
+        data_dir=data_dir,
+        schema_version=schema_version,
+        message_hooks=_load_message_hooks(data),
+    )
+
+
 def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None) -> Config:
     """加载配置。
 
@@ -1028,87 +1155,9 @@ def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None)
         default=True,
     )
 
-    providers: dict[str, ToolConfig] = {}
-
     raw_providers = data.get("providers")
-    provider_document_changed = False
-    if isinstance(raw_providers, dict) and raw_providers:
-        normalized_raw_providers: dict[str, Any] = {}
-        for provider_name, provider_raw in raw_providers.items():
-            normalized_name = str(provider_name or "").strip()
-            if not normalized_name:
-                continue
-            normalized_raw, changed = _normalize_provider_raw(
-                normalized_name,
-                provider_raw if isinstance(provider_raw, dict) else {},
-                legacy=False,
-            )
-            normalized_raw_providers[normalized_name] = normalized_raw
-            provider_document_changed = provider_document_changed or changed
-        provider_raw_map = _public_default_provider_raw()
-        provider_raw_map = _merge_provider_raw(provider_raw_map, _load_provider_overlay())
-        provider_raw_map = _merge_provider_raw(provider_raw_map, normalized_raw_providers)
-        for provider_name, provider_raw in provider_raw_map.items():
-            if not provider_name:
-                continue
-            normalized_provider_raw, _ = _normalize_provider_raw(
-                str(provider_name),
-                provider_raw if isinstance(provider_raw, dict) else {},
-                legacy=False,
-            )
-            providers[provider_name] = _build_tool_config(
-                str(provider_name),
-                normalized_provider_raw,
-                legacy=False,
-            )
-    else:
-        for raw_tool in data.get("tools", []):
-            tool_name = str(raw_tool.get("name") or "").strip()
-            if not tool_name:
-                continue
-            normalized_raw, _ = _normalize_provider_raw(
-                tool_name,
-                raw_tool if isinstance(raw_tool, dict) else {},
-                legacy=True,
-            )
-            providers[tool_name] = _build_tool_config(tool_name, normalized_raw, legacy=True)
-        if not providers:
-            provider_raw_map = _public_default_provider_raw()
-            provider_raw_map = _merge_provider_raw(provider_raw_map, _load_provider_overlay())
-            for provider_name, provider_raw in provider_raw_map.items():
-                normalized_provider_raw, _ = _normalize_provider_raw(
-                    provider_name,
-                    provider_raw if isinstance(provider_raw, dict) else {},
-                    legacy=False,
-                )
-                providers[provider_name] = _build_tool_config(provider_name, normalized_provider_raw, legacy=False)
-        else:
-            overlay_raw = _load_provider_overlay()
-            if overlay_raw:
-                provider_raw_map = _merge_provider_raw({}, overlay_raw)
-                for provider_name, provider_raw in provider_raw_map.items():
-                    normalized_provider_raw, _ = _normalize_provider_raw(
-                        provider_name,
-                        provider_raw if isinstance(provider_raw, dict) else {},
-                        legacy=False,
-                    )
-                    providers[provider_name] = _build_tool_config(provider_name, normalized_provider_raw, legacy=False)
-
-    if isinstance(raw_providers, dict) and raw_providers:
-        _backfill_missing_public_providers(providers, include_managed_defaults=True)
-    elif providers:
-        _backfill_missing_public_providers(providers, include_managed_defaults=False)
-    else:
-        _backfill_missing_public_providers(providers, include_managed_defaults=True)
-
-    ordered_names = []
-    for name in _public_default_provider_ids():
-        if name in providers:
-            ordered_names.append(name)
-    for name in providers.keys():
-        if name not in ordered_names:
-            ordered_names.append(name)
-    tools = [providers[name] for name in ordered_names]
+    providers, normalized_raw_providers, provider_document_changed = _build_provider_configs_from_document(data)
+    tools = _ordered_tools_from_providers(providers)
     if data_dir is not None:
         should_persist = False
         if isinstance(raw_providers, dict) and raw_providers and provider_document_changed:

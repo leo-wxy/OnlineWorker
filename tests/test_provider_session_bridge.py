@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from core import provider_session_bridge as bridge
 
 
@@ -604,6 +606,225 @@ def test_send_provider_session_message_uses_generic_runtime_start_hook(monkeypat
             "port": 0,
             "protocol": "http",
         },
+    }
+
+
+def test_provider_session_adapter_uses_configured_runtime_context(monkeypatch, tmp_path):
+    import asyncio
+
+    captured = {}
+    config = SimpleNamespace(
+        data_dir=str(tmp_path),
+        get_tool=lambda provider_id: SimpleNamespace(
+            name=provider_id,
+            bin="configured-launcher",
+            auth={"auth_token": "token-123"},
+            external_cli={
+                "auth_token": "token-123",
+                "upstream_base_url": "https://upstream.example.test",
+                "model": "model-1",
+            },
+            launch_methods=[{"id": "primary", "bin": "configured-launcher"}],
+            app_server_port=4567,
+            app_server_url="unix:///tmp/configured.sock",
+            protocol="unix",
+            owner_transport="unix",
+            live_transport="shared_unix",
+            control_mode="hybrid",
+        ),
+    )
+
+    class RuntimeHooks:
+        @staticmethod
+        async def start(manager, bot, tool_cfg):
+            task = object()
+            manager.set_tui_sync_task("overlay-tool", task)
+            captured["config_data_dir"] = manager.state.config.data_dir
+            captured["tool_cfg"] = {
+                "name": tool_cfg.name,
+                "bin": tool_cfg.bin,
+                "auth": tool_cfg.auth,
+                "external_cli": tool_cfg.external_cli,
+                "launch_methods": tool_cfg.launch_methods,
+                "app_server_port": tool_cfg.app_server_port,
+                "app_server_url": tool_cfg.app_server_url,
+                "protocol": tool_cfg.protocol,
+                "owner_transport": tool_cfg.owner_transport,
+                "live_transport": tool_cfg.live_transport,
+                "control_mode": tool_cfg.control_mode,
+            }
+            captured["task_accessor"] = manager.get_tui_sync_task("overlay-tool") is task
+            manager.state.set_adapter(tool_cfg.name, {"provider_id": tool_cfg.name})
+
+    class Descriptor:
+        metadata = SimpleNamespace(
+            bin="metadata-bin",
+            transport=SimpleNamespace(app_server_port=0, type="http"),
+            owner_transport="http",
+            live_transport="http",
+        )
+        runtime_hooks = RuntimeHooks
+
+    monkeypatch.setattr(bridge, "get_data_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(bridge, "load_provider_runtime_config", lambda *args, **kwargs: config)
+
+    adapter = asyncio.run(bridge._provider_session_adapter(Descriptor(), "overlay-tool"))
+
+    assert adapter == {"provider_id": "overlay-tool"}
+    assert captured == {
+        "config_data_dir": str(tmp_path),
+        "tool_cfg": {
+            "name": "overlay-tool",
+            "bin": "configured-launcher",
+            "auth": {"auth_token": "token-123"},
+            "external_cli": {
+                "auth_token": "token-123",
+                "upstream_base_url": "https://upstream.example.test",
+                "model": "model-1",
+            },
+            "launch_methods": [{"id": "primary", "bin": "configured-launcher"}],
+            "app_server_port": 4567,
+            "app_server_url": "unix:///tmp/configured.sock",
+            "protocol": "unix",
+            "owner_transport": "unix",
+            "live_transport": "shared_unix",
+            "control_mode": "hybrid",
+        },
+        "task_accessor": True,
+    }
+
+
+def test_provider_session_adapter_uses_provider_config_without_telegram_env(monkeypatch, tmp_path):
+    import asyncio
+
+    captured = {}
+    (tmp_path / "config.yaml").write_text(
+        """
+schema_version: 2
+providers:
+  claude:
+    managed: true
+    autostart: false
+    bin: "configured-claude"
+    auth:
+      auth_token: "token-123"
+    external_cli:
+      auth_token: "token-123"
+      upstream_base_url: "https://upstream.example.test"
+      model: "model-1"
+    launch_methods:
+      - id: primary
+        bin: configured-claude
+    transport:
+      type: stdio
+logging:
+  level: "INFO"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    for key in ("TELEGRAM_TOKEN", "ALLOWED_USER_ID", "GROUP_CHAT_ID"):
+        monkeypatch.delenv(key, raising=False)
+
+    class RuntimeHooks:
+        @staticmethod
+        async def start(manager, bot, tool_cfg):
+            captured["config_data_dir"] = manager.state.config.data_dir
+            captured["tool_cfg"] = {
+                "name": tool_cfg.name,
+                "bin": tool_cfg.bin,
+                "auth": tool_cfg.auth,
+                "external_cli": tool_cfg.external_cli,
+                "launch_methods": tool_cfg.launch_methods,
+                "protocol": tool_cfg.protocol,
+            }
+            manager.state.set_adapter(tool_cfg.name, {"provider_id": tool_cfg.name})
+
+    class Descriptor:
+        metadata = SimpleNamespace(
+            bin="metadata-claude",
+            transport=SimpleNamespace(app_server_port=0, type="stdio"),
+            owner_transport="stdio",
+            live_transport="stdio",
+        )
+        runtime_hooks = RuntimeHooks
+
+    monkeypatch.setattr(bridge, "get_data_dir", lambda: str(tmp_path))
+
+    adapter = asyncio.run(bridge._provider_session_adapter(Descriptor(), "claude"))
+
+    assert adapter == {"provider_id": "claude"}
+    assert captured == {
+        "config_data_dir": str(tmp_path),
+        "tool_cfg": {
+            "name": "claude",
+            "bin": "configured-claude",
+            "auth": {
+                "auth_token": "token-123",
+                "base_url": "https://upstream.example.test",
+                "model": "model-1",
+            },
+            "external_cli": {
+                "auth_token": "token-123",
+                "upstream_base_url": "https://upstream.example.test",
+                "model": "model-1",
+            },
+            "launch_methods": [{"id": "primary", "label": "primary", "bin": "configured-claude"}],
+            "protocol": "stdio",
+        },
+    }
+
+
+def test_provider_session_adapter_exposes_lifecycle_reconnect_api(monkeypatch, tmp_path):
+    import asyncio
+
+    captured = {}
+    config = SimpleNamespace(
+        data_dir=str(tmp_path),
+        get_tool=lambda provider_id: SimpleNamespace(
+            name=provider_id,
+            bin="configured-launcher",
+            auth={},
+            external_cli={},
+            launch_methods=[],
+            app_server_port=0,
+            app_server_url="",
+            protocol="unix",
+            owner_transport="unix",
+            live_transport="shared_unix",
+            control_mode="app",
+        ),
+    )
+
+    class RuntimeHooks:
+        @staticmethod
+        async def start(manager, bot, tool_cfg):
+            captured["initial"] = manager.is_reconnect_inflight("codex")
+            manager.set_reconnect_inflight("codex", True)
+            captured["enabled"] = manager.is_reconnect_inflight("codex")
+            manager.set_reconnect_inflight("codex", False)
+            captured["disabled"] = manager.is_reconnect_inflight("codex")
+            manager.state.set_adapter(tool_cfg.name, {"provider_id": tool_cfg.name})
+
+    class Descriptor:
+        metadata = SimpleNamespace(
+            bin="metadata-codex",
+            transport=SimpleNamespace(app_server_port=0, type="unix"),
+            owner_transport="unix",
+            live_transport="shared_unix",
+        )
+        runtime_hooks = RuntimeHooks
+
+    monkeypatch.setattr(bridge, "get_data_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(bridge, "load_provider_runtime_config", lambda *args, **kwargs: config)
+
+    adapter = asyncio.run(bridge._provider_session_adapter(Descriptor(), "codex"))
+
+    assert adapter == {"provider_id": "codex"}
+    assert captured == {
+        "initial": False,
+        "enabled": True,
+        "disabled": False,
     }
 
 

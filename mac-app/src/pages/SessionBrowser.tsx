@@ -467,7 +467,10 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
       return;
     }
 
-    await loadProvider(previousSession.type, { force: true });
+    await loadProvider(previousSession.type, {
+      force: true,
+      forceRefresh: true,
+    });
     setSelectedWorkspace(previousSession.workspace || null);
     setSelectedSessionId(nextSessionId);
   }, [loadProvider]);
