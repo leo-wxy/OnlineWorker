@@ -42,6 +42,9 @@ Plans:
   - [ ] Remove duplicated Claude filtering from core.
   - [ ] Verify App/TG workspace parity for manual CLI sessions, managed sessions, smoke/login failures, and provider-private noise.
 
+Latest verification:
+- The current source cleanup follow-up keeps Phase 17 scoped to provider-owned summary surfaces while removing hotfix duplication: `config.py` now shares one loader skeleton for full app config and runtime-safe provider config; SessionBrowser and TaskBoard now share one session-derived preview sanitization helper; TaskBoard pinned/low-signal preview hydration now de-duplicates per-session last-message reads; and `provider_session_bridge.py` now uses one minimal runtime/archive stub builder. Focused checks passed: `node --test OnlineWorker/mac-app/tests/sessionBrowserState.test.mjs` -> `19 passed`, `node --test OnlineWorker/mac-app/tests/taskBoard.test.mjs` -> `29 passed`, `node --test OnlineWorker/mac-app/tests/appShell.test.mjs` -> `19 passed`, `python3 -m pytest OnlineWorker/tests/test_config.py -q` -> `48 passed`, `python3 -m pytest OnlineWorker/tests/test_provider_session_bridge.py -q` -> `24 passed`. Installed-app parity validation remains required before Phase 17 closure.
+
 Success Criteria (what must be TRUE):
   1. Core/Tauri no longer reads Claude project jsonl files directly for workspace or session list behavior.
   2. Claude-specific fields such as `entrypoint` are interpreted only by the Claude provider/plugin layer.
