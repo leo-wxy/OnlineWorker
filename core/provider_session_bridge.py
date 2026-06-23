@@ -314,79 +314,74 @@ def _runtime_config_and_tool_cfg(descriptor, provider_id: str):
     return config, _metadata_tool_cfg(descriptor, provider_id)
 
 
+def _attach_adapter_registry(state, *, adapters: dict[str, Any] | None = None):
+    state.adapters = dict(adapters or {})
+
+    def get_adapter(tool_name: str):
+        return state.adapters.get(tool_name)
+
+    def set_adapter(tool_name: str, adapter_obj) -> None:
+        if adapter_obj is None:
+            state.adapters.pop(tool_name, None)
+        else:
+            state.adapters[tool_name] = adapter_obj
+
+    state.get_adapter = get_adapter
+    state.set_adapter = set_adapter
+    return state
+
+
+def _build_runtime_manager_stub(config):
+    state = _attach_adapter_registry(
+        SimpleNamespace(
+            config=config,
+            app_server_proc=None,
+        )
+    )
+    manager = SimpleNamespace(
+        state=state,
+        storage=AppStorage(workspaces={}),
+        gid=0,
+        _tui_sync_tasks={},
+        _tui_mirror_tasks={},
+        _reconnect_tasks={},
+        _reconnect_inflight={},
+        _stale_recovery_tasks={},
+    )
+
+    def _set_task(tasks: dict[str, Any], provider: str, task) -> None:
+        if task is None:
+            tasks.pop(provider, None)
+        else:
+            tasks[provider] = task
+
+    manager.get_tui_sync_task = lambda provider: manager._tui_sync_tasks.get(provider)
+    manager.set_tui_sync_task = lambda provider, task: _set_task(manager._tui_sync_tasks, provider, task)
+    manager.get_tui_mirror_task = lambda provider: manager._tui_mirror_tasks.get(provider)
+    manager.set_tui_mirror_task = lambda provider, task: _set_task(manager._tui_mirror_tasks, provider, task)
+    manager.get_reconnect_task = lambda provider: manager._reconnect_tasks.get(provider)
+    manager.set_reconnect_task = lambda provider, task: _set_task(manager._reconnect_tasks, provider, task)
+    manager.get_reconnect_inflight = lambda provider: bool(manager._reconnect_inflight.get(provider, False))
+    manager.is_reconnect_inflight = manager.get_reconnect_inflight
+
+    def set_reconnect_inflight(provider: str, value: bool) -> None:
+        if value:
+            manager._reconnect_inflight[provider] = True
+        else:
+            manager._reconnect_inflight.pop(provider, None)
+
+    manager.set_reconnect_inflight = set_reconnect_inflight
+    manager.get_stale_recovery_tasks = lambda provider: manager._stale_recovery_tasks.setdefault(provider, {})
+    return manager
+
+
 async def _provider_session_adapter(descriptor, provider_id: str):
     runtime_hooks = getattr(descriptor, "runtime_hooks", None)
     if not callable(getattr(runtime_hooks, "start", None)):
         raise ValueError(f"Provider '{provider_id}' does not expose runtime start hooks")
     config, tool_cfg = _runtime_config_and_tool_cfg(descriptor, provider_id)
 
-    class _State:
-        def __init__(self):
-            self.config = config
-            self.adapters: dict[str, Any] = {}
-            self.app_server_proc = None
-
-        def set_adapter(self, tool_name: str, adapter_obj) -> None:
-            if adapter_obj is None:
-                self.adapters.pop(tool_name, None)
-            else:
-                self.adapters[tool_name] = adapter_obj
-
-        def get_adapter(self, tool_name: str):
-            return self.adapters.get(tool_name)
-
-    class _Manager:
-        def __init__(self):
-            self.state = _State()
-            self.storage = AppStorage(workspaces={})
-            self.gid = 0
-            self._tui_sync_tasks: dict[str, Any] = {}
-            self._tui_mirror_tasks: dict[str, Any] = {}
-            self._reconnect_tasks: dict[str, Any] = {}
-            self._reconnect_inflight: dict[str, bool] = {}
-            self._stale_recovery_tasks: dict[str, dict[str, Any]] = {}
-
-        @staticmethod
-        def _set_task(tasks: dict[str, Any], provider: str, task) -> None:
-            if task is None:
-                tasks.pop(provider, None)
-            else:
-                tasks[provider] = task
-
-        def get_tui_sync_task(self, provider: str):
-            return self._tui_sync_tasks.get(provider)
-
-        def set_tui_sync_task(self, provider: str, task) -> None:
-            self._set_task(self._tui_sync_tasks, provider, task)
-
-        def get_tui_mirror_task(self, provider: str):
-            return self._tui_mirror_tasks.get(provider)
-
-        def set_tui_mirror_task(self, provider: str, task) -> None:
-            self._set_task(self._tui_mirror_tasks, provider, task)
-
-        def get_reconnect_task(self, provider: str):
-            return self._reconnect_tasks.get(provider)
-
-        def set_reconnect_task(self, provider: str, task) -> None:
-            self._set_task(self._reconnect_tasks, provider, task)
-
-        def get_reconnect_inflight(self, provider: str) -> bool:
-            return bool(self._reconnect_inflight.get(provider, False))
-
-        def is_reconnect_inflight(self, provider: str) -> bool:
-            return self.get_reconnect_inflight(provider)
-
-        def set_reconnect_inflight(self, provider: str, value: bool) -> None:
-            if value:
-                self._reconnect_inflight[provider] = True
-            else:
-                self._reconnect_inflight.pop(provider, None)
-
-        def get_stale_recovery_tasks(self, provider: str) -> dict[str, Any]:
-            return self._stale_recovery_tasks.setdefault(provider, {})
-
-    manager = _Manager()
+    manager = _build_runtime_manager_stub(config)
     await runtime_hooks.start(manager, bot=None, tool_cfg=tool_cfg)
     active_adapter = manager.state.get_adapter(provider_id)
     if active_adapter is None:
@@ -427,23 +422,13 @@ def _bridge_state_for_archive(provider_id: str, session_id: str, workspace_path:
         threads={session_id: thread_info},
     )
     gateway_state = _message_gateway_state()
-    state = SimpleNamespace(
-        config=gateway_state.config if gateway_state is not None else None,
-        storage=AppStorage(workspaces={workspace_id: ws_info}),
+    state = _attach_adapter_registry(
+        SimpleNamespace(
+            config=gateway_state.config if gateway_state is not None else None,
+            storage=AppStorage(workspaces={workspace_id: ws_info}),
+        ),
         adapters={provider_id: adapter} if adapter is not None else {},
     )
-
-    def get_adapter(tool_name: str):
-        return state.adapters.get(tool_name)
-
-    def set_adapter(tool_name: str, adapter_obj) -> None:
-        if adapter_obj is None:
-            state.adapters.pop(tool_name, None)
-        else:
-            state.adapters[tool_name] = adapter_obj
-
-    state.get_adapter = get_adapter
-    state.set_adapter = set_adapter
     return state, ws_info
 
 

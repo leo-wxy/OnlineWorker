@@ -31,6 +31,15 @@ export interface TaskBoardSessionActivity {
   updatedAt: number;
 }
 
+export interface TaskBoardActivityStreamEvent {
+  kind: "snapshot" | "activity" | "remove" | "error";
+  activities?: TaskBoardSessionActivity[];
+  activity?: TaskBoardSessionActivity | null;
+  providerId?: string;
+  sessionId?: string;
+  error?: string | null;
+}
+
 export interface TaskBoardTask {
   id: string;
   sessionId: string;
@@ -66,6 +75,33 @@ export interface TaskBoardModel {
   };
   generatedAtEpochMs: number;
 }
+
+export function isLowSignalTaskBoardText(value: unknown): boolean;
+
+export function taskBoardActivityKey(activity: TaskBoardSessionActivity): string;
+
+export function taskBoardSessionKey(providerId: string, sessionId: string): string;
+
+export function upsertTaskBoardActivity(
+  activities: TaskBoardSessionActivity[],
+  activity: TaskBoardSessionActivity,
+): TaskBoardSessionActivity[];
+
+export function removeTaskBoardActivity(
+  activities: TaskBoardSessionActivity[],
+  providerId: string,
+  sessionId: string,
+): TaskBoardSessionActivity[];
+
+export function collectTaskBoardPreviewHydrationPlan(input?: {
+  sessions?: UnifiedSession[];
+  taskBoardState?: TaskBoardState | null;
+  pinnedLimit?: number;
+  lowSignalLimit?: number;
+}): {
+  keys: string[];
+  pinnedKeys: string[];
+};
 
 export function buildTaskBoardModel(input: {
   sessions: UnifiedSession[];

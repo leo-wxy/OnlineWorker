@@ -1,15 +1,8 @@
 import type { ProviderSessionMetadata } from "../../types";
 import type { ProviderFilter, UnifiedSession } from "./presentation";
-import { mergeSessionListSnapshot } from "../../utils/sessionBrowserState.js";
+import { cloneSessionEntry, mergeSessionListSnapshot } from "../../utils/sessionBrowserState.js";
 
 const providerSessionSnapshotCache = new Map<ProviderFilter, UnifiedSession[]>();
-
-function cloneSession(session: UnifiedSession): UnifiedSession {
-  return {
-    ...session,
-    raw: { ...(session.raw ?? {}) },
-  };
-}
 
 type GenericProviderSessionRaw = {
   id?: string;
@@ -71,7 +64,7 @@ export function mergeSessionSnapshotsByProvider(
 }
 
 export function readCachedProviderSessionSnapshot(provider: ProviderFilter): UnifiedSession[] {
-  return (providerSessionSnapshotCache.get(provider) ?? []).map(cloneSession);
+  return (providerSessionSnapshotCache.get(provider) ?? []).map(cloneSessionEntry);
 }
 
 export function readCachedProviderSessionSnapshotRows(providers?: ProviderFilter[]): UnifiedSession[] {
@@ -93,8 +86,8 @@ export function writeCachedProviderSessionSnapshot(
       preserveOnEmpty: options?.preserveOnEmpty === true,
     },
   );
-  providerSessionSnapshotCache.set(provider, merged.map(cloneSession));
-  return merged.map(cloneSession);
+  providerSessionSnapshotCache.set(provider, merged.map(cloneSessionEntry));
+  return merged.map(cloneSessionEntry);
 }
 
 export function providerSessionMetadataFromUnifiedSession(session: UnifiedSession): ProviderSessionMetadata {

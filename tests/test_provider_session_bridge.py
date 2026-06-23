@@ -775,6 +775,91 @@ logging:
     }
 
 
+def test_provider_session_adapter_reads_overlay_from_cwd_env(monkeypatch, tmp_path):
+    import asyncio
+    import config as config_module
+
+    captured = {}
+    (tmp_path / "config.yaml").write_text(
+        """
+schema_version: 2
+logging:
+  level: "INFO"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    overlay_path = tmp_path / "provider-overlay.yaml"
+    overlay_path.write_text(
+        """
+providers:
+  overlay-tool:
+    managed: true
+    bin: "overlay-launcher"
+    auth:
+      auth_token: "overlay-token"
+    external_cli:
+      upstream_base_url: "https://overlay.example.test"
+      model: "overlay-model"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".env").write_text(
+        f"ONLINEWORKER_PROVIDER_OVERLAY={overlay_path}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ONLINEWORKER_PROVIDER_OVERLAY", raising=False)
+    monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
+    monkeypatch.delenv("ALLOWED_USER_ID", raising=False)
+    monkeypatch.delenv("GROUP_CHAT_ID", raising=False)
+    monkeypatch.setattr(config_module, "_dotenv_loaded", False)
+
+    class RuntimeHooks:
+        @staticmethod
+        async def start(manager, bot, tool_cfg):
+            captured["config_data_dir"] = manager.state.config.data_dir
+            captured["tool_cfg"] = {
+                "name": tool_cfg.name,
+                "bin": tool_cfg.bin,
+                "auth": tool_cfg.auth,
+                "external_cli": tool_cfg.external_cli,
+            }
+            manager.state.set_adapter(tool_cfg.name, {"provider_id": tool_cfg.name})
+
+    class Descriptor:
+        metadata = SimpleNamespace(
+            bin="metadata-launcher",
+            transport=SimpleNamespace(app_server_port=0, type="stdio"),
+            owner_transport="stdio",
+            live_transport="stdio",
+        )
+        runtime_hooks = RuntimeHooks
+
+    monkeypatch.setattr(bridge, "get_data_dir", lambda: None)
+
+    adapter = asyncio.run(bridge._provider_session_adapter(Descriptor(), "overlay-tool"))
+
+    assert adapter == {"provider_id": "overlay-tool"}
+    assert captured == {
+        "config_data_dir": None,
+        "tool_cfg": {
+            "name": "overlay-tool",
+            "bin": "overlay-launcher",
+            "auth": {
+                "auth_token": "overlay-token",
+                "base_url": "https://overlay.example.test",
+                "model": "overlay-model",
+            },
+            "external_cli": {
+                "upstream_base_url": "https://overlay.example.test",
+                "model": "overlay-model",
+            },
+        },
+    }
+
+
 def test_provider_session_adapter_exposes_lifecycle_reconnect_api(monkeypatch, tmp_path):
     import asyncio
 

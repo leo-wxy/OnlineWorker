@@ -16,9 +16,15 @@ import { mergeSessionListSnapshot } from "../utils/sessionBrowserState.js";
 import { visibleSessionProviders } from "../utils/sessionProviders.js";
 import {
   buildTaskBoardModel,
+  collectTaskBoardPreviewHydrationPlan,
+  isLowSignalTaskBoardText,
+  removeTaskBoardActivity,
+  taskBoardSessionKey,
+  type TaskBoardActivityStreamEvent,
   type TaskBoardSessionActivity,
   type TaskBoardState,
   type TaskBoardTask,
+  upsertTaskBoardActivity,
 } from "../utils/taskBoard.js";
 import type {
   DashboardState,
@@ -48,62 +54,12 @@ const LOW_SIGNAL_PREVIEW_HYDRATION_LIMIT = 16;
 const SESSION_PREVIEW_HYDRATION_TIMEOUT_MS = 1200;
 const TASK_BOARD_ACTIVITY_REFRESH_TIMEOUT_MS = 1500;
 
-interface TaskBoardActivityStreamEvent {
-  kind: "snapshot" | "activity" | "remove" | "error";
-  activities?: TaskBoardSessionActivity[];
-  activity?: TaskBoardSessionActivity | null;
-  providerId?: string;
-  sessionId?: string;
-  error?: string | null;
-}
-
 interface RefreshOptions {
   includeActivities?: boolean;
   forceProviderRefresh?: boolean;
 }
 
 type TaskBoardApprovalAction = "exec_allow" | "exec_deny";
-
-function taskActivityKey(activity: TaskBoardSessionActivity) {
-  return `${activity.providerId}:${activity.sessionId}`;
-}
-
-function taskSessionKey(providerId: string, sessionId: string) {
-  return `${providerId}:${sessionId}`;
-}
-
-function normalizedBoardText(value: unknown) {
-  return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
-}
-
-function isLowSignalBoardText(value: unknown) {
-  const text = normalizedBoardText(value).toLowerCase();
-  if (!text) {
-    return true;
-  }
-  if (text.length <= 2) {
-    return true;
-  }
-  return ["ok", "done", "yes", "no", "test", "ping"].includes(text);
-}
-
-function upsertSessionActivity(
-  activities: TaskBoardSessionActivity[],
-  activity: TaskBoardSessionActivity,
-) {
-  const key = taskActivityKey(activity);
-  const next = activities.filter((item) => taskActivityKey(item) !== key);
-  next.unshift(activity);
-  return next;
-}
-
-function removeSessionActivity(
-  activities: TaskBoardSessionActivity[],
-  providerId: string,
-  sessionId: string,
-) {
-  return activities.filter((item) => item.providerId !== providerId || item.sessionId !== sessionId);
-}
 
 function formatRelativeTime(epochMs: number | null, nowMs: number, texts: ReturnType<typeof useI18n>["t"]) {
   if (!epochMs) {
@@ -186,53 +142,25 @@ async function withTimeout<T>(
   }
 }
 
-async function loadTaskBoardProviderSessions(
-  provider: ProviderMetadata,
-  workspaceFallback: string,
-  forceRefresh = false,
-): Promise<UnifiedSession[]> {
-  return normalizeGenericProviderSessions(
-    provider.id,
-    await fetchProviderSessions(provider.id, { forceRefresh }),
-    workspaceFallback,
-  );
-}
-
-function mergeTaskBoardSessions(previous: UnifiedSession[], next: UnifiedSession[]) {
-  return mergeSessionListSnapshot(previous, next);
-}
-
-async function hydratePinnedSessionPreviews(
+async function hydrateTaskBoardSessionPreviews(
   sessions: UnifiedSession[],
   taskBoardState: TaskBoardState,
 ) {
-  const pinnedKeys = new Set(
-    taskBoardState.pinned.map((item) => taskSessionKey(item.providerId, item.sessionId)),
-  );
-  if (pinnedKeys.size === 0) {
-    return hydrateLowSignalSessionPreviews(sessions);
+  const plan = collectTaskBoardPreviewHydrationPlan({
+    sessions,
+    taskBoardState,
+    pinnedLimit: PINNED_PREVIEW_HYDRATION_LIMIT,
+    lowSignalLimit: LOW_SIGNAL_PREVIEW_HYDRATION_LIMIT,
+  });
+  const hydrationKeys = new Set(plan.keys);
+  if (hydrationKeys.size === 0) {
+    return sessions;
   }
+  const pinnedKeys = new Set(plan.pinnedKeys);
 
-  const pinnedUpdatedAtByKey = new Map(
-    taskBoardState.pinned.map((item) => [
-      taskSessionKey(item.providerId, item.sessionId),
-      item.updatedAtEpoch ?? 0,
-    ]),
-  );
-  const pinnedCandidates = sessions
-    .filter((session) => pinnedKeys.has(taskSessionKey(session.type, session.id)))
-    .sort((left, right) => {
-      const leftUpdatedAt = pinnedUpdatedAtByKey.get(taskSessionKey(left.type, left.id)) ?? 0;
-      const rightUpdatedAt = pinnedUpdatedAtByKey.get(taskSessionKey(right.type, right.id)) ?? 0;
-      return rightUpdatedAt - leftUpdatedAt;
-    })
-    .slice(0, PINNED_PREVIEW_HYDRATION_LIMIT);
-  const hydrationKeys = new Set(
-    pinnedCandidates.map((session) => taskSessionKey(session.type, session.id)),
-  );
-
-  const hydrated = await Promise.all(sessions.map(async (session) => {
-    if (!hydrationKeys.has(taskSessionKey(session.type, session.id))) {
+  return Promise.all(sessions.map(async (session) => {
+    const key = taskBoardSessionKey(session.type, session.id);
+    if (!hydrationKeys.has(key)) {
       return session;
     }
     try {
@@ -240,50 +168,7 @@ async function hydratePinnedSessionPreviews(
       if (!lastMessage) {
         return session;
       }
-      return {
-        ...session,
-        raw: {
-          ...(session.raw ?? {}),
-          lastMessage,
-        },
-      };
-    } catch (lastMessageError) {
-      console.warn(`Failed to load pinned session preview for ${session.type}:${session.id}`, lastMessageError);
-      return session;
-    }
-  }));
-  return hydrateLowSignalSessionPreviews(hydrated);
-}
-
-async function hydrateLowSignalSessionPreviews(
-  sessions: UnifiedSession[],
-) {
-  const lowSignalCandidates = sessions
-    .filter((session) => {
-      const raw = session.raw ?? {};
-      const preview = raw.lastMessage ?? raw.last_message ?? raw.preview ?? raw.summary ?? "";
-      return isLowSignalBoardText(session.title) || isLowSignalBoardText(preview);
-    })
-    .sort((left, right) => {
-      const leftUpdatedAt = Number((left.raw as Record<string, unknown> | undefined)?.updatedAt ?? (left.raw as Record<string, unknown> | undefined)?.updated_at ?? 0);
-      const rightUpdatedAt = Number((right.raw as Record<string, unknown> | undefined)?.updatedAt ?? (right.raw as Record<string, unknown> | undefined)?.updated_at ?? 0);
-      return rightUpdatedAt - leftUpdatedAt;
-    })
-    .slice(0, LOW_SIGNAL_PREVIEW_HYDRATION_LIMIT);
-  const hydrationKeys = new Set(
-    lowSignalCandidates.map((session) => taskSessionKey(session.type, session.id)),
-  );
-  if (hydrationKeys.size === 0) {
-    return sessions;
-  }
-
-  return Promise.all(sessions.map(async (session) => {
-    if (!hydrationKeys.has(taskSessionKey(session.type, session.id))) {
-      return session;
-    }
-    try {
-      const lastMessage = await readSessionLastMessageWithTimeout(session);
-      if (!lastMessage || isLowSignalBoardText(lastMessage)) {
+      if (!pinnedKeys.has(key) && isLowSignalTaskBoardText(lastMessage)) {
         return session;
       }
       return {
@@ -294,7 +179,7 @@ async function hydrateLowSignalSessionPreviews(
         },
       };
     } catch (lastMessageError) {
-      console.warn(`Failed to load low-signal session preview for ${session.type}:${session.id}`, lastMessageError);
+      console.warn(`Failed to hydrate task board session preview for ${session.type}:${session.id}`, lastMessageError);
       return session;
     }
   }));
@@ -673,17 +558,17 @@ export function TaskBoard({
         visibleSessionProviders(nextProviders).map((provider) => provider.id),
       );
       if (cachedSessions.length > 0) {
-        setSessions((current) => mergeTaskBoardSessions(current, cachedSessions));
+        setSessions((current) => mergeSessionListSnapshot(current, cachedSessions));
       }
 
       const visibleProviders = visibleSessionProviders(nextProviders) as ProviderMetadata[];
       const sessionResults = await Promise.all(
         visibleProviders.map(async (provider) => {
           try {
-            const normalizedSessions = await loadTaskBoardProviderSessions(
-              provider,
+            const normalizedSessions = normalizeGenericProviderSessions(
+              provider.id,
+              await fetchProviderSessions(provider.id, { forceRefresh: forceProviderRefresh }),
               t.sessions.workspaceFallback,
-              forceProviderRefresh,
             );
             return writeCachedProviderSessionSnapshot(provider.id, normalizedSessions);
           } catch (sessionError) {
@@ -693,14 +578,14 @@ export function TaskBoard({
         }),
       );
       const flatSessions = sessionResults.flat();
-      setSessions((current) => mergeTaskBoardSessions(current, flatSessions));
+      setSessions((current) => mergeSessionListSnapshot(current, flatSessions));
       setNowMs(Date.now());
-      void hydratePinnedSessionPreviews(flatSessions, nextTaskBoardState)
+      void hydrateTaskBoardSessionPreviews(flatSessions, nextTaskBoardState)
         .then((hydratedSessions) => {
           if (refreshSequenceRef.current !== refreshSequence) {
             return;
           }
-          setSessions((current) => mergeTaskBoardSessions(current, hydratedSessions));
+          setSessions((current) => mergeSessionListSnapshot(current, hydratedSessions));
           setNowMs(Date.now());
         })
         .catch((hydrationError) => {
@@ -748,13 +633,13 @@ export function TaskBoard({
       }
       if (event.kind === "activity" && event.activity) {
         const activity = event.activity;
-        setLocalSessionActivities((current) => upsertSessionActivity(current, activity));
+        setLocalSessionActivities((current) => upsertTaskBoardActivity(current, activity));
         setNowMs(Date.now());
         setLoading(false);
         return;
       }
       if (event.kind === "remove" && event.providerId && event.sessionId) {
-        setLocalSessionActivities((current) => removeSessionActivity(current, event.providerId!, event.sessionId!));
+        setLocalSessionActivities((current) => removeTaskBoardActivity(current, event.providerId!, event.sessionId!));
         setNowMs(Date.now());
         setLoading(false);
         return;

@@ -19,7 +19,12 @@ import {
   UsageBrowser,
 } from "./pages";
 import type { TaskBoardOpenSessionTarget } from "./pages";
-import type { TaskBoardSessionActivity } from "./utils/taskBoard.js";
+import {
+  upsertTaskBoardActivity,
+  removeTaskBoardActivity,
+  type TaskBoardActivityStreamEvent,
+  type TaskBoardSessionActivity,
+} from "./utils/taskBoard.js";
 import { useI18n, type Locale } from "./i18n";
 import {
   isSupportedAppTab,
@@ -28,45 +33,6 @@ import {
 } from "./utils/appTabs.js";
 
 const APP_NAVIGATE_TAB_EVENT = "app:navigate-tab";
-
-interface TaskBoardActivityStreamEvent {
-  kind: "snapshot" | "activity" | "remove" | "error";
-  activities?: TaskBoardSessionActivity[];
-  activity?: TaskBoardSessionActivity | null;
-  providerId?: string;
-  sessionId?: string;
-  error?: string | null;
-}
-
-function taskActivityKey(activity: TaskBoardSessionActivity) {
-  return `${activity.providerId}:${activity.sessionId}`;
-}
-
-function upsertSessionActivity(
-  activities: TaskBoardSessionActivity[],
-  activity: TaskBoardSessionActivity,
-) {
-  const key = taskActivityKey(activity);
-  return [
-    activity,
-    ...activities.filter((item) => taskActivityKey(item) !== key),
-  ];
-}
-
-function removeSessionActivity(
-  activities: TaskBoardSessionActivity[],
-  providerId: string,
-  sessionId: string,
-) {
-  return activities.filter((item) => item.providerId !== providerId || item.sessionId !== sessionId);
-}
-
-function taskBoardAttentionCount(activities: TaskBoardSessionActivity[]) {
-  return activities.filter((activity) => {
-    const status = String(activity.status || "").trim().toLowerCase();
-    return status === "needs_attention";
-  }).length;
-}
 
 export default function App() {
   const { locale, setLocale, t } = useI18n();
@@ -77,7 +43,10 @@ export default function App() {
   const [isFirstRun, setIsFirstRun] = useState(false);
   const [sessionOpenTarget, setSessionOpenTarget] = useState<TaskBoardOpenSessionTarget | null>(null);
   const [taskBoardActivities, setTaskBoardActivities] = useState<TaskBoardSessionActivity[]>([]);
-  const taskAttentionCount = taskBoardAttentionCount(taskBoardActivities);
+  const taskAttentionCount = taskBoardActivities.filter((activity) => {
+    const status = String(activity.status || "").trim().toLowerCase();
+    return status === "needs_attention";
+  }).length;
 
   // First-run detection: auto-switch to Guide tab on first launch
   useEffect(() => {
@@ -140,11 +109,11 @@ export default function App() {
         return;
       }
       if (event.kind === "activity" && event.activity) {
-        setTaskBoardActivities((current) => upsertSessionActivity(current, event.activity!));
+        setTaskBoardActivities((current) => upsertTaskBoardActivity(current, event.activity!));
         return;
       }
       if (event.kind === "remove" && event.providerId && event.sessionId) {
-        setTaskBoardActivities((current) => removeSessionActivity(current, event.providerId!, event.sessionId!));
+        setTaskBoardActivities((current) => removeTaskBoardActivity(current, event.providerId!, event.sessionId!));
       }
     };
 

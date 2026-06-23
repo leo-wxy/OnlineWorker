@@ -76,7 +76,7 @@ test("task board keeps cached provider summaries and uses force refresh only on 
   assert.match(taskBoard, /readCachedProviderSessionSnapshotRows/);
   assert.match(taskBoard, /writeCachedProviderSessionSnapshot/);
   assert.match(taskBoard, /forceProviderRefresh\?: boolean/);
-  assert.match(taskBoard, /await fetchProviderSessions\(provider\.id, \{ forceRefresh \}\)/);
+  assert.match(taskBoard, /await fetchProviderSessions\(provider\.id, \{ forceRefresh: forceProviderRefresh \}\)/);
   assert.match(taskBoard, /const hasHydratedProviderSessionsRef = useRef\(false\);/);
   assert.match(taskBoard, /await refresh\(\{ includeActivities: true \}\);/);
   assert.match(taskBoard, /if \(cancelled \|\| hasHydratedProviderSessionsRef\.current\) \{\s*return;\s*\}/s);
@@ -98,8 +98,8 @@ test("session browser loads provider sessions only when the tab is active and ke
   assert.match(sessionBrowser, /const emptyForceRefreshAttemptsRef = useRef<Map<ProviderFilter, number>>\(new Map\(\)\);/);
   assert.match(sessionBrowser, /const \[providerReloadTick,\s*setProviderReloadTick\] = useState\(0\);/);
   assert.match(sessionBrowser, /const retryTimerRef = useRef<number \| null>\(null\);/);
-  assert.match(sessionBrowser, /const shouldSeedCachedSessions = true;/);
-  assert.match(sessionBrowser, /if \(shouldSeedCachedSessions && cachedSessions\.length > 0\) \{\s*loadedProvidersRef\.current\.add\(provider\);/s);
+  assert.doesNotMatch(sessionBrowser, /const shouldSeedCachedSessions = true;/);
+  assert.match(sessionBrowser, /if \(cachedSessions\.length > 0\) \{\s*loadedProvidersRef\.current\.add\(provider\);/s);
   assert.match(sessionBrowser, /loadingProvidersRef\.current\.add\(provider\);/);
   assert.match(sessionBrowser, /setLoading\(loadingProvidersRef\.current\.size > 0\);/);
   assert.match(sessionBrowser, /const providerListReady = loadedProvidersRef\.current\.has\(providerFilter\);/);
@@ -387,23 +387,29 @@ test("dashboard renders provider icons from provider metadata", () => {
 test("task board listens to activity stream without fallback polling", () => {
   const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
   const taskBoard = readFileSync(join(root, "src", "pages", "TaskBoard.tsx"), "utf8");
+  const taskModel = readFileSync(join(root, "src", "utils", "taskBoard.js"), "utf8");
+  const taskModelTypes = readFileSync(join(root, "src", "utils", "taskBoard.d.ts"), "utf8");
   const lib = readFileSync(join(root, "src-tauri", "src", "lib.rs"), "utf8");
   const taskBoardState = readFileSync(join(root, "src-tauri", "src", "commands", "task_board_state.rs"), "utf8");
 
   assert.match(taskBoard, /onClick=\{\(\) => void refresh\(\{ includeActivities: true, forceProviderRefresh: true \}\)\}/);
   assert.match(app, /start_task_board_activity_stream/);
-  assert.match(taskBoard, /function upsertSessionActivity/);
-  assert.match(taskBoard, /function removeSessionActivity/);
+  assert.match(taskModelTypes, /export interface TaskBoardActivityStreamEvent/);
+  assert.match(taskModel, /export function taskBoardSessionKey/);
+  assert.match(taskModel, /export function upsertTaskBoardActivity/);
+  assert.match(taskModel, /export function removeTaskBoardActivity/);
   assert.match(taskBoard, /sharedSessionActivities !== undefined/);
   assert.match(taskBoard, /onSessionActivitiesChange\?/);
   assert.match(taskBoard, /const activity = event\.activity;/);
-  assert.match(taskBoard, /setLocalSessionActivities\(\(current\) => upsertSessionActivity\(current, activity\)\)/);
+  assert.match(taskBoard, /setLocalSessionActivities\(\(current\) => upsertTaskBoardActivity\(current, activity\)\)/);
   assert.match(taskBoard, /event\.kind === "remove"/);
-  assert.match(taskBoard, /setLocalSessionActivities\(\(current\) => removeSessionActivity\(current, event\.providerId!, event\.sessionId!\)\)/);
+  assert.match(taskBoard, /setLocalSessionActivities\(\(current\) => removeTaskBoardActivity\(current, event\.providerId!, event\.sessionId!\)\)/);
   assert.match(taskBoard, /refresh\(\{ includeActivities: true \}\)/);
   assert.match(taskBoard, /setLoading\(false\);/);
   assert.equal(taskBoard.includes("window.setInterval(() => {\n      void refresh();"), false);
   assert.match(taskBoard, /setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 30_000\)/);
+  assert.equal(app.includes("interface TaskBoardActivityStreamEvent"), false);
+  assert.equal(taskBoard.includes("interface TaskBoardActivityStreamEvent"), false);
   assert.match(app, /let activeStreamId: number \| null = null/);
   assert.match(app, /invoke<number>\("start_task_board_activity_stream", \{ channel \}\)/);
   assert.match(app, /invoke\("stop_task_board_activity_stream", \{ streamId: activeStreamId \}\)/);
@@ -451,13 +457,17 @@ test("task board pinned cards expose an explicit unfollow action", () => {
 
 test("task board hydrates previews for pinned idle sessions", () => {
   const taskBoard = readFileSync(join(root, "src", "pages", "TaskBoard.tsx"), "utf8");
+  const taskModel = readFileSync(join(root, "src", "utils", "taskBoard.js"), "utf8");
 
-  assert.match(taskBoard, /async function hydratePinnedSessionPreviews/);
+  assert.match(taskBoard, /async function hydrateTaskBoardSessionPreviews/);
   assert.match(taskBoard, /const PINNED_PREVIEW_HYDRATION_LIMIT = 12/);
-  assert.match(taskBoard, /taskBoardState\.pinned\.map/);
-  assert.match(taskBoard, /\.slice\(0, PINNED_PREVIEW_HYDRATION_LIMIT\)/);
+  assert.match(taskModel, /export function collectTaskBoardPreviewHydrationPlan/);
+  assert.match(taskModel, /\.slice\(0, pinnedLimit\)/);
+  assert.match(taskModel, /\.slice\(0, lowSignalLimit\)/);
   assert.match(taskBoard, /readSessionLastMessageWithTimeout\(session\)/);
+  assert.match(taskBoard, /const pinnedKeys = new Set\(plan\.pinnedKeys\)/);
   assert.match(taskBoard, /raw:\s*\{\s*\.\.\.\(session\.raw \?\? \{\}\),\s*lastMessage,/);
-  assert.match(taskBoard, /void hydratePinnedSessionPreviews\(flatSessions, nextTaskBoardState\)/);
-  assert.match(taskBoard, /setSessions\(\(current\) => mergeTaskBoardSessions\(current, hydratedSessions\)\)/);
+  assert.match(taskBoard, /void hydrateTaskBoardSessionPreviews\(flatSessions, nextTaskBoardState\)/);
+  assert.match(taskBoard, /const key = taskBoardSessionKey\(session\.type, session\.id\)/);
+  assert.match(taskBoard, /setSessions\(\(current\) => mergeSessionListSnapshot\(current, hydratedSessions\)\)/);
 });

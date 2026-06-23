@@ -241,6 +241,7 @@ export function SessionListPanel({
           const ui = getProviderUi(session.type, providerLabels[session.type]);
           const isArchiving = archivingSessionId === session.id;
           const isPinned = Boolean(pinnedSessionIds?.has(`${session.type}:${session.id}`));
+          const preview = sessionPreviewText(session);
 
           return (
             <div
@@ -323,9 +324,9 @@ export function SessionListPanel({
               <h4 className={`line-clamp-2 pl-1 text-sm leading-6 ${isActive ? "font-semibold text-gray-950" : "font-medium text-gray-700"}`}>
                 {session.title}
               </h4>
-              {sessionPreviewText(session) ? (
+              {preview ? (
                 <p className="mt-2 line-clamp-3 pl-1 text-xs leading-5 text-slate-500">
-                  {sessionPreviewText(session)}
+                  {preview}
                 </p>
               ) : null}
               {renderSessionMeta?.(session)}

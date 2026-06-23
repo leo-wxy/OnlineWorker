@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildTaskBoardModel } from "../src/utils/taskBoard.js";
+import { buildTaskBoardModel, collectTaskBoardPreviewHydrationPlan } from "../src/utils/taskBoard.js";
 
 const nowEpochMs = 1_800_000_000_000;
 
@@ -896,4 +896,28 @@ test("buildTaskBoardModel does not use assistant text as title without session m
 
   assert.equal(board.running[0].title, "019e92cb-955");
   assert.equal(board.running[0].preview, "通过事件流更新 TaskBoard。");
+});
+
+test("collectTaskBoardPreviewHydrationPlan dedupes sessions that are both pinned and low-signal", () => {
+  const target = session({
+    id: "thread-a",
+    title: "OK",
+    raw: {
+      preview: "OK",
+      updatedAt: nowEpochMs - 5_000,
+    },
+  });
+
+  const plan = collectTaskBoardPreviewHydrationPlan({
+    sessions: [target],
+    taskBoardState: {
+      version: 1,
+      pinned: [
+        { providerId: "codex", sessionId: "thread-a", updatedAtEpoch: nowEpochMs },
+      ],
+    },
+  });
+
+  assert.deepEqual(plan.keys, ["codex:thread-a"]);
+  assert.deepEqual(plan.pinnedKeys, ["codex:thread-a"]);
 });

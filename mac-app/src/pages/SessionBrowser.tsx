@@ -205,9 +205,8 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
       return;
     }
 
-    const shouldSeedCachedSessions = true;
     const cachedSessions = readCachedProviderSessionSnapshot(provider);
-    if (shouldSeedCachedSessions && cachedSessions.length > 0) {
+    if (cachedSessions.length > 0) {
       loadedProvidersRef.current.add(provider);
       setGenericSessionsByProvider((current) => mergeSessionSnapshotsByProvider(
         current,

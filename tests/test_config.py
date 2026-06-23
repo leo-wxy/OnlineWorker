@@ -294,6 +294,56 @@ providers:
     }
 
 
+def test_load_provider_runtime_config_reads_overlay_from_cwd_env(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+schema_version: 2
+logging:
+  level: "INFO"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    overlay_path = tmp_path / "provider-overlay.yaml"
+    overlay_path.write_text(
+        """
+providers:
+  overlay-tool:
+    managed: true
+    bin: "overlay-launcher"
+    auth:
+      auth_token: "overlay-token"
+    external_cli:
+      upstream_base_url: "https://overlay.example.test"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        f"ONLINEWORKER_PROVIDER_OVERLAY={overlay_path}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
+    monkeypatch.delenv("ALLOWED_USER_ID", raising=False)
+    monkeypatch.delenv("GROUP_CHAT_ID", raising=False)
+    monkeypatch.delenv("ONLINEWORKER_PROVIDER_OVERLAY", raising=False)
+
+    import config as config_module
+
+    monkeypatch.setattr(config_module, "_dotenv_loaded", False)
+
+    cfg = config_module.load_provider_runtime_config("overlay-tool")
+    overlay_tool = cfg.get_provider("overlay-tool")
+
+    assert overlay_tool is not None
+    assert overlay_tool.bin == "overlay-launcher"
+    assert overlay_tool.auth["auth_token"] == "overlay-token"
+    assert overlay_tool.external_cli["upstream_base_url"] == "https://overlay.example.test"
+
+
 def test_load_config_reads_custom_notification_channel(tmp_path, monkeypatch):
     p = tmp_path / "config.yaml"
     p.write_text(

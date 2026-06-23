@@ -1,7 +1,13 @@
 import type { UnifiedSession } from "../components/session-browser/presentation";
 import type { TaskBoardSessionActivity } from "./taskBoard";
 
+export function formatSessionPreviewText(value: unknown): string;
+
+export function sessionPreviewFromRaw(raw?: Record<string, unknown> | null): string | null;
+
 export function sessionPreviewText(session: UnifiedSession): string | null;
+
+export function cloneSessionEntry(session: UnifiedSession): UnifiedSession;
 
 export function mergeSessionListSnapshot(
   previousSessions?: UnifiedSession[],

@@ -22,7 +22,7 @@ function sanitizeSummaryText(value) {
   return text.replace(ABSOLUTE_PATH_RE, (_, prefix) => `${prefix}[path]`);
 }
 
-function previewText(value) {
+export function formatSessionPreviewText(value) {
   let text = sanitizeSummaryText(value).replace(/\s+/g, " ");
   for (let index = 0; index < 4; index += 1) {
     const next = text
@@ -39,6 +39,29 @@ function previewText(value) {
     text = next;
   }
   return text;
+}
+
+export function sessionPreviewFromRaw(raw) {
+  const preview = firstNonEmptyString(
+    raw?.highlightedThreadPreview,
+    raw?.lastAssistantMessage,
+    raw?.last_assistant_message,
+    raw?.lastFinalMessage,
+    raw?.last_final_message,
+    raw?.lastUserMessage,
+    raw?.last_user_message,
+    raw?.lastUserMessageText,
+    raw?.lastMessage,
+    raw?.last_message,
+    raw?.latestMessage,
+    raw?.latest_message,
+    raw?.preview,
+    raw?.summary,
+    raw?.lastAssistantSummary,
+    raw?.lastAssistantSummaryText,
+  );
+  const text = preview ? formatSessionPreviewText(preview) : "";
+  return text || null;
 }
 
 function isPlaceholderTitle(title, sessionId) {
@@ -66,27 +89,7 @@ function activityCreatesSyntheticSession(activity) {
 }
 
 export function sessionPreviewText(session) {
-  const raw = session?.raw ?? {};
-  const preview = firstNonEmptyString(
-    raw.highlightedThreadPreview,
-    raw.lastAssistantMessage,
-    raw.last_assistant_message,
-    raw.lastFinalMessage,
-    raw.last_final_message,
-    raw.lastUserMessage,
-    raw.last_user_message,
-    raw.lastUserMessageText,
-    raw.lastMessage,
-    raw.last_message,
-    raw.latestMessage,
-    raw.latest_message,
-    raw.preview,
-    raw.summary,
-    raw.lastAssistantSummary,
-    raw.lastAssistantSummaryText,
-  );
-  const text = preview ? previewText(preview) : "";
-  return text || null;
+  return sessionPreviewFromRaw(session?.raw ?? {});
 }
 
 function mergeRawSessionSummary(previousRaw = {}, nextRaw = {}) {
@@ -108,7 +111,7 @@ function mergeRawSessionSummary(previousRaw = {}, nextRaw = {}) {
   };
 }
 
-function cloneSessionEntry(session) {
+export function cloneSessionEntry(session) {
   return {
     ...session,
     raw: { ...(session?.raw ?? {}) },
@@ -209,10 +212,6 @@ export function hasPendingSelectedSession(sessions, selectedSessionId) {
   return !list.some((session) => session?.id === currentId);
 }
 
-function sameSession(left, right) {
-  return left?.type === right?.providerId && left?.id === right?.sessionId;
-}
-
 export function mergeLiveSessionActivities(sessions, activities) {
   const liveActivities = (activities ?? []).filter(activityCreatesSyntheticSession);
   const activeKeys = new Set(
@@ -244,7 +243,7 @@ export function mergeLiveSessionActivities(sessions, activities) {
     }
     const key = `${activity.providerId}:${activity.sessionId}`;
     const title = normalizedString(activity.title);
-    const preview = previewText(
+    const preview = formatSessionPreviewText(
       activity.lastAssistantMessage || activity.lastFinalMessage || activity.lastUserMessage || title,
     );
     const workspace = normalizedString(activity.workspacePath) || normalizedString(activity.workspaceId);
