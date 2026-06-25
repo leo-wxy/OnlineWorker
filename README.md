@@ -129,7 +129,7 @@ xattr -cr /Applications/OnlineWorker.app
    - `TELEGRAM_TOKEN`
    - `ALLOWED_USER_ID`
    - `GROUP_CHAT_ID`
-4. If you use Claude through the official login flow, run `claude auth login` first.
+4. If you use Claude through the official login flow, run `claude auth login` first. If you use a custom upstream or launcher, fill the Claude provider card in `Setup` instead of hand-editing env files.
 5. Use the in-app connectivity checks on the `Setup` page to confirm Telegram access.
 6. Go back to `Dashboard` and start the service.
 
@@ -155,8 +155,18 @@ ALLOWED_USER_ID=123456789
 GROUP_CHAT_ID=-1001234567890
 ```
 
-Claude uses the local Claude CLI's own authentication and runtime configuration.
-OnlineWorker does not read or write `ANTHROPIC_*` proxy, model, or key settings.
+Claude can be configured from the Claude provider card in `Setup`.
+
+- `Claude Auth Token` maps to `ANTHROPIC_AUTH_TOKEN`
+- `Claude Base URL` maps to `ANTHROPIC_BASE_URL`
+- `Claude Model` maps to `ANTHROPIC_MODEL`
+
+OnlineWorker stores these values in the Claude provider's `external_cli` block in
+`config.yaml` and injects them into the Claude runtime only when the matching
+environment variable is not already present in the current process. That keeps
+shell-level overrides working while still making packaged runs self-contained.
+The `Launcher wraps Claude` toggle is available for wrapper binaries that
+ultimately invoke `claude`.
 
 `config.yaml` stores provider, Telegram, notification channel, and AI
 service/scenario settings. Provider overlays can be mounted with

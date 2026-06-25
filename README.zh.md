@@ -110,7 +110,7 @@ xattr -cr /Applications/OnlineWorker.app
    - `TELEGRAM_TOKEN`
    - `ALLOWED_USER_ID`
    - `GROUP_CHAT_ID`
-4. 如果你通过官方登录流程使用 Claude，先执行 `claude auth login`。
+4. 如果你通过官方登录流程使用 Claude，先执行 `claude auth login`。如果你使用自定义上游或 launcher，就直接在 `Setup` 里的 Claude provider 卡片里填配置，不要手动改 env 文件。
 5. 在 `Setup` 页用内置连通性检查确认 Telegram 访问正常。
 6. 回到 `Dashboard`，启动服务。
 
@@ -135,8 +135,17 @@ ALLOWED_USER_ID=123456789
 GROUP_CHAT_ID=-1001234567890
 ```
 
-Claude 使用本机 Claude CLI 自己的鉴权和运行时配置。
-OnlineWorker 不再读取或写入 `ANTHROPIC_*` 代理、模型或密钥设置。
+Claude 可以直接在 `Setup` 里的 Claude provider 卡片配置：
+
+- `Claude Auth Token` 映射到 `ANTHROPIC_AUTH_TOKEN`
+- `Claude Base URL` 映射到 `ANTHROPIC_BASE_URL`
+- `Claude Model` 映射到 `ANTHROPIC_MODEL`
+
+OnlineWorker 会把这些值写入 `config.yaml` 中 Claude provider 的
+`external_cli` 段，再在 Claude 运行时注入到环境变量里；如果当前进程已经
+有同名环境变量，就优先保留现有值。这样既能支持 packaged app 自己保存
+配置，也能保留 shell 级覆盖。`Launcher wraps Claude` 开关适用于最终还是
+会调用 `claude` 的 wrapper 启动器。
 
 `config.yaml` 保存 provider、Telegram、通知渠道和 AI 服务/场景配置。
 provider overlay 可通过 `ONLINEWORKER_PROVIDER_OVERLAY` 挂载；notification
