@@ -23,8 +23,8 @@ use commands::config::{
     get_provider_metadata, list_env_keys, read_config, read_env, read_env_field, read_env_raw,
     read_provider_runtime_policies_from_disk, reveal_env_field, set_ai_config,
     set_notification_channel_config, set_notification_channel_enabled, set_provider_cli_config,
-    set_provider_flags, set_provider_message_hook_enabled, write_config, write_env,
-    write_env_field,
+    set_provider_flags, set_provider_message_hook_enabled, validate_provider_config, write_config,
+    write_env, write_env_field,
 };
 use commands::dashboard::get_dashboard_state;
 use commands::logs::{get_log_file_path, start_log_tail, stop_log_tail};
@@ -390,6 +390,7 @@ pub fn run() {
             set_notification_channel_config,
             set_notification_channel_enabled,
             get_provider_metadata,
+            validate_provider_config,
             list_env_keys,
             reveal_env_field,
             open_terminal,

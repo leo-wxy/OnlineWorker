@@ -126,6 +126,35 @@ export interface ProviderMetadata {
   icon?: ProviderIconMetadata | null;
 }
 
+export type ProviderValidationSeverity = "info" | "warning" | "error" | string;
+
+export interface ProviderValidationCheck {
+  id: string;
+  label: string;
+  ok: boolean;
+  severity: ProviderValidationSeverity;
+  detail?: string | null;
+  remediation?: string | null;
+}
+
+export interface ProviderValidationSources {
+  configPath: string;
+  providerConfigFound: boolean;
+  cliPath?: string | null;
+  envMaterialized: string[];
+  runtimeId?: string | null;
+  bin?: string | null;
+}
+
+export interface ProviderValidationReport {
+  providerId: string;
+  ok: boolean;
+  status: string;
+  summary: string;
+  checks: ProviderValidationCheck[];
+  sources: ProviderValidationSources;
+}
+
 export interface NotificationChannelMetadata {
   id: string;
   label: string;

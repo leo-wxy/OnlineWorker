@@ -101,7 +101,10 @@ fn is_sensitive_key(key: &str) -> bool {
 
 fn is_legacy_external_cli_env_key(key: &str) -> bool {
     let upper = key.trim().to_uppercase();
-    upper.starts_with("ANTHROPIC_") || LEGACY_EXTERNAL_CLI_ENV_KEYS.iter().any(|candidate| *candidate == upper)
+    upper.starts_with("ANTHROPIC_")
+        || LEGACY_EXTERNAL_CLI_ENV_KEYS
+            .iter()
+            .any(|candidate| *candidate == upper)
 }
 
 fn sanitize_env_content(raw: &str) -> String {
@@ -170,6 +173,338 @@ pub struct EnvLine {
 pub struct EnvContent {
     pub lines: Vec<EnvLine>,
     pub path: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderValidationCheck {
+    pub id: String,
+    pub label: String,
+    pub ok: bool,
+    pub severity: String,
+    pub detail: Option<String>,
+    pub remediation: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderValidationSources {
+    pub config_path: String,
+    pub provider_config_found: bool,
+    pub cli_path: Option<String>,
+    pub env_materialized: Vec<String>,
+    pub runtime_id: Option<String>,
+    pub bin: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderValidationReport {
+    pub provider_id: String,
+    pub ok: bool,
+    pub status: String,
+    pub summary: String,
+    pub checks: Vec<ProviderValidationCheck>,
+    pub sources: ProviderValidationSources,
+}
+
+fn provider_validation_command_program_token(command_line: &str) -> String {
+    let mut token = String::new();
+    let mut chars = command_line.trim().chars().peekable();
+    let mut quote: Option<char> = None;
+    while let Some(ch) = chars.next() {
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            } else if ch == '\\' {
+                token.push(chars.next().unwrap_or(ch));
+            } else {
+                token.push(ch);
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '\\' => token.push(chars.next().unwrap_or(ch)),
+            ch if ch.is_whitespace() => break,
+            _ => token.push(ch),
+        }
+    }
+    token
+}
+
+fn provider_validation_rich_path() -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    format!(
+        "{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+        home
+    )
+}
+
+fn provider_validation_expand_home_path(value: &str) -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    if value.starts_with("~/") {
+        format!("{}{}", home, &value[1..])
+    } else {
+        value.to_string()
+    }
+}
+
+fn resolve_provider_cli_path(command_line: &str) -> Option<String> {
+    let program = provider_validation_command_program_token(command_line);
+    if program.trim().is_empty() {
+        return None;
+    }
+    let expanded = provider_validation_expand_home_path(&program);
+    if expanded.starts_with('/') {
+        let path = Path::new(&expanded);
+        if path.exists() && path.is_file() {
+            return Some(expanded);
+        }
+        return None;
+    }
+    let output = std::process::Command::new("which")
+        .arg(&expanded)
+        .env("PATH", provider_validation_rich_path())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
+
+fn non_empty(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn provider_launch_command(provider: &ProviderMetadata) -> Option<String> {
+    provider
+        .launch_methods
+        .iter()
+        .find_map(|method| non_empty(Some(method.bin.as_str())))
+        .or_else(|| non_empty(provider.bin.as_deref()))
+        .or_else(|| {
+            provider
+                .install
+                .cli_names
+                .iter()
+                .find_map(|name| non_empty(Some(name.as_str())))
+        })
+        .or_else(|| non_empty(Some(provider.id.as_str())))
+}
+
+fn provider_external_cli_env(provider: &ProviderMetadata) -> Vec<String> {
+    let mut keys = Vec::new();
+    if non_empty(provider.external_cli.auth_token.as_deref()).is_some() {
+        keys.push("ANTHROPIC_AUTH_TOKEN".to_string());
+    }
+    if non_empty(provider.external_cli.upstream_base_url.as_deref()).is_some() {
+        keys.push("ANTHROPIC_BASE_URL".to_string());
+    }
+    if non_empty(provider.external_cli.model.as_deref()).is_some() {
+        keys.push("ANTHROPIC_MODEL".to_string());
+    }
+    keys
+}
+
+fn validation_check(
+    id: &str,
+    label: &str,
+    ok: bool,
+    severity: &str,
+    detail: Option<String>,
+    remediation: Option<String>,
+) -> ProviderValidationCheck {
+    ProviderValidationCheck {
+        id: id.to_string(),
+        label: label.to_string(),
+        ok,
+        severity: severity.to_string(),
+        detail,
+        remediation,
+    }
+}
+
+fn report_status(checks: &[ProviderValidationCheck], provider_found: bool) -> String {
+    if !provider_found {
+        return "missing_provider".to_string();
+    }
+    if checks
+        .iter()
+        .any(|check| check.id == "cli_available" && !check.ok && check.severity == "error")
+    {
+        return "missing_cli".to_string();
+    }
+    if checks
+        .iter()
+        .any(|check| !check.ok && check.severity == "error")
+    {
+        return "misconfigured".to_string();
+    }
+    "ready".to_string()
+}
+
+fn build_provider_validation_report<F>(
+    provider_id: &str,
+    provider: Option<ProviderMetadata>,
+    config_path: String,
+    resolve_cli: F,
+) -> ProviderValidationReport
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let normalized_provider_id = provider_id.trim().to_string();
+    let provider_config_found = provider.is_some();
+    let mut checks = vec![validation_check(
+        "provider_config",
+        "Provider config",
+        provider_config_found,
+        if provider_config_found {
+            "info"
+        } else {
+            "error"
+        },
+        if provider_config_found {
+            Some(format!(
+                "{} found in config metadata.",
+                normalized_provider_id
+            ))
+        } else {
+            Some(format!(
+                "{} is not present in provider metadata.",
+                normalized_provider_id
+            ))
+        },
+        (!provider_config_found).then(|| "Save or materialize provider config first.".to_string()),
+    )];
+
+    let mut cli_path = None;
+    let mut env_materialized = Vec::new();
+    let mut runtime_id = None;
+    let mut bin = None;
+
+    if let Some(provider) = provider {
+        runtime_id = Some(provider.runtime_id.clone());
+        let launch_command = provider_launch_command(&provider);
+        bin = launch_command.clone();
+        checks.push(validation_check(
+            "launch_command",
+            "Launch command",
+            launch_command.is_some(),
+            if launch_command.is_some() {
+                "info"
+            } else {
+                "error"
+            },
+            launch_command
+                .as_ref()
+                .map(|command| format!("Using `{}`.", command))
+                .or_else(|| Some("No launch command is configured.".to_string())),
+            launch_command
+                .is_none()
+                .then(|| "Set the provider launch command and save the provider card.".to_string()),
+        ));
+
+        if let Some(command) = launch_command.as_deref() {
+            cli_path = resolve_cli(command);
+            let cli_ok = cli_path.is_some();
+            checks.push(validation_check(
+                "cli_available",
+                "CLI available",
+                cli_ok,
+                if cli_ok { "info" } else { "error" },
+                cli_path
+                    .as_ref()
+                    .map(|path| format!("Resolved to `{}`.", path))
+                    .or_else(|| Some(format!("Could not resolve `{}` on the app PATH.", command))),
+                (!cli_ok).then(|| "Install the CLI or set an absolute launcher path.".to_string()),
+            ));
+        }
+
+        let supports_send = provider.capabilities.sessions && provider.capabilities.send;
+        checks.push(validation_check(
+            "session_send_capability",
+            "Session send capability",
+            supports_send,
+            if supports_send { "info" } else { "warning" },
+            if supports_send {
+                Some("Provider declares session list and send support.".to_string())
+            } else {
+                Some("Provider does not declare full Session send support.".to_string())
+            },
+            (!supports_send)
+                .then(|| "This provider may not be usable from the Sessions tab.".to_string()),
+        ));
+
+        env_materialized = provider_external_cli_env(&provider);
+        let external_cli_mode = provider
+            .capabilities
+            .message_rewrite
+            .external_cli
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("");
+        let uses_anthropic_env_cli = external_cli_mode == "http_proxy";
+        if uses_anthropic_env_cli || !env_materialized.is_empty() {
+            checks.push(validation_check(
+                "external_cli_env",
+                "External CLI runtime env",
+                !env_materialized.is_empty(),
+                if env_materialized.is_empty() { "warning" } else { "info" },
+                if env_materialized.is_empty() {
+                    Some("No external CLI env keys are configured; native CLI auth may still be used.".to_string())
+                } else {
+                    Some(format!("Will materialize {}.", env_materialized.join(", ")))
+                },
+                None,
+            ));
+        }
+    }
+
+    let status = report_status(&checks, provider_config_found);
+    let ok = !checks
+        .iter()
+        .any(|check| !check.ok && check.severity == "error");
+    let has_warning = checks
+        .iter()
+        .any(|check| !check.ok && check.severity == "warning");
+    let summary = if ok && has_warning {
+        "Required checks passed; review warnings before using this provider.".to_string()
+    } else if ok {
+        "Configuration ready for lightweight provider startup checks.".to_string()
+    } else {
+        checks
+            .iter()
+            .find(|check| !check.ok && check.severity == "error")
+            .and_then(|check| check.detail.clone())
+            .unwrap_or_else(|| "Provider configuration is not ready.".to_string())
+    };
+
+    ProviderValidationReport {
+        provider_id: normalized_provider_id,
+        ok,
+        status,
+        summary,
+        checks,
+        sources: ProviderValidationSources {
+            config_path,
+            provider_config_found,
+            cli_path,
+            env_materialized,
+            runtime_id,
+            bin,
+        },
+    }
 }
 
 /// Check if this is the first run (no config.yaml in data dir).
@@ -301,6 +636,23 @@ pub(crate) fn read_visible_provider_ids_from_disk() -> Result<Vec<String>, Strin
 #[tauri::command]
 pub async fn get_provider_metadata() -> Result<Vec<ProviderMetadata>, String> {
     read_provider_metadata_from_disk()
+}
+
+#[tauri::command]
+pub async fn validate_provider_config(
+    provider_id: String,
+) -> Result<ProviderValidationReport, String> {
+    let providers = read_provider_metadata_from_disk()?;
+    let normalized_provider_id = provider_id.trim().to_string();
+    let provider = providers
+        .into_iter()
+        .find(|provider| provider.id == normalized_provider_id);
+    Ok(build_provider_validation_report(
+        &normalized_provider_id,
+        provider,
+        config_path().to_string_lossy().to_string(),
+        resolve_provider_cli_path,
+    ))
 }
 
 #[tauri::command]
@@ -591,12 +943,13 @@ mod tests {
     use serde_yaml::Value;
 
     use super::{
-        config_path, create_default_config, default_env_template, env_path, is_sensitive_key,
-        read_config, sanitize_env_content, set_provider_flags, set_test_home_override,
-        write_config,
+        build_provider_validation_report, config_path, create_default_config, default_env_template,
+        env_path, is_sensitive_key, read_config, sanitize_env_content, set_provider_flags,
+        set_test_home_override, write_config,
     };
     use crate::commands::config_provider::{
-        provider_default_metadata, public_default_provider_ids,
+        provider_default_metadata, public_default_provider_ids, ProviderExternalCliConfig,
+        ProviderMetadata,
     };
 
     struct TestHomeGuard {
@@ -888,5 +1241,143 @@ GROUP_CHAT_ID=-1001
         }
         assert!(doc.get("notifications").is_some());
         assert!(doc.get("ai").is_some());
+    }
+
+    #[test]
+    fn validate_provider_config_reports_cli_and_external_env_checks() {
+        let provider = ProviderMetadata {
+            id: "claude".to_string(),
+            runtime_id: "claude".to_string(),
+            label: "Claude".to_string(),
+            description: "Claude provider".to_string(),
+            visible: true,
+            visibility: "public".to_string(),
+            managed: true,
+            autostart: false,
+            bin: Some("claude".to_string()),
+            transport: crate::commands::config_provider::ProviderTransportMetadata {
+                owner: "stdio".to_string(),
+                live: "owner_bridge".to_string(),
+                kind: "stdio".to_string(),
+                app_server_port: None,
+                app_server_url: None,
+            },
+            live_transport: "owner_bridge".to_string(),
+            control_mode: None,
+            capabilities: crate::commands::config_provider::ProviderCapabilitiesEntry {
+                sessions: true,
+                send: true,
+                ..Default::default()
+            },
+            message_hooks: crate::commands::config_provider::ProviderMessageHooksMetadata {
+                abusive_language_normalization:
+                    crate::commands::config_provider::ProviderMessageHookStatus {
+                        enabled: true,
+                        mode: "none".to_string(),
+                    },
+            },
+            external_cli: ProviderExternalCliConfig {
+                upstream_base_url: Some("https://anthropic.example.test".to_string()),
+                auth_token: Some("secret-token".to_string()),
+                model: Some("claude-sonnet".to_string()),
+                launches_managed_child_cli: false,
+            },
+            launch_methods: Vec::new(),
+            install: Default::default(),
+            process: Default::default(),
+            discovery: Default::default(),
+            tui_host: Default::default(),
+            icon: None,
+        };
+
+        let report = build_provider_validation_report(
+            "claude",
+            Some(provider),
+            "/tmp/OnlineWorker/config.yaml".to_string(),
+            |_| Some("/opt/homebrew/bin/claude".to_string()),
+        );
+
+        assert!(report.ok);
+        assert_eq!(report.status, "ready");
+        assert!(report.sources.provider_config_found);
+        assert_eq!(
+            report.sources.cli_path.as_deref(),
+            Some("/opt/homebrew/bin/claude")
+        );
+        assert_eq!(
+            report.sources.env_materialized,
+            vec![
+                "ANTHROPIC_AUTH_TOKEN".to_string(),
+                "ANTHROPIC_BASE_URL".to_string(),
+                "ANTHROPIC_MODEL".to_string()
+            ]
+        );
+        assert!(report.checks.iter().any(|check| {
+            check.id == "external_cli_env" && check.ok && check.severity == "info"
+        }));
+    }
+
+    #[test]
+    fn validate_provider_config_marks_missing_cli_as_error() {
+        let provider = provider_default_metadata("claude");
+
+        let report = build_provider_validation_report(
+            "claude",
+            Some(provider),
+            "/tmp/OnlineWorker/config.yaml".to_string(),
+            |_| None,
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.status, "missing_cli");
+        assert!(report.checks.iter().any(|check| {
+            check.id == "cli_available" && !check.ok && check.severity == "error"
+        }));
+    }
+
+    #[test]
+    fn validate_provider_config_summarizes_external_cli_env_warning() {
+        let provider = provider_default_metadata("claude");
+
+        let report = build_provider_validation_report(
+            "claude",
+            Some(provider),
+            "/tmp/OnlineWorker/config.yaml".to_string(),
+            |_| Some("/opt/homebrew/bin/claude".to_string()),
+        );
+
+        assert!(report.ok);
+        assert_eq!(report.status, "ready");
+        assert!(report.checks.iter().any(|check| {
+            check.id == "external_cli_env" && !check.ok && check.severity == "warning"
+        }));
+        assert_eq!(
+            report.summary,
+            "Required checks passed; review warnings before using this provider."
+        );
+    }
+
+    #[test]
+    fn validate_provider_config_does_not_warn_codex_remote_proxy_about_anthropic_env() {
+        let provider = provider_default_metadata("codex");
+
+        let report = build_provider_validation_report(
+            "codex",
+            Some(provider),
+            "/tmp/OnlineWorker/config.yaml".to_string(),
+            |_| Some("/opt/homebrew/bin/codex".to_string()),
+        );
+
+        assert!(report.ok);
+        assert_eq!(report.status, "ready");
+        assert_eq!(
+            report.summary,
+            "Configuration ready for lightweight provider startup checks."
+        );
+        assert!(report
+            .checks
+            .iter()
+            .all(|check| check.id != "external_cli_env"));
+        assert!(report.sources.env_materialized.is_empty());
     }
 }

@@ -466,6 +466,12 @@ export const enTexts: AppTexts = {
       launchMethodCommandsHint: "One candidate command per line. The provider tests them in order at runtime and uses the first usable command; the first line is also saved as the provider's main bin.",
       externalCliLaunchesManagedChildCli: "Open the managed child CLI after launcher starts",
       externalCliSave: "Save CLI config",
+      validateConfig: "Validate config",
+      validatingConfig: "Validating...",
+      validationOk: "Configuration ready",
+      validationFailed: "Configuration unavailable",
+      validationWarning: "Needs attention",
+      validationSource: "Config source",
     },
     notifications: {
       title: "Notifications",

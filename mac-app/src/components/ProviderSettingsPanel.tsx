@@ -1,6 +1,6 @@
 import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { ProviderMetadata, ServiceStatus } from "../types";
+import type { ProviderMetadata, ProviderValidationReport, ServiceStatus } from "../types";
 import { useI18n } from "../i18n";
 import {
   extensionProviderSettings,
@@ -36,6 +36,26 @@ function providerSettingClass(enabled: boolean) {
   return enabled
     ? "border-blue-100 bg-blue-50/70"
     : "border-slate-200/80 bg-slate-50/80 opacity-75";
+}
+
+function validationToneClass(report: ProviderValidationReport) {
+  if (!report.ok) {
+    return "border-rose-200 bg-rose-50/78 text-rose-800";
+  }
+  if (report.checks.some((check) => check.severity === "warning" && !check.ok)) {
+    return "border-amber-200 bg-amber-50/80 text-amber-800";
+  }
+  return "border-emerald-200 bg-emerald-50/78 text-emerald-800";
+}
+
+function validationCheckDotClass(severity: string, ok: boolean) {
+  if (severity === "error" || !ok) {
+    return "bg-rose-500";
+  }
+  if (severity === "warning") {
+    return "bg-amber-500";
+  }
+  return "bg-emerald-500";
 }
 
 function supportsLaunchMethods(provider: ProviderMetadata | undefined) {
@@ -132,6 +152,8 @@ export function ProviderSettingsPanel({ mode }: Props) {
   const [savingProviderId, setSavingProviderId] = useState<string | null>(null);
   const [savingCliProviderId, setSavingCliProviderId] = useState<string | null>(null);
   const [savingHookProviderId, setSavingHookProviderId] = useState<string | null>(null);
+  const [validatingProviderId, setValidatingProviderId] = useState<string | null>(null);
+  const [validationReports, setValidationReports] = useState<Record<string, ProviderValidationReport>>({});
   const [cliDrafts, setCliDrafts] = useState<Record<string, ProviderCliDraft>>({});
   const [error, setError] = useState<string | null>(null);
 
@@ -189,6 +211,17 @@ export function ProviderSettingsPanel({ mode }: Props) {
     [providers]
   );
 
+  const clearProviderValidationReport = (providerId: string) => {
+    setValidationReports((current) => {
+      if (!current[providerId]) {
+        return current;
+      }
+      const remaining = { ...current };
+      delete remaining[providerId];
+      return remaining;
+    });
+  };
+
   const saveProviderFlags = async (
     providerId: string,
     managed: boolean,
@@ -201,6 +234,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
         managed,
         autostart: managed && autostart,
       });
+      clearProviderValidationReport(providerId);
       const status = await invoke<ServiceStatus>("service_status");
       if (status.running) {
         await invoke("service_restart");
@@ -219,17 +253,18 @@ export function ProviderSettingsPanel({ mode }: Props) {
     providerId: string,
     patch: Partial<ProviderCliDraft>
   ) => {
+    clearProviderValidationReport(providerId);
     setCliDrafts((current) => {
       const provider = byId.get(providerId);
-        const previous = current[providerId] ?? {
-          bin: provider?.bin ?? provider?.install?.cliNames?.[0] ?? providerId,
-          authToken: provider?.externalCli?.authToken ?? "",
-          baseUrl: provider?.externalCli?.upstreamBaseUrl ?? "",
-          model: provider?.externalCli?.model ?? "",
-          launchesManagedChildCli: provider?.externalCli?.launchesManagedChildCli ?? false,
-          launchCommands: provider?.launchMethods?.length
-            ? provider.launchMethods.map((method) => method.bin).join("\n")
-            : provider?.bin ?? provider?.install?.cliNames?.[0] ?? providerId,
+      const previous = current[providerId] ?? {
+        bin: provider?.bin ?? provider?.install?.cliNames?.[0] ?? providerId,
+        authToken: provider?.externalCli?.authToken ?? "",
+        baseUrl: provider?.externalCli?.upstreamBaseUrl ?? "",
+        model: provider?.externalCli?.model ?? "",
+        launchesManagedChildCli: provider?.externalCli?.launchesManagedChildCli ?? false,
+        launchCommands: provider?.launchMethods?.length
+          ? provider.launchMethods.map((method) => method.bin).join("\n")
+          : provider?.bin ?? provider?.install?.cliNames?.[0] ?? providerId,
       };
       return {
         ...current,
@@ -282,6 +317,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
         },
         launchMethods,
       });
+      clearProviderValidationReport(provider.id);
       const status = await invoke<ServiceStatus>("service_status");
       if (status.running) {
         await invoke("service_restart");
@@ -308,6 +344,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
         hookName: "abusive_language_normalization",
         enabled,
       });
+      clearProviderValidationReport(providerId);
       startTransition(() => {
         void load();
       });
@@ -316,6 +353,25 @@ export function ProviderSettingsPanel({ mode }: Props) {
       setError(String(err));
     } finally {
       setSavingHookProviderId(null);
+    }
+  };
+
+  const validateProviderConfig = async (providerId: string) => {
+    if (validatingProviderId) {
+      return;
+    }
+    setValidatingProviderId(providerId);
+    try {
+      const report = await invoke<ProviderValidationReport>("validate_provider_config", { providerId });
+      setValidationReports((current) => ({
+        ...current,
+        [providerId]: report,
+      }));
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setValidatingProviderId(null);
     }
   };
 
@@ -353,6 +409,8 @@ export function ProviderSettingsPanel({ mode }: Props) {
           const busy = savingProviderId === setting.id;
           const cliBusy = savingCliProviderId === setting.id;
           const hookBusy = savingHookProviderId === setting.id;
+          const validating = validatingProviderId === setting.id;
+          const report = validationReports[setting.id];
           const hiddenByDefault = provider?.visible === false;
           const cliAvailable = cliAvailability[setting.id] !== false;
           const canEnable = setting.enabled || cliAvailable;
@@ -427,7 +485,17 @@ export function ProviderSettingsPanel({ mode }: Props) {
                     )}
                   </div>
                 </div>
-                {busy && <span className="text-xs font-semibold text-blue-600">{texts.saving}</span>}
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  {busy && <span className="text-xs font-semibold text-blue-600">{texts.saving}</span>}
+                  <button
+                    type="button"
+                    disabled={Boolean(validatingProviderId)}
+                    onClick={() => void validateProviderConfig(setting.id)}
+                    className="h-8 rounded-lg border border-slate-200 bg-white/90 px-2.5 text-xs font-bold text-slate-700 transition hover:border-blue-200 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {validating ? texts.validatingConfig : texts.validateConfig}
+                  </button>
+                </div>
               </div>
 
               <div className="mt-4 flex flex-wrap items-center gap-6">
@@ -469,6 +537,41 @@ export function ProviderSettingsPanel({ mode }: Props) {
                   </label>
                 )}
               </div>
+
+              {report && (
+                <div className={`mt-5 rounded-xl border p-4 ${validationToneClass(report)}`}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-bold">
+                        {!report.ok
+                          ? texts.validationFailed
+                          : report.checks.some((check) => check.severity === "warning" && !check.ok)
+                            ? texts.validationWarning
+                            : texts.validationOk}
+                      </h4>
+                      <p className="mt-1 text-xs font-medium opacity-85">{report.summary}</p>
+                    </div>
+                    <span className="rounded-full bg-white/70 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] opacity-80">
+                      {report.status}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid gap-2">
+                    {report.checks.map((check) => (
+                      <div key={check.id} className="flex gap-2 rounded-lg bg-white/58 px-3 py-2 text-xs">
+                        <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${validationCheckDotClass(check.severity, check.ok)}`}></span>
+                        <span className="min-w-0">
+                          <span className="block font-bold">{check.label}</span>
+                          {check.detail && <span className="mt-0.5 block opacity-80">{check.detail}</span>}
+                          {check.remediation && <span className="mt-0.5 block font-semibold opacity-90">{check.remediation}</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-3 break-all text-[11px] font-semibold opacity-75">
+                    {texts.validationSource}: {report.sources.configPath}
+                  </p>
+                </div>
+              )}
 
               {provider && (supportsExternalCliRewrite || showManagedRemoteProxyAlias || canEditLaunchMethods) && (
                 <div className="mt-5 grid gap-3 rounded-xl border border-slate-200/80 bg-white/70 p-4">

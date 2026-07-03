@@ -367,6 +367,12 @@ export interface AppTexts {
     launchMethodCommandsHint: string;
     externalCliLaunchesManagedChildCli: string;
     externalCliSave: string;
+    validateConfig: string;
+    validatingConfig: string;
+    validationOk: string;
+    validationFailed: string;
+    validationWarning: string;
+    validationSource: string;
   };
   notifications: {
     title: string;

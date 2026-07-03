@@ -316,6 +316,36 @@ test("provider settings exposes external CLI rewrite configuration in the app", 
   assert.match(rustLib, /set_provider_cli_config/);
 });
 
+test("provider settings exposes lightweight provider configuration validation", () => {
+  const panel = readFileSync(join(root, "src", "components", "ProviderSettingsPanel.tsx"), "utf8");
+  const types = readFileSync(join(root, "src", "types.ts"), "utf8");
+  const i18nTypes = readFileSync(join(root, "src", "i18n", "types.ts"), "utf8");
+  const zh = readFileSync(join(root, "src", "i18n", "locales", "zh.ts"), "utf8");
+  const en = readFileSync(join(root, "src", "i18n", "locales", "en.ts"), "utf8");
+  const rustConfig = readFileSync(join(root, "src-tauri", "src", "commands", "config.rs"), "utf8");
+  const rustLib = readFileSync(join(root, "src-tauri", "src", "lib.rs"), "utf8");
+
+  assert.match(panel, /validate_provider_config/);
+  assert.match(panel, /ProviderValidationReport/);
+  assert.match(panel, /validationReports/);
+  assert.match(panel, /clearProviderValidationReport/);
+  assert.match(panel, /disabled=\{Boolean\(validatingProviderId\)\}/);
+  assert.match(panel, /texts\.validateConfig/);
+  assert.match(panel, /texts\.validatingConfig/);
+  assert.match(panel, /report\.checks\.map/);
+  assert.match(types, /export interface ProviderValidationReport/);
+  assert.match(types, /export interface ProviderValidationCheck/);
+  assert.match(i18nTypes, /validateConfig:\s*string/);
+  assert.match(i18nTypes, /validationOk:\s*string/);
+  assert.match(i18nTypes, /validationFailed:\s*string/);
+  assert.match(zh, /验证配置/);
+  assert.match(zh, /配置可用/);
+  assert.match(en, /Validate config/);
+  assert.match(en, /Configuration ready/);
+  assert.match(rustConfig, /pub async fn validate_provider_config/);
+  assert.match(rustLib, /validate_provider_config/);
+});
+
 test("notification tab exposes split app list and plugin-defined configuration", () => {
   const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
   const panel = readFileSync(join(root, "src", "components", "NotificationSettingsPanel.tsx"), "utf8");

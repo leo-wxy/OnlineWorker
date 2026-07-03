@@ -461,6 +461,12 @@ export const zhTexts: AppTexts = {
       launchMethodCommandsHint: "每行一个候选命令。运行时由 provider 按顺序测试并选中第一个可用命令；第一行会同步为 provider 的主 bin。",
       externalCliLaunchesManagedChildCli: "启动后进入受管子 CLI",
       externalCliSave: "保存 CLI 配置",
+      validateConfig: "验证配置",
+      validatingConfig: "验证中...",
+      validationOk: "配置可用",
+      validationFailed: "配置不可用",
+      validationWarning: "需要关注",
+      validationSource: "配置来源",
     },
     notifications: {
       title: "通知",
