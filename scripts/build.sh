@@ -86,8 +86,31 @@ stage_hook_relays() {
 	chmod +x "$HOOK_RELAY_STAGING_ROOT/claude_hook_relay.py"
 }
 
-ensure_pnpm() {
-	if command -v pnpm &>/dev/null; then
+check_frontend_package_manager_state() {
+	local unexpected=()
+	local candidate
+	for candidate in \
+		"$PROJECT_ROOT/mac-app/pnpm-lock.yaml" \
+		"$PROJECT_ROOT/mac-app/pnpm-workspace.yaml"; do
+		if [ -e "$candidate" ]; then
+			unexpected+=("${candidate#$PROJECT_ROOT/}")
+		fi
+	done
+
+	if [ "${#unexpected[@]}" -eq 0 ]; then
+		return
+	fi
+
+	echo "ERROR: unexpected local pnpm state files detected:"
+	printf '  %s\n' "${unexpected[@]}"
+	echo ""
+	echo "Remove these generated files before packaging. scripts/build.sh uses npm"
+	echo "so the packaged build does not enter pnpm approve-builds."
+	exit 1
+}
+
+ensure_npm() {
+	if command -v npm &>/dev/null; then
 		return
 	fi
 
@@ -99,14 +122,8 @@ ensure_pnpm() {
 		hash -r
 	fi
 
-	if command -v corepack &>/dev/null; then
-		corepack enable >/dev/null 2>&1 || true
-		corepack prepare pnpm@latest-10 --activate >/dev/null 2>&1 || true
-		hash -r
-	fi
-
-	if ! command -v pnpm &>/dev/null; then
-		echo "ERROR: pnpm not found. Install Node.js 20 and pnpm, or load nvm before running scripts/build.sh"
+	if ! command -v npm &>/dev/null; then
+		echo "ERROR: npm not found. Install Node.js 20, or load nvm before running scripts/build.sh"
 		exit 1
 	fi
 }
@@ -160,18 +177,21 @@ echo ""
 
 # Step 4: Build Tauri app (produces .dmg)
 echo "=== Step 3/3: Tauri build ==="
-ensure_pnpm
+ensure_npm
 hash -r
+check_frontend_package_manager_state
 stage_provider_plugins
 stage_notification_plugins
 stage_hook_relays
 cd "$PROJECT_ROOT/mac-app"
+export PUPPETEER_SKIP_DOWNLOAD="${PUPPETEER_SKIP_DOWNLOAD:-true}"
+export PUPPETEER_SKIP_CHROME_DOWNLOAD="${PUPPETEER_SKIP_CHROME_DOWNLOAD:-true}"
 if [ ! -x "$PROJECT_ROOT/mac-app/node_modules/.bin/tauri" ]; then
 	echo "=== Installing mac-app dependencies ==="
-	pnpm install --no-frozen-lockfile
+	npm install --no-package-lock
 	echo ""
 fi
-pnpm tauri build
+npm run tauri -- build
 
 echo ""
 echo "=== Build Complete ==="

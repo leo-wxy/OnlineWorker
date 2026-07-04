@@ -38,6 +38,25 @@ def test_build_script_syncs_versions_before_packaging():
     assert "=== Sync app version ===" in build_script
 
 
+def test_build_script_keeps_frontend_dependency_setup_non_interactive():
+    build_script = (ROOT / "scripts/build.sh").read_text(encoding="utf-8")
+
+    assert "check_frontend_package_manager_state" in build_script
+    assert "pnpm-lock.yaml" in build_script
+    assert "pnpm-workspace.yaml" in build_script
+    assert "npm install --no-package-lock" in build_script
+    assert "npm run tauri -- build" in build_script
+    assert "pnpm tauri build" not in build_script
+    assert "pnpm install" not in build_script
+    assert "PUPPETEER_SKIP_DOWNLOAD" in build_script
+
+
+def test_mac_app_does_not_depend_on_pnpm_build_script_approvals():
+    package_json = json.loads((ROOT / "mac-app/package.json").read_text(encoding="utf-8"))
+
+    assert "pnpm" not in package_json
+
+
 def test_sync_app_version_updates_all_packaging_version_fields(tmp_path):
     fixture = tmp_path / "repo"
     (fixture / "mac-app/src-tauri").mkdir(parents=True)

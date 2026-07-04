@@ -41,10 +41,13 @@ test("session browser chats handle stream-ready and stream errors as non-destruc
     "utf8",
   );
 
-  assert.match(genericChat, /if \(event\?\.kind === "stream_ready"\) \{\s*return;\s*\}/s);
+  assert.match(genericChat, /if \(event\?\.kind === "stream_ready"\) \{\s*liveStreamReadyRef\.current = true;\s*return;\s*\}/s);
   assert.match(genericChat, /if \(event\?\.kind === "error"\)/);
+  assert.match(genericChat, /liveStreamReadyRef\.current = false/);
   assert.match(genericChat, /messagesRef\.current\.length === 0/);
   assert.match(genericChat, /setReplyWatchState\(\(current\) => \(current \? "expired" : current\)\)/);
   assert.match(genericChat, /applySessionStreamEvent\(previousMessages, event\)/);
   assert.match(genericChat, /shouldClearReplyWatch\(previousMessages, nextMessages, event\)/);
+  assert.match(genericChat, /shouldSkip:\s*\(\) => liveRefreshBlockedRef\.current/);
+  assert.doesNotMatch(genericChat, /shouldSkip:\s*\(\) => liveRefreshBlockedRef\.current \|\| liveStreamReadyRef\.current/);
 });

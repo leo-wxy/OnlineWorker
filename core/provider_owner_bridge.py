@@ -112,6 +112,56 @@ def _resolve_workspace_and_thread(state, provider_id: str, thread_id: str, works
     return ws, thread
 
 
+def _resolve_workspace(state, provider_id: str, workspace_dir: str):
+    normalized_workspace_dir = str(workspace_dir or "").strip()
+    if not normalized_workspace_dir:
+        return None
+
+    storage = getattr(state, "storage", None)
+    if storage is not None:
+        for ws in storage.workspaces.values():
+            if getattr(ws, "tool", "") != provider_id:
+                continue
+            if getattr(ws, "path", "") == normalized_workspace_dir:
+                return ws
+
+        workspace_id = _workspace_key(provider_id, normalized_workspace_dir)
+        ws = WorkspaceInfo(
+            name=os.path.basename(normalized_workspace_dir) or normalized_workspace_dir,
+            path=normalized_workspace_dir,
+            tool=provider_id,
+            topic_id=None,
+            daemon_workspace_id=workspace_id,
+            threads={},
+        )
+        storage.workspaces[workspace_id] = ws
+        try:
+            save_storage(storage)
+        except Exception:
+            logger.debug("[provider-owner-bridge] 保存新建 workspace 失败", exc_info=True)
+        return ws
+
+    return SimpleNamespace(
+        name=os.path.basename(normalized_workspace_dir) or normalized_workspace_dir,
+        path=normalized_workspace_dir,
+        tool=provider_id,
+        topic_id=None,
+        daemon_workspace_id=_workspace_key(provider_id, normalized_workspace_dir),
+        threads={},
+    )
+
+
+def _extract_started_thread_id(result) -> str:
+    if not isinstance(result, dict):
+        return ""
+    thread_id = result.get("id") or result.get("threadId") or result.get("thread_id")
+    if not thread_id:
+        thread = result.get("thread")
+        if isinstance(thread, dict):
+            thread_id = thread.get("id") or thread.get("threadId") or thread.get("thread_id")
+    return str(thread_id or "").strip()
+
+
 def _resolve_workspace_and_thread_for_mirror(state, provider_id: str, thread_id: str, workspace_dir: str):
     normalized_thread_id = str(thread_id or "").strip()
     normalized_workspace_dir = str(workspace_dir or "").strip()
@@ -590,6 +640,8 @@ class ProviderOwnerBridge:
                 response = await self._handle_list_sessions(request)
             elif request_type == "read_session":
                 response = await self._handle_read_session(request)
+            elif request_type == "create_session":
+                response = await self._handle_create_session(request)
             elif request_type == "archive_session":
                 response = await self._handle_archive_session(request)
             elif request_type == "runtime_status":
@@ -1241,6 +1293,82 @@ class ProviderOwnerBridge:
         return {
             "ok": True,
             "summary": _normalize_usage_summary(provider_id, raw_summary),
+        }
+
+    async def _handle_create_session(self, request: dict) -> dict:
+        provider_id = str(request.get("provider_id") or "").strip()
+        workspace_dir = str(request.get("workspace_dir") or "").strip()
+
+        if not provider_id:
+            return {"ok": False, "error": "缺少 provider_id"}
+        if not workspace_dir:
+            return {"ok": False, "error": "缺少 workspace_dir"}
+
+        provider = get_provider(provider_id, getattr(self.state, "config", None))
+        if provider is None:
+            return {"ok": False, "error": f"Provider '{provider_id}' 未启用"}
+
+        adapter = self.state.get_adapter(provider_id)
+        if adapter is None or not getattr(adapter, "connected", False):
+            return {"ok": False, "error": f"{provider_id} adapter 未连接"}
+        start_thread = getattr(adapter, "start_thread", None)
+        if not callable(start_thread):
+            return {"ok": False, "error": f"{provider_id} adapter 不支持创建会话"}
+
+        ws_info = _resolve_workspace(self.state, provider_id, workspace_dir)
+        if ws_info is None:
+            return {"ok": False, "error": "缺少 workspace_dir，无法创建 provider 会话"}
+
+        workspace_id = getattr(ws_info, "daemon_workspace_id", None) or _workspace_key(provider_id, ws_info.path)
+        ws_info.daemon_workspace_id = workspace_id
+
+        if hasattr(adapter, "register_workspace_cwd"):
+            try:
+                adapter.register_workspace_cwd(workspace_id, ws_info.path)
+            except Exception:
+                logger.debug("[provider-owner-bridge] register_workspace_cwd 失败", exc_info=True)
+
+        try:
+            result = await start_thread(workspace_id)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        thread_id = _extract_started_thread_id(result)
+        if not thread_id:
+            return {"ok": False, "error": f"{provider_id} start_thread 返回无效 thread id"}
+
+        thread_info = ws_info.threads.get(thread_id)
+        if thread_info is None:
+            thread_info = _new_thread_info(thread_id, source=_new_thread_source(provider_id))
+            ws_info.threads[thread_id] = thread_info
+        thread_info.archived = False
+        thread_info.is_active = False
+        thread_info.preview = getattr(thread_info, "preview", None) or ""
+
+        if getattr(self.state, "storage", None) is not None:
+            try:
+                save_storage(self.state.storage)
+            except Exception as exc:
+                return {"ok": False, "error": f"会话已创建，但保存本地状态失败: {exc}"}
+        self._list_sessions_cache.clear()
+
+        now = int(time.time())
+        return {
+            "ok": True,
+            "provider_id": provider_id,
+            "thread_id": thread_id,
+            "workspace_id": workspace_id,
+            "workspace_dir": ws_info.path,
+            "session": {
+                "id": thread_id,
+                "title": thread_id,
+                "preview": "",
+                "workspace": ws_info.path,
+                "archived": False,
+                "providerActive": False,
+                "updatedAt": now,
+                "createdAt": now,
+            },
         }
 
     async def _handle_read_session(self, request: dict) -> dict:

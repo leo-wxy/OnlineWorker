@@ -104,6 +104,7 @@ test("session browser loads provider sessions only when the tab is active and ke
   assert.match(sessionBrowser, /setLoading\(loadingProvidersRef\.current\.size > 0\);/);
   assert.match(sessionBrowser, /const providerListReady = loadedProvidersRef\.current\.has\(providerFilter\);/);
   assert.match(sessionBrowser, /const waitingForProviderList = useMemo/);
+  assert.match(sessionBrowser, /if \(!providerListReady && sessions\.length === 0\) \{\s*return sessions;\s*\}/s);
   assert.match(sessionBrowser, /resolveSessionSnapshotUpdate\(cachedSessions, normalizedSessions, \{/);
   assert.match(sessionBrowser, /emptyRetryBudget: options\?\.forceRefresh && !acceptEmptySnapshot \? 1 : 0,/);
   assert.match(sessionBrowser, /window\.setTimeout\(\(\) => \{\s*setProviderReloadTick\(\(current\) => current \+ 1\);\s*\}, 750\)/s);
@@ -118,8 +119,17 @@ test("session browser loads provider sessions only when the tab is active and ke
   assert.match(sessionBrowser, /await loadProvider\(previousSession\.type, \{\s*force: true,\s*forceRefresh: true,\s*\}\);/s);
   assert.match(sessionBrowser, /acceptEmptySnapshot: true,/);
   assert.match(navigation, /loading = false/);
-  assert.match(navigation, /\{loading \? \(\s*<StatePanel message=\{noSessionsLabel\} \/>/s);
-  assert.match(navigation, /\{loading \? \(\s*<StatePanel message=\{labels\.noSessions\} \/>/s);
+  assert.match(navigation, /\{loading && workspaces\.length === 0 \? \(\s*<StatePanel message=\{noSessionsLabel\} \/>/s);
+  assert.match(navigation, /\{loading && sessions\.length === 0 \? \(\s*<StatePanel message=\{labels\.noSessions\} \/>/s);
+});
+
+test("session navigation keeps populated lists visible during background provider refresh", () => {
+  const navigation = readFileSync(join(root, "src", "components", "session-browser", "navigation.tsx"), "utf8");
+
+  assert.match(navigation, /loading && workspaces\.length === 0/);
+  assert.match(navigation, /loading && sessions\.length === 0/);
+  assert.doesNotMatch(navigation, /\{loading \? \(\s*<StatePanel message=\{noSessionsLabel\} \/>/s);
+  assert.doesNotMatch(navigation, /\{loading \? \(\s*<StatePanel message=\{labels\.noSessions\} \/>/s);
 });
 
 test("ai settings uses fixed service cards and scenario service selection", () => {

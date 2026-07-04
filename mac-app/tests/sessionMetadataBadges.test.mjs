@@ -67,7 +67,7 @@ test("generic provider sessions render a reusable chat surface with composer wir
 test("generic provider chat keeps header state aligned without remounting on live list updates", () => {
   const genericChat = readFileSync(join(root, "src", "components", "session-browser", "GenericProviderChat.tsx"), "utf8");
 
-  assert.match(genericChat, /useEffect\(\(\) => \{\s*setActiveSession\(session\);\s*\}, \[session\.id, session\.type, session\.workspace\]\);/s);
+  assert.match(genericChat, /useEffect\(\(\) => \{\s*liveStreamReadyRef\.current = false;\s*setActiveSession\(session\);\s*\}, \[session\.id, session\.type, session\.workspace\]\);/s);
   assert.match(genericChat, /if \(!active\) \{\s*return;\s*\}/s);
   assert.match(genericChat, /enabled: active && Boolean\(activeSession\.id\)/);
   assert.match(genericChat, /if \(hasLoadedRef\.current && messagesRef\.current\.length > 0\) \{\s*void refreshMessagesSilently\(\);\s*\} else \{\s*void loadMessages\(\);\s*\}/s);

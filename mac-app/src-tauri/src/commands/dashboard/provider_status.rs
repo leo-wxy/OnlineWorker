@@ -8,10 +8,9 @@ use std::process::Command;
 use std::time::{Duration, SystemTime};
 
 use super::super::config_provider::{
-    infer_provider_legacy_transport, provider_default_live_transport,
-    provider_default_metadata, provider_metadata_from_raw,
-    provider_uses_shared_app_server_transport, public_default_provider_ids,
-    ProviderIconEntry, ProviderMetadata, ProviderTuiHostEntry,
+    infer_provider_legacy_transport, provider_default_live_transport, provider_default_metadata,
+    provider_metadata_from_raw, provider_uses_shared_app_server_transport,
+    public_default_provider_ids, ProviderIconEntry, ProviderMetadata, ProviderTuiHostEntry,
 };
 use super::{ProviderDashboardStatus, ServiceHealth};
 
@@ -191,7 +190,8 @@ pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<Provi
             if provider_uses_shared_app_server_transport(&id) && snapshot.transport == "stdio" {
                 snapshot.port = None;
                 snapshot.app_server_url = None;
-            } else if provider_uses_shared_app_server_transport(&id) && snapshot.transport == "unix" {
+            } else if provider_uses_shared_app_server_transport(&id) && snapshot.transport == "unix"
+            {
                 snapshot.port = None;
             }
             snapshot.live_transport = normalize_live_transport(provider.live_transport)
@@ -239,10 +239,14 @@ pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<Provi
             snapshot.port = port;
             snapshot.app_server_url = tool.app_server_url.or(snapshot.app_server_url);
             snapshot.control_mode = tool.control_mode.or(snapshot.control_mode);
-            if provider_uses_shared_app_server_transport(&tool.name) && snapshot.transport == "stdio" {
+            if provider_uses_shared_app_server_transport(&tool.name)
+                && snapshot.transport == "stdio"
+            {
                 snapshot.port = None;
                 snapshot.app_server_url = None;
-            } else if provider_uses_shared_app_server_transport(&tool.name) && snapshot.transport == "unix" {
+            } else if provider_uses_shared_app_server_transport(&tool.name)
+                && snapshot.transport == "unix"
+            {
                 snapshot.port = None;
             }
             snapshot.live_transport =

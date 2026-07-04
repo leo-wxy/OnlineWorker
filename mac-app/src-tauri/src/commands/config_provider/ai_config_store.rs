@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    AiConfigDocument, AiConfigMetadata, AiScenarioConfigEntry, AiScenarioMetadata,
-    AiServiceConfigEntry, AiServiceMetadata, ProviderAiServiceDefault, ProviderConfigDocument,
-    provider_ai_service_defaults,
+    provider_ai_service_defaults, AiConfigDocument, AiConfigMetadata, AiScenarioConfigEntry,
+    AiScenarioMetadata, AiServiceConfigEntry, AiServiceMetadata, ProviderAiServiceDefault,
+    ProviderConfigDocument,
 };
 
 const LEGACY_NOTIFICATION_SUMMARY_PROMPT: &str = "You summarize OnlineWorker task completion notifications.\nReturn compact JSON with preview_title and summary.\npreview_title identifies the completed task.\nsummary explains the completed result.\n\nCurrent task:\n{{task_summary}}\n\nFinal assistant message:\n{{final_message}}\n";
@@ -133,7 +133,9 @@ pub(super) fn ai_metadata_from_document(doc: ProviderConfigDocument) -> AiConfig
             AiServiceMetadata {
                 id: service.id.clone(),
                 name: service.name,
-                label: defaults.map(|item| item.label.clone()).unwrap_or_else(|| service.id.clone()),
+                label: defaults
+                    .map(|item| item.label.clone())
+                    .unwrap_or_else(|| service.id.clone()),
                 description: defaults
                     .map(|item| item.description.clone())
                     .unwrap_or_default(),

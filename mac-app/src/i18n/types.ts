@@ -247,6 +247,11 @@ export interface AppTexts {
     stagingAttachments: string;
     attachmentUnsupported: string;
     sessionActions: string;
+    newSession: string;
+    creatingSession: string;
+    newSessionHint: string;
+    newSessionNoWorkspace: string;
+    createSessionFailed: (error: string) => string;
     openWorkspaceInTerminal: string;
     openWorkspaceInFinder: string;
     copyWorkspacePath: string;

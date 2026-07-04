@@ -30,11 +30,15 @@ test("provider session view loads codex through generic provider session reads",
   assert.doesNotMatch(genericChat, /fetchCodexThreadState/);
 });
 
-test("provider session view keeps an idle snapshot refresh fallback for externally growing codex sessions", () => {
+test("provider session view keeps snapshot refresh active after the live stream is ready", () => {
   const genericChat = readFileSync(join(root, "src", "components", "session-browser", "GenericProviderChat.tsx"), "utf8");
 
   assert.match(genericChat, /startActiveSessionRefresh\(\{/);
   assert.match(genericChat, /intervalMs:\s*3000/);
+  assert.match(genericChat, /const liveStreamReadyRef = useRef\(false\)/);
+  assert.match(genericChat, /if \(event\?\.kind === "stream_ready"\) \{\s*liveStreamReadyRef\.current = true;\s*return;\s*\}/s);
+  assert.match(genericChat, /shouldSkip:\s*\(\) => liveRefreshBlockedRef\.current/);
+  assert.doesNotMatch(genericChat, /shouldSkip:\s*\(\) => liveRefreshBlockedRef\.current \|\| liveStreamReadyRef\.current/);
   assert.match(genericChat, /const \[loading, setLoading\] = useState\(true\)/);
   assert.match(
     genericChat,

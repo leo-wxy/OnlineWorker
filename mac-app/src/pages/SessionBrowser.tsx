@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent } fr
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "../i18n";
 import {
+  createProviderSession,
   fetchProviderMetadata,
   fetchProviderSessions,
 } from "../components/session-browser/api";
@@ -83,6 +84,8 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
   const [workspaceContextMenu, setWorkspaceContextMenu] = useState<WorkspaceActionMenuState | null>(null);
   const [archivingSessionId, setArchivingSessionId] = useState<string | null>(null);
   const [archiveNotice, setArchiveNotice] = useState<ArchiveNotice | null>(null);
+  const [creatingSession, setCreatingSession] = useState(false);
+  const [createSessionError, setCreateSessionError] = useState<string | null>(null);
   const [taskBoardState, setTaskBoardState] = useState<TaskBoardState>(DEFAULT_TASK_BOARD_STATE);
   const [providerReloadTick, setProviderReloadTick] = useState(0);
   const loadedProvidersRef = useRef<Set<ProviderFilter>>(new Set());
@@ -164,6 +167,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     setSessionContextMenu(null);
     setWorkspaceContextMenu(null);
     setArchiveNotice(null);
+    setCreateSessionError(null);
   }, [openTarget?.providerId, providerFilter]);
 
   useEffect(() => {
@@ -262,10 +266,8 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
       console.warn(`Failed to load ${provider} sessions`, error);
       if (retryTimerRef.current !== null) {
         window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
       }
-      retryTimerRef.current = window.setTimeout(() => {
-        setProviderReloadTick((current) => current + 1);
-      }, 750);
       return false;
     } finally {
       loadingProvidersRef.current.delete(provider);
@@ -339,6 +341,24 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     providerFilter,
   ]);
 
+  const providerListReady = loadedProvidersRef.current.has(providerFilter);
+
+  const unifiedSessions = useMemo<UnifiedSession[]>(() => {
+    const sessions = genericSessionsByProvider[providerFilter] ?? [];
+    if (!providerListReady && sessions.length === 0) {
+      return sessions;
+    }
+    return mergeLiveSessionActivities(
+      sessions,
+      taskBoardActivities.filter((activity) => activity.providerId === providerFilter),
+    );
+  }, [genericSessionsByProvider, providerFilter, providerListReady, taskBoardActivities]);
+
+  const workspaces = useMemo(() => {
+    const list = Array.from(new Set(unifiedSessions.map(s => s.workspace)));
+    return list.sort();
+  }, [unifiedSessions]);
+
   const refreshCurrentProvider = useCallback(async () => {
     await loadProvider(providerFilter, {
       force: true,
@@ -346,6 +366,58 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
       acceptEmptySnapshot: true,
     });
   }, [loadProvider, providerFilter]);
+
+  const startNewSession = useCallback(async () => {
+    const workspacePath = selectedWorkspace || workspaces[0] || "";
+    if (!providerFilter || !workspacePath || creatingSession) {
+      setCreateSessionError(t.sessions.newSessionNoWorkspace);
+      return;
+    }
+
+    setCreatingSession(true);
+    setCreateSessionError(null);
+    setArchiveNotice(null);
+    setSessionContextMenu(null);
+    setWorkspaceContextMenu(null);
+    try {
+      const rawSession = await createProviderSession(providerFilter, workspacePath);
+      const normalizedSession = normalizeGenericProviderSessions(
+        providerFilter,
+        [rawSession],
+        workspacePath,
+      )[0];
+      if (!normalizedSession) {
+        throw new Error("provider returned an empty session");
+      }
+      const currentSessions = genericSessionsByProvider[providerFilter] ?? [];
+      const nextSessions = [
+        normalizedSession,
+        ...currentSessions.filter((session) => session.id !== normalizedSession.id),
+      ];
+      const cachedMerged = writeCachedProviderSessionSnapshot(providerFilter, nextSessions);
+      loadedProvidersRef.current.add(providerFilter);
+      activatedProvidersRef.current.add(providerFilter);
+      setGenericSessionsByProvider((current) => mergeSessionSnapshotsByProvider(
+        current,
+        providerFilter,
+        cachedMerged,
+      ));
+      setArchiveFilter("active");
+      setSelectedWorkspace(normalizedSession.workspace || workspacePath);
+      setSelectedSessionId(normalizedSession.id);
+    } catch (error) {
+      setCreateSessionError(t.sessions.createSessionFailed((error as Error).message));
+    } finally {
+      setCreatingSession(false);
+    }
+  }, [
+    creatingSession,
+    genericSessionsByProvider,
+    providerFilter,
+    selectedWorkspace,
+    t.sessions,
+    workspaces,
+  ]);
 
   const openSessionContextMenu = useCallback((
     event: MouseEvent<HTMLElement>,
@@ -449,14 +521,6 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     }
   }, [pinnedSessionIds]);
 
-  const unifiedSessions = useMemo<UnifiedSession[]>(() => {
-    const sessions = genericSessionsByProvider[providerFilter] ?? [];
-    return mergeLiveSessionActivities(
-      sessions,
-      taskBoardActivities.filter((activity) => activity.providerId === providerFilter),
-    );
-  }, [genericSessionsByProvider, providerFilter, taskBoardActivities]);
-
   const handleSessionRemapped = useCallback(async (
     previousSession: UnifiedSession,
     sendResult: ProviderSessionSendResult,
@@ -473,11 +537,6 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     setSelectedWorkspace(previousSession.workspace || null);
     setSelectedSessionId(nextSessionId);
   }, [loadProvider]);
-
-  const workspaces = useMemo(() => {
-    const list = Array.from(new Set(unifiedSessions.map(s => s.workspace)));
-    return list.sort();
-  }, [unifiedSessions]);
 
   useEffect(() => {
     if (selectedWorkspace && workspaces.length > 0 && !workspaces.includes(selectedWorkspace)) {
@@ -498,7 +557,6 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     return unifiedSessions.find(s => s.id === selectedSessionId) || null;
   }, [unifiedSessions, selectedSessionId]);
 
-  const providerListReady = loadedProvidersRef.current.has(providerFilter);
   const waitingForProviderList = useMemo(() => (
     active &&
     Boolean(providerFilter) &&
@@ -576,6 +634,13 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
             pinSession: t.sessions.pinSession,
             unpinSession: t.sessions.unpinSession,
             sessionActions: t.sessions.sessionActions,
+            newSession: t.sessions.newSession,
+            creatingSession: t.sessions.creatingSession,
+            newSessionHint: t.sessions.newSessionHint,
+          }}
+          newSessionForm={{
+            creating: creatingSession,
+            error: createSessionError,
           }}
           pinnedSessionIds={pinnedSessionIds}
           renderSessionMeta={(session) => (
@@ -586,6 +651,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
             ) : null
           )}
           onArchiveFilterChange={setArchiveFilter}
+          onStartNewSession={() => void startNewSession()}
           onSelectSession={setSelectedSessionId}
           onTogglePinSession={(session) => void handleTogglePinSession(session)}
           onOpenContextMenu={openSessionContextMenu}

@@ -184,8 +184,7 @@ pub async fn get_provider_usage_summary(
     }
 
     let data_dir = ensure_data_dir()?;
-    match provider_usage_summary_via_owner_bridge(&data_dir, &provider.id, &start_date, &end_date)
-    {
+    match provider_usage_summary_via_owner_bridge(&data_dir, &provider.id, &start_date, &end_date) {
         Ok(summary) => Ok(summary),
         Err(_) => run_provider_usage_bridge(&app, &provider.id, &start_date, &end_date).await,
     }

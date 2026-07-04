@@ -150,7 +150,10 @@ fn parse_provider_session_row(row: &Value) -> Option<ProviderSessionRow> {
         workspace,
         title,
         preview,
-        archived: row.get("archived").and_then(Value::as_bool).unwrap_or(false),
+        archived: row
+            .get("archived")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         provider_active: row
             .get("providerActive")
             .or_else(|| row.get("provider_active"))
@@ -270,7 +273,8 @@ async fn load_provider_session_rows_for_state(
         let rows = value
             .as_array()
             .map(|items| {
-                items.iter()
+                items
+                    .iter()
                     .filter_map(parse_provider_session_row)
                     .collect::<Vec<_>>()
             })

@@ -913,11 +913,11 @@ pub async fn publish_telegram_commands() -> Result<CommandRegistryResponse, Stri
 mod tests {
     use super::{
         apply_publish_success, build_publish_scopes, build_publishable_commands, build_response,
-        command_registry_path, discover_provider_file_commands_from_roots,
-        discover_downstream_commands, discover_skill_commands_from_roots, load_or_initialize_store,
-        load_registry_store, merge_registry_with_discovery, preferred_telegram_name,
-        save_registry_store, CommandBackend, CommandRegistryEntry, CommandRegistryStore,
-        CommandScope, CommandSource, CommandStatus, DiscoveredCommand,
+        command_registry_path, discover_downstream_commands,
+        discover_provider_file_commands_from_roots, discover_skill_commands_from_roots,
+        load_or_initialize_store, load_registry_store, merge_registry_with_discovery,
+        preferred_telegram_name, save_registry_store, CommandBackend, CommandRegistryEntry,
+        CommandRegistryStore, CommandScope, CommandSource, CommandStatus, DiscoveredCommand,
     };
     use crate::commands::telegram::TelegramCommandScope;
     use std::collections::HashSet;

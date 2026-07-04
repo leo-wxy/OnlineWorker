@@ -58,6 +58,17 @@ export async function fetchProviderSession(
   return limitSessionTurns(normalizeSessionTurns(turns));
 }
 
+export async function createProviderSession(
+  providerId: string,
+  workspaceDir: string,
+): Promise<unknown> {
+  const result = await invoke<Record<string, unknown> | null>("create_provider_session", {
+    providerId,
+    workspaceDir,
+  });
+  return result?.session ?? result ?? {};
+}
+
 export async function sendProviderSessionMessage(
   providerId: string,
   sessionId: string,

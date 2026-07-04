@@ -82,6 +82,7 @@ export function GenericProviderChat({
   const replyWatchTokenRef = useRef(0);
   const messagesRef = useRef<SessionTurn[]>([]);
   const liveRefreshBlockedRef = useRef(true);
+  const liveStreamReadyRef = useRef(false);
   const hasLoadedRef = useRef(false);
   const pendingScrollBehaviorRef = useRef<ScrollBehavior>("auto");
 
@@ -100,6 +101,7 @@ export function GenericProviderChat({
   }, []);
 
   useEffect(() => {
+    liveStreamReadyRef.current = false;
     setActiveSession(session);
   }, [session.id, session.type, session.workspace]);
 
@@ -184,9 +186,11 @@ export function GenericProviderChat({
 
   const handleSessionEvent = useCallback((event: SessionStreamEvent) => {
     if (event?.kind === "stream_ready") {
+      liveStreamReadyRef.current = true;
       return;
     }
     if (event?.kind === "error") {
+      liveStreamReadyRef.current = false;
       if (messagesRef.current.length === 0) {
         setError(event.error ?? "provider session stream error");
       } else {

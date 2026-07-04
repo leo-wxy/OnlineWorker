@@ -76,11 +76,7 @@ pub(crate) struct ProviderExternalCliConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub(crate) upstream_base_url: Option<String>,
-    #[serde(
-        default,
-        alias = "auth_token",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, alias = "auth_token", skip_serializing_if = "Option::is_none")]
     pub(crate) auth_token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) model: Option<String>,
@@ -845,11 +841,8 @@ fn provider_plugin_manifest_sources_with_paths() -> Vec<ProviderPluginManifestSo
         .filter_map(|asset| {
             let id = asset.id()?;
             Some(ProviderPluginManifestSource {
-            source: asset.manifest.to_string(),
-            path: plugin_root
-                .join("builtin")
-                    .join(id)
-                .join("plugin.yaml"),
+                source: asset.manifest.to_string(),
+                path: plugin_root.join("builtin").join(id).join("plugin.yaml"),
             })
         })
         .collect()
@@ -1038,11 +1031,7 @@ fn provider_ai_service_default_list() -> Vec<ProviderAiServiceDefault> {
                 .map(|model| model.trim().to_string())
                 .filter(|model| !model.is_empty())
                 .collect::<Vec<_>>();
-            let default_model = service
-                .default_model
-                .unwrap_or_default()
-                .trim()
-                .to_string();
+            let default_model = service.default_model.unwrap_or_default().trim().to_string();
             let label = service
                 .label
                 .unwrap_or_else(|| service.name.clone().unwrap_or_else(|| service_id.clone()))
@@ -1068,7 +1057,12 @@ fn provider_ai_service_default_list() -> Vec<ProviderAiServiceDefault> {
                         .unwrap_or_else(|| "openai_compatible_chat".to_string())
                         .trim()
                         .to_string(),
-                    base_url: service.base_url.unwrap_or_default().trim().trim_end_matches('/').to_string(),
+                    base_url: service
+                        .base_url
+                        .unwrap_or_default()
+                        .trim()
+                        .trim_end_matches('/')
+                        .to_string(),
                     endpoint: service.endpoint.unwrap_or_default().trim().to_string(),
                     api_key: String::new(),
                     api_key_env: service.api_key_env.unwrap_or_default().trim().to_string(),
@@ -1184,7 +1178,9 @@ fn infer_legacy_transport(
         }
     }
     let default_transport = default_owner_transport(tool_name);
-    if raw_port.unwrap_or(0) > 0 && (default_transport == "stdio" || uses_shared_app_server_transport(tool_name)) {
+    if raw_port.unwrap_or(0) > 0
+        && (default_transport == "stdio" || uses_shared_app_server_transport(tool_name))
+    {
         "ws".to_string()
     } else {
         default_transport
@@ -1227,10 +1223,7 @@ fn normalize_provider_entry(provider_id: &str, provider: &mut ProviderConfigEntr
         .take()
         .or(defaults.runtime_id)
         .or_else(|| Some(provider_id.to_string()));
-    provider.bin = provider
-        .bin
-        .take()
-        .or(defaults.bin);
+    provider.bin = provider.bin.take().or(defaults.bin);
     let control_mode = provider.control_mode.take().or(defaults.control_mode);
     provider.auth = if compatibility.auth_policy.as_deref() == Some("external_cli_only") {
         None
@@ -1302,10 +1295,9 @@ fn normalize_provider_entry(provider_id: &str, provider: &mut ProviderConfigEntr
     {
         explicit_live_transport = None;
     }
-    let live_transport = explicit_live_transport
-        .unwrap_or_else(|| {
-            default_live_transport(provider_id, &owner_transport, control_mode.as_deref())
-        });
+    let live_transport = explicit_live_transport.unwrap_or_else(|| {
+        default_live_transport(provider_id, &owner_transport, control_mode.as_deref())
+    });
 
     provider.control_mode = control_mode;
     provider.owner_transport = Some(owner_transport);
@@ -1483,7 +1475,13 @@ fn merge_provider_message_rewrite(
     if rewrite.wrapper.as_deref().unwrap_or("").trim().is_empty() {
         rewrite.wrapper = default_rewrite.wrapper;
     }
-    if rewrite.proxy_alias.as_deref().unwrap_or("").trim().is_empty() {
+    if rewrite
+        .proxy_alias
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+    {
         rewrite.proxy_alias = default_rewrite.proxy_alias;
     }
     rewrite
@@ -1695,15 +1693,21 @@ fn provider_external_cli_config(provider: &ProviderConfigEntry) -> ProviderExter
             .get("auth_token")
             .and_then(value_as_string)
             .or_else(|| config.get("authToken").and_then(value_as_string)),
-        model: config
-            .get("model")
-            .and_then(value_as_string),
+        model: config.get("model").and_then(value_as_string),
         launches_managed_child_cli: config
             .get("launcher_wraps_claude")
             .and_then(value_as_bool)
             .or_else(|| config.get("launcherWrapsClaude").and_then(value_as_bool))
-            .or_else(|| config.get("launches_managed_child_cli").and_then(value_as_bool))
-            .or_else(|| config.get("launchesManagedChildCli").and_then(value_as_bool))
+            .or_else(|| {
+                config
+                    .get("launches_managed_child_cli")
+                    .and_then(value_as_bool)
+            })
+            .or_else(|| {
+                config
+                    .get("launchesManagedChildCli")
+                    .and_then(value_as_bool)
+            })
             .unwrap_or(false),
     }
 }
@@ -1932,10 +1936,7 @@ pub(super) fn set_provider_cli_config_in_document(
         .filter(|value| !value.is_empty())
     {
         Some(model) => {
-            config.insert(
-                "model".to_string(),
-                serde_yaml::Value::String(model),
-            );
+            config.insert("model".to_string(), serde_yaml::Value::String(model));
         }
         None => {
             config.remove("model");
@@ -2024,14 +2025,15 @@ mod tests {
         build_default_user_config_with_env, normalize_config_for_display,
         normalize_provider_document, normalize_provider_document_with_env,
         notification_channel_metadata_from_raw, overlay_env_spec_from_env_raw,
-        provider_ai_service_defaults, provider_assets, provider_default_metadata, provider_metadata_from_raw,
-        public_default_provider_ids, read_manifest_files_from_overlay_path,
-        serialize_normalized_config_with_env, set_ai_config_in_document,
-        set_notification_channel_config_in_document, set_notification_channel_enabled_in_document,
-        set_provider_cli_config_in_document, set_provider_flags_in_document,
-        set_provider_message_hook_enabled_in_document, set_test_process_env_override,
-        AiScenarioConfigEntry, AiServiceConfigEntry, ProviderExternalCliConfig,
-        ProviderLaunchMethodConfig, NOTIFICATION_OVERLAY_ENV, PROVIDER_OVERLAY_ENV,
+        provider_ai_service_defaults, provider_assets, provider_default_metadata,
+        provider_metadata_from_raw, public_default_provider_ids,
+        read_manifest_files_from_overlay_path, serialize_normalized_config_with_env,
+        set_ai_config_in_document, set_notification_channel_config_in_document,
+        set_notification_channel_enabled_in_document, set_provider_cli_config_in_document,
+        set_provider_flags_in_document, set_provider_message_hook_enabled_in_document,
+        set_test_process_env_override, AiScenarioConfigEntry, AiServiceConfigEntry,
+        ProviderExternalCliConfig, ProviderLaunchMethodConfig, NOTIFICATION_OVERLAY_ENV,
+        PROVIDER_OVERLAY_ENV,
     };
 
     fn shared_unix_provider_id_for_test() -> String {
@@ -2045,7 +2047,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_provider_document_migrates_legacy_default_ws_to_unix_and_backfills_public_defaults() {
+    fn normalize_provider_document_migrates_legacy_default_ws_to_unix_and_backfills_public_defaults(
+    ) {
         let provider_id = shared_unix_provider_id_for_test();
         let raw = format!(
             r#"
@@ -2628,8 +2631,18 @@ providers:
             .find(|provider| provider.id == "custom-b")
             .expect("custom-b");
 
-        assert!(custom_a.message_hooks.abusive_language_normalization.enabled);
-        assert!(!custom_b.message_hooks.abusive_language_normalization.enabled);
+        assert!(
+            custom_a
+                .message_hooks
+                .abusive_language_normalization
+                .enabled
+        );
+        assert!(
+            !custom_b
+                .message_hooks
+                .abusive_language_normalization
+                .enabled
+        );
     }
 
     #[test]
@@ -2657,7 +2670,10 @@ providers:
             custom.external_cli.upstream_base_url.as_deref(),
             Some("https://upstream.example.test/provider")
         );
-        assert_eq!(custom.external_cli.model.as_deref(), Some("deepseek-v4-pro[1m]"));
+        assert_eq!(
+            custom.external_cli.model.as_deref(),
+            Some("deepseek-v4-pro[1m]")
+        );
         assert!(custom.external_cli.launches_managed_child_cli);
     }
 
@@ -2707,9 +2723,7 @@ providers:
             Some("sk-test-token")
         );
         assert_eq!(
-            external_cli
-                .get("model")
-                .and_then(|value| value.as_str()),
+            external_cli.get("model").and_then(|value| value.as_str()),
             Some("deepseek-v4-pro[1m]")
         );
         assert_eq!(
@@ -3255,8 +3269,16 @@ providers:
         assert!(provider.capabilities.message_rewrite.app_send);
         assert!(provider.capabilities.message_rewrite.telegram);
         assert_eq!(
-            provider.capabilities.message_rewrite.external_cli.as_deref(),
-            defaults.capabilities.message_rewrite.external_cli.as_deref()
+            provider
+                .capabilities
+                .message_rewrite
+                .external_cli
+                .as_deref(),
+            defaults
+                .capabilities
+                .message_rewrite
+                .external_cli
+                .as_deref()
         );
         assert_eq!(
             provider.capabilities.message_rewrite.wrapper.as_deref(),

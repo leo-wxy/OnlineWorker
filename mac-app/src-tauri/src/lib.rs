@@ -8,7 +8,11 @@ use std::sync::{
     Arc,
 };
 use std::time::Duration;
-use std::{env, fs, path::{Path, PathBuf}, thread};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    thread,
+};
 use tauri::Manager;
 use tokio::sync::Mutex;
 
@@ -29,8 +33,8 @@ use commands::config::{
 use commands::dashboard::get_dashboard_state;
 use commands::logs::{get_log_file_path, start_log_tail, stop_log_tail};
 use commands::provider_sessions::{
-    archive_provider_session, list_provider_sessions, read_provider_session,
-    send_provider_session_message, stage_session_composer_attachments,
+    archive_provider_session, create_provider_session, list_provider_sessions,
+    read_provider_session, send_provider_session_message, stage_session_composer_attachments,
     start_provider_session_event_stream, stop_provider_session_event_stream,
 };
 use commands::provider_usage::get_provider_usage_summary;
@@ -398,6 +402,7 @@ pub fn run() {
             open_provider_tui_host_terminal,
             list_provider_sessions,
             read_provider_session,
+            create_provider_session,
             archive_provider_session,
             send_provider_session_message,
             stage_session_composer_attachments,
@@ -473,22 +478,20 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        prepare_single_instance_startup, probe_existing_instance, single_instance_socket_path,
-        ExistingInstanceStatus, SingleInstanceStartup,
         default_provider_overlay_env, launch_service_self_check_delay,
-        service_guard_check_interval, should_auto_start_service_after_launch,
-        should_auto_start_service_in_session, should_cleanup_on_destroy,
-        should_hide_window_on_close, should_restore_main_window_on_reopen, AppExitState,
+        prepare_single_instance_startup, probe_existing_instance, service_guard_check_interval,
+        should_auto_start_service_after_launch, should_auto_start_service_in_session,
+        should_cleanup_on_destroy, should_hide_window_on_close,
+        should_restore_main_window_on_reopen, single_instance_socket_path, AppExitState,
+        ExistingInstanceStatus, SingleInstanceStartup,
     };
     use crate::commands::service::ServiceStatus;
     use std::os::unix::net::UnixListener;
     use std::{fs, path::Path, time::Duration};
 
     fn temp_single_instance_dir(name: &str) -> std::path::PathBuf {
-        let dir = std::path::PathBuf::from("/tmp").join(format!(
-            "ow-si-{name}-{}",
-            std::process::id(),
-        ));
+        let dir =
+            std::path::PathBuf::from("/tmp").join(format!("ow-si-{name}-{}", std::process::id(),));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp dir");
         dir

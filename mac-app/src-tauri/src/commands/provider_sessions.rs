@@ -77,35 +77,36 @@ fn normalized_session_access_value(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
 
+fn canonical_session_access_value(value: &str) -> String {
+    let value = normalized_session_access_value(value);
+    if value.is_empty() {
+        return "owner_bridge".to_string();
+    }
+
+    match value.as_str() {
+        // Legacy provider-specific storage/runtime names may still exist in
+        // user config.yaml files. The current app session surface routes those
+        // operations through the provider owner bridge.
+        "codex_threads" | "codex_app_server" | "codex_thread_jsonl" | "claude_projects"
+        | "claude_project" => "owner_bridge".to_string(),
+        _ => value,
+    }
+}
+
 fn provider_session_access(provider: &ProviderMetadata) -> ProviderSessionAccessCapabilities {
     provider.capabilities.session_access.clone()
 }
 
 fn provider_session_list_access(provider: &ProviderMetadata) -> String {
-    let value = normalized_session_access_value(&provider_session_access(provider).list);
-    if value.is_empty() {
-        "owner_bridge".to_string()
-    } else {
-        value
-    }
+    canonical_session_access_value(&provider_session_access(provider).list)
 }
 
 fn provider_session_read_access(provider: &ProviderMetadata) -> String {
-    let value = normalized_session_access_value(&provider_session_access(provider).read);
-    if value.is_empty() {
-        "owner_bridge".to_string()
-    } else {
-        value
-    }
+    canonical_session_access_value(&provider_session_access(provider).read)
 }
 
 fn provider_session_send_access(provider: &ProviderMetadata) -> String {
-    let value = normalized_session_access_value(&provider_session_access(provider).send);
-    if value.is_empty() {
-        "owner_bridge".to_string()
-    } else {
-        value
-    }
+    canonical_session_access_value(&provider_session_access(provider).send)
 }
 
 fn composer_attachment_staging_dir(data_dir: &Path) -> std::path::PathBuf {
@@ -389,6 +390,46 @@ fn archive_provider_session_via_owner_bridge(
     Ok(response)
 }
 
+fn create_provider_session_via_owner_bridge(
+    data_dir: &Path,
+    provider_id: &str,
+    workspace_dir: &str,
+) -> Result<Value, String> {
+    let mut socket = connect_owner_bridge_socket(data_dir, PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT)?;
+
+    let payload = serde_json::json!({
+        "type": "create_session",
+        "provider_id": provider_id,
+        "workspace_dir": workspace_dir,
+    });
+
+    let raw_request = format!("{}\n", payload);
+    socket
+        .write_all(raw_request.as_bytes())
+        .map_err(|e| format!("write provider owner bridge request failed: {e}"))?;
+    socket
+        .shutdown(Shutdown::Write)
+        .map_err(|e| format!("shutdown provider owner bridge write failed: {e}"))?;
+
+    let mut response_line = String::new();
+    let mut reader = BufReader::new(socket);
+    reader
+        .read_line(&mut response_line)
+        .map_err(|e| format!("read provider owner bridge response failed: {e}"))?;
+
+    let response = serde_json::from_str::<Value>(response_line.trim())
+        .map_err(|e| format!("parse provider owner bridge response failed: {e}"))?;
+    if response.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err(response
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("provider owner bridge request failed")
+            .to_string());
+    }
+
+    Ok(response)
+}
+
 fn stream_provider_session_events_via_owner_bridge(
     data_dir: &Path,
     provider_id: &str,
@@ -544,6 +585,12 @@ fn owner_bridge_archive_error_allows_sidecar(error: &str) -> bool {
         || lowered.contains("shutdown provider owner bridge write failed")
         || lowered.contains("read provider owner bridge response failed")
         || lowered.contains("parse provider owner bridge response failed")
+}
+
+fn owner_bridge_list_error_allows_sidecar(error: &str) -> bool {
+    let lowered = error.to_ascii_lowercase();
+    lowered.contains("provider owner bridge not ready")
+        || lowered.contains("connect provider owner bridge failed")
 }
 
 fn send_provider_session_message_via_owner_bridge_with_retry(
@@ -754,13 +801,14 @@ pub(crate) async fn load_provider_sessions_with_overlays(
         "owner_bridge" | "sidecar" => {
             let data_dir = ensure_data_dir()?;
             let sessions = match list_provider_sessions_via_owner_bridge(
-                    &data_dir,
-                    &provider.id,
-                    100,
-                    force_refresh,
-                ) {
-                    Ok(value) => Ok(value),
-                    Err(_) => {
+                &data_dir,
+                &provider.id,
+                100,
+                force_refresh,
+            ) {
+                Ok(value) => Ok(value),
+                Err(error) => {
+                    if owner_bridge_list_error_allows_sidecar(&error) {
                         run_provider_session_bridge(
                             app,
                             &provider.id,
@@ -770,8 +818,11 @@ pub(crate) async fn load_provider_sessions_with_overlays(
                             Some(PROVIDER_SESSION_BRIDGE_LIST_TIMEOUT),
                         )
                         .await
+                    } else {
+                        Err(error)
                     }
-                }?;
+                }
+            }?;
             Ok(overlay_provider_sessions(&data_dir, &provider.id, sessions))
         }
         other => Err(format!(
@@ -954,7 +1005,28 @@ pub async fn read_provider_session(
     session_id: String,
     workspace_dir: Option<String>,
 ) -> Result<Value, String> {
-    load_provider_session(&app, &provider_id, &session_id, workspace_dir.as_deref(), 20).await
+    load_provider_session(
+        &app,
+        &provider_id,
+        &session_id,
+        workspace_dir.as_deref(),
+        20,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn create_provider_session(
+    provider_id: String,
+    workspace_dir: String,
+) -> Result<Value, String> {
+    let provider = require_runtime_provider(&provider_id)?;
+    let normalized_workspace_dir = workspace_dir.trim().to_string();
+    if normalized_workspace_dir.is_empty() {
+        return Err("workspace_dir is required".to_string());
+    }
+    let data_dir = ensure_data_dir()?;
+    create_provider_session_via_owner_bridge(&data_dir, &provider.id, &normalized_workspace_dir)
 }
 
 #[tauri::command]
@@ -1177,14 +1249,17 @@ pub async fn stop_provider_session_event_stream() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        archive_provider_session_via_owner_bridge,
+        archive_provider_session_via_owner_bridge, create_provider_session_via_owner_bridge,
         list_provider_sessions_via_owner_bridge_with_timeout,
-        owner_bridge_archive_error_allows_sidecar, persist_provider_session_archived_state,
-        provider_session_list_access, provider_session_read_access, provider_session_send_access,
+        owner_bridge_archive_error_allows_sidecar, owner_bridge_list_error_allows_sidecar,
+        persist_provider_session_archived_state, provider_session_list_access,
+        provider_session_read_access, provider_session_send_access,
         send_provider_session_message_via_owner_bridge,
         send_provider_session_message_via_owner_bridge_with_retry, ComposerAttachment,
     };
-    use crate::commands::config_provider::{provider_metadata_from_raw, public_default_provider_ids};
+    use crate::commands::config_provider::{
+        provider_metadata_from_raw, public_default_provider_ids,
+    };
     use crate::commands::provider_bridge_common::{
         provider_bridge_env, provider_bridge_path, provider_not_enabled_message,
         provider_owner_bridge_socket_path, PROVIDER_OVERLAY_ENV,
@@ -1212,6 +1287,33 @@ mod tests {
             assert_eq!(provider_session_read_access(provider), "owner_bridge");
             assert_eq!(provider_session_send_access(provider), "owner_bridge");
         }
+    }
+
+    #[test]
+    fn provider_session_routes_accept_legacy_config_access_tokens() {
+        let providers = provider_metadata_from_raw("", None).expect("metadata");
+        let mut codex = providers
+            .iter()
+            .find(|provider| provider.id == "codex")
+            .expect("codex provider")
+            .clone();
+        codex.capabilities.session_access.list = "codex_threads".to_string();
+        codex.capabilities.session_access.read = "codex_thread_jsonl".to_string();
+        codex.capabilities.session_access.send = "codex_app_server".to_string();
+        assert_eq!(provider_session_list_access(&codex), "owner_bridge");
+        assert_eq!(provider_session_read_access(&codex), "owner_bridge");
+        assert_eq!(provider_session_send_access(&codex), "owner_bridge");
+
+        let mut claude = providers
+            .iter()
+            .find(|provider| provider.id == "claude")
+            .expect("claude provider")
+            .clone();
+        claude.capabilities.session_access.list = "claude_projects".to_string();
+        claude.capabilities.session_access.read = "claude_project".to_string();
+        assert_eq!(provider_session_list_access(&claude), "owner_bridge");
+        assert_eq!(provider_session_read_access(&claude), "owner_bridge");
+        assert_eq!(provider_session_send_access(&claude), "owner_bridge");
     }
 
     #[test]
@@ -1350,7 +1452,53 @@ mod tests {
         )
         .expect("send via owner bridge");
 
-        assert_eq!(used_bridge, Some(serde_json::json!({ "ok": true, "accepted": true })));
+        assert_eq!(
+            used_bridge,
+            Some(serde_json::json!({ "ok": true, "accepted": true }))
+        );
+        server.join().expect("join owner bridge server");
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn owner_bridge_can_create_provider_session_payload() {
+        let temp_dir = std::env::temp_dir().join(format!("ow-pob-create-{}", std::process::id()));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let socket_path = provider_owner_bridge_socket_path(&temp_dir);
+        let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept owner bridge socket");
+            let mut request = String::new();
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            reader
+                .read_line(&mut request)
+                .expect("read owner bridge request");
+            let payload: serde_json::Value =
+                serde_json::from_str(request.trim()).expect("parse owner bridge request");
+            assert_eq!(payload["type"], "create_session");
+            assert_eq!(payload["provider_id"], "overlay-tool");
+            assert_eq!(payload["workspace_dir"], "/tmp/workspace");
+
+            let response = serde_json::json!({
+                "ok": true,
+                "thread_id": "tid-new",
+                "session": {
+                    "id": "tid-new",
+                    "workspace": "/tmp/workspace",
+                    "title": "tid-new",
+                    "archived": false
+                }
+            });
+            writeln!(stream, "{response}").expect("write response");
+        });
+
+        let result =
+            create_provider_session_via_owner_bridge(&temp_dir, "overlay-tool", "/tmp/workspace")
+                .expect("create via owner bridge");
+
+        assert_eq!(result["thread_id"], "tid-new");
+        assert_eq!(result["session"]["id"], "tid-new");
         server.join().expect("join owner bridge server");
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -1390,7 +1538,10 @@ mod tests {
         )
         .expect("owner bridge should become ready within timeout");
 
-        assert_eq!(response, serde_json::json!({ "ok": true, "accepted": true }));
+        assert_eq!(
+            response,
+            serde_json::json!({ "ok": true, "accepted": true })
+        );
         server.join().expect("join owner bridge server");
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -1485,8 +1636,9 @@ mod tests {
             writeln!(stream, "{response}").expect("write response");
         });
 
-        let result = super::list_provider_sessions_via_owner_bridge(&temp_dir, "overlay-tool", 100, false)
-            .expect("list via owner bridge");
+        let result =
+            super::list_provider_sessions_via_owner_bridge(&temp_dir, "overlay-tool", 100, false)
+                .expect("list via owner bridge");
 
         assert_eq!(
             result,
@@ -1508,7 +1660,8 @@ mod tests {
 
     #[test]
     fn owner_bridge_list_provider_sessions_force_refresh_payload() {
-        let temp_dir = std::env::temp_dir().join(format!("ow-pobr-list-force-{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("ow-pobr-list-force-{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).expect("create temp dir");
         let socket_path = provider_owner_bridge_socket_path(&temp_dir);
@@ -1531,8 +1684,9 @@ mod tests {
             writeln!(stream, "{response}").expect("write response");
         });
 
-        let result = super::list_provider_sessions_via_owner_bridge(&temp_dir, "overlay-tool", 100, true)
-            .expect("list via owner bridge");
+        let result =
+            super::list_provider_sessions_via_owner_bridge(&temp_dir, "overlay-tool", 100, true)
+                .expect("list via owner bridge");
 
         assert_eq!(result, serde_json::json!([]));
         server.join().expect("join owner bridge server");
@@ -1573,6 +1727,26 @@ mod tests {
 
         server.join().expect("join owner bridge server");
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn owner_bridge_list_errors_only_fall_back_before_owner_is_ready() {
+        assert!(owner_bridge_list_error_allows_sidecar(
+            "provider owner bridge not ready: /tmp/provider_owner_bridge.sock"
+        ));
+        assert!(owner_bridge_list_error_allows_sidecar(
+            "connect provider owner bridge failed: connection refused"
+        ));
+
+        assert!(!owner_bridge_list_error_allows_sidecar(
+            "read provider owner bridge response failed: resource temporarily unavailable"
+        ));
+        assert!(!owner_bridge_list_error_allows_sidecar(
+            "parse provider owner bridge response failed: expected value"
+        ));
+        assert!(!owner_bridge_list_error_allows_sidecar(
+            "Provider 'codex' list_sessions failed"
+        ));
     }
 
     #[test]

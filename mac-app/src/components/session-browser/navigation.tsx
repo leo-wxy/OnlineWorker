@@ -98,7 +98,7 @@ export function WorkspaceSidebar({
       </div>
 
       <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
-        {loading ? (
+        {loading && workspaces.length === 0 ? (
           <StatePanel message={noSessionsLabel} />
         ) : workspaces.length === 0 ? (
           <StatePanel message={noSessionsLabel} />
@@ -156,9 +156,11 @@ export function SessionListPanel({
   archiveNotice,
   loading = false,
   labels,
+  newSessionForm,
   pinnedSessionIds,
   renderSessionMeta,
   onArchiveFilterChange,
+  onStartNewSession,
   onSelectSession,
   onTogglePinSession,
   onOpenContextMenu,
@@ -180,10 +182,18 @@ export function SessionListPanel({
     pinSession: string;
     unpinSession: string;
     sessionActions: string;
+    newSession: string;
+    creatingSession: string;
+    newSessionHint: string;
+  };
+  newSessionForm?: {
+    creating: boolean;
+    error: string | null;
   };
   pinnedSessionIds?: Set<string>;
   renderSessionMeta?: (session: UnifiedSession) => ReactNode;
   onArchiveFilterChange: (filter: ArchiveFilter) => void;
+  onStartNewSession?: () => void;
   onSelectSession: (sessionId: string) => void;
   onTogglePinSession?: (session: UnifiedSession) => void;
   onOpenContextMenu: (event: MouseEvent<HTMLElement>, session: UnifiedSession) => void;
@@ -232,7 +242,33 @@ export function SessionListPanel({
       <ArchiveNoticeBanner notice={archiveNotice} />
 
       <div className="relative flex-1 space-y-2 overflow-y-auto px-3 py-3">
-        {loading ? (
+        {onStartNewSession ? (
+          <>
+          <button
+            type="button"
+            onClick={onStartNewSession}
+            disabled={newSessionForm?.creating}
+            className="group flex w-full items-center gap-3 rounded-[22px] border border-dashed border-slate-200 bg-white/58 px-4 py-4 text-left transition-colors hover:border-sky-200 hover:bg-sky-50/45 disabled:cursor-progress disabled:opacity-70"
+          >
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-white text-sky-600 shadow-sm transition-colors group-hover:text-sky-700">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 5v14m-7-7h14" />
+              </svg>
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold text-gray-800">
+                {newSessionForm?.creating ? labels.creatingSession : labels.newSession}
+              </span>
+              <span className="mt-1 block truncate text-xs text-slate-400">{labels.newSessionHint}</span>
+            </span>
+          </button>
+          {newSessionForm?.error ? (
+            <p className="px-4 text-xs font-medium leading-5 text-rose-600">{newSessionForm.error}</p>
+          ) : null}
+          </>
+        ) : null}
+
+        {loading && sessions.length === 0 ? (
           <StatePanel message={labels.noSessions} />
         ) : sessions.length === 0 ? (
           <StatePanel message={labels.noSessions} />

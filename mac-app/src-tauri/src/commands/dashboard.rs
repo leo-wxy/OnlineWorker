@@ -383,7 +383,8 @@ mod tests {
 
     use super::{
         build_dashboard_state, build_provider_statuses, diagnose_telegram_polling_from_log,
-        extract_thread_summary, read_env_key, read_provider_runtime_status_via_owner_bridge_with_timeout,
+        extract_thread_summary, read_env_key,
+        read_provider_runtime_status_via_owner_bridge_with_timeout,
         read_provider_workspace_activity, read_recent_activity_summary_cached_with_now,
         read_recent_activity_summary_from_paths_with_provider_sessions, redact_telegram_token,
         resolve_builtin_provider_snapshots, AlertLevel, DashboardComputationInput,
@@ -705,8 +706,8 @@ mod tests {
 
     #[test]
     fn build_provider_statuses_reads_degraded_health_from_owner_bridge() {
-        let temp_dir =
-            std::path::PathBuf::from("/tmp").join(format!("ow-provider-status-{}", std::process::id()));
+        let temp_dir = std::path::PathBuf::from("/tmp")
+            .join(format!("ow-provider-status-{}", std::process::id()));
         fs::create_dir_all(&temp_dir).expect("create temp dir");
         let socket_path = temp_dir.join("provider_owner_bridge.sock");
         let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
@@ -755,7 +756,10 @@ mod tests {
         );
 
         assert_eq!(providers[0].health, ServiceHealth::Degraded);
-        assert_eq!(providers[0].detail.as_deref(), Some("• primary：连接不可用"));
+        assert_eq!(
+            providers[0].detail.as_deref(),
+            Some("• primary：连接不可用")
+        );
 
         server.join().expect("join owner bridge server");
         let _ = fs::remove_dir_all(&temp_dir);
@@ -763,8 +767,10 @@ mod tests {
 
     #[test]
     fn build_provider_statuses_reads_healthy_status_from_owner_bridge() {
-        let temp_dir = std::path::PathBuf::from("/tmp")
-            .join(format!("ow-dashboard-provider-status-{}", std::process::id()));
+        let temp_dir = std::path::PathBuf::from("/tmp").join(format!(
+            "ow-dashboard-provider-status-{}",
+            std::process::id()
+        ));
         fs::create_dir_all(&temp_dir).expect("create temp dir");
         let socket_path = temp_dir.join("provider_owner_bridge.sock");
         let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
@@ -1104,7 +1110,8 @@ tools:
     }
 
     #[test]
-    fn resolve_builtin_provider_snapshots_backfills_public_defaults_and_omits_hidden_overlay_provider() {
+    fn resolve_builtin_provider_snapshots_backfills_public_defaults_and_omits_hidden_overlay_provider(
+    ) {
         let provider_id = shared_unix_provider_id_for_test();
         let raw = format!(
             r#"
@@ -1274,7 +1281,7 @@ providers:
             &provider_sessions("first snapshot"),
             base,
         )
-            .expect("first recent activity");
+        .expect("first recent activity");
         assert_eq!(
             first.highlighted_thread_preview.as_deref(),
             Some("first snapshot")
@@ -1350,10 +1357,7 @@ providers:
         assert_eq!(candidate.workspace_name.as_deref(), Some("onlineWorker"));
         assert_eq!(candidate.tool, "secondary");
         assert_eq!(candidate.session_id, "ses-secondary-dashboard");
-        assert_eq!(
-            candidate.preview.as_deref(),
-            Some("继续 dashboard 收口")
-        );
+        assert_eq!(candidate.preview.as_deref(), Some("继续 dashboard 收口"));
         assert_eq!(candidate.updated_at, 1_775_603_600_000_i64);
         assert_eq!(candidate.active_thread_count, 1);
     }
@@ -1521,7 +1525,10 @@ providers:
             summary.active_workspace_name.as_deref(),
             Some("provider-owned-workspace")
         );
-        assert_eq!(summary.active_workspace_path.as_deref(), Some(workspace_path));
+        assert_eq!(
+            summary.active_workspace_path.as_deref(),
+            Some(workspace_path)
+        );
         assert_eq!(summary.active_tool.as_deref(), Some("claude"));
         assert_eq!(summary.active_session_id.as_deref(), Some("claude-live-1"));
         assert_eq!(

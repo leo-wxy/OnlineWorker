@@ -13,6 +13,47 @@ from core.storage import AppStorage, ThreadInfo, WorkspaceInfo
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_creates_provider_session(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    class _FakeAdapter:
+        connected = True
+
+        def __init__(self):
+            self.registered = []
+            self.start_thread = AsyncMock(return_value={"thread": {"id": "tid-new"}})
+
+        def register_workspace_cwd(self, workspace_id: str, cwd: str):
+            self.registered.append((workspace_id, cwd))
+
+    state = AppState(storage=AppStorage())
+    adapter = _FakeAdapter()
+    state.set_adapter("overlay-tool", adapter)
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(name=name) if name == "overlay-tool" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_create_session(
+        {
+            "provider_id": "overlay-tool",
+            "workspace_dir": "/tmp/workspace",
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["thread_id"] == "tid-new"
+    assert response["session"]["id"] == "tid-new"
+    assert response["session"]["workspace"] == "/tmp/workspace"
+    assert adapter.registered == [("overlay-tool:/tmp/workspace", "/tmp/workspace")]
+    adapter.start_thread.assert_awaited_once_with("overlay-tool:/tmp/workspace")
+    ws = state.storage.workspaces["overlay-tool:/tmp/workspace"]
+    assert ws.threads["tid-new"].thread_id == "tid-new"
+    assert ws.threads["tid-new"].archived is False
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_serves_provider_usage_summary(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
