@@ -35,7 +35,8 @@ use commands::logs::{get_log_file_path, start_log_tail, stop_log_tail};
 use commands::provider_sessions::{
     archive_provider_session, create_provider_session, list_provider_sessions,
     read_provider_session, send_provider_session_message, stage_session_composer_attachments,
-    start_provider_session_event_stream, stop_provider_session_event_stream,
+    start_provider_session_event_stream, start_provider_session_message,
+    stop_provider_session_event_stream,
 };
 use commands::provider_usage::get_provider_usage_summary;
 use commands::service::{
@@ -405,6 +406,7 @@ pub fn run() {
             create_provider_session,
             archive_provider_session,
             send_provider_session_message,
+            start_provider_session_message,
             stage_session_composer_attachments,
             start_provider_session_event_stream,
             stop_provider_session_event_stream,

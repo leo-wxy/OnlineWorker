@@ -13,6 +13,16 @@ export type ArchiveNotice = {
   text: string;
 };
 
+function archiveErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+  return "unknown error";
+}
+
 export function SessionActionMenu({
   menu,
   archivingSessionId,
@@ -104,7 +114,7 @@ export async function archiveSessionWithFeedback({
   } catch (error) {
     return {
       tone: "error",
-      text: failureText((error as Error).message),
+      text: failureText(archiveErrorMessage(error)),
     };
   }
 }

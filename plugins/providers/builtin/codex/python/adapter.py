@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import sqlite3
+import time
 from collections import deque
 from typing import Any, Callable, Awaitable, Optional
 
@@ -28,6 +29,7 @@ from plugins.providers.builtin.codex.python.transport import (
 
 logger = logging.getLogger(__name__)
 DEFAULT_APPROVALS_REVIEWER = "user"
+PENDING_THREAD_START_TTL_SECONDS = 120.0
 
 # 回调类型，必须与 daemon.py 完全一致
 EventCallback = Callable[[str, Any], Awaitable[None]]
@@ -64,6 +66,7 @@ class CodexAdapter:
         self._workspace_cwd_map: dict[str, str] = {}
         # thread_id → workspace_id 映射（用于事件路由）
         self._thread_workspace_map: dict[str, str] = {}
+        self._pending_thread_starts: list[dict[str, Any]] = []
         self._thread_policy_lookup_enabled = False
         # 最近协议收发摘要，用于 1006 / EOF 断线诊断
         self._recent_inbound_messages: deque[str] = deque(maxlen=6)
@@ -289,13 +292,50 @@ class CodexAdapter:
         params: dict[str, Any] = {"approvalsReviewer": DEFAULT_APPROVALS_REVIEWER}
         if cwd:
             params["cwd"] = cwd
-        result = await self._call("thread/start", params)
-        # 记录新 thread 的 workspace 映射
-        thread_id = self._extract_thread_id_from_result(result)
-        if thread_id and workspace_id:
-            self._thread_workspace_map[thread_id] = workspace_id
-            logger.debug(f"[thread_map] 新 thread 映射：{thread_id[:12]}… → {workspace_id}")
-        return result
+        loop = asyncio.get_running_loop()
+        pending_start = {
+            "workspace_id": workspace_id,
+            "cwd": cwd or "",
+            "future": loop.create_future(),
+            "expires_at": 0.0,
+        }
+        self._pending_thread_starts.append(pending_start)
+        keep_pending = False
+        try:
+            try:
+                result = await self._call("thread/start", params)
+            except TimeoutError:
+                future = pending_start["future"]
+                pending_start["expires_at"] = time.monotonic() + PENDING_THREAD_START_TTL_SECONDS
+                keep_pending = True
+                try:
+                    thread_id = await asyncio.wait_for(
+                        asyncio.shield(future),
+                        timeout=PENDING_THREAD_START_TTL_SECONDS,
+                    )
+                except Exception:
+                    raise
+                keep_pending = False
+                logger.warning(
+                    "[thread_map] thread/start RPC 超时，但 notification 已返回 thread=%s workspace=%s",
+                    str(thread_id)[:12],
+                    workspace_id,
+                )
+                return {"id": thread_id}
+
+            # 记录新 thread 的 workspace 映射
+            thread_id = self._extract_thread_id_from_result(result)
+            if thread_id and workspace_id:
+                self._thread_workspace_map[thread_id] = workspace_id
+                future = pending_start["future"]
+                if not future.done():
+                    future.set_result(thread_id)
+                logger.debug(f"[thread_map] 新 thread 映射：{thread_id[:12]}… → {workspace_id}")
+            return result
+        finally:
+            if not keep_pending:
+                with suppress(ValueError):
+                    self._pending_thread_starts.remove(pending_start)
 
     async def resume_thread(self, workspace_id: str, thread_id: str) -> dict:
         # 记录 thread → workspace 映射，确保后续事件能正确路由
@@ -923,6 +963,13 @@ class CodexAdapter:
 
     def _update_thread_workspace_map(self, method: str, params: dict) -> None:
         """从事件中提取 threadId，更新 thread → workspace 反向映射。"""
+        now = time.monotonic()
+        self._pending_thread_starts = [
+            item
+            for item in self._pending_thread_starts
+            if float(item.get("expires_at") or 0.0) <= 0.0
+            or float(item.get("expires_at") or 0.0) > now
+        ]
         thread_id = self._extract_thread_id_from_event_params(params)
 
         if thread_id and thread_id not in self._thread_workspace_map:
@@ -934,5 +981,21 @@ class CodexAdapter:
                         self._thread_workspace_map[thread_id] = ws_id
                         logger.debug(f"[thread_map] cwd 关联：{thread_id[:12]}… → {ws_id}")
                         return
+            if len(self._pending_thread_starts) == 1:
+                pending_start = self._pending_thread_starts[0]
+                workspace_id = str(pending_start.get("workspace_id") or "")
+                if workspace_id:
+                    self._thread_workspace_map[thread_id] = workspace_id
+                    future = pending_start.get("future")
+                    if future is not None and not future.done():
+                        future.set_result(thread_id)
+                    logger.debug(
+                        "[thread_map] pending start 关联：%s… → %s",
+                        thread_id[:12],
+                        workspace_id,
+                    )
+                    with suppress(ValueError):
+                        self._pending_thread_starts.remove(pending_start)
+                    return
             # 找不到明确映射时不猜测，等后续事件补全（如 thread/start 会写入映射）
             logger.debug(f"[thread_map] thread {thread_id[:12]}… 暂无 workspace 映射，跳过")

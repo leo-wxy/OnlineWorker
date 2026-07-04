@@ -563,6 +563,7 @@ async def test_prepare_send_resumes_app_owned_thread_without_remapping(monkeypat
 
     interrupt_mock = AsyncMock()
     monkeypatch.setattr(codex_runtime, "_interrupt_active_turn", interrupt_mock)
+    monkeypatch.setattr(codex_runtime, "_codex_thread_has_source_record", lambda workspace_path, thread_id: True)
 
     should_continue = await codex_runtime.prepare_send(
         state,
@@ -589,6 +590,63 @@ async def test_prepare_send_resumes_app_owned_thread_without_remapping(monkeypat
     )
     assert ws.threads["thread-app"] is thread_info
     assert thread_info.source == "app"
+
+
+@pytest.mark.asyncio
+async def test_prepare_send_materializes_state_only_app_thread(monkeypatch):
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    thread_info = ThreadInfo(
+        thread_id="app:codex:draft",
+        topic_id=None,
+        preview="新建会话",
+        archived=False,
+        is_active=False,
+        source="app",
+    )
+    ws.threads["app:codex:draft"] = thread_info
+    state = AppState(storage=AppStorage())
+
+    adapter = MagicMock()
+    adapter.start_thread = AsyncMock(return_value={"id": "thread-real"})
+    adapter.resume_thread = AsyncMock(return_value={})
+
+    interrupt_mock = AsyncMock()
+    monkeypatch.setattr(codex_runtime, "_interrupt_active_turn", interrupt_mock)
+    monkeypatch.setattr(codex_runtime, "_codex_thread_has_source_record", lambda workspace_path, thread_id: False)
+
+    should_continue = await codex_runtime.prepare_send(
+        state,
+        adapter,
+        ws,
+        thread_info,
+        update=SimpleNamespace(),
+        context=SimpleNamespace(),
+        group_chat_id=1,
+        src_topic_id=None,
+        text="第一条消息",
+        has_photo=False,
+    )
+
+    assert should_continue is True
+    adapter.start_thread.assert_awaited_once_with("codex:onlineWorker")
+    adapter.resume_thread.assert_not_awaited()
+    assert set(ws.threads) == {"thread-real"}
+    assert ws.threads["thread-real"] is thread_info
+    assert thread_info.thread_id == "thread-real"
+    assert thread_info.source == "app"
+    assert thread_info.is_active is True
+    interrupt_mock.assert_awaited_once_with(
+        state,
+        adapter,
+        "codex:onlineWorker",
+        "thread-real",
+        label="codex",
+    )
 
 
 @pytest.mark.asyncio

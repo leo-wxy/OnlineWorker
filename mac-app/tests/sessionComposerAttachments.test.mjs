@@ -29,7 +29,8 @@ test("session composer exposes attachment staging and selected attachment render
   assert.match(shared, /void onPickFiles\("file", files\)/);
   assert.match(shared, /void onPickFiles\("image", files\)/);
   assert.match(shared, /onAttachmentsChange\(attachments\.filter/);
-  assert.match(shared, /onAttachmentsChange\(\[\]\);\s*try\s*{\s*await onSend\(text, attachments\);/s);
+  assert.match(shared, /onAttachmentsChange\(\[\]\);\s*try\s*{\s*const accepted = await onSend\(text, attachments\);/s);
+  assert.match(shared, /if \(accepted === false\) \{\s*onAttachmentsChange\(attachments\);\s*setDraft\(\(current\) => current \|\| text\);/s);
   assert.match(shared, /onAttachmentsChange\(attachments\);\s*setDraft\(\(current\) => current \|\| text\);/);
   assert.match(shared, /\{supportsAttachments \? \(/);
   assert.match(attachmentHook, /export function useStagedAttachments/);
@@ -38,7 +39,10 @@ test("session composer exposes attachment staging and selected attachment render
   assert.match(attachmentHook, /setAttachments\(\(current\) => \[\.\.\.current, \.\.\.staged\]\)/);
   assert.match(attachmentHook, /setStagingAttachments\(false\)/);
   assert.match(genericChat, /onPickFiles=\{handlePickFiles\}/);
-  assert.match(genericChat, /const sendResult = await sendProviderSessionMessage/);
+  assert.match(genericChat, /const sendResult = mode === "new-session"/);
+  assert.match(genericChat, /await startProviderSessionMessage\(/);
+  assert.match(genericChat, /await sendProviderSessionMessage\(/);
   assert.match(genericChat, /const remappedSessionId = sendResult\.threadId\?\.trim\(\)/);
+  assert.match(genericChat, /await onNewSessionStarted\?\.\(sendResult\)/);
   assert.match(genericChat, /await onSessionRemapped\?\.\(activeSession, sendResult\)/);
 });

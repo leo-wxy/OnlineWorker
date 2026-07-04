@@ -206,6 +206,15 @@ archived from the Sessions page. Archive is provider-backed: OnlineWorker calls
 the provider's real archive path first, updates local state only after success,
 and leaves the session unchanged if the provider reports failure.
 
+The `New` entry under an active workspace opens a first-message composer instead
+of creating a local placeholder session. Sending the first message asks the
+provider to create a real session and then sends the message into that provider
+thread. For Codex, slow `thread/start` calls may return a pending result to the
+UI while OnlineWorker waits for the app-server notification that contains the
+real thread id; once the activity stream reports the matching provider-backed
+session, Sessions selects that real session and keeps the optimistic user
+message visible. Local `app:*` draft ids are not shown as sessions.
+
 ### Usage
 
 Usage data is exposed through provider metadata and usage hooks. The app shows

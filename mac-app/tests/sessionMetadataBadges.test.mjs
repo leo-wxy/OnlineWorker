@@ -59,7 +59,7 @@ test("generic provider sessions render a reusable chat surface with composer wir
     /await sendProviderSessionMessage\(\s*activeSession\.type,\s*activeSession\.id,\s*trimmedText,\s*nextAttachments,\s*activeSession\.workspace,\s*\)/s,
   );
   assert.match(genericChat, /active = true/);
-  assert.match(genericChat, /enabled: active && Boolean\(activeSession\.id\)/);
+  assert.match(genericChat, /enabled: active && mode !== "new-session" && Boolean\(activeSession\.id\)/);
   assert.match(genericChat, /<SessionComposer/);
   assert.doesNotMatch(genericChat, /chat is not available/);
 });
@@ -69,7 +69,7 @@ test("generic provider chat keeps header state aligned without remounting on liv
 
   assert.match(genericChat, /useEffect\(\(\) => \{\s*liveStreamReadyRef\.current = false;\s*setActiveSession\(session\);\s*\}, \[session\.id, session\.type, session\.workspace\]\);/s);
   assert.match(genericChat, /if \(!active\) \{\s*return;\s*\}/s);
-  assert.match(genericChat, /enabled: active && Boolean\(activeSession\.id\)/);
+  assert.match(genericChat, /enabled: active && mode !== "new-session" && Boolean\(activeSession\.id\)/);
   assert.match(genericChat, /if \(hasLoadedRef\.current && messagesRef\.current\.length > 0\) \{\s*void refreshMessagesSilently\(\);\s*\} else \{\s*void loadMessages\(\);\s*\}/s);
   assert.match(genericChat, /if \(!hasSessionSnapshotChanged\(messagesRef\.current, turns\)\) \{/);
 });

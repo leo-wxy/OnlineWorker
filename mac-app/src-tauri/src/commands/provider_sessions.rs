@@ -215,6 +215,54 @@ fn send_provider_session_message_via_owner_bridge(
         .to_string())
 }
 
+fn start_provider_session_message_via_owner_bridge(
+    data_dir: &Path,
+    provider_id: &str,
+    workspace_dir: &str,
+    text: &str,
+    attachments: &[ComposerAttachment],
+) -> Result<Value, String> {
+    let mut socket = connect_owner_bridge_socket(data_dir, PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT)?;
+
+    let mut payload = serde_json::json!({
+        "type": "start_session_message",
+        "provider_id": provider_id,
+        "workspace_dir": workspace_dir,
+        "text": text,
+        "source": "session_tab",
+    });
+    if !attachments.is_empty() {
+        payload["attachments"] = serde_json::to_value(attachments)
+            .map_err(|e| format!("serialize attachments failed: {e}"))?;
+    }
+
+    let raw_request = format!("{}\n", payload);
+    socket
+        .write_all(raw_request.as_bytes())
+        .map_err(|e| format!("write provider owner bridge request failed: {e}"))?;
+    socket
+        .shutdown(Shutdown::Write)
+        .map_err(|e| format!("shutdown provider owner bridge write failed: {e}"))?;
+
+    let mut response_line = String::new();
+    let mut reader = BufReader::new(socket);
+    reader
+        .read_line(&mut response_line)
+        .map_err(|e| format!("read provider owner bridge response failed: {e}"))?;
+
+    let response = serde_json::from_str::<Value>(response_line.trim())
+        .map_err(|e| format!("parse provider owner bridge response failed: {e}"))?;
+    if response.get("ok").and_then(Value::as_bool) == Some(true) {
+        return Ok(response);
+    }
+
+    Err(response
+        .get("error")
+        .and_then(Value::as_str)
+        .unwrap_or("provider owner bridge request failed")
+        .to_string())
+}
+
 fn read_provider_session_via_owner_bridge(
     data_dir: &Path,
     provider_id: &str,
@@ -401,6 +449,7 @@ fn create_provider_session_via_owner_bridge(
         "type": "create_session",
         "provider_id": provider_id,
         "workspace_dir": workspace_dir,
+        "create_mode": "app_state",
     });
 
     let raw_request = format!("{}\n", payload);
@@ -1071,6 +1120,46 @@ pub async fn send_provider_session_message(
 }
 
 #[tauri::command]
+pub async fn start_provider_session_message(
+    provider_id: String,
+    workspace_dir: String,
+    text: String,
+    attachments: Option<Vec<ComposerAttachment>>,
+) -> Result<Value, String> {
+    let provider = require_runtime_provider(&provider_id)?;
+    let attachments = attachments.unwrap_or_default();
+    let normalized_workspace_dir = workspace_dir.trim().to_string();
+    let trimmed = text.trim().to_string();
+    if normalized_workspace_dir.is_empty() {
+        return Err("workspace_dir is required".to_string());
+    }
+    if trimmed.is_empty() && attachments.is_empty() {
+        return Err("message is empty".to_string());
+    }
+    match provider_session_send_access(&provider).as_str() {
+        "owner_bridge" => {
+            let data_dir = ensure_data_dir()?;
+            start_provider_session_message_via_owner_bridge(
+                &data_dir,
+                &provider.id,
+                &normalized_workspace_dir,
+                &trimmed,
+                &attachments,
+            )
+        }
+        "none" | "unsupported" => Err(format!(
+            "Provider '{}' has no session send implementation",
+            provider.id
+        )),
+        _ => Err(format!(
+            "Provider '{}' has unsupported session send access '{}'",
+            provider.id,
+            provider_session_send_access(&provider)
+        )),
+    }
+}
+
+#[tauri::command]
 pub async fn archive_provider_session(
     app: AppHandle,
     provider_id: String,
@@ -1255,7 +1344,8 @@ mod tests {
         persist_provider_session_archived_state, provider_session_list_access,
         provider_session_read_access, provider_session_send_access,
         send_provider_session_message_via_owner_bridge,
-        send_provider_session_message_via_owner_bridge_with_retry, ComposerAttachment,
+        send_provider_session_message_via_owner_bridge_with_retry,
+        start_provider_session_message_via_owner_bridge, ComposerAttachment,
     };
     use crate::commands::config_provider::{
         provider_metadata_from_raw, public_default_provider_ids,
@@ -1461,6 +1551,61 @@ mod tests {
     }
 
     #[test]
+    fn start_provider_session_message_uses_owner_bridge_payload() {
+        let temp_dir = std::env::temp_dir().join(format!("ow-pob-start-{}", std::process::id()));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let socket_path = provider_owner_bridge_socket_path(&temp_dir);
+        let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept owner bridge socket");
+            let mut request = String::new();
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            reader
+                .read_line(&mut request)
+                .expect("read owner bridge request");
+            let payload: serde_json::Value =
+                serde_json::from_str(request.trim()).expect("parse owner bridge request");
+            assert_eq!(payload["type"], "start_session_message");
+            assert_eq!(payload["provider_id"], "overlay-tool");
+            assert_eq!(payload["workspace_dir"], "/tmp/workspace");
+            assert_eq!(payload["text"], "hello");
+            assert_eq!(payload["attachments"][0]["kind"], "file");
+
+            let response = serde_json::json!({
+                "ok": true,
+                "accepted": true,
+                "thread_id": "tid-new",
+                "created_new_thread": true
+            });
+            writeln!(stream, "{response}").expect("write response");
+        });
+
+        let attachments = vec![ComposerAttachment {
+            id: "att-1".to_string(),
+            kind: "file".to_string(),
+            name: "notes.txt".to_string(),
+            mime_type: Some("text/plain".to_string()),
+            size_bytes: 128,
+            path: "/tmp/workspace/notes.txt".to_string(),
+        }];
+
+        let response = start_provider_session_message_via_owner_bridge(
+            &temp_dir,
+            "overlay-tool",
+            "/tmp/workspace",
+            "hello",
+            &attachments,
+        )
+        .expect("start session via owner bridge");
+
+        assert_eq!(response["thread_id"], "tid-new");
+        assert_eq!(response["created_new_thread"], true);
+        server.join().expect("join owner bridge server");
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
     fn owner_bridge_can_create_provider_session_payload() {
         let temp_dir = std::env::temp_dir().join(format!("ow-pob-create-{}", std::process::id()));
         fs::create_dir_all(&temp_dir).expect("create temp dir");
@@ -1479,6 +1624,7 @@ mod tests {
             assert_eq!(payload["type"], "create_session");
             assert_eq!(payload["provider_id"], "overlay-tool");
             assert_eq!(payload["workspace_dir"], "/tmp/workspace");
+            assert_eq!(payload["create_mode"], "app_state");
 
             let response = serde_json::json!({
                 "ok": true,

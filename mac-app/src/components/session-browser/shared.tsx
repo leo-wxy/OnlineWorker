@@ -122,7 +122,7 @@ export function SessionComposer({
   supportsAttachments?: boolean;
   attachmentButtonLabel: string;
   imageButtonLabel: string;
-  onSend: (text: string, attachments: ComposerAttachment[]) => Promise<void>;
+  onSend: (text: string, attachments: ComposerAttachment[]) => Promise<boolean | void>;
 }) {
   const [draft, setDraft] = useState("");
 
@@ -139,7 +139,11 @@ export function SessionComposer({
     setDraft("");
     onAttachmentsChange([]);
     try {
-      await onSend(text, attachments);
+      const accepted = await onSend(text, attachments);
+      if (accepted === false) {
+        onAttachmentsChange(attachments);
+        setDraft((current) => current || text);
+      }
     } catch (error) {
       onAttachmentsChange(attachments);
       setDraft((current) => current || text);

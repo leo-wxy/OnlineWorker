@@ -52,6 +52,9 @@ test("session browser exposes provider-backed archive actions from visible and c
   );
   assert.match(archiveUi, /role="menu"/);
   assert.match(archiveUi, /role="menuitem"/);
+  assert.match(archiveUi, /function archiveErrorMessage\(error: unknown\): string/);
+  assert.match(archiveUi, /typeof error === "string" && error\.trim\(\)/);
+  assert.match(archiveUi, /failureText\(archiveErrorMessage\(error\)\)/);
   assert.match(archiveUi, /tone: "error"/);
   assert.match(sessionBrowser, /setArchiveNotice\(nextNotice\)/);
   assert.doesNotMatch(sessionBrowser, /session\.archived\s*=\s*true/);

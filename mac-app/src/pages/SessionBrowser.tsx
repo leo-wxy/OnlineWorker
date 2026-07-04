@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent } fr
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "../i18n";
 import {
-  createProviderSession,
   fetchProviderMetadata,
   fetchProviderSessions,
 } from "../components/session-browser/api";
@@ -61,6 +60,14 @@ interface Props {
   active?: boolean;
 }
 
+type NewSessionComposerState = {
+  providerId: ProviderFilter;
+  workspace: string;
+  composeId: string;
+  pendingMessage?: string;
+  pendingSince?: number;
+};
+
 const DEFAULT_TASK_BOARD_STATE: TaskBoardState = {
   version: 1,
   pinned: [],
@@ -68,6 +75,45 @@ const DEFAULT_TASK_BOARD_STATE: TaskBoardState = {
 
 function sessionTaskBoardKey(session: UnifiedSession) {
   return `${session.type}:${session.id}`;
+}
+
+function compactSessionText(value: unknown) {
+  return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+}
+
+function activityUpdatedAtMs(activity: TaskBoardSessionActivity) {
+  const value = Number(activity.updatedAt || 0);
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+  return value > 1_000_000_000_000 ? value : value * 1000;
+}
+
+function activityMatchesPendingNewSession(
+  activity: TaskBoardSessionActivity,
+  composer: NewSessionComposerState,
+) {
+  if (!activity.sessionId || activity.providerId !== composer.providerId) {
+    return false;
+  }
+  const workspace = compactSessionText(activity.workspacePath || activity.workspaceId);
+  if (workspace && workspace !== composer.workspace && activity.workspaceId !== `${composer.providerId}:${composer.workspace}`) {
+    return false;
+  }
+  if (composer.pendingSince && activityUpdatedAtMs(activity) + 1000 < composer.pendingSince) {
+    return false;
+  }
+  const pendingMessage = compactSessionText(composer.pendingMessage);
+  if (!pendingMessage) {
+    return false;
+  }
+  const haystack = compactSessionText([
+    activity.lastUserMessage,
+    activity.title,
+    activity.lastAssistantMessage,
+    activity.lastFinalMessage,
+  ].join(" "));
+  return haystack.includes(pendingMessage);
 }
 
 export function SessionBrowser({ openTarget = null, taskBoardActivities = [], active = true }: Props) {
@@ -86,6 +132,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
   const [archiveNotice, setArchiveNotice] = useState<ArchiveNotice | null>(null);
   const [creatingSession, setCreatingSession] = useState(false);
   const [createSessionError, setCreateSessionError] = useState<string | null>(null);
+  const [newSessionComposer, setNewSessionComposer] = useState<NewSessionComposerState | null>(null);
   const [taskBoardState, setTaskBoardState] = useState<TaskBoardState>(DEFAULT_TASK_BOARD_STATE);
   const [providerReloadTick, setProviderReloadTick] = useState(0);
   const loadedProvidersRef = useRef<Set<ProviderFilter>>(new Set());
@@ -168,6 +215,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     setWorkspaceContextMenu(null);
     setArchiveNotice(null);
     setCreateSessionError(null);
+    setNewSessionComposer(null);
   }, [openTarget?.providerId, providerFilter]);
 
   useEffect(() => {
@@ -306,6 +354,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     setArchiveFilter("active");
     setSelectedWorkspace(openTarget.workspace?.trim() || null);
     setSelectedSessionId(openTarget.sessionId);
+    setNewSessionComposer(null);
     setSessionContextMenu(null);
     setWorkspaceContextMenu(null);
     setArchiveNotice(null);
@@ -379,40 +428,17 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     setArchiveNotice(null);
     setSessionContextMenu(null);
     setWorkspaceContextMenu(null);
-    try {
-      const rawSession = await createProviderSession(providerFilter, workspacePath);
-      const normalizedSession = normalizeGenericProviderSessions(
-        providerFilter,
-        [rawSession],
-        workspacePath,
-      )[0];
-      if (!normalizedSession) {
-        throw new Error("provider returned an empty session");
-      }
-      const currentSessions = genericSessionsByProvider[providerFilter] ?? [];
-      const nextSessions = [
-        normalizedSession,
-        ...currentSessions.filter((session) => session.id !== normalizedSession.id),
-      ];
-      const cachedMerged = writeCachedProviderSessionSnapshot(providerFilter, nextSessions);
-      loadedProvidersRef.current.add(providerFilter);
-      activatedProvidersRef.current.add(providerFilter);
-      setGenericSessionsByProvider((current) => mergeSessionSnapshotsByProvider(
-        current,
-        providerFilter,
-        cachedMerged,
-      ));
-      setArchiveFilter("active");
-      setSelectedWorkspace(normalizedSession.workspace || workspacePath);
-      setSelectedSessionId(normalizedSession.id);
-    } catch (error) {
-      setCreateSessionError(t.sessions.createSessionFailed((error as Error).message));
-    } finally {
-      setCreatingSession(false);
-    }
+    setNewSessionComposer({
+      providerId: providerFilter,
+      workspace: workspacePath,
+      composeId: `new:${providerFilter}:${Date.now()}`,
+    });
+    setArchiveFilter("active");
+    setSelectedWorkspace(workspacePath);
+    setSelectedSessionId(null);
+    setCreatingSession(false);
   }, [
     creatingSession,
-    genericSessionsByProvider,
     providerFilter,
     selectedWorkspace,
     t.sessions,
@@ -538,6 +564,82 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     setSelectedSessionId(nextSessionId);
   }, [loadProvider]);
 
+  const handleNewSessionStarted = useCallback(async (
+    sendResult: ProviderSessionSendResult,
+  ) => {
+    if (!newSessionComposer) {
+      return;
+    }
+    const nextSessionId = sendResult.threadId?.trim();
+    if (!nextSessionId) {
+      throw new Error("provider did not return a real session id");
+    }
+    const normalizedSession = normalizeGenericProviderSessions(
+      newSessionComposer.providerId,
+      sendResult.session ? [sendResult.session] : [{
+        id: nextSessionId,
+        title: nextSessionId,
+        workspace: newSessionComposer.workspace,
+        providerActive: true,
+      }],
+      newSessionComposer.workspace,
+    )[0];
+    if (normalizedSession) {
+      loadedProvidersRef.current.add(newSessionComposer.providerId);
+      activatedProvidersRef.current.add(newSessionComposer.providerId);
+      setGenericSessionsByProvider((current) => mergeSessionSnapshotsByProvider(
+        current,
+        newSessionComposer.providerId,
+        [
+          normalizedSession,
+          ...(current[newSessionComposer.providerId] ?? []).filter((session) => session.id !== normalizedSession.id),
+        ],
+      ));
+    }
+    setNewSessionComposer(null);
+    setSelectedWorkspace(newSessionComposer.workspace);
+    setSelectedSessionId(nextSessionId);
+    await loadProvider(newSessionComposer.providerId, {
+      force: true,
+      forceRefresh: true,
+    });
+  }, [newSessionComposer, loadProvider]);
+
+  const handleNewSessionPending = useCallback(async (
+    _sendResult: ProviderSessionSendResult,
+    text: string,
+  ) => {
+    if (!newSessionComposer) {
+      return;
+    }
+    setNewSessionComposer({
+      ...newSessionComposer,
+      pendingMessage: text,
+      pendingSince: Date.now(),
+    });
+  }, [newSessionComposer]);
+
+  useEffect(() => {
+    if (!newSessionComposer?.pendingMessage) {
+      return;
+    }
+    const activity = taskBoardActivities.find((item) =>
+      activityMatchesPendingNewSession(item, newSessionComposer)
+    );
+    if (!activity) {
+      return;
+    }
+    loadedProvidersRef.current.add(newSessionComposer.providerId);
+    activatedProvidersRef.current.add(newSessionComposer.providerId);
+    setSelectedWorkspace(activity.workspacePath || newSessionComposer.workspace);
+    setSelectedSessionId(activity.sessionId);
+    setNewSessionComposer(null);
+    void loadProvider(newSessionComposer.providerId, {
+      force: true,
+      forceRefresh: true,
+    });
+  }, [loadProvider, newSessionComposer, taskBoardActivities]);
+
   useEffect(() => {
     if (selectedWorkspace && workspaces.length > 0 && !workspaces.includes(selectedWorkspace)) {
       setSelectedWorkspace(null);
@@ -577,6 +679,20 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
   const effectiveSelectedSession = useMemo(() => (
     selectedSession ?? (!selectedSessionId ? filteredSessions[0] ?? null : null)
   ), [filteredSessions, selectedSession, selectedSessionId]);
+
+  const newSessionComposerChat = useMemo<UnifiedSession | null>(() => {
+    if (!newSessionComposer || newSessionComposer.providerId !== providerFilter) {
+      return null;
+    }
+    return {
+      id: newSessionComposer.composeId,
+      type: newSessionComposer.providerId,
+      workspace: newSessionComposer.workspace,
+      title: t.sessions.newSession,
+      archived: false,
+      raw: { source: "new_session_composer" },
+    };
+  }, [newSessionComposer, providerFilter, t.sessions.newSession]);
 
   const pendingSelectedSession = useMemo(() => (
     hasPendingSelectedSession(unifiedSessions, selectedSessionId) &&
@@ -652,14 +768,30 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
           )}
           onArchiveFilterChange={setArchiveFilter}
           onStartNewSession={() => void startNewSession()}
-          onSelectSession={setSelectedSessionId}
+          onSelectSession={(sessionId) => {
+            setNewSessionComposer(null);
+            setSelectedSessionId(sessionId);
+          }}
           onTogglePinSession={(session) => void handleTogglePinSession(session)}
           onOpenContextMenu={openSessionContextMenu}
           onOpenActionMenu={openSessionActionMenu}
         />
 
         <div className="min-w-0 flex-1 overflow-hidden rounded-[28px]">
-          {effectiveSelectedSession ? (
+          {newSessionComposerChat ? (
+            <GenericProviderChat
+              session={newSessionComposerChat}
+              key={newSessionComposerChat.id}
+              mode="new-session"
+              providerSupportsAttachments={Boolean(
+                providerCapabilities[newSessionComposerChat.type]?.files ||
+                providerCapabilities[newSessionComposerChat.type]?.photos
+              )}
+              onNewSessionStarted={handleNewSessionStarted}
+              onNewSessionPending={handleNewSessionPending}
+              active={active}
+            />
+          ) : effectiveSelectedSession ? (
             <GenericProviderChat
               session={effectiveSelectedSession}
               key={effectiveSelectedSession.id}

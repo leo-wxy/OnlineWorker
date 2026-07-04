@@ -147,6 +147,54 @@ async def test_dispatch_does_not_block_on_slow_event_callback():
 
 
 @pytest.mark.asyncio
+async def test_start_thread_uses_pending_notification_when_rpc_times_out():
+    adapter = CodexAdapter()
+    adapter._connected = True
+    adapter.register_workspace_cwd("codex:/tmp/project", "/tmp/project")
+
+    async def timeout_call(method, params):
+        assert method == "thread/start"
+        assert params["cwd"] == "/tmp/project"
+        await asyncio.sleep(0)
+        adapter._update_thread_workspace_map("thread/started", {"threadId": "real-thread"})
+        raise TimeoutError("app-server RPC 超时：method=thread/start")
+
+    adapter._call = timeout_call
+
+    result = await adapter.start_thread("codex:/tmp/project")
+
+    assert result == {"id": "real-thread"}
+    assert adapter._thread_workspace_map["real-thread"] == "codex:/tmp/project"
+
+
+@pytest.mark.asyncio
+async def test_expired_thread_notification_after_start_timeout_is_not_mapped(monkeypatch):
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.adapter.PENDING_THREAD_START_TTL_SECONDS",
+        0.01,
+    )
+    adapter = CodexAdapter()
+    adapter._connected = True
+    adapter.register_workspace_cwd("codex:/tmp/project", "/tmp/project")
+
+    async def timeout_call(method, params):
+        assert method == "thread/start"
+        assert params["cwd"] == "/tmp/project"
+        raise TimeoutError("app-server RPC 超时：method=thread/start")
+
+    adapter._call = timeout_call
+
+    with pytest.raises(TimeoutError):
+        await adapter.start_thread("codex:/tmp/project")
+
+    await asyncio.sleep(0.02)
+    adapter._update_thread_workspace_map("thread/started", {"threadId": "late-thread"})
+
+    assert "late-thread" not in adapter._thread_workspace_map
+    assert adapter._pending_thread_starts == []
+
+
+@pytest.mark.asyncio
 async def test_dispatch_does_not_block_on_slow_server_request_callback():
     adapter = CodexAdapter()
     release = asyncio.Event()

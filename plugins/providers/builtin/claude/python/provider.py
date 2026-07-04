@@ -70,7 +70,7 @@ def create_provider_descriptor() -> ProviderDescriptor:
             read_thread_history=_read_thread_history,
             query_active_thread_ids=_query_active_thread_ids,
             query_running_thread_ids=_query_running_thread_ids,
-            include_state_only_thread=lambda thread_info: False,
+            include_state_only_thread=lambda thread_info: str(getattr(thread_info, "source", "") or "").strip().lower() == "app",
             thread_list_is_authoritative=True,
             preserve_archived_threads=True,
         ),

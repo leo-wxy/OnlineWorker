@@ -54,6 +54,165 @@ async def test_provider_owner_bridge_creates_provider_session(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_creates_app_state_session_without_source_materialization(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    class _FakeAdapter:
+        connected = True
+
+        def __init__(self):
+            self.registered = []
+            self.start_thread = AsyncMock(return_value={"thread": {"id": "tid-source"}})
+
+        def register_workspace_cwd(self, workspace_id: str, cwd: str):
+            self.registered.append((workspace_id, cwd))
+
+    state = AppState(storage=AppStorage())
+    adapter = _FakeAdapter()
+    state.set_adapter("codex", adapter)
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            name=name,
+            facts=SimpleNamespace(
+                include_state_only_thread=lambda thread_info: thread_info.source == "app",
+            ),
+        )
+        if name == "codex"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_create_session(
+        {
+            "provider_id": "codex",
+            "workspace_dir": "/tmp/workspace",
+            "create_mode": "app_state",
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["thread_id"].startswith("app:codex:")
+    assert response["session"]["id"] == response["thread_id"]
+    assert response["session"]["workspace"] == "/tmp/workspace"
+    assert response["session"]["source"] == "app"
+    assert adapter.registered == [("codex:/tmp/workspace", "/tmp/workspace")]
+    adapter.start_thread.assert_not_awaited()
+    ws = state.storage.workspaces["codex:/tmp/workspace"]
+    assert ws.threads[response["thread_id"]].source == "app"
+    assert ws.threads[response["thread_id"]].archived is False
+    assert ws.threads[response["thread_id"]].is_active is False
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_list_sessions_excludes_state_only_app_threads(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="workspace",
+        path="/tmp/workspace",
+        tool="codex",
+        daemon_workspace_id="codex:/tmp/workspace",
+        threads={
+            "app:codex:1": ThreadInfo(
+                thread_id="app:codex:1",
+                preview="新建会话",
+                archived=False,
+                is_active=False,
+                source="app",
+            )
+        },
+    )
+    storage.workspaces["codex:/tmp/workspace"] = ws
+    state = AppState(storage=storage)
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            name=name,
+            facts=SimpleNamespace(
+                list_sessions=lambda limit=100: [
+                    {
+                        "id": "real-thread",
+                        "workspace": "/tmp/workspace",
+                        "title": "Real",
+                    }
+                ],
+                include_state_only_thread=lambda thread_info: thread_info.source == "app",
+            ),
+        )
+        if name == "codex"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_list_sessions(
+        {
+            "provider_id": "codex",
+            "force_refresh": True,
+        }
+    )
+
+    assert response["ok"] is True
+    session_ids = {session["id"] for session in response["sessions"]}
+    assert session_ids == {"real-thread"}
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_list_sessions_excludes_legacy_draft_threads(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="workspace",
+        path="/tmp/workspace",
+        tool="codex",
+        daemon_workspace_id="codex:/tmp/workspace",
+        threads={
+            "draft:codex:1": ThreadInfo(
+                thread_id="draft:codex:1",
+                preview="legacy draft",
+                archived=False,
+                is_active=False,
+                source="app",
+            ),
+            "app:codex:1": ThreadInfo(
+                thread_id="app:codex:1",
+                preview="新建会话",
+                archived=False,
+                is_active=False,
+                source="app",
+            ),
+        },
+    )
+    storage.workspaces["codex:/tmp/workspace"] = ws
+    state = AppState(storage=storage)
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            name=name,
+            facts=SimpleNamespace(
+                list_sessions=lambda limit=100: [],
+                include_state_only_thread=lambda thread_info: thread_info.source == "app",
+            ),
+        )
+        if name == "codex"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_list_sessions(
+        {
+            "provider_id": "codex",
+            "force_refresh": True,
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["sessions"] == []
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_serves_provider_usage_summary(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
@@ -728,6 +887,263 @@ async def test_provider_owner_bridge_uses_registry_message_hooks(monkeypatch, tm
     assert activity["workspacePath"] == "/tmp/project-a"
     assert activity["lastUserMessage"] == "hello owner bridge"
     assert activity["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_starts_real_session_with_first_message(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    called = {}
+
+    class _FakeAdapter:
+        connected = True
+
+        def __init__(self):
+            self.registered = []
+            self.start_thread = AsyncMock(return_value={"id": "real-thread"})
+
+        def register_workspace_cwd(self, workspace_id: str, cwd: str) -> None:
+            self.registered.append((workspace_id, cwd))
+
+    adapter = _FakeAdapter()
+    state = AppState(storage=AppStorage())
+    state.set_adapter("overlay-tool", adapter)
+
+    async def ensure_connected(state_obj, current_adapter, ws_info, **kwargs):
+        called["ensure_connected"] = (state_obj, current_adapter, ws_info.tool, ws_info.path)
+        return current_adapter
+
+    async def prepare_send(state_obj, current_adapter, ws_info, thread_info, **kwargs):
+        called["prepare_send"] = (
+            state_obj,
+            current_adapter,
+            ws_info.daemon_workspace_id,
+            thread_info.thread_id,
+            kwargs["text"],
+        )
+        return True
+
+    async def send(state_obj, current_adapter, ws_info, thread_info, **kwargs):
+        called["send"] = (
+            state_obj,
+            current_adapter,
+            ws_info.daemon_workspace_id,
+            thread_info.thread_id,
+            kwargs["text"],
+        )
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            message_hooks=SimpleNamespace(
+                ensure_connected=ensure_connected,
+                prepare_send=prepare_send,
+                send=send,
+            )
+        )
+        if name == "overlay-tool"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_start_session_message(
+        {
+            "provider_id": "overlay-tool",
+            "workspace_dir": "/tmp/project-a",
+            "text": "first message",
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["accepted"] is True
+    assert response["thread_id"] == "real-thread"
+    assert response["requested_thread_id"] == "real-thread"
+    assert response["created_new_thread"] is True
+    assert response["remapped"] is False
+    assert response["session"]["id"] == "real-thread"
+    assert not response["session"]["id"].startswith("app:overlay-tool:")
+    adapter.start_thread.assert_awaited_once_with("overlay-tool:/tmp/project-a")
+    assert adapter.registered == [
+        ("overlay-tool:/tmp/project-a", "/tmp/project-a"),
+        ("overlay-tool:/tmp/project-a", "/tmp/project-a"),
+    ]
+    ws = state.storage.workspaces["overlay-tool:/tmp/project-a"]
+    assert set(ws.threads) == {"real-thread"}
+    assert ws.threads["real-thread"].thread_id == "real-thread"
+    assert ws.threads["real-thread"].preview == "first message"
+    if bridge._pending_send_tasks:
+        await asyncio.gather(*tuple(bridge._pending_send_tasks), return_exceptions=True)
+    assert called["send"][2:] == (
+        "overlay-tool:/tmp/project-a",
+        "real-thread",
+        "first message",
+    )
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_start_session_message_accepts_slow_real_thread(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    called = {}
+    release_start = asyncio.Event()
+
+    class _FakeAdapter:
+        connected = True
+
+        def __init__(self):
+            self.registered = []
+
+        def register_workspace_cwd(self, workspace_id: str, cwd: str) -> None:
+            self.registered.append((workspace_id, cwd))
+
+        async def start_thread(self, workspace_id: str):
+            called["start_thread"] = workspace_id
+            await release_start.wait()
+            return {"id": "real-thread"}
+
+    adapter = _FakeAdapter()
+    state = AppState(storage=AppStorage())
+    state.set_adapter("overlay-tool", adapter)
+
+    async def ensure_connected(state_obj, current_adapter, ws_info, **kwargs):
+        return current_adapter
+
+    async def prepare_send(state_obj, current_adapter, ws_info, thread_info, **kwargs):
+        raise AssertionError("start_session_message should send directly after start_thread")
+
+    async def send(state_obj, current_adapter, ws_info, thread_info, **kwargs):
+        called["send"] = (
+            ws_info.daemon_workspace_id,
+            thread_info.thread_id,
+            kwargs["text"],
+        )
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            message_hooks=SimpleNamespace(
+                ensure_connected=ensure_connected,
+                prepare_send=prepare_send,
+                send=send,
+            )
+        )
+        if name == "overlay-tool"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    task = asyncio.create_task(
+        bridge._handle_start_session_message(
+            {
+                "provider_id": "overlay-tool",
+                "workspace_dir": "/tmp/project-a",
+                "text": "first message",
+            }
+        )
+    )
+
+    await asyncio.sleep(0)
+    assert not task.done()
+    release_start.set()
+    response = await asyncio.wait_for(task, timeout=1.0)
+
+    assert response["ok"] is True
+    assert response["accepted"] is True
+    assert response["thread_id"] == "real-thread"
+    assert response["created_new_thread"] is True
+    assert response["session"]["id"] == "real-thread"
+    ws = state.storage.workspaces["overlay-tool:/tmp/project-a"]
+    assert set(ws.threads) == {"real-thread"}
+    assert ws.threads["real-thread"].preview == "first message"
+    if bridge._pending_send_tasks:
+        await asyncio.gather(*tuple(bridge._pending_send_tasks), return_exceptions=True)
+    assert called["start_thread"] == "overlay-tool:/tmp/project-a"
+    assert called["send"] == (
+        "overlay-tool:/tmp/project-a",
+        "real-thread",
+        "first message",
+    )
+    activity = state.message_bus.session_activity("overlay-tool", "real-thread")
+    assert activity["workspacePath"] == "/tmp/project-a"
+    assert activity["lastUserMessage"] == "first message"
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_start_session_message_returns_before_thread_start_finishes(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    called = {}
+    release_start = asyncio.Event()
+
+    class _FakeAdapter:
+        connected = True
+
+        def __init__(self):
+            self.registered = []
+
+        def register_workspace_cwd(self, workspace_id: str, cwd: str) -> None:
+            self.registered.append((workspace_id, cwd))
+
+        async def start_thread(self, workspace_id: str):
+            called["start_thread"] = workspace_id
+            await release_start.wait()
+            return {"id": "real-thread"}
+
+    adapter = _FakeAdapter()
+    state = AppState(storage=AppStorage())
+    state.set_adapter("overlay-tool", adapter)
+
+    async def ensure_connected(state_obj, current_adapter, ws_info, **kwargs):
+        return current_adapter
+
+    async def prepare_send(state_obj, current_adapter, ws_info, thread_info, **kwargs):
+        raise AssertionError("start_session_message should send directly after start_thread")
+
+    async def send(state_obj, current_adapter, ws_info, thread_info, **kwargs):
+        called["send"] = thread_info.thread_id
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            message_hooks=SimpleNamespace(
+                ensure_connected=ensure_connected,
+                prepare_send=prepare_send,
+                send=send,
+            )
+        )
+        if name == "overlay-tool"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await asyncio.wait_for(
+        bridge._handle_start_session_message(
+            {
+                "provider_id": "overlay-tool",
+                "workspace_dir": "/tmp/project-a",
+                "text": "first message",
+            }
+        ),
+        timeout=0.05,
+    )
+
+    assert response["ok"] is True
+    assert response["accepted"] is True
+    assert response["pending"] is True
+    assert not response.get("thread_id")
+    assert called["start_thread"] == "overlay-tool:/tmp/project-a"
+
+    release_start.set()
+    if bridge._pending_send_tasks:
+        await asyncio.gather(*tuple(bridge._pending_send_tasks), return_exceptions=True)
+
+    ws = state.storage.workspaces["overlay-tool:/tmp/project-a"]
+    assert set(ws.threads) == {"real-thread"}
+    assert ws.threads["real-thread"].preview == "first message"
+    assert called["send"] == "real-thread"
+    activity = state.message_bus.session_activity("overlay-tool", "real-thread")
+    assert activity["workspacePath"] == "/tmp/project-a"
+    assert activity["lastUserMessage"] == "first message"
 
 
 @pytest.mark.asyncio
@@ -1934,6 +2350,68 @@ async def test_provider_owner_bridge_archives_session_via_real_thread_hook(monke
     assert archived["state"] is state
     assert saved["storage"] is storage
     thread = storage.workspaces["overlay-tool:/tmp/project-a"].threads["tid-archive"]
+    assert thread.archived is True
+    assert thread.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_archives_app_state_session_locally(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    saved = {}
+    storage = AppStorage()
+    storage.workspaces["codex:/tmp/project-a"] = WorkspaceInfo(
+        name="project-a",
+        path="/tmp/project-a",
+        tool="codex",
+        daemon_workspace_id="codex:/tmp/project-a",
+        threads={
+            "app:codex:empty": ThreadInfo(
+                thread_id="app:codex:empty",
+                archived=False,
+                is_active=False,
+                source="app",
+            )
+        },
+    )
+    state = AppState(storage=storage)
+    adapter = SimpleNamespace(connected=True)
+    state.set_adapter("codex", adapter)
+
+    archive_thread = AsyncMock(side_effect=AssertionError("source archive should not be called"))
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            thread_hooks=SimpleNamespace(archive_thread=archive_thread)
+        )
+        if name == "codex"
+        else None,
+    )
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.save_storage",
+        lambda storage_arg: saved.update({"storage": storage_arg}),
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_archive_session(
+        {
+            "provider_id": "codex",
+            "session_id": "app:codex:empty",
+            "workspace_dir": "/tmp/project-a",
+        }
+    )
+
+    assert response == {
+        "ok": True,
+        "provider_id": "codex",
+        "thread_id": "app:codex:empty",
+        "workspace_id": "codex:/tmp/project-a",
+        "workspace_dir": "/tmp/project-a",
+        "archive_source": "local_state",
+    }
+    archive_thread.assert_not_awaited()
+    assert saved["storage"] is storage
+    thread = storage.workspaces["codex:/tmp/project-a"].threads["app:codex:empty"]
     assert thread.archived is True
     assert thread.is_active is False
 

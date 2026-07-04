@@ -20,6 +20,7 @@ import {
 import {
   fetchProviderSession,
   sendProviderSessionMessage,
+  startProviderSessionMessage,
 } from "./api";
 import { useStagedAttachments } from "./composerAttachments";
 import { getProviderUi, type UnifiedSession } from "./presentation";
@@ -56,11 +57,17 @@ export function GenericProviderChat({
   session,
   providerSupportsAttachments,
   onSessionRemapped,
+  onNewSessionStarted,
+  onNewSessionPending,
+  mode = "session",
   active = true,
 }: {
   session: UnifiedSession;
   providerSupportsAttachments: boolean;
   onSessionRemapped?: (previousSession: UnifiedSession, sendResult: ProviderSessionSendResult) => Promise<void> | void;
+  onNewSessionStarted?: (sendResult: ProviderSessionSendResult) => Promise<void> | void;
+  onNewSessionPending?: (sendResult: ProviderSessionSendResult, text: string) => Promise<void> | void;
+  mode?: "session" | "new-session";
   active?: boolean;
 }) {
   const { t } = useI18n();
@@ -124,6 +131,13 @@ export function GenericProviderChat({
   }, [session.archived, session.raw, session.title, session.id, session.type, session.workspace]);
 
   const loadMessages = useCallback(async () => {
+    if (mode === "new-session") {
+      applyMessages([], "auto");
+      hasLoadedRef.current = true;
+      setLoading(false);
+      setError(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -136,9 +150,12 @@ export function GenericProviderChat({
     } finally {
       setLoading(false);
     }
-  }, [activeSession.id, activeSession.type, activeSession.workspace, applyMessages]);
+  }, [activeSession.id, activeSession.type, activeSession.workspace, applyMessages, mode]);
 
   const refreshMessagesSilently = useCallback(async () => {
+    if (mode === "new-session") {
+      return;
+    }
     try {
       const turns = await fetchProviderSession(activeSession.type, activeSession.id, activeSession.workspace);
       hasLoadedRef.current = true;
@@ -155,7 +172,7 @@ export function GenericProviderChat({
         console.warn("Provider session silent refresh failed", loadError);
       }
     }
-  }, [activeSession.id, activeSession.type, activeSession.workspace, applyMessages]);
+  }, [activeSession.id, activeSession.type, activeSession.workspace, applyMessages, mode]);
 
   useEffect(() => {
     if (!active) {
@@ -213,7 +230,7 @@ export function GenericProviderChat({
   }, [applyMessages, cancelReplyWatch]);
 
   useProviderSessionEventStream({
-    enabled: active && Boolean(activeSession.id),
+    enabled: active && mode !== "new-session" && Boolean(activeSession.id),
     providerId: activeSession.type,
     sessionId: activeSession.id,
     workspaceDir: activeSession.workspace ?? null,
@@ -222,6 +239,9 @@ export function GenericProviderChat({
 
   useEffect(() => {
     if (!active) {
+      return;
+    }
+    if (mode === "new-session") {
       return;
     }
     if (!activeSession.id) {
@@ -249,7 +269,7 @@ export function GenericProviderChat({
     });
 
     return cleanup;
-  }, [active, activeSession.id, activeSession.type, activeSession.workspace]);
+  }, [active, activeSession.id, activeSession.type, activeSession.workspace, mode]);
 
   const handleSend = async (trimmedText: string, nextAttachments: ComposerAttachment[]) => {
     if (!trimmedText.trim() && nextAttachments.length === 0) {
@@ -278,23 +298,47 @@ export function GenericProviderChat({
     const baselineAssistantCount = countAssistantEntries(previousMessages);
 
     try {
-      const sendResult = await sendProviderSessionMessage(
-        activeSession.type,
-        activeSession.id,
-        trimmedText,
-        nextAttachments,
-        activeSession.workspace,
+      const sendResult = mode === "new-session"
+        ? await startProviderSessionMessage(
+            activeSession.type,
+            activeSession.workspace,
+            trimmedText,
+            nextAttachments,
+          )
+        : await sendProviderSessionMessage(
+            activeSession.type,
+            activeSession.id,
+            trimmedText,
+            nextAttachments,
+            activeSession.workspace,
       );
       const remappedSessionId = sendResult.threadId?.trim();
+      if (mode === "new-session" && !remappedSessionId) {
+        if (sendResult.pending && sendResult.accepted !== false) {
+          await onNewSessionPending?.(sendResult, trimmedText);
+          setAttachments([]);
+          setReplyWatchState("background");
+          return true;
+        }
+        throw new Error("provider did not return a real session id");
+      }
       if (remappedSessionId && remappedSessionId !== activeSession.id) {
         const nextSession = {
           ...activeSession,
           id: remappedSessionId,
         };
         setActiveSession(nextSession);
-        await onSessionRemapped?.(activeSession, sendResult);
+        if (mode === "new-session") {
+          await onNewSessionStarted?.(sendResult);
+        } else {
+          await onSessionRemapped?.(activeSession, sendResult);
+        }
       }
       setAttachments([]);
+      if (mode === "new-session") {
+        setReplyWatchState("background");
+        return true;
+      }
 
       const loadSnapshot = async () => {
         const currentSession = remappedSessionId && remappedSessionId !== activeSession.id
@@ -370,6 +414,7 @@ export function GenericProviderChat({
       cancelReplyWatch();
       setError((sendError as Error).message);
       applyMessages(previousMessages, "auto");
+      return false;
     } finally {
       setSending(false);
     }

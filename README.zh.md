@@ -211,6 +211,13 @@ proxy socket 和其父目录会分别设置为 `0600` / `0700`，限制在当前
 
 Sessions 页面支持浏览、发送消息、按 Active/Archived 过滤，以及归档具体会话。归档是 provider-backed 操作：OnlineWorker 会先调用 provider 的真实归档路径，成功后才更新本地状态；如果 provider 返回失败，本地会话状态保持不变。
 
+Active workspace 下的 `New` 入口会打开首条消息输入区，而不是先创建本地
+placeholder 会话。发送首条消息时，OnlineWorker 会先请求 provider 创建真实
+session，再把消息发送到这个 provider thread。Codex 的 `thread/start` 较慢时，
+UI 可能先收到 pending 结果；后台会继续等待 app-server notification 返回真实
+thread id，并在活动流出现匹配的 provider-backed session 后选中这个真实会话，
+同时保留界面上的乐观用户消息。本地 `app:*` draft id 不会作为会话展示。
+
 ### 用量
 
 用量数据通过 provider metadata 和 usage hooks 暴露。App 的 Usage 页面会动态展示支持用量读取的 provider，新 provider 不需要把解析逻辑硬编码到 React 页面里。

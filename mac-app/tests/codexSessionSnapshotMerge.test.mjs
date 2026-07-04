@@ -25,7 +25,7 @@ test("provider session view loads codex through generic provider session reads",
   const genericChat = readFileSync(join(root, "src", "components", "session-browser", "GenericProviderChat.tsx"), "utf8");
 
   assert.match(genericChat, /const turns = await fetchProviderSession\(activeSession\.type, activeSession\.id, activeSession\.workspace\)/);
-  assert.match(genericChat, /enabled: active && Boolean\(activeSession\.id\)/);
+  assert.match(genericChat, /enabled: active && mode !== "new-session" && Boolean\(activeSession\.id\)/);
   assert.match(genericChat, /usesExtendedReplyPolling/);
   assert.doesNotMatch(genericChat, /fetchCodexThreadState/);
 });

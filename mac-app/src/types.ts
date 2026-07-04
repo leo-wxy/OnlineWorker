@@ -353,6 +353,8 @@ export interface ProviderSessionSendResult {
   workspaceId?: string | null;
   remapped?: boolean;
   createdNewThread?: boolean;
+  pending?: boolean;
+  session?: unknown | null;
 }
 
 export interface SessionStreamEvent {

@@ -1134,21 +1134,40 @@ async def prepare_send(
     attachments=None,
 ) -> bool:
     workspace_id = ws_info.daemon_workspace_id
-    try:
-        await adapter.resume_thread(workspace_id, thread_info.thread_id)
-    except Exception as e:
-        if is_codex_unmaterialized_error(e):
-            original_thread_id = thread_info.thread_id
-            result = await adapter.start_thread(workspace_id)
-            new_thread_id = _extract_started_thread_id(result)
-            _replace_thread_binding(ws_info, thread_info, new_thread_id)
-            logger.info(
-                "[provider-message] codex thread 尚未 materialize，已创建源端 thread old=%s new=%s",
-                original_thread_id[:8],
-                new_thread_id[:8],
-            )
-        else:
-            raise
+    workspace_path = str(getattr(ws_info, "path", "") or "")
+    thread_id = str(getattr(thread_info, "thread_id", "") or "")
+    thread_source = str(getattr(thread_info, "source", "") or "").strip().lower()
+    should_materialize_app_thread = (
+        thread_source == "app"
+        and not _codex_thread_has_source_record(workspace_path, thread_id)
+    )
+
+    if should_materialize_app_thread:
+        original_thread_id = thread_info.thread_id
+        result = await adapter.start_thread(workspace_id)
+        new_thread_id = _extract_started_thread_id(result)
+        _replace_thread_binding(ws_info, thread_info, new_thread_id)
+        logger.info(
+            "[provider-message] codex app-state thread 首次发送已创建源端 thread old=%s new=%s",
+            str(original_thread_id)[:8],
+            new_thread_id[:8],
+        )
+    else:
+        try:
+            await adapter.resume_thread(workspace_id, thread_info.thread_id)
+        except Exception as e:
+            if is_codex_unmaterialized_error(e):
+                original_thread_id = thread_info.thread_id
+                result = await adapter.start_thread(workspace_id)
+                new_thread_id = _extract_started_thread_id(result)
+                _replace_thread_binding(ws_info, thread_info, new_thread_id)
+                logger.info(
+                    "[provider-message] codex thread 尚未 materialize，已创建源端 thread old=%s new=%s",
+                    str(original_thread_id)[:8],
+                    new_thread_id[:8],
+                )
+            else:
+                raise
     await _interrupt_active_turn(
         state,
         adapter,
