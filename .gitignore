@@ -25,6 +25,10 @@ mac-app/src-tauri/binaries/
 mac-app/src-tauri/target/
 mac-app/src-tauri/provider-plugins/**
 !mac-app/src-tauri/provider-plugins/.gitkeep
+mac-app/src-tauri/hook-relays/**
+!mac-app/src-tauri/hook-relays/.gitkeep
+mac-app/src-tauri/notification-plugins/**
+!mac-app/src-tauri/notification-plugins/.gitkeep
 mac-app/node_modules/
 mac-app/.vite/
 build/
