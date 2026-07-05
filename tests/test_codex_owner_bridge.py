@@ -1,5 +1,6 @@
 import pytest
 
+from config import Config, ToolConfig
 from plugins.providers.builtin.codex.python.owner_bridge import CodexOwnerBridge, ensure_codex_owner_bridge_started
 from core.state import AppState
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
@@ -78,6 +79,128 @@ async def test_codex_owner_bridge_uses_workspace_mapping_when_cwd_matches(tmp_pa
     assert activity["workspaceId"] == "ws-1"
     assert activity["lastUserMessage"] == "hello"
     assert activity["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_codex_owner_bridge_watches_thread_after_send_in_tui_mode(tmp_path):
+    ws = WorkspaceInfo(
+        name="project",
+        path="/Users/example/Projects/project",
+        tool="codex",
+        daemon_workspace_id="ws-1",
+        threads={"tid-watch": ThreadInfo(thread_id="tid-watch")},
+    )
+    state = AppState(
+        storage=AppStorage(workspaces={"codex:project": ws}),
+        config=Config(
+            telegram_token="token",
+            allowed_user_id=1,
+            group_chat_id=1,
+            log_level="INFO",
+            tools=[ToolConfig(name="codex", enabled=True, bin="codex", control_mode="tui")],
+        ),
+    )
+    state.set_adapter("codex", _FakeAdapter())
+    bridge = CodexOwnerBridge(state, data_dir=str(tmp_path))
+
+    response = await bridge._handle_send_message({
+        "thread_id": "tid-watch",
+        "text": "hello",
+        "cwd": "/Users/example/Projects/project",
+    })
+
+    assert response["ok"] is True
+    assert "tid-watch" in codex_state.get_runtime(state).watched_threads
+
+
+@pytest.mark.asyncio
+async def test_codex_app_source_does_not_route_to_tui_host_in_tui_mode(monkeypatch, tmp_path):
+    from plugins.providers.builtin.codex.python import runtime as codex_runtime
+
+    ws = WorkspaceInfo(
+        name="project",
+        path="/Users/example/Projects/project",
+        tool="codex",
+        daemon_workspace_id="codex:/Users/example/Projects/project",
+        threads={
+            "tid-app": ThreadInfo(
+                thread_id="tid-app",
+                source="app",
+                is_active=True,
+            )
+        },
+    )
+    state = AppState(
+        storage=AppStorage(workspaces={"codex:project": ws}),
+        config=Config(
+            telegram_token="token",
+            allowed_user_id=1,
+            group_chat_id=1,
+            log_level="INFO",
+            data_dir=str(tmp_path),
+            tools=[ToolConfig(name="codex", enabled=True, bin="codex", control_mode="tui")],
+        ),
+    )
+    monkeypatch.setattr(codex_runtime, "_codex_thread_has_source_record", lambda _path, _thread_id: True)
+
+    routed = await codex_runtime.try_route_owner_bridge_send(
+        state,
+        ws,
+        ws.threads["tid-app"],
+        text="hello from session",
+    )
+
+    assert routed is False
+
+
+@pytest.mark.asyncio
+async def test_codex_send_fallback_uses_app_server_in_tui_mode(tmp_path):
+    from plugins.providers.builtin.codex.python import runtime as codex_runtime
+
+    ws = WorkspaceInfo(
+        name="project",
+        path="/Users/example/Projects/project",
+        tool="codex",
+        daemon_workspace_id="codex:/Users/example/Projects/project",
+        threads={"tid-fallback": ThreadInfo(thread_id="tid-fallback", source="app")},
+    )
+    state = AppState(
+        storage=AppStorage(workspaces={"codex:project": ws}),
+        config=Config(
+            telegram_token="token",
+            allowed_user_id=1,
+            group_chat_id=1,
+            log_level="INFO",
+            data_dir=str(tmp_path),
+            tools=[ToolConfig(name="codex", enabled=True, bin="codex", control_mode="tui")],
+        ),
+    )
+    adapter = _FakeAdapter()
+
+    await codex_runtime.send_message(
+        state,
+        adapter,
+        ws,
+        ws.threads["tid-fallback"],
+        update=None,
+        context=None,
+        group_chat_id=0,
+        src_topic_id=None,
+        text="hello fallback",
+        has_photo=False,
+        attachments=None,
+    )
+
+    assert adapter.calls == [
+        (
+            "send",
+            "codex:/Users/example/Projects/project",
+            "tid-fallback",
+            "hello fallback",
+            None,
+            {},
+        )
+    ]
 
 
 @pytest.mark.asyncio

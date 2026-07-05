@@ -32,6 +32,7 @@ import {
   FOREGROUND_REPLY_POLL,
   limitSessionTurns,
   mergeSessionTurns,
+  overlayPendingUserTurn,
   SessionChatHeader,
   SessionComposer,
   SessionMessages,
@@ -92,6 +93,20 @@ export function GenericProviderChat({
   const liveStreamReadyRef = useRef(false);
   const hasLoadedRef = useRef(false);
   const pendingScrollBehaviorRef = useRef<ScrollBehavior>("auto");
+  const pendingUserMessage = typeof activeSession.raw?.lastUserMessage === "string"
+    ? activeSession.raw.lastUserMessage.trim()
+    : typeof activeSession.raw?.last_user_message === "string"
+      ? activeSession.raw.last_user_message.trim()
+      : "";
+  const pendingEventKind = typeof activeSession.raw?.lastEventKind === "string"
+    ? activeSession.raw.lastEventKind.trim()
+    : typeof activeSession.raw?.last_event_kind === "string"
+      ? activeSession.raw.last_event_kind.trim()
+      : "";
+  const sessionOverlayRaw = {
+    lastUserMessage: pendingUserMessage,
+    lastEventKind: pendingEventKind,
+  };
 
   const cancelReplyWatch = useCallback(() => {
     replyWatchTokenRef.current += 1;
@@ -142,15 +157,25 @@ export function GenericProviderChat({
     setError(null);
     try {
       const turns = await fetchProviderSession(activeSession.type, activeSession.id, activeSession.workspace);
-      applyMessages(turns, "auto");
+      const nextTurns = overlayPendingUserTurn(turns, sessionOverlayRaw);
+      const overlayed = nextTurns !== turns;
+      applyMessages(nextTurns, "auto");
       hasLoadedRef.current = true;
-      setReplyWatchState((current) => (current === "expired" ? null : current));
+      setReplyWatchState((current) => overlayed ? (current ?? "background") : (current === "expired" ? null : current));
     } catch (loadError) {
       setError((loadError as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [activeSession.id, activeSession.type, activeSession.workspace, applyMessages, mode]);
+  }, [
+    activeSession.id,
+    activeSession.type,
+    activeSession.workspace,
+    applyMessages,
+    mode,
+    pendingEventKind,
+    pendingUserMessage,
+  ]);
 
   const refreshMessagesSilently = useCallback(async () => {
     if (mode === "new-session") {
@@ -158,13 +183,15 @@ export function GenericProviderChat({
     }
     try {
       const turns = await fetchProviderSession(activeSession.type, activeSession.id, activeSession.workspace);
+      const nextTurns = overlayPendingUserTurn(turns, sessionOverlayRaw);
+      const overlayed = nextTurns !== turns;
       hasLoadedRef.current = true;
-      if (!hasSessionSnapshotChanged(messagesRef.current, turns)) {
-        setReplyWatchState((current) => (current === "expired" ? null : current));
+      if (!hasSessionSnapshotChanged(messagesRef.current, nextTurns)) {
+        setReplyWatchState((current) => overlayed ? (current ?? "background") : (current === "expired" ? null : current));
         return;
       }
-      applyMessages(turns, "auto");
-      setReplyWatchState((current) => (current === "expired" ? null : current));
+      applyMessages(nextTurns, "auto");
+      setReplyWatchState((current) => overlayed ? (current ?? "background") : (current === "expired" ? null : current));
     } catch (loadError) {
       if (messagesRef.current.length === 0) {
         setError((loadError as Error).message);
@@ -172,7 +199,15 @@ export function GenericProviderChat({
         console.warn("Provider session silent refresh failed", loadError);
       }
     }
-  }, [activeSession.id, activeSession.type, activeSession.workspace, applyMessages, mode]);
+  }, [
+    activeSession.id,
+    activeSession.type,
+    activeSession.workspace,
+    applyMessages,
+    mode,
+    pendingEventKind,
+    pendingUserMessage,
+  ]);
 
   useEffect(() => {
     if (!active) {
@@ -252,15 +287,21 @@ export function GenericProviderChat({
       intervalMs: 3000,
       getCurrentSnapshot: () => messagesRef.current,
       loadSnapshot: async () => {
-        return fetchProviderSession(
+        return overlayPendingUserTurn(await fetchProviderSession(
           activeSession.type,
           activeSession.id,
           activeSession.workspace,
-        );
+        ), sessionOverlayRaw);
       },
       onSnapshot: (snapshot) => {
+        const overlayed = Boolean(
+          pendingUserMessage
+          && (pendingEventKind === "message.user.submitted" || pendingEventKind === "message.user.accepted")
+          && snapshot[snapshot.length - 1]?.role === "user"
+          && snapshot[snapshot.length - 1]?.content === pendingUserMessage,
+        );
         applyMessages(snapshot, "auto");
-        setReplyWatchState((current) => (current === "expired" ? null : current));
+        setReplyWatchState((current) => overlayed ? (current ?? "background") : (current === "expired" ? null : current));
       },
       shouldSkip: () => liveRefreshBlockedRef.current,
       onError: (error) => {
@@ -269,7 +310,15 @@ export function GenericProviderChat({
     });
 
     return cleanup;
-  }, [active, activeSession.id, activeSession.type, activeSession.workspace, mode]);
+  }, [
+    active,
+    activeSession.id,
+    activeSession.type,
+    activeSession.workspace,
+    mode,
+    pendingEventKind,
+    pendingUserMessage,
+  ]);
 
   const handleSend = async (trimmedText: string, nextAttachments: ComposerAttachment[]) => {
     if (!trimmedText.trim() && nextAttachments.length === 0) {
@@ -292,8 +341,8 @@ export function GenericProviderChat({
 
     setSending(true);
     setError(null);
-      applyMessages(optimisticMessages, "smooth");
-      setReplyWatchState("foreground");
+    applyMessages(optimisticMessages, "smooth");
+    setReplyWatchState("foreground");
 
     const baselineAssistantCount = countAssistantEntries(previousMessages);
 
@@ -352,10 +401,14 @@ export function GenericProviderChat({
           currentSession.id,
           currentSession.workspace,
         );
+        const overlaySnapshot = overlayPendingUserTurn(snapshot, {
+          lastUserMessage: trimmedText,
+          lastEventKind: "message.user.accepted",
+        });
         const shouldMergeSnapshot = remappedSessionId && remappedSessionId !== activeSession.id;
         const nextSnapshot = shouldMergeSnapshot
-          ? mergeSessionTurns(previousMessages, snapshot)
-          : snapshot;
+          ? mergeSessionTurns(previousMessages, overlaySnapshot)
+          : overlaySnapshot;
         if (shouldContinue()) {
           messagesRef.current = nextSnapshot;
         }

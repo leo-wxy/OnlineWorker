@@ -25,6 +25,8 @@ test("provider session view loads codex through generic provider session reads",
   const genericChat = readFileSync(join(root, "src", "components", "session-browser", "GenericProviderChat.tsx"), "utf8");
 
   assert.match(genericChat, /const turns = await fetchProviderSession\(activeSession\.type, activeSession\.id, activeSession\.workspace\)/);
+  assert.match(genericChat, /const sessionOverlayRaw = \{\s*lastUserMessage: pendingUserMessage,\s*lastEventKind: pendingEventKind,\s*\};/s);
+  assert.match(genericChat, /overlayPendingUserTurn\(turns,\s*sessionOverlayRaw\)/);
   assert.match(genericChat, /enabled: active && mode !== "new-session" && Boolean\(activeSession\.id\)/);
   assert.match(genericChat, /usesExtendedReplyPolling/);
   assert.doesNotMatch(genericChat, /fetchCodexThreadState/);
@@ -44,13 +46,17 @@ test("provider session view keeps snapshot refresh active after the live stream 
     genericChat,
     /liveRefreshBlockedRef\.current\s*=\s*loading \|\| sending \|\| \(replyWatchState !== null && replyWatchState !== "expired"\)/,
   );
-  assert.match(genericChat, /setReplyWatchState\(\(current\) => \(current === "expired" \? null : current\)\)/);
   assert.match(
     genericChat,
-    /return fetchProviderSession\(\s*activeSession\.type,\s*activeSession\.id,\s*activeSession\.workspace,\s*\);/s,
+    /return overlayPendingUserTurn\(\s*await fetchProviderSession\(\s*activeSession\.type,\s*activeSession\.id,\s*activeSession\.workspace,\s*\),\s*sessionOverlayRaw\s*\);/s,
   );
   assert.doesNotMatch(genericChat, /return mergeSessionTurns\(messagesRef\.current, turns\)/);
   assert.doesNotMatch(genericChat, /setMessages\(\[\]\)/);
+  assert.match(genericChat, /const overlayed = nextTurns !== turns;/);
+  assert.match(
+    genericChat,
+    /setReplyWatchState\(\(current\) => overlayed \? \(current \?\? "background"\) : \(current === "expired" \? null : current\)\);/,
+  );
 });
 
 test("session browser keeps existing messages visible during reloads", () => {
@@ -67,7 +73,10 @@ test("session browser only uses smooth scroll for user-authored appends", () => 
   assert.match(genericChat, /const pendingScrollBehaviorRef = useRef<ScrollBehavior>\("auto"\);/);
   assert.match(genericChat, /const applyMessages = useCallback\(\s*\(\s*nextMessages: SessionTurn\[\],\s*scrollBehavior: ScrollBehavior = "auto"/s);
   assert.match(genericChat, /endRef\.current\?\.scrollIntoView\(\{ behavior \}\);/);
-  assert.match(genericChat, /applyMessages\(turns,\s*"auto"\);/);
+  assert.match(
+    genericChat,
+    /const overlaySnapshot = overlayPendingUserTurn\(\s*snapshot,\s*\{\s*lastUserMessage: trimmedText,\s*lastEventKind: "message.user.accepted",\s*\}\s*\);/s,
+  );
   assert.match(genericChat, /applyMessages\(optimisticMessages,\s*"smooth"\);/);
   assert.doesNotMatch(genericChat, /scrollIntoView\(\{ behavior: "smooth" \}\)/);
 });

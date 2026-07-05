@@ -16,6 +16,11 @@ from core.user_messages.gateway import prepare_user_message_text
 from plugins.providers.builtin.codex.python.adapter import DEFAULT_APPROVALS_REVIEWER
 from plugins.providers.builtin.codex.python.errors import is_codex_unmaterialized_error
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
+from plugins.providers.builtin.codex.python.tui_bridge import is_codex_local_owner_mode
+from plugins.providers.builtin.codex.python.tui_realtime_mirror import (
+    seed_codex_watch_baseline,
+    watch_codex_thread,
+)
 
 
 OWNER_BRIDGE_SOCKET_FILENAME = "codex_owner_bridge.sock"
@@ -309,6 +314,23 @@ class CodexOwnerBridge:
         requested_thread_id = thread_id
         effective_thread_id = thread_id
         created_new_thread = False
+
+        def _seed_local_owner_watch(current_thread_id: str):
+            if getattr(self.state, "storage", None) is None:
+                return None
+            found = None
+            if hasattr(self.state, "find_thread_by_id_global"):
+                found = self.state.find_thread_by_id_global(current_thread_id)
+            ws_info = found[0] if found is not None else None
+            if ws_info is None:
+                if not workspace_id or not cwd:
+                    return None
+                ws_info = _ensure_storage_workspace(self.state, workspace_id, cwd)
+            if current_thread_id not in ws_info.threads or not is_codex_local_owner_mode(self.state, ws_info):
+                return None
+            seed_codex_watch_baseline(self.state, ws_info, current_thread_id)
+            return ws_info
+
         logger.info(
             "[codex-owner-bridge] send_message thread=%s workspace=%s cwd=%s",
             thread_id,
@@ -321,6 +343,7 @@ class CodexOwnerBridge:
             self.state.mark_provider_task_summary("codex", effective_thread_id, text)
             if workspace_id:
                 try:
+                    watch_ws = _seed_local_owner_watch(effective_thread_id)
                     await _send_on_thread(
                         adapter,
                         workspace_id,
@@ -331,6 +354,8 @@ class CodexOwnerBridge:
                         approvals_reviewer=approvals_reviewer,
                         sandbox_policy=sandbox_policy,
                     )
+                    if watch_ws is not None:
+                        watch_codex_thread(self.state, watch_ws, effective_thread_id)
                 except Exception as exc:
                     if not (can_remap and is_codex_unmaterialized_error(exc)):
                         raise
@@ -346,6 +371,7 @@ class CodexOwnerBridge:
                     created_new_thread = effective_thread_id != requested_thread_id
                     codex_state.mark_send_started(self.state, effective_thread_id)
                     self.state.mark_provider_task_summary("codex", effective_thread_id, text)
+                    watch_ws = _seed_local_owner_watch(effective_thread_id)
                     await _send_on_thread(
                         adapter,
                         workspace_id,
@@ -356,6 +382,8 @@ class CodexOwnerBridge:
                         approvals_reviewer=approvals_reviewer,
                         sandbox_policy=sandbox_policy,
                     )
+                    if watch_ws is not None:
+                        watch_codex_thread(self.state, watch_ws, effective_thread_id)
             else:
                 try:
                     await adapter._call("thread/resume", {"threadId": thread_id})

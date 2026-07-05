@@ -255,7 +255,7 @@ async def test_slash_router_passes_review_with_args_through(tool: str):
     handler = make_slash_command_handler(state, GROUP_CHAT_ID, state.config)
     await handler(update, ctx)
 
-    adapter.resume_thread.assert_awaited_once_with(f"{tool}:onlineWorker", thread_id)
+    adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_awaited_once_with(
         f"{tool}:onlineWorker",
         thread_id,
@@ -296,7 +296,7 @@ async def test_slash_router_passes_permissions_through_without_opening_wrapper()
     await handler(update, ctx)
 
     assert 703 not in state.pending_command_wrappers
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
+    adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "/permissions")
     ctx.bot.send_message.assert_not_awaited()
 
@@ -630,7 +630,7 @@ async def test_slash_router_resolves_registered_telegram_alias_to_original_comma
     handler = make_slash_command_handler(state, GROUP_CHAT_ID, state.config)
     await handler(update, ctx)
 
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
+    adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "/gsd-fast")
     ctx.bot.send_message.assert_not_awaited()
 
@@ -680,3 +680,180 @@ async def test_slash_router_routes_workspace_fallback_command_from_thread_topic(
     assert called == [[]]
     adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_slash_router_new_from_thread_topic_creates_separate_provider_thread(monkeypatch):
+    from bot.handlers import thread as thread_module
+    from bot.handlers.slash import make_slash_command_handler
+
+    state = _build_state(tool="codex")
+    ws = state.storage.workspaces["codex:onlineWorker"]
+    ws.threads["current-thread"] = ThreadInfo(
+        thread_id="current-thread",
+        topic_id=100,
+        archived=False,
+        preview="current session",
+    )
+
+    adapter = MagicMock()
+    adapter.connected = True
+    adapter.start_thread = AsyncMock(return_value={"id": "new-thread-1"})
+    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.send_user_message = AsyncMock(return_value={})
+    state.set_adapter("codex", adapter)
+
+    send_thread_control_panel = AsyncMock()
+    monkeypatch.setattr(
+        thread_module,
+        "send_thread_control_panel",
+        send_thread_control_panel,
+    )
+    monkeypatch.setattr(thread_module, "save_storage", lambda storage: None)
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.message_id = 508
+    update.effective_message.text = "/new Explain this project"
+    update.effective_message.caption = None
+    update.effective_message.photo = None
+    update.effective_message.message_thread_id = 100
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.create_forum_topic = AsyncMock(return_value=MagicMock(message_thread_id=200))
+    ctx.bot.send_message = AsyncMock(return_value=MagicMock(message_id=920))
+    ctx.args = None
+
+    handler = make_slash_command_handler(state, GROUP_CHAT_ID, state.config)
+    await handler(update, ctx)
+
+    adapter.start_thread.assert_awaited_once_with("codex:onlineWorker")
+    adapter.resume_thread.assert_not_awaited()
+    adapter.send_user_message.assert_awaited_once_with(
+        "codex:onlineWorker",
+        "new-thread-1",
+        "Explain this project",
+    )
+    assert adapter.send_user_message.await_args.args[1] != "current-thread"
+
+    ctx.bot.create_forum_topic.assert_awaited_once()
+    assert ws.threads["new-thread-1"].topic_id == 200
+    assert ws.threads["new-thread-1"].preview == "Explain this project"
+
+    confirmation_topics = [
+        call.kwargs.get("message_thread_id")
+        for call in ctx.bot.send_message.await_args_list
+        if "新 thread 已创建，请切到新 Topic 继续" in call.kwargs.get("text", "")
+    ]
+    assert confirmation_topics == [100]
+
+    send_thread_control_panel.assert_awaited_once()
+    panel_call = send_thread_control_panel.await_args
+    assert panel_call.args[4].thread_id == "new-thread-1"
+    assert panel_call.kwargs["topic_id"] == 200
+
+
+@pytest.mark.asyncio
+async def test_slash_router_new_without_text_rejects_codex_in_source_thread_topic(monkeypatch):
+    from bot.handlers import thread as thread_module
+    from bot.handlers.slash import make_slash_command_handler
+
+    state = _build_state(tool="codex")
+    ws = state.storage.workspaces["codex:onlineWorker"]
+    ws.threads["current-thread"] = ThreadInfo(
+        thread_id="current-thread",
+        topic_id=100,
+        archived=False,
+        preview="current session",
+    )
+
+    adapter = MagicMock()
+    adapter.connected = True
+    adapter.start_thread = AsyncMock(return_value={"id": "should-not-start"})
+    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.send_user_message = AsyncMock(return_value={})
+    state.set_adapter("codex", adapter)
+
+    monkeypatch.setattr(thread_module, "save_storage", lambda storage: None)
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.message_id = 509
+    update.effective_message.text = "/new"
+    update.effective_message.caption = None
+    update.effective_message.photo = None
+    update.effective_message.message_thread_id = 100
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.create_forum_topic = AsyncMock(return_value=MagicMock(message_thread_id=200))
+    ctx.bot.send_message = AsyncMock(return_value=MagicMock(message_id=921))
+    ctx.args = None
+
+    handler = make_slash_command_handler(state, GROUP_CHAT_ID, state.config)
+    await handler(update, ctx)
+
+    adapter.start_thread.assert_not_awaited()
+    adapter.resume_thread.assert_not_awaited()
+    adapter.send_user_message.assert_not_awaited()
+    ctx.bot.create_forum_topic.assert_not_awaited()
+
+    ctx.bot.send_message.assert_awaited_once()
+    sent = ctx.bot.send_message.await_args.kwargs
+    assert sent["message_thread_id"] == 100
+    assert "不能创建空 thread" in sent["text"]
+    assert "/new <初始消息>" in sent["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_router_new_from_thread_topic_publishes_user_message_events(monkeypatch):
+    from bot.handlers import thread as thread_module
+    from bot.handlers.slash import make_slash_command_handler
+
+    state = _build_state(tool="codex")
+    ws = state.storage.workspaces["codex:onlineWorker"]
+    ws.threads["current-thread"] = ThreadInfo(
+        thread_id="current-thread",
+        topic_id=100,
+        archived=False,
+        preview="current session",
+    )
+
+    adapter = MagicMock()
+    adapter.connected = True
+    adapter.start_thread = AsyncMock(return_value={"id": "new-thread-1"})
+    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.send_user_message = AsyncMock(return_value={})
+    state.set_adapter("codex", adapter)
+
+    monkeypatch.setattr(thread_module, "send_thread_control_panel", AsyncMock())
+    monkeypatch.setattr(thread_module, "save_storage", lambda storage: None)
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.message_id = 510
+    update.effective_message.text = "/new Explain this project"
+    update.effective_message.caption = None
+    update.effective_message.photo = None
+    update.effective_message.message_thread_id = 100
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.create_forum_topic = AsyncMock(return_value=MagicMock(message_thread_id=200))
+    ctx.bot.send_message = AsyncMock(return_value=MagicMock(message_id=922))
+    ctx.args = None
+
+    handler = make_slash_command_handler(state, GROUP_CHAT_ID, state.config)
+    await handler(update, ctx)
+
+    assert [event["kind"] for event in state.message_bus.recent_events()] == [
+        "message.user.submitted",
+        "message.user.accepted",
+    ]
+    activity = state.message_bus.session_activity("codex", "new-thread-1")
+    assert activity["workspacePath"] == "/Users/example/Projects/onlineWorker"
+    assert activity["lastUserMessage"] == "Explain this project"

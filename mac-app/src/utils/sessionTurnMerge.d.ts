@@ -8,3 +8,8 @@ export function mergeSessionTurns(
   existing: SessionTurn[],
   incoming: SessionTurn[],
 ): SessionTurn[];
+
+export function overlayPendingUserTurn(
+  turns: SessionTurn[],
+  raw: Record<string, unknown>,
+): SessionTurn[];

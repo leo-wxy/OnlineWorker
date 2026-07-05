@@ -477,7 +477,7 @@ async def test_codex_server_request_handler_allows_new_request():
 
 
 @pytest.mark.asyncio
-async def test_prepare_send_resumes_imported_thread_without_remapping(monkeypatch):
+async def test_prepare_send_does_not_resume_imported_thread_before_send(monkeypatch):
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
@@ -520,7 +520,7 @@ async def test_prepare_send_resumes_imported_thread_without_remapping(monkeypatc
 
     assert should_continue is True
     adapter.start_thread.assert_not_awaited()
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "thread-imported")
+    adapter.resume_thread.assert_not_awaited()
     interrupt_mock.assert_awaited_once_with(
         state,
         adapter,
@@ -539,7 +539,7 @@ async def test_prepare_send_resumes_imported_thread_without_remapping(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_prepare_send_resumes_app_owned_thread_without_remapping(monkeypatch):
+async def test_prepare_send_does_not_resume_app_owned_thread_before_send(monkeypatch):
     ws = WorkspaceInfo(
         name="onlineWorker",
         path="/Users/example/Projects/onlineWorker",
@@ -580,7 +580,7 @@ async def test_prepare_send_resumes_app_owned_thread_without_remapping(monkeypat
 
     assert should_continue is True
     adapter.start_thread.assert_not_awaited()
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "thread-app")
+    adapter.resume_thread.assert_not_awaited()
     interrupt_mock.assert_awaited_once_with(
         state,
         adapter,

@@ -12,6 +12,13 @@ from types import SimpleNamespace
 from typing import Optional
 
 from config import get_data_dir
+from core.provider_session_new import (
+    build_provider_session_summary,
+    rollback_started_real_provider_thread,
+    send_started_provider_thread_message,
+    start_real_provider_thread,
+    validate_new_provider_thread_request,
+)
 from core.providers.registry import get_provider
 from core.storage import ThreadInfo, WorkspaceInfo, save_storage
 from core.user_messages.contracts import UserMessageSendRequest
@@ -150,17 +157,6 @@ def _resolve_workspace(state, provider_id: str, workspace_dir: str):
         daemon_workspace_id=_workspace_key(provider_id, normalized_workspace_dir),
         threads={},
     )
-
-
-def _extract_started_thread_id(result) -> str:
-    if not isinstance(result, dict):
-        return ""
-    thread_id = result.get("id") or result.get("threadId") or result.get("thread_id")
-    if not thread_id:
-        thread = result.get("thread")
-        if isinstance(thread, dict):
-            thread_id = thread.get("id") or thread.get("threadId") or thread.get("thread_id")
-    return str(thread_id or "").strip()
 
 
 def _resolve_workspace_and_thread_for_mirror(state, provider_id: str, thread_id: str, workspace_dir: str):
@@ -1382,24 +1378,24 @@ class ProviderOwnerBridge:
 
         if create_mode in {"app_state", "app", "state_only"}:
             thread_id = f"app:{provider_id}:{uuid.uuid4()}"
+            thread_info = ws_info.threads.get(thread_id)
+            if thread_info is None:
+                thread_info = _new_thread_info(thread_id, source="app")
+                ws_info.threads[thread_id] = thread_info
         else:
-            start_thread = getattr(adapter, "start_thread", None)
-            if not callable(start_thread):
-                return {"ok": False, "error": f"{provider_id} adapter 不支持创建会话"}
             try:
-                result = await start_thread(workspace_id)
+                started = await start_real_provider_thread(
+                    adapter,
+                    ws_info,
+                    workspace_id,
+                    provider_id=provider_id,
+                    preview=None,
+                    source=_new_thread_source(provider_id),
+                )
             except Exception as exc:
                 return {"ok": False, "error": str(exc)}
-
-            thread_id = _extract_started_thread_id(result)
-            if not thread_id:
-                return {"ok": False, "error": f"{provider_id} start_thread 返回无效 thread id"}
-
-        thread_info = ws_info.threads.get(thread_id)
-        if thread_info is None:
-            thread_source = "app" if create_mode in {"app_state", "app", "state_only"} else _new_thread_source(provider_id)
-            thread_info = _new_thread_info(thread_id, source=thread_source)
-            ws_info.threads[thread_id] = thread_info
+            thread_id = started.thread_id
+            thread_info = started.thread_info
         thread_info.archived = False
         thread_info.is_active = False
         thread_info.source = "app" if create_mode in {"app_state", "app", "state_only"} else thread_info.source
@@ -1419,17 +1415,13 @@ class ProviderOwnerBridge:
             "thread_id": thread_id,
             "workspace_id": workspace_id,
             "workspace_dir": ws_info.path,
-            "session": {
-                "id": thread_id,
-                "title": thread_info.preview or thread_id,
-                "preview": thread_info.preview or "",
-                "workspace": ws_info.path,
-                "archived": False,
-                "providerActive": False,
-                "updatedAt": now,
-                "createdAt": now,
-                "source": thread_info.source,
-            },
+            "session": build_provider_session_summary(
+                ws_info,
+                thread_info,
+                preview_text=thread_info.preview,
+                provider_active=False,
+                now=now,
+            ),
         }
 
     async def _handle_read_session(self, request: dict) -> dict:
@@ -1670,8 +1662,9 @@ class ProviderOwnerBridge:
             workspace_path=str(getattr(ws_info, "path", "") or ""),
         )
 
+        source = str(request.get("source") or "session_tab")
         owner_bridge_router = getattr(message_hooks, "try_route_owner_bridge_send", None)
-        if callable(owner_bridge_router) and not attachments:
+        if callable(owner_bridge_router) and not attachments and source != "session_tab":
             route_result = await owner_bridge_router(
                 self.state,
                 ws_info,
@@ -1844,54 +1837,45 @@ class ProviderOwnerBridge:
         *,
         request: dict,
         provider_id: str,
+        provider,
         ws_info,
         workspace_id: str,
         adapter,
         text: str,
         attachments,
     ) -> dict:
-        start_thread = getattr(adapter, "start_thread", None)
-        if not callable(start_thread):
-            return {"ok": False, "error": f"{provider_id} adapter 不支持创建会话"}
-
         try:
-            result = await start_thread(workspace_id)
+            started = await start_real_provider_thread(
+                adapter,
+                ws_info,
+                workspace_id,
+                provider_id=provider_id,
+                preview=text,
+                source="provider",
+            )
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+        thread_id = started.thread_id
+        created_thread = started.created_thread
+        thread_info = started.thread_info
 
-        thread_id = _extract_started_thread_id(result)
-        if not thread_id:
-            return {"ok": False, "error": f"{provider_id} start_thread 返回无效 thread id"}
-        if thread_id.startswith(f"app:{provider_id}:"):
-            return {"ok": False, "error": f"{provider_id} start_thread 返回了本地占位 thread id"}
-
-        existing_thread = ws_info.threads.get(thread_id)
-        created_thread = existing_thread is None
-        thread_info = existing_thread or _new_thread_info(thread_id, source="provider")
-        thread_info.thread_id = thread_id
-        thread_info.preview = text or getattr(thread_info, "preview", None)
-        thread_info.archived = False
-        thread_info.is_active = True
-        if not str(getattr(thread_info, "source", "") or "").strip():
-            thread_info.source = "provider"
-        ws_info.threads[thread_id] = thread_info
-
-        send_response = await self._handle_send_message(
-            {
-                **request,
-                "type": "send_message",
-                "provider_id": provider_id,
-                "thread_id": thread_id,
-                "workspace_dir": ws_info.path,
-                "text": text,
-                "attachments": attachments,
-                "_skip_prepare_send": True,
-            }
-        )
-        if send_response.get("ok") is not True:
-            if created_thread:
-                ws_info.threads.pop(thread_id, None)
-            return send_response
+        try:
+            sent = await send_started_provider_thread_message(
+                self.state,
+                ws_info,
+                thread_info,
+                workspace_id,
+                provider_id=provider_id,
+                text=text,
+                attachments=attachments,
+                source=str(request.get("source") or "session_tab"),
+                provider=provider,
+                adapter=adapter,
+                metadata={"bridge": "provider_owner"},
+            )
+        except Exception as exc:
+            rollback_started_real_provider_thread(ws_info, started)
+            return {"ok": False, "error": str(exc)}
 
         if getattr(self.state, "storage", None) is not None:
             try:
@@ -1901,9 +1885,8 @@ class ProviderOwnerBridge:
         self._list_sessions_cache.clear()
 
         now = int(time.time())
-        effective_thread_id = str(send_response.get("thread_id") or thread_id)
+        effective_thread_id = str(sent.thread_id or thread_id)
         return {
-            **send_response,
             "ok": True,
             "accepted": True,
             "provider_id": provider_id,
@@ -1912,17 +1895,13 @@ class ProviderOwnerBridge:
             "workspace_id": workspace_id,
             "created_new_thread": True,
             "remapped": effective_thread_id != thread_id,
-            "session": {
-                "id": effective_thread_id,
-                "title": text or effective_thread_id,
-                "preview": text,
-                "workspace": ws_info.path,
-                "archived": False,
-                "providerActive": True,
-                "updatedAt": now,
-                "createdAt": now,
-                "source": str(getattr(thread_info, "source", "") or "provider"),
-            },
+            "session": build_provider_session_summary(
+                ws_info,
+                thread_info,
+                preview_text=sent.text,
+                provider_active=True,
+                now=now,
+            ),
         }
 
     async def _handle_start_session_message(self, request: dict) -> dict:
@@ -1952,6 +1931,16 @@ class ProviderOwnerBridge:
         if ws_info is None:
             return {"ok": False, "error": "缺少 workspace_dir，无法创建 provider 会话"}
 
+        validation_error = validate_new_provider_thread_request(
+            self.state,
+            ws_info,
+            text=text,
+            attachments=attachments,
+            provider=provider,
+        )
+        if validation_error:
+            return {"ok": False, "error": validation_error}
+
         workspace_id = getattr(ws_info, "daemon_workspace_id", None) or _workspace_key(provider_id, ws_info.path)
         ws_info.daemon_workspace_id = workspace_id
 
@@ -1965,6 +1954,7 @@ class ProviderOwnerBridge:
             self._execute_start_session_message(
                 request=request,
                 provider_id=provider_id,
+                provider=provider,
                 ws_info=ws_info,
                 workspace_id=workspace_id,
                 adapter=adapter,

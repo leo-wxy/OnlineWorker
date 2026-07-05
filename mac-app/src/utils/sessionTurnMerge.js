@@ -50,6 +50,34 @@ function isSameLogicalTurn(left, right) {
   return normalizeAttachmentNoise(left.content) === normalizeAttachmentNoise(right.content);
 }
 
+function normalizedString(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function pendingUserEventKind(raw) {
+  const kind = normalizedString(raw?.lastEventKind ?? raw?.last_event_kind);
+  return kind === "message.user.submitted"
+    || kind === "message.user.accepted";
+}
+
+export function overlayPendingUserTurn(turns, raw) {
+  const pendingText = normalizedString(raw?.lastUserMessage ?? raw?.last_user_message);
+  if (!pendingText || !pendingUserEventKind(raw)) {
+    return turns;
+  }
+  if (turns.some((turn) => turn?.role === "user" && isSameLogicalTurn(turn, { role: "user", content: pendingText }))) {
+    return turns;
+  }
+  return limitSessionTurns([
+    ...turns,
+    {
+      role: "user",
+      content: pendingText,
+      displayMode: "plain",
+    },
+  ]);
+}
+
 export function mergeSessionTurns(existing, incoming) {
   if (incoming.length === 0) {
     return existing;

@@ -24,6 +24,7 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 15: Bus-Driven Rendering And Approval Command Boundary** - Follow up Phase 14 by migrating heavy first-party renderers onto the bus once the event schema is stable: `15-02` App Session detail live-model migration, `15-03` Telegram edge migration, and `15-04` approval/question command-boundary tightening are source verified.
 - [x] **Phase 16: Provider External Event Ingress** - Add provider-plugin-owned external event ingress for Claude and distribution-provided provider plugins so externally launched sessions can enter the Phase 14 message bus. Claude uses a marker-based global hook merge; OpenCode-compatible listener behavior is reference-only for compatible provider plugins, not a new product surface. Implementation remains scoped to provider plugin directories plus focused tests and generic bus projection fixes.
 - [ ] **Phase 17: Provider Session Core Isolation** - Move provider-private session/workspace parsing and filtering fully behind provider/plugin-owned capabilities so Tauri core, Session Tab, Dashboard/TaskBoard, and Telegram consume one provider-owned source of truth. This phase specifically removes duplicated Claude project parsing/filtering from core and prevents private fields such as Claude `entrypoint` from leaking into provider-neutral surfaces.
+- [ ] **Phase 18: Provider Session New Flow** - Make new-session creation provider-backed across App Sessions and Telegram session topics. App `New` creates a real provider session with the first message instead of a local draft; Telegram `/new <initial message>` in an existing session topic is source-verified to create a new provider-backed session/topic under the same workspace instead of sending to the current session. The next follow-up is code convergence into a shared provider-backed new-session core service while preserving App and Telegram transport-specific shells. Installed-app/TG UAT remains before release confidence.
 
 ## Phase Details
 
@@ -63,7 +64,7 @@ Success Criteria (what must be TRUE):
   2. Telegram remains the default builtin notification plugin with behavior preserved for current users.
   3. The architecture can register additional notification plugins without adding app-specific branches throughout shared runtime code.
   4. Notification failure handling is explicit enough that one channel failure does not silently break all user-facing delivery.
-**Plans:** 2 plans
+**Plans:** 2 source-verified
 
 Plans:
 - [x] 06-01: Add minimal notification channel abstraction
@@ -670,3 +671,41 @@ Planning status:
 - The modification scope is explicit: implementation code should stay in provider plugin directories, with planning docs and focused tests as the expected non-plugin changes.
 - 16-01 planning docs were committed on branch `codex/phase-16-provider-event-ingress`.
 - 16-02 is complete: automated source regression passed, installed-app live validation covered Claude, Codex, and the distribution-provided provider flow, TaskBoard attention/running/completed updates, approval buttons, and final message refresh. A follow-up raw approval request id fix was added for Codex app-server approval decisions and revalidated in the installed app.
+
+### Phase 18: Provider Session New Flow
+
+**Goal:** Make new-session creation consistent and real-source-backed across the App Session tab and Telegram session topics, with no local-only draft sessions or current-session misrouting.
+**Requirements**: TBD
+**Depends on:** Phase 17
+**Scope Fence:** This phase covers provider-backed session creation and first-message delivery for App Sessions and Telegram `/new`. It must not reintroduce local `app:*` sessions as visible rows, bypass provider `start_thread`, or change approval/question ownership rules.
+**Plans:** 2 plans
+
+Plans:
+- [x] 18-01: Unify App and Telegram new-session creation
+  - [x] App Session tab `New` opens a first-message composer instead of creating a visible local draft session.
+  - [x] App first-message send calls provider-backed `start_session_message`, keeps optimistic text visible on slow provider startup, and selects the real provider session once activity arrives.
+  - [x] Codex slow `thread/start` waits for app-server notification before mapping the real thread id and skips duplicate `prepare_send`.
+  - [x] Telegram session topic `/new <initial message>` creates a new provider-backed session under the current session's workspace and opens/binds a new Telegram topic.
+  - [x] Telegram `/new` must not send the slash command or first message to the current existing session.
+  - [x] Empty `/new` behavior remains provider-specific: Codex rejects with a clear initial-message requirement; providers that support empty sessions may continue to create one.
+- [x] 18-02: Converge the provider-backed new-session core
+  - [x] Extract a shared `start_thread -> materialize real thread -> first-message send` core service under `core/`.
+  - [x] Keep App owner-bridge `pending` behavior and Telegram topic bind/rollback as outer surface-specific shells.
+  - [x] Preserve provider-owned validation hooks instead of hard-coding provider rules into either entrypoint.
+
+Success Criteria (what must be TRUE):
+  1. App `New` creates and selects a real provider session, never a visible `app:*` draft.
+  2. App first-message send survives slow Codex `thread/start` by using a pending state and later real activity match.
+  3. Telegram `/new <initial message>` inside a session topic creates a separate provider-backed session and a separate Telegram topic under the same workspace.
+  4. The original Telegram session topic receives only a confirmation/handoff message, not the new conversation content.
+  5. Codex and Claude follow the same generic thread handler boundary where possible, with provider-specific validation kept in provider hooks.
+  6. Focused slash-router/thread tests cover session-topic `/new`, workspace-topic `/new`, Codex empty-message rejection, and no current-session passthrough.
+  7. Packaged-app verification is run before release/tag confidence when this phase changes installed runtime behavior.
+
+Planning status:
+- Phase 18 was added on 2026-07-05 after App Session `New` was implemented and real Codex installed-app validation proved a new provider-backed session could be created with the first message.
+- Telegram session-topic `/new <initial message>` is source-verified to reuse the same product semantics from App `New`: create a new real provider session under the current workspace and route subsequent conversation to the new session/topic. The fix keeps `/new` confirmation and Codex empty-message validation in the source session topic instead of replying in the workspace topic.
+- Verification passed: `pytest -q tests/test_slash_router.py tests/test_workspace_thread_open.py tests/test_thread_helpers.py tests/test_im_route_store.py` -> `57 passed`; `node --test mac-app/tests/sessionNewComposer.test.mjs` -> `1 passed`; `git diff --check` -> passed.
+- The next convergence step is explicit: App and Telegram should share one provider-backed new-session core service, but they should not be forced through one complete handler because App needs owner-bridge `pending` semantics and Telegram needs topic bind/rollback semantics.
+- `18-02` reached source-verified status: App owner bridge and Telegram `/new` now share provider-owned validation, real-thread start/materialization, and started-thread first-message send through `core/provider_session_new.py`, while keeping App `pending` behavior and Telegram topic bind/rollback at the outer shell. Verification passed: `pytest -q tests/test_provider_session_new.py tests/test_provider_owner_bridge.py tests/test_slash_router.py tests/test_workspace_thread_open.py tests/test_thread_helpers.py tests/test_im_route_store.py` -> `111 passed`; `node --test mac-app/tests/sessionNewComposer.test.mjs` -> `1 passed`; `git diff --check` -> passed.
+- Installed-app/TG UAT remains required before release/tag confidence.

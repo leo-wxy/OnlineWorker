@@ -258,6 +258,7 @@ export function mergeLiveSessionActivities(sessions, activities) {
         updatedAt: updatedAt || session.raw?.updatedAt || 0,
         createdAt: session.raw?.createdAt || updatedAt || 0,
         lastUserMessage: normalizedString(activity.lastUserMessage) || session.raw?.lastUserMessage || "",
+        lastEventKind: normalizedString(activity.lastEventKind) || session.raw?.lastEventKind || "",
         lastAssistantMessage:
           normalizedString(activity.lastAssistantMessage) || session.raw?.lastAssistantMessage || "",
         lastFinalMessage:
@@ -286,6 +287,7 @@ export function mergeLiveSessionActivities(sessions, activities) {
         updatedAt,
         createdAt: updatedAt,
         lastUserMessage: normalizedString(activity.lastUserMessage),
+        lastEventKind: normalizedString(activity.lastEventKind),
         lastAssistantMessage: normalizedString(activity.lastAssistantMessage),
         lastFinalMessage: normalizedString(activity.lastFinalMessage),
         highlightedThreadPreview: preview,

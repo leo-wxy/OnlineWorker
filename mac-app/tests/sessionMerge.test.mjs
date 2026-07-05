@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { mergeSessionTurns } from "../src/utils/sessionTurnMerge.js";
+import { mergeSessionTurns, overlayPendingUserTurn } from "../src/utils/sessionTurnMerge.js";
 
 test("mergeSessionTurns removes stale pending assistant when final snapshot arrives", () => {
   const existing = [
@@ -78,4 +78,42 @@ test("mergeSessionTurns replaces optimistic user turn with attachment-enriched s
       ["assistant", "图片主色调是偏青绿色。"],
     ],
   );
+});
+
+test("overlayPendingUserTurn appends last accepted user message when snapshot is still empty", () => {
+  const next = overlayPendingUserTurn([], {
+    lastUserMessage: "这个工程的主要作用是什么？",
+    lastEventKind: "message.user.accepted",
+  });
+
+  assert.deepEqual(next, [
+    {
+      role: "user",
+      content: "这个工程的主要作用是什么？",
+      displayMode: "plain",
+    },
+  ]);
+});
+
+test("overlayPendingUserTurn does not duplicate a user turn already present in snapshot", () => {
+  const next = overlayPendingUserTurn(
+    [{ role: "user", content: "这个工程的主要作用是什么？", displayMode: "plain" }],
+    {
+      lastUserMessage: "这个工程的主要作用是什么？",
+      lastEventKind: "message.user.accepted",
+    },
+  );
+
+  assert.deepEqual(next, [
+    { role: "user", content: "这个工程的主要作用是什么？", displayMode: "plain" },
+  ]);
+});
+
+test("overlayPendingUserTurn ignores non-user-terminal activity states", () => {
+  const next = overlayPendingUserTurn([], {
+    lastUserMessage: "这个工程的主要作用是什么？",
+    lastEventKind: "message.assistant.final",
+  });
+
+  assert.deepEqual(next, []);
 });

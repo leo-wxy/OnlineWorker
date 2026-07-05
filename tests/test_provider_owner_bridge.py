@@ -965,7 +965,6 @@ async def test_provider_owner_bridge_starts_real_session_with_first_message(monk
     adapter.start_thread.assert_awaited_once_with("overlay-tool:/tmp/project-a")
     assert adapter.registered == [
         ("overlay-tool:/tmp/project-a", "/tmp/project-a"),
-        ("overlay-tool:/tmp/project-a", "/tmp/project-a"),
     ]
     ws = state.storage.workspaces["overlay-tool:/tmp/project-a"]
     assert set(ws.threads) == {"real-thread"}
@@ -1147,6 +1146,48 @@ async def test_provider_owner_bridge_start_session_message_returns_before_thread
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_start_session_message_uses_provider_thread_validation(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    class _FakeAdapter:
+        connected = True
+
+        def __init__(self):
+            self.start_thread = AsyncMock(return_value={"id": "real-thread"})
+
+        def register_workspace_cwd(self, workspace_id: str, cwd: str) -> None:
+            return None
+
+    state = AppState(storage=AppStorage())
+    adapter = _FakeAdapter()
+    state.set_adapter("codex", adapter)
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(
+            message_hooks=SimpleNamespace(),
+            thread_hooks=SimpleNamespace(
+                validate_new_thread=lambda state_obj, ws_info, initial_text: "blocked by provider",
+            ),
+        )
+        if name == "codex"
+        else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_start_session_message(
+        {
+            "provider_id": "codex",
+            "workspace_dir": "/tmp/project-a",
+            "text": "first message",
+        }
+    )
+
+    assert response == {"ok": False, "error": "blocked by provider"}
+    adapter.start_thread.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_keeps_text_before_registry_message_hooks_while_rewrite_is_sealed(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
@@ -1246,6 +1287,7 @@ async def test_provider_owner_bridge_routes_text_via_provider_owner_bridge_hook(
             "thread_id": "tid-cli",
             "text": "hello visible cli",
             "workspace_dir": "/tmp/project-a",
+            "source": "telegram",
         }
     )
 
@@ -1319,6 +1361,7 @@ async def test_provider_owner_bridge_keeps_text_before_owner_bridge_router_while
             "thread_id": "tid-cli",
             "text": "这什么傻逼问题",
             "workspace_dir": "/tmp/project-a",
+            "source": "telegram",
         }
     )
 
@@ -1331,6 +1374,60 @@ async def test_provider_owner_bridge_keeps_text_before_owner_bridge_router_while
     )
     provider.message_hooks.prepare_send.assert_not_awaited()
     provider.message_hooks.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_session_tab_bypasses_owner_bridge_router(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    class _FakeAdapter:
+        connected = True
+
+        def register_workspace_cwd(self, workspace_id: str, cwd: str) -> None:
+            pass
+
+    storage = AppStorage()
+    storage.workspaces["overlay-tool:/tmp/project-a"] = WorkspaceInfo(
+        name="project-a",
+        path="/tmp/project-a",
+        tool="overlay-tool",
+        daemon_workspace_id="overlay-tool:/tmp/project-a",
+        threads={"tid-cli": ThreadInfo(thread_id="tid-cli", source="provider")},
+    )
+    state = AppState(storage=storage)
+    state.set_adapter("overlay-tool", _FakeAdapter())
+
+    route_send = AsyncMock(return_value="owned_visible_cli")
+    provider = SimpleNamespace(
+        message_hooks=SimpleNamespace(
+            ensure_connected=AsyncMock(return_value=None),
+            prepare_send=AsyncMock(return_value=True),
+            send=AsyncMock(return_value={}),
+            try_route_owner_bridge_send=route_send,
+        )
+    )
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: provider if name == "overlay-tool" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_send_message(
+        {
+            "provider_id": "overlay-tool",
+            "thread_id": "tid-cli",
+            "text": "hello from session tab",
+            "workspace_dir": "/tmp/project-a",
+        }
+    )
+    if bridge._pending_send_tasks:
+        await asyncio.gather(*tuple(bridge._pending_send_tasks))
+
+    assert response["ok"] is True
+    assert response["accepted"] is True
+    route_send.assert_not_awaited()
+    provider.message_hooks.prepare_send.assert_awaited_once()
+    provider.message_hooks.send.assert_awaited_once()
 
 
 @pytest.mark.asyncio

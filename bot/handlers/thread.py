@@ -19,6 +19,11 @@ from core.providers.facts import (
     query_provider_active_thread_ids,
     read_provider_thread_history,
 )
+from core.provider_session_new import (
+    send_started_provider_thread_message,
+    start_real_provider_thread,
+    validate_new_provider_thread_request,
+)
 from core.providers.registry import classify_provider, get_provider, provider_not_enabled_message
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -28,8 +33,6 @@ from core.storage import (
     ThreadInfo,
     save_storage,
 )
-from core.user_messages.contracts import UserMessageSendRequest
-from core.user_messages.gateway import prepare_user_message_text
 from bot.handlers.common import (
     _send_to_group,
     get_route_aware_thread_topic_id,
@@ -78,18 +81,6 @@ def _resolve_workspace(state: AppState, src_topic_id: Optional[int]) -> Optional
             state.observe_unknown_telegram_topic(src_topic_id)
             return None
     return state.get_active_workspace()
-
-
-def _extract_started_thread_id(result: object) -> str:
-    """兼容 provider start_thread 的两种返回结构。"""
-    thread_id = result.get("id") if isinstance(result, dict) else None
-    if not thread_id and isinstance(result, dict):
-        thread = result.get("thread", {})
-        if isinstance(thread, dict):
-            thread_id = thread.get("id")
-    if not thread_id:
-        raise RuntimeError(f"start_thread 返回无效 thread id：{result}")
-    return str(thread_id)
 
 
 async def _rollback_failed_new_thread(
@@ -189,11 +180,13 @@ def _collect_session_ids(sessions: list[dict]) -> set[str]:
 
 
 def _validate_new_thread_request(state: AppState, ws: WorkspaceInfo, initial_text: str | None) -> str | None:
-    hooks = _get_thread_hooks(ws.tool)
-    validate_new_thread = getattr(hooks, "validate_new_thread", None) if hooks is not None else None
-    if callable(validate_new_thread):
-        return validate_new_thread(state, ws, initial_text)
-    return None
+    return validate_new_provider_thread_request(
+        state,
+        ws,
+        text=initial_text,
+        attachments=[],
+        provider=_get_thread_provider(ws.tool),
+    )
 
 
 async def _activate_new_thread_in_source(
@@ -204,28 +197,18 @@ async def _activate_new_thread_in_source(
     thread_id: str,
     initial_text: str | None,
 ) -> None:
-    if initial_text:
-        result = await prepare_user_message_text(
-            state,
-            UserMessageSendRequest(
-                source="telegram_new_thread",
-                provider_id=str(ws.tool),
-                workspace_id=str(workspace_id),
-                thread_id=str(thread_id),
-                text=initial_text,
-            ),
-        )
-        initial_text = result.text
-
-    hooks = _get_thread_hooks(ws.tool)
-    activate_new_thread = getattr(hooks, "activate_new_thread", None) if hooks is not None else None
-    if callable(activate_new_thread):
-        await activate_new_thread(state, adapter, ws, workspace_id, thread_id, initial_text)
-        return
-
-    await adapter.resume_thread(workspace_id, thread_id)
-    if initial_text:
-        await adapter.send_user_message(workspace_id, thread_id, initial_text)
+    await send_started_provider_thread_message(
+        state,
+        ws,
+        ws.threads[thread_id],
+        workspace_id,
+        provider_id=str(ws.tool),
+        text=initial_text or "",
+        attachments=[],
+        source="telegram_new_thread",
+        provider=_get_thread_provider(ws.tool),
+        adapter=adapter,
+    )
 
 
 def _list_sort_key(session: dict) -> tuple[int, int, str]:
@@ -590,9 +573,16 @@ def make_new_thread_handler(state: AppState, group_chat_id: int) -> Callable:
         src_topic_id = msg.message_thread_id if msg else None  # type: ignore[union-attr]
 
         ws = _resolve_workspace(state, src_topic_id)
+        source_thread = _resolve_thread_from_topic(state, src_topic_id)
         ws_key = state.get_workspace_storage_key(ws) if ws else None
         reply_topic_id = (
-            state.get_workspace_topic_id(ws_key, ws) if ws is not None and ws_key is not None else None
+            src_topic_id
+            if source_thread is not None
+            else (
+                state.get_workspace_topic_id(ws_key, ws)
+                if ws is not None and ws_key is not None
+                else None
+            )
         ) or src_topic_id
 
         if not ws:
@@ -648,20 +638,19 @@ def make_new_thread_handler(state: AppState, group_chat_id: int) -> Callable:
 
         try:
             # 1. daemon 中新建 thread
-            result = await active_adapter.start_thread(workspace_id)
-            thread_id = _extract_started_thread_id(result)
-
             # 1b. 立即占位注册 ThreadInfo（topic_id=None），避免 SSE 事件（turn/started 等）
             #     在 create_forum_topic 返回前触发时，_resolve_topic_id 找不到 thread
             #     而 fallback 到 workspace topic。
-            thread_info = ThreadInfo(
-                thread_id=thread_id,
-                topic_id=None,
+            started = await start_real_provider_thread(
+                active_adapter,
+                ws,
+                workspace_id,
+                provider_id=str(ws.tool),
                 preview=initial_text or None,
-                archived=False,
                 source="app",
             )
-            ws.threads[thread_id] = thread_info
+            thread_id = started.thread_id
+            thread_info = started.thread_info
             # 注意：此处不 save_storage，topic_id 尚未确定
 
             # 2. 创建 Telegram Forum Topic

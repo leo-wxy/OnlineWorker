@@ -238,6 +238,7 @@ test("mergeLiveSessionActivities updates matching session preview without replac
 
   assert.equal(merged[0].title, "继续 phase17 的实现");
   assert.equal(merged[0].raw.lastAssistantMessage, "我正在通过事件流更新 Session 列表。");
+  assert.equal(merged[0].raw.lastEventKind, "message.assistant.delta");
   assert.equal(sessionPreviewText(merged[0]), "通过事件流更新 Session 列表。");
 });
 
@@ -267,6 +268,7 @@ test("mergeLiveSessionActivities creates a live session row when cached list mis
   assert.equal(merged[0].id, "thread-live");
   assert.equal(merged[0].workspace, "/tmp/project");
   assert.equal(merged[0].raw.providerActive, true);
+  assert.equal(merged[0].raw.lastEventKind, "message.user.accepted");
   assert.equal(sessionPreviewText(merged[0]), "继续接手这个问题");
 });
 
