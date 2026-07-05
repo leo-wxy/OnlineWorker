@@ -29,7 +29,6 @@ from bot.interaction_specs import (
 from core.state import AppState, PendingCommandWrapper
 from core.storage import save_storage, ThreadInfo
 from core.user_messages.contracts import UserMessageSendRequest
-from core.user_messages.gateway import prepare_user_message_text
 from core.messages.publishing import (
     publish_approval_answered,
     publish_question_answered,
@@ -245,22 +244,6 @@ async def _dispatch_thread_message(
     if not workspace_id:
         raise RuntimeError("workspace 未关联 daemon ID。")
 
-    gateway_result = await prepare_user_message_text(
-        state,
-        UserMessageSendRequest(
-            source="telegram",
-            provider_id=str(ws_info.tool),
-            workspace_id=str(workspace_id),
-            thread_id=str(thread_info.thread_id),
-            text=send_text,
-            attachments=attachments or [],
-            metadata={
-                "source_topic_id": src_topic_id,
-                **(message_metadata or {}),
-            },
-        ),
-    )
-    send_text = gateway_result.text
     message = update.effective_message
     tg_message_id = int(getattr(message, "message_id", 0) or 0)
     message_event_request = UserMessageSendRequest(

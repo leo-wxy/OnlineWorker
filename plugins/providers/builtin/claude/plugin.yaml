@@ -24,9 +24,6 @@ provider:
     type: stdio
   compatibility:
     auth_policy: external_cli_only
-  message_hooks:
-    abusive_language_normalization:
-      enabled: false
   capabilities:
     sessions: true
     send: true
@@ -40,11 +37,6 @@ provider:
     command_wrappers: []
     control_modes:
       - app
-    message_rewrite:
-      app_send: true
-      telegram: true
-      external_cli: http_proxy
-      wrapper: ow-claude
     session_access:
       list: owner_bridge
       read: owner_bridge

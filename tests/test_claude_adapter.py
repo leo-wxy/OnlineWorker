@@ -135,10 +135,10 @@ def test_resolve_claude_bin_preserves_explicit_path():
 def test_claude_adapter_build_send_argv_preserves_launcher_prefix():
     from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
 
-    adapter = ClaudeAdapter(claude_bin="ow-claude-launcher claude")
+    adapter = ClaudeAdapter(claude_bin="claude-launcher claude")
 
     assert adapter._build_send_argv("ses-1", "继续") == [
-        "ow-claude-launcher",
+        "claude-launcher",
         "claude",
         "-p",
         "--verbose",
@@ -873,7 +873,7 @@ async def test_claude_adapter_auth_status_uses_runtime_env_without_cli_login(mon
 async def test_claude_adapter_auth_status_uses_launcher_prefix(monkeypatch):
     from plugins.providers.builtin.claude.python.adapter import ClaudeAdapter
 
-    adapter = ClaudeAdapter(claude_bin="ow-claude-launcher claude")
+    adapter = ClaudeAdapter(claude_bin="claude-launcher claude")
 
     create_process = AsyncMock(
         return_value=FakeAuthProcess(
@@ -888,7 +888,7 @@ async def test_claude_adapter_auth_status_uses_launcher_prefix(monkeypatch):
     status = await adapter.refresh_auth_status()
 
     assert status["loggedIn"] is True
-    assert create_process.await_args.args[:4] == ("ow-claude-launcher", "claude", "auth", "status")
+    assert create_process.await_args.args[:4] == ("claude-launcher", "claude", "auth", "status")
 
 
 @pytest.mark.asyncio

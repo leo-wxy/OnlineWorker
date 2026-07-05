@@ -194,7 +194,7 @@ async def run_permission_write_downloads(args: argparse.Namespace) -> int:
         content=str(args.content),
         allow_always=bool(args.allow_always),
     )
-    data_dir = _make_data_dir("ow-claude-smoke")
+    data_dir = _make_data_dir("claude-hook-smoke")
     workspace_id = "claude:smoke"
     session_id = str(uuid.uuid4())
 
@@ -321,7 +321,7 @@ async def run_multiselect_bridge(args: argparse.Namespace) -> int:
     if not answers:
         raise RuntimeError("answers 不能为空")
 
-    data_dir = _make_data_dir("ow-claude-ask")
+    data_dir = _make_data_dir("claude-hook-ask")
     workspace_id = "claude:smoke"
     session_id = str(uuid.uuid4())
     question_text = "你希望我用哪些语言回复？"

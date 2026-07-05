@@ -127,7 +127,6 @@ function demoProviders() {
     usage: true,
     commandWrappers: [],
     controlModes: ["app"],
-    messageRewrite: null,
   };
   return [
     {
@@ -143,7 +142,6 @@ function demoProviders() {
       liveTransport: "owner_bridge",
       controlMode: "app",
       capabilities: baseCapabilities,
-      messageHooks: { abusiveLanguageNormalization: { enabled: false, mode: "off" } },
       externalCli: { launchesManagedChildCli: false },
       install: { cliNames: ["codex"] },
       process: { cleanupMatchers: [] },
@@ -162,7 +160,6 @@ function demoProviders() {
       liveTransport: "stdio",
       controlMode: "app",
       capabilities: baseCapabilities,
-      messageHooks: { abusiveLanguageNormalization: { enabled: false, mode: "off" } },
       externalCli: { launchesManagedChildCli: false },
       install: { cliNames: ["claude"] },
       process: { cleanupMatchers: [] },

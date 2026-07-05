@@ -11,8 +11,6 @@ from config import get_data_dir, load_config, load_provider_runtime_config
 from core.providers.overlay import iter_overlay_manifest_paths, load_manifest
 from core.providers.registry import get_provider
 from core.storage import AppStorage, ThreadInfo, WorkspaceInfo
-from core.user_messages.contracts import UserMessageSendRequest
-from core.user_messages.gateway import prepare_user_message_text
 
 
 def _workspace_path(workspace: Any) -> str:
@@ -629,19 +627,6 @@ async def send_provider_session_message(
     thread_info = {
         "thread_id": normalized_session_id,
     }
-    gateway_result = await prepare_user_message_text(
-        _message_gateway_state(),
-        UserMessageSendRequest(
-            source="provider_session_bridge",
-            provider_id=provider_id,
-            workspace_id=ws_info["daemon_workspace_id"],
-            thread_id=normalized_session_id,
-            text=trimmed_text,
-            attachments=normalized_attachments,
-        ),
-    )
-    trimmed_text = gateway_result.text
-
     await _invoke_message_hook_send(
         message_hooks.send,
         adapter=adapter,

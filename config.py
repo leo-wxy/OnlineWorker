@@ -129,7 +129,6 @@ class ToolConfig:
     auth: dict[str, str] = field(default_factory=dict)
     external_cli: dict[str, Any] = field(default_factory=dict)
     launch_methods: list[dict[str, str]] = field(default_factory=list)
-    message_hooks: "MessageHooksConfig | None" = None
 
     def __post_init__(self) -> None:
         managed = self.enabled if self.managed is None else bool(self.managed)
@@ -190,33 +189,6 @@ class NotificationChannelConfig:
 
 
 @dataclass
-class MessageHookConfig:
-    enabled: bool = True
-    mode: str = "conservative"
-    config: dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        self.enabled = bool(self.enabled)
-        self.mode = str(self.mode or "conservative").strip()
-        self.config = {
-            str(key): value
-            for key, value in (self.config or {}).items()
-            if key is not None
-        }
-
-
-@dataclass
-class MessageHooksConfig:
-    enabled: bool = True
-    builtin: dict[str, MessageHookConfig] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        self.enabled = bool(self.enabled)
-        if "abusive_language_normalization" not in self.builtin:
-            self.builtin["abusive_language_normalization"] = MessageHookConfig()
-
-
-@dataclass
 class Config:
     telegram_token: str
     allowed_user_id: int
@@ -230,7 +202,6 @@ class Config:
     delete_archived_topics: bool = True  # 归档 thread 时是否删除 topic（vs 仅关闭）
     schema_version: int = 1  # 1=legacy tools[]; 2=provider-centric
     notification_channels: dict[str, NotificationChannelConfig] = field(default_factory=dict)
-    message_hooks: MessageHooksConfig = field(default_factory=MessageHooksConfig)
     ai: AiConfig = field(default_factory=AiConfig)
 
     def __post_init__(self) -> None:
@@ -327,72 +298,6 @@ def _load_notification_channels(data: dict[str, Any]) -> dict[str, NotificationC
     return channels
 
 
-def _build_message_hook_config(raw: dict[str, Any] | None) -> MessageHookConfig:
-    raw = raw if isinstance(raw, dict) else {}
-    config = raw.get("config") if isinstance(raw.get("config"), dict) else {}
-    raw_mode = raw.get("mode", "conservative")
-    if raw_mode is False:
-        mode = "off"
-    elif raw_mode is True:
-        mode = "conservative"
-    else:
-        mode = str(raw_mode or "conservative")
-    return MessageHookConfig(
-        enabled=bool(raw.get("enabled", True)),
-        mode=mode,
-        config=dict(config),
-    )
-
-
-def _load_message_hooks(data: dict[str, Any]) -> MessageHooksConfig:
-    raw = data.get("message_hooks")
-    raw = raw if isinstance(raw, dict) else {}
-    builtin_raw = raw.get("builtin") if isinstance(raw.get("builtin"), dict) else {}
-    builtin = {
-        "abusive_language_normalization": _build_message_hook_config(
-            builtin_raw.get("abusive_language_normalization")
-            if isinstance(builtin_raw, dict)
-            else None
-        )
-    }
-    if isinstance(builtin_raw, dict):
-        for hook_name, hook_raw in builtin_raw.items():
-            normalized_name = str(hook_name or "").strip()
-            if not normalized_name or normalized_name in builtin:
-                continue
-            builtin[normalized_name] = _build_message_hook_config(
-                hook_raw if isinstance(hook_raw, dict) else {}
-            )
-    return MessageHooksConfig(
-        enabled=bool(raw.get("enabled", True)),
-        builtin=builtin,
-    )
-
-
-def _message_hooks_from_raw(raw: Any) -> MessageHooksConfig | None:
-    if not isinstance(raw, dict):
-        return None
-    if "builtin" in raw:
-        return _load_message_hooks({"message_hooks": raw})
-
-    builtin = {
-        "abusive_language_normalization": _build_message_hook_config(
-            raw.get("abusive_language_normalization")
-        )
-    }
-    for hook_name, hook_raw in raw.items():
-        normalized_name = str(hook_name or "").strip()
-        if not normalized_name or normalized_name in builtin or normalized_name in {"enabled", "builtin"}:
-            continue
-        builtin[normalized_name] = _build_message_hook_config(
-            hook_raw if isinstance(hook_raw, dict) else {}
-        )
-    return MessageHooksConfig(
-        enabled=bool(raw.get("enabled", True)),
-        builtin=builtin,
-    )
-
-
 def _normalize_launch_methods(raw: Any) -> list[dict[str, str]]:
     if not isinstance(raw, list):
         return []
@@ -457,7 +362,6 @@ def _default_provider_blueprint(name: str) -> dict[str, Any]:
         "auth": {},
         "external_cli": {},
         "launch_methods": [],
-        "message_hooks": None,
     }
 
 
@@ -611,7 +515,6 @@ def _load_builtin_provider_plugin_blueprint(name: str) -> dict[str, Any] | None:
             "launch_methods": bool(getattr(metadata.capabilities, "launch_methods", False)),
             "command_wrappers": list(metadata.capabilities.command_wrappers),
             "control_modes": list(metadata.capabilities.control_modes),
-            "message_rewrite": dict(getattr(metadata.capabilities, "message_rewrite", {}) or {}),
         },
         "process": {
             "cleanup_matchers": list(metadata.process.cleanup_matchers),
@@ -622,7 +525,6 @@ def _load_builtin_provider_plugin_blueprint(name: str) -> dict[str, Any] | None:
         "auth": auth,
         "external_cli": provider_raw.get("external_cli") if isinstance(provider_raw.get("external_cli"), dict) else {},
         "launch_methods": provider_raw.get("launch_methods") if isinstance(provider_raw.get("launch_methods"), list) else [],
-        "message_hooks": provider_raw.get("message_hooks") if isinstance(provider_raw.get("message_hooks"), dict) else None,
     }
 
 
@@ -931,9 +833,6 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
             for k, v in raw.get("auth", {}).items()
             if k is not None and str(v or "").strip()
         }
-    raw_message_hooks = raw.get("message_hooks")
-    if not isinstance(raw_message_hooks, dict):
-        raw_message_hooks = defaults.get("message_hooks")
     return ToolConfig(
         name=tool_name,
         enabled=managed,
@@ -956,7 +855,6 @@ def _build_tool_config(tool_name: str, raw: dict[str, Any], *, legacy: bool) -> 
         auth=auth,
         external_cli=raw.get("external_cli") if isinstance(raw.get("external_cli"), dict) else defaults["external_cli"],
         launch_methods=raw.get("launch_methods") if isinstance(raw.get("launch_methods"), list) else defaults["launch_methods"],
-        message_hooks=_message_hooks_from_raw(raw_message_hooks),
     )
 
 
@@ -1123,7 +1021,6 @@ def load_provider_runtime_config(provider_id: str, *, data_dir: str | None = Non
         providers=providers,
         data_dir=data_dir,
         schema_version=loaded.schema_version,
-        message_hooks=_load_message_hooks(loaded.data),
     )
 
 
@@ -1210,6 +1107,5 @@ def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None)
         delete_archived_topics=telegram_config.get("delete_archived_topics", True),
         schema_version=loaded.schema_version,
         notification_channels=_load_notification_channels(loaded.data),
-        message_hooks=_load_message_hooks(loaded.data),
         ai=_load_ai_config(loaded.data),
     )

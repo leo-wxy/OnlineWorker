@@ -122,7 +122,6 @@ entrypoints:
 - `provider.transport.type`: 与 `owner_transport` 保持一致，兼容旧字段读取。
 - `provider.transport.app_server_port` / `app_server_url`: 仅在 `ws` / `http` 类 transport 需要。
 - `provider.capabilities`: App 用于决定功能入口和发送能力。
-- `provider.capabilities.message_rewrite.proxy_alias`: 可选。仅当 provider 自己提供 remote proxy CLI 入口时填写，用于设置页展示可复制的代理 alias；共享 UI 不应硬编码 provider 专属命令。
 - `provider.process.cleanup_matchers`: 只填写该 provider 自己启动的子进程匹配规则，不能匹配通用 CLI、终端、编辑器或用户进程。
 - `provider.discovery.command_roots` / `skill_roots`: 可选。声明该 provider 的本地 command / skill 发现目录，支持 `~`。共享 command registry 只读取这里声明的 provider 专属路径。
 - `provider.tui_host.sidecar_args`: 可选。声明打开 provider TUI host 时传给 `onlineworker-bot` sidecar 的参数模板。支持 `{workspace}` 和 `{thread_id}` 占位符；共享 App 只做替换与执行，不硬编码 provider 专属 flag。

@@ -117,8 +117,7 @@ async def test_thread_topic_slash_message_passthrough_to_codex():
     handler = make_message_handler(state, GROUP_CHAT_ID)
     await handler(update, ctx)
 
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
-    adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "/model")
+    assert state.message_bus.session_activity("codex", "tid-1")["lastUserMessage"] == "/model"
 
 
 @pytest.mark.asyncio
@@ -161,8 +160,7 @@ async def test_thread_topic_message_revives_stale_archived_thread_when_source_ac
 
     assert ws.threads["tid-1"].archived is False
     assert ws.threads["tid-1"].is_active is True
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
-    adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "继续")
+    assert state.message_bus.session_activity("codex", "tid-1")["lastUserMessage"] == "继续"
 
 
 @pytest.mark.asyncio
@@ -214,7 +212,7 @@ async def test_thread_topic_message_uses_registry_message_hooks_for_custom_provi
 
 
 @pytest.mark.asyncio
-async def test_thread_topic_message_keeps_original_text_while_message_rewrite_is_sealed(monkeypatch):
+async def test_thread_topic_message_passes_original_text_to_custom_provider(monkeypatch):
     from bot.handlers.message import make_message_handler
 
     state = _build_state(tool="custom")
@@ -259,7 +257,7 @@ async def test_thread_topic_message_keeps_original_text_while_message_rewrite_is
 
 
 @pytest.mark.asyncio
-async def test_thread_topic_slash_message_skips_abusive_language_normalization_for_custom_provider(monkeypatch):
+async def test_thread_topic_slash_message_passes_original_text_to_custom_provider(monkeypatch):
     from bot.handlers.message import make_message_handler
 
     state = _build_state(tool="custom")
@@ -304,7 +302,7 @@ async def test_thread_topic_slash_message_skips_abusive_language_normalization_f
 
 
 @pytest.mark.asyncio
-async def test_new_thread_handler_keeps_initial_text_while_message_rewrite_is_sealed(monkeypatch):
+async def test_new_thread_handler_passes_original_initial_text(monkeypatch):
     from bot.handlers.thread import make_new_thread_handler
 
     state = _build_state(tool="custom")
@@ -491,7 +489,7 @@ async def test_new_thread_handler_uses_provider_thread_hooks_for_custom_provider
     assert args[2] is ws
     assert args[3] == "custom:onlineWorker"
     assert args[4] == "custom-new"
-    assert args[5] is None
+    assert args[5] == ""
     adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_not_awaited()
 
@@ -976,12 +974,7 @@ async def test_review_wrapper_callback_applies_via_existing_thread_send_chain():
     handler = make_callback_handler(state, GROUP_CHAT_ID)
     await handler(update, ctx)
 
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
-    adapter.send_user_message.assert_awaited_once_with(
-        "codex:onlineWorker",
-        "tid-1",
-        "/review HEAD~1",
-    )
+    assert state.message_bus.session_activity("codex", "tid-1")["lastUserMessage"] == "/review HEAD~1"
     assert 700 not in state.pending_command_wrappers
     query.edit_message_text.assert_awaited_once()
     assert "已发送" in query.edit_message_text.await_args.args[0]

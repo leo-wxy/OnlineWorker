@@ -8,8 +8,8 @@ use super::config_provider::{
     serialize_config_document_for_persistence, serialize_normalized_config_with_env,
     set_ai_config_in_document, set_notification_channel_config_in_document,
     set_notification_channel_enabled_in_document, set_provider_cli_config_in_document,
-    set_provider_flags_in_document, set_provider_message_hook_enabled_in_document,
-    visible_provider_ids_from_raw, AiConfigMetadata, AiScenarioConfigEntry, AiServiceConfigEntry,
+    set_provider_flags_in_document, visible_provider_ids_from_raw, AiConfigMetadata,
+    AiScenarioConfigEntry, AiServiceConfigEntry,
     NotificationChannelMetadata, ProviderExternalCliConfig, ProviderLaunchMethodConfig,
     ProviderMetadata, ProviderRuntimePolicy,
 };
@@ -446,15 +446,7 @@ where
         ));
 
         env_materialized = provider_external_cli_env(&provider);
-        let external_cli_mode = provider
-            .capabilities
-            .message_rewrite
-            .external_cli
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("");
-        let uses_anthropic_env_cli = external_cli_mode == "http_proxy";
+        let uses_anthropic_env_cli = provider.id == "claude";
         if uses_anthropic_env_cli || !env_materialized.is_empty() {
             checks.push(validation_check(
                 "external_cli_env",
@@ -547,24 +539,6 @@ pub async fn set_provider_flags(
 
     let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
     set_provider_flags_in_document(&mut doc, &provider_id, managed, autostart);
-    let serialized = serialize_config_document_for_persistence(doc, &raw)?;
-    std::fs::write(&path, serialized).map_err(|e| format!("Cannot write config.yaml: {}", e))
-}
-
-#[tauri::command]
-pub async fn set_provider_message_hook_enabled(
-    provider_id: String,
-    hook_name: String,
-    enabled: bool,
-) -> Result<(), String> {
-    let dir = ensure_data_dir()?;
-    cleanup_legacy_external_cli_config(&dir)?;
-    let path = dir.join("config.yaml");
-    let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
-    let raw = read_config_or_materialize_default(&path, &env_raw)?;
-
-    let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
-    set_provider_message_hook_enabled_in_document(&mut doc, &provider_id, &hook_name, enabled);
     let serialized = serialize_config_document_for_persistence(doc, &raw)?;
     std::fs::write(&path, serialized).map_err(|e| format!("Cannot write config.yaml: {}", e))
 }
@@ -1268,13 +1242,6 @@ GROUP_CHAT_ID=-1001
                 sessions: true,
                 send: true,
                 ..Default::default()
-            },
-            message_hooks: crate::commands::config_provider::ProviderMessageHooksMetadata {
-                abusive_language_normalization:
-                    crate::commands::config_provider::ProviderMessageHookStatus {
-                        enabled: true,
-                        mode: "none".to_string(),
-                    },
             },
             external_cli: ProviderExternalCliConfig {
                 upstream_base_url: Some("https://anthropic.example.test".to_string()),

@@ -355,12 +355,8 @@ export interface AppTexts {
     saving: string;
     enable: string;
     autostart: string;
-    civilityModeTitle: string;
-    civilityModeDescription: string;
     cliConfigTitle: string;
     externalCliBin: string;
-    externalCliProxyAliasTitle: string;
-    externalCliProxyAliasDescription: string;
     externalCliAuthToken: string;
     externalCliAuthTokenPlaceholder: string;
     externalCliBaseUrl: string;

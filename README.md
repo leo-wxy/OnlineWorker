@@ -190,15 +190,6 @@ App/Telegram flow. Codex approval prompts are accepted only when they arrive as
 app-server server requests, and Telegram button clicks respond through
 `reply_server_request(...)`.
 
-### Codex Text Sending
-
-Civility mode is temporarily disabled. App and Telegram send user input
-unchanged, and the related settings entry is hidden from the app.
-
-The managed remote-proxy wrapper code remains in the repository for a future
-restore, but it is not documented as a public entry point while the feature is
-paused.
-
 ### Session Operations
 
 Sessions can be browsed, messaged, filtered by active/archived state, and

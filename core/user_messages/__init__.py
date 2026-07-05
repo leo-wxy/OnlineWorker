@@ -1,1 +1,1 @@
-"""OnlineWorker-level user message gateway and hooks."""
+"""User message event contracts."""

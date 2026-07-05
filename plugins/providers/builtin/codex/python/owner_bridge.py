@@ -12,7 +12,6 @@ from core.messages.publishing import (
     publish_user_message_submitted,
 )
 from core.user_messages.contracts import UserMessageSendRequest
-from core.user_messages.gateway import prepare_user_message_text
 from plugins.providers.builtin.codex.python.adapter import DEFAULT_APPROVALS_REVIEWER
 from plugins.providers.builtin.codex.python.errors import is_codex_unmaterialized_error
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
@@ -274,18 +273,6 @@ class CodexOwnerBridge:
         else:
             workspace_id = ""
 
-        gateway_result = await prepare_user_message_text(
-            self.state,
-            UserMessageSendRequest(
-                source=source,
-                provider_id="codex",
-                workspace_id=str(workspace_id),
-                thread_id=thread_id,
-                text=text,
-                attachments=attachments,
-            ),
-        )
-        text = gateway_result.text
         message_event_request = UserMessageSendRequest(
             source=source,
             provider_id="codex",

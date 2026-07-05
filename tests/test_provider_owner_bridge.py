@@ -1239,7 +1239,7 @@ async def test_provider_owner_bridge_start_session_message_creates_claude_thread
 
 
 @pytest.mark.asyncio
-async def test_provider_owner_bridge_keeps_text_before_registry_message_hooks_while_rewrite_is_sealed(monkeypatch, tmp_path):
+async def test_provider_owner_bridge_passes_original_text_to_registry_message_hooks(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
     called = {}
@@ -1365,7 +1365,7 @@ async def test_provider_owner_bridge_routes_text_via_provider_owner_bridge_hook(
 
 
 @pytest.mark.asyncio
-async def test_provider_owner_bridge_keeps_text_before_owner_bridge_router_while_rewrite_is_sealed(monkeypatch, tmp_path):
+async def test_provider_owner_bridge_passes_original_text_to_owner_bridge_router(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
     class _FakeAdapter:

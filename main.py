@@ -253,16 +253,6 @@ def main() -> None:
         action="store_true",
         help="Run a visible single-owner Codex TUI host and exit when Codex exits",
     )
-    parser.add_argument(
-        "--ow-codex",
-        action="store_true",
-        help="Run Codex CLI through OnlineWorker's local remote proxy",
-    )
-    parser.add_argument(
-        "--ow-claude",
-        action="store_true",
-        help="Run Claude CLI through OnlineWorker's local HTTP proxy",
-    )
     parser.add_argument("--codex-tui-target", default=None)
     parser.add_argument("--codex-tui-cd", default=None)
     parser.add_argument("--codex-tui-remote", default=None)
@@ -307,33 +297,6 @@ def main() -> None:
                     remote_url=args.codex_tui_remote,
                     codex_bin=args.codex_tui_bin,
                     extra_args=args.codex_tui_extra_arg,
-                )
-            )
-        )
-    if args.ow_codex:
-        from plugins.providers.builtin.codex.python.cli_wrapper import run_ow_codex_once
-
-        raise SystemExit(
-            asyncio.run(
-                run_ow_codex_once(
-                    unknown_args,
-                    data_dir=data_dir,
-                )
-            )
-        )
-    if args.ow_claude:
-        from plugins.providers.builtin.claude.python.cli_wrapper import parse_ow_claude_args, run_ow_claude_from_args
-
-        raise SystemExit(
-            asyncio.run(
-                run_ow_claude_from_args(
-                    parse_ow_claude_args(
-                        [
-                            "--data-dir",
-                            data_dir,
-                            *unknown_args,
-                        ]
-                    )
                 )
             )
         )

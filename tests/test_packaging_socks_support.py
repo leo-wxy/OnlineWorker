@@ -43,16 +43,6 @@ def test_packaging_includes_lightweight_claude_hook_relay() -> None:
     assert '"hook-relays"' in tauri_config
 
 
-def test_pyinstaller_specs_include_packaged_ow_codex_entrypoint() -> None:
-    spec_paths = [
-        ROOT / "onlineworker.spec",
-        ROOT / "onlineworker-x86_64.spec",
-    ]
-    for spec_path in spec_paths:
-        spec_globals = _load_spec_globals(spec_path)
-        assert "plugins.providers.builtin.codex.python.cli_wrapper" in spec_globals["provider_hiddenimports"]
-
-
 def _load_spec_globals(spec_path: Path) -> dict:
     source = spec_path.read_text(encoding="utf-8")
     prefix = source.split("a = Analysis(", 1)[0]

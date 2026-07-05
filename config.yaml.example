@@ -15,10 +15,6 @@ providers:
     control_mode: "app"
     transport:
       type: "unix"
-    message_hooks:
-      abusive_language_normalization:
-        enabled: true
-
   claude:
     visible: true
     managed: false
@@ -30,10 +26,6 @@ providers:
     control_mode: "app"
     transport:
       type: "stdio"
-    message_hooks:
-      abusive_language_normalization:
-        enabled: false
-
 telegram:
   # true = delete archived thread topics.
   # false = close topics and keep history visible in Telegram.

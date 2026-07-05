@@ -33,24 +33,6 @@ export interface ProviderCapabilitiesMetadata {
   launchMethods: boolean;
   commandWrappers: string[];
   controlModes: string[];
-  messageRewrite?: ProviderMessageRewriteCapabilities | null;
-}
-
-export interface ProviderMessageRewriteCapabilities {
-  appSend: boolean;
-  telegram: boolean;
-  externalCli?: string | null;
-  wrapper?: string | null;
-  proxyAlias?: string | null;
-}
-
-export interface ProviderMessageHookStatus {
-  enabled: boolean;
-  mode: string;
-}
-
-export interface ProviderMessageHooksMetadata {
-  abusiveLanguageNormalization: ProviderMessageHookStatus;
 }
 
 export interface ProviderExternalCliConfig {
@@ -116,7 +98,6 @@ export interface ProviderMetadata {
   liveTransport: string;
   controlMode?: string | null;
   capabilities: ProviderCapabilitiesMetadata;
-  messageHooks?: ProviderMessageHooksMetadata | null;
   externalCli: ProviderExternalCliConfig;
   launchMethods?: ProviderLaunchMethodConfig[];
   install?: ProviderInstallMetadata;

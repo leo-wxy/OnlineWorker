@@ -9,7 +9,6 @@ from core.messages.publishing import (
 from core.providers.registry import get_provider
 from core.storage import ThreadInfo, WorkspaceInfo
 from core.user_messages.contracts import UserMessageSendRequest
-from core.user_messages.gateway import prepare_user_message_text
 
 
 @dataclass(frozen=True)
@@ -157,33 +156,19 @@ async def send_started_provider_thread_message(
     if resolved_provider is None:
         raise RuntimeError(f"Provider '{provider_id}' 未启用")
 
-    prepared = await prepare_user_message_text(
-        state,
-        UserMessageSendRequest(
-            source=source,
-            provider_id=provider_id,
-            workspace_id=str(workspace_id),
-            thread_id=str(thread_info.thread_id),
-            text=text,
-            attachments=attachments,
-            metadata=metadata or {},
-        ),
-    )
-    prepared_text = prepared.text
-
     message_request = UserMessageSendRequest(
         source=source,
         provider_id=provider_id,
         workspace_id=str(workspace_id),
         thread_id=str(thread_info.thread_id),
-        text=prepared_text,
+        text=text,
         attachments=attachments,
         metadata=metadata or {},
     )
     publish_user_message_submitted(
         state,
         message_request,
-        text=prepared_text,
+        text=text,
         workspace_path=str(getattr(ws_info, "path", "") or ""),
     )
 
@@ -215,7 +200,7 @@ async def send_started_provider_thread_message(
         publish_user_message_accepted(
             state,
             message_request,
-            text=prepared_text,
+            text=text,
             workspace_path=str(getattr(ws_info, "path", "") or ""),
         )
 
@@ -228,7 +213,7 @@ async def send_started_provider_thread_message(
             context=None,
             group_chat_id=0,
             src_topic_id=None,
-            text=prepared_text,
+            text=text,
             has_photo=False,
             attachments=attachments,
         )
@@ -237,7 +222,7 @@ async def send_started_provider_thread_message(
 
         return SentProviderThreadMessage(
             thread_id=str(thread_info.thread_id),
-            text=prepared_text,
+            text=text,
         )
 
     resolved_adapter = adapter
@@ -253,18 +238,18 @@ async def send_started_provider_thread_message(
             ws_info,
             workspace_id,
             str(thread_info.thread_id),
-            prepared_text,
+            text,
         )
     else:
         await resolved_adapter.resume_thread(workspace_id, str(thread_info.thread_id))
-        if prepared_text:
+        if text:
             await resolved_adapter.send_user_message(
                 workspace_id,
                 str(thread_info.thread_id),
-                prepared_text,
+                text,
             )
 
     return SentProviderThreadMessage(
         thread_id=str(thread_info.thread_id),
-        text=prepared_text,
+        text=text,
     )

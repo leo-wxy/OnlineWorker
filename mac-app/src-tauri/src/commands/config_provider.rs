@@ -44,29 +44,6 @@ pub(crate) struct ProviderConfigDocument {
     pub(super) ai: Option<AiConfigDocument>,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
-pub(crate) struct ProviderMessageHookEntry {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) enabled: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) mode: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) config: Option<BTreeMap<String, serde_yaml::Value>>,
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ProviderMessageHookStatus {
-    pub(crate) enabled: bool,
-    pub(crate) mode: String,
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ProviderMessageHooksMetadata {
-    pub(crate) abusive_language_normalization: ProviderMessageHookStatus,
-}
-
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProviderExternalCliConfig {
@@ -303,8 +280,6 @@ pub(crate) struct ProviderConfigEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) capabilities: Option<ProviderCapabilitiesEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) message_hooks: Option<BTreeMap<String, ProviderMessageHookEntry>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) install: Option<ProviderInstallEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) process: Option<ProviderProcessEntry>,
@@ -341,8 +316,6 @@ pub(crate) struct ProviderCapabilitiesEntry {
     pub(crate) command_wrappers: Vec<String>,
     #[serde(default, alias = "control_modes")]
     pub(crate) control_modes: Vec<String>,
-    #[serde(default, alias = "message_rewrite")]
-    pub(crate) message_rewrite: ProviderMessageRewriteCapabilities,
     #[serde(default, alias = "session_access")]
     pub(crate) session_access: ProviderSessionAccessCapabilities,
 }
@@ -358,29 +331,6 @@ pub(crate) struct ProviderSessionAccessCapabilities {
     pub(crate) send: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub(crate) stream: String,
-}
-
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ProviderMessageRewriteCapabilities {
-    #[serde(default, alias = "app_send")]
-    pub(crate) app_send: bool,
-    #[serde(default)]
-    pub(crate) telegram: bool,
-    #[serde(
-        default,
-        alias = "external_cli",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub(crate) external_cli: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) wrapper: Option<String>,
-    #[serde(
-        default,
-        alias = "proxy_alias",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub(crate) proxy_alias: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
@@ -461,7 +411,6 @@ pub(crate) struct ProviderMetadata {
     pub(crate) live_transport: String,
     pub(crate) control_mode: Option<String>,
     pub(crate) capabilities: ProviderCapabilitiesEntry,
-    pub(crate) message_hooks: ProviderMessageHooksMetadata,
     pub(crate) external_cli: ProviderExternalCliConfig,
     pub(crate) launch_methods: Vec<ProviderLaunchMethodConfig>,
     pub(crate) install: ProviderInstallEntry,
@@ -620,7 +569,6 @@ struct ProviderPluginConfig {
     transport: Option<ProviderTransportEntry>,
     auth: Option<BTreeMap<String, String>>,
     capabilities: Option<ProviderCapabilitiesEntry>,
-    message_hooks: Option<BTreeMap<String, ProviderMessageHookEntry>>,
     install: Option<ProviderInstallEntry>,
     process: Option<ProviderProcessEntry>,
     discovery: Option<ProviderDiscoveryEntry>,
@@ -958,7 +906,6 @@ fn plugin_manifest_to_default(manifest: ProviderPluginManifest) -> Option<Provid
             control_mode: provider.control_mode.or_else(|| Some("app".to_string())),
             auth: provider.auth,
             capabilities: Some(provider.capabilities.unwrap_or_default()),
-            message_hooks: provider.message_hooks,
             launch_methods: None,
             install: Some({
                 let mut install = provider.install.unwrap_or_default();
@@ -1130,7 +1077,6 @@ fn generic_provider_config(provider_id: &str) -> ProviderConfigEntry {
         live_transport: Some("stdio".to_string()),
         control_mode: Some("app".to_string()),
         capabilities: Some(ProviderCapabilitiesEntry::default()),
-        message_hooks: None,
         launch_methods: None,
         install: Some(ProviderInstallEntry {
             cli_names: vec![provider_id.to_string()],
@@ -1306,7 +1252,6 @@ fn normalize_provider_entry(provider_id: &str, provider: &mut ProviderConfigEntr
     provider.transport = Some(transport);
     provider.capabilities =
         merge_provider_capabilities(provider.capabilities.take(), defaults.capabilities);
-    provider.message_hooks = provider.message_hooks.take().or(defaults.message_hooks);
     provider.launch_methods = normalize_launch_methods(provider.launch_methods.take());
     provider.install = provider.install.take().or(defaults.install);
     provider.process = normalize_provider_process(provider.process.take().or(defaults.process));
@@ -1422,10 +1367,6 @@ fn merge_provider_capabilities(
             if capabilities.control_modes.is_empty() {
                 capabilities.control_modes = default_capabilities.control_modes;
             }
-            capabilities.message_rewrite = merge_provider_message_rewrite(
-                capabilities.message_rewrite,
-                default_capabilities.message_rewrite,
-            );
             capabilities.session_access = merge_provider_session_access(
                 capabilities.session_access,
                 default_capabilities.session_access,
@@ -1455,36 +1396,6 @@ fn merge_provider_session_access(
         access.stream = default_access.stream;
     }
     access
-}
-
-fn merge_provider_message_rewrite(
-    mut rewrite: ProviderMessageRewriteCapabilities,
-    default_rewrite: ProviderMessageRewriteCapabilities,
-) -> ProviderMessageRewriteCapabilities {
-    rewrite.app_send = rewrite.app_send || default_rewrite.app_send;
-    rewrite.telegram = rewrite.telegram || default_rewrite.telegram;
-    if rewrite
-        .external_cli
-        .as_deref()
-        .unwrap_or("")
-        .trim()
-        .is_empty()
-    {
-        rewrite.external_cli = default_rewrite.external_cli;
-    }
-    if rewrite.wrapper.as_deref().unwrap_or("").trim().is_empty() {
-        rewrite.wrapper = default_rewrite.wrapper;
-    }
-    if rewrite
-        .proxy_alias
-        .as_deref()
-        .unwrap_or("")
-        .trim()
-        .is_empty()
-    {
-        rewrite.proxy_alias = default_rewrite.proxy_alias;
-    }
-    rewrite
 }
 
 fn legacy_tool_to_provider(tool: LegacyToolConfig) -> ProviderConfigEntry {
@@ -1635,7 +1546,6 @@ fn provider_metadata_from_entry(
         }),
         control_mode: provider.control_mode.clone(),
         capabilities: provider.capabilities.clone().unwrap_or_default(),
-        message_hooks: provider_message_hooks_metadata(provider),
         external_cli: provider_external_cli_config(provider),
         launch_methods: provider.launch_methods.clone().unwrap_or_default(),
         install: provider.install.clone().unwrap_or_default(),
@@ -1709,22 +1619,6 @@ fn provider_external_cli_config(provider: &ProviderConfigEntry) -> ProviderExter
                     .and_then(value_as_bool)
             })
             .unwrap_or(false),
-    }
-}
-
-fn provider_message_hooks_metadata(provider: &ProviderConfigEntry) -> ProviderMessageHooksMetadata {
-    let hook = provider
-        .message_hooks
-        .as_ref()
-        .and_then(|hooks| hooks.get("abusive_language_normalization"));
-    ProviderMessageHooksMetadata {
-        abusive_language_normalization: ProviderMessageHookStatus {
-            enabled: hook.and_then(|entry| entry.enabled).unwrap_or(true),
-            mode: hook
-                .and_then(|entry| entry.mode.clone())
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| "conservative".to_string()),
-        },
     }
 }
 
@@ -1838,33 +1732,6 @@ pub(super) fn set_provider_flags_in_document(
     provider.managed = Some(managed);
     provider.autostart = Some(managed && autostart);
     normalize_provider_entry(provider_id, provider);
-    doc.schema_version = Some(2);
-    doc.tools = None;
-}
-
-pub(super) fn set_provider_message_hook_enabled_in_document(
-    doc: &mut ProviderConfigDocument,
-    provider_id: &str,
-    hook_name: &str,
-    enabled: bool,
-) {
-    let normalized_provider_id = provider_id.trim();
-    let normalized_hook_name = hook_name.trim();
-    if normalized_provider_id.is_empty() || normalized_hook_name.is_empty() {
-        return;
-    }
-
-    let providers = doc.providers.get_or_insert_with(BTreeMap::new);
-    let provider = providers
-        .entry(normalized_provider_id.to_string())
-        .or_insert_with(|| disabled_provider_config(normalized_provider_id));
-    let hooks = provider.message_hooks.get_or_insert_with(BTreeMap::new);
-    let hook = hooks
-        .entry(normalized_hook_name.to_string())
-        .or_insert_with(ProviderMessageHookEntry::default);
-    hook.enabled = Some(enabled);
-    hook.mode.get_or_insert_with(|| "conservative".to_string());
-    normalize_provider_entry(normalized_provider_id, provider);
     doc.schema_version = Some(2);
     doc.tools = None;
 }
@@ -2030,10 +1897,9 @@ mod tests {
         read_manifest_files_from_overlay_path, serialize_normalized_config_with_env,
         set_ai_config_in_document, set_notification_channel_config_in_document,
         set_notification_channel_enabled_in_document, set_provider_cli_config_in_document,
-        set_provider_flags_in_document, set_provider_message_hook_enabled_in_document,
-        set_test_process_env_override, AiScenarioConfigEntry, AiServiceConfigEntry,
-        ProviderExternalCliConfig, ProviderLaunchMethodConfig, NOTIFICATION_OVERLAY_ENV,
-        PROVIDER_OVERLAY_ENV,
+        set_provider_flags_in_document, set_test_process_env_override, AiScenarioConfigEntry,
+        AiServiceConfigEntry, ProviderExternalCliConfig, ProviderLaunchMethodConfig,
+        NOTIFICATION_OVERLAY_ENV, PROVIDER_OVERLAY_ENV,
     };
 
     fn shared_unix_provider_id_for_test() -> String {
@@ -2122,7 +1988,7 @@ providers:
       cleanupMatchers:
         - codex.*app-server
         - codex-aar
-        - onlineworker-bot --ow-codex
+        - onlineworker-bot --provider-session-bridge
         - custom-provider.*serve
 "#;
 
@@ -2134,7 +2000,7 @@ providers:
         assert_eq!(
             process.cleanup_matchers,
             vec![
-                "onlineworker-bot --ow-codex".to_string(),
+                "onlineworker-bot --provider-session-bridge".to_string(),
                 "custom-provider.*serve".to_string(),
             ]
         );
@@ -2605,47 +2471,6 @@ tools:
     }
 
     #[test]
-    fn provider_metadata_exposes_provider_message_hook_status_and_coverage() {
-        let raw = r#"
-schema_version: 2
-providers:
-  custom-a:
-    managed: true
-    message_hooks:
-      abusive_language_normalization:
-        enabled: true
-  custom-b:
-    managed: true
-    message_hooks:
-      abusive_language_normalization:
-        enabled: false
-"#;
-
-        let providers = provider_metadata_from_raw(raw, None).expect("metadata");
-        let custom_a = providers
-            .iter()
-            .find(|provider| provider.id == "custom-a")
-            .expect("custom-a");
-        let custom_b = providers
-            .iter()
-            .find(|provider| provider.id == "custom-b")
-            .expect("custom-b");
-
-        assert!(
-            custom_a
-                .message_hooks
-                .abusive_language_normalization
-                .enabled
-        );
-        assert!(
-            !custom_b
-                .message_hooks
-                .abusive_language_normalization
-                .enabled
-        );
-    }
-
-    #[test]
     fn provider_metadata_exposes_provider_external_cli_settings() {
         let raw = r#"
 schema_version: 2
@@ -2858,32 +2683,6 @@ providers:
                 .map(|method| method.bin.as_str()),
             Some("custom")
         );
-    }
-
-    #[test]
-    fn set_provider_message_hook_enabled_updates_provider_config() {
-        let raw = r#"
-schema_version: 2
-providers:
-  custom:
-    managed: true
-"#;
-
-        let mut doc = normalize_provider_document(raw).expect("normalized config");
-        set_provider_message_hook_enabled_in_document(
-            &mut doc,
-            "custom",
-            "abusive_language_normalization",
-            false,
-        );
-
-        let providers = doc.providers.expect("providers");
-        let custom = providers.get("custom").expect("custom");
-        let message_hooks = custom.message_hooks.as_ref().expect("message hooks");
-        let hook = message_hooks
-            .get("abusive_language_normalization")
-            .expect("normalizer hook");
-        assert_eq!(hook.enabled, Some(false));
     }
 
     #[test]
@@ -3164,7 +2963,7 @@ providers:
     }
 
     #[test]
-    fn provider_metadata_uses_manifest_message_hook_defaults() {
+    fn provider_metadata_includes_public_manifest_defaults() {
         let providers = provider_metadata_from_raw("", None).expect("metadata");
         let public_providers = public_default_provider_ids();
         assert_eq!(
@@ -3222,15 +3021,14 @@ provider:
     }
 
     #[test]
-    fn provider_metadata_backfills_new_message_rewrite_fields_for_existing_config() {
+    fn provider_metadata_backfills_session_access_for_existing_config() {
         let provider_id = public_default_provider_ids()
             .into_iter()
             .find(|provider_id| {
                 let metadata = provider_default_metadata(provider_id);
-                metadata.capabilities.message_rewrite.external_cli.is_some()
-                    && metadata.capabilities.message_rewrite.wrapper.is_some()
+                !metadata.capabilities.session_access.read.is_empty()
             })
-            .expect("message rewrite provider");
+            .expect("session access provider");
         let raw = format!(
             r#"
 schema_version: 2
@@ -3253,9 +3051,6 @@ providers:
         - app
         - tui
         - hybrid
-      messageRewrite:
-        appSend: false
-        telegram: false
 "#
         );
 
@@ -3264,26 +3059,6 @@ providers:
             .iter()
             .find(|provider| provider.id == provider_id)
             .expect("provider");
-        let defaults = provider_default_metadata(&provider_id);
-
-        assert!(provider.capabilities.message_rewrite.app_send);
-        assert!(provider.capabilities.message_rewrite.telegram);
-        assert_eq!(
-            provider
-                .capabilities
-                .message_rewrite
-                .external_cli
-                .as_deref(),
-            defaults
-                .capabilities
-                .message_rewrite
-                .external_cli
-                .as_deref()
-        );
-        assert_eq!(
-            provider.capabilities.message_rewrite.wrapper.as_deref(),
-            defaults.capabilities.message_rewrite.wrapper.as_deref()
-        );
         assert_eq!(provider.capabilities.session_access.read, "owner_bridge");
         assert_eq!(provider.capabilities.session_access.list, "owner_bridge");
         assert_eq!(provider.capabilities.session_access.send, "owner_bridge");

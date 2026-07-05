@@ -22,7 +22,6 @@ from core.provider_session_new import (
 from core.providers.registry import get_provider
 from core.storage import ThreadInfo, WorkspaceInfo, save_storage
 from core.user_messages.contracts import UserMessageSendRequest
-from core.user_messages.gateway import prepare_user_message_text
 from core.messages.publishing import (
     publish_session_archived,
     publish_approval_answered,
@@ -1634,18 +1633,6 @@ class ProviderOwnerBridge:
         if message_hooks is None:
             return {"ok": False, "error": f"Provider '{provider_id}' 不支持发送消息"}
 
-        gateway_result = await prepare_user_message_text(
-            self.state,
-            UserMessageSendRequest(
-                source=str(request.get("source") or "session_tab"),
-                provider_id=provider_id,
-                workspace_id=str(workspace_id),
-                thread_id=thread_id,
-                text=text,
-                attachments=attachments,
-            ),
-        )
-        text = gateway_result.text
         message_event_request = UserMessageSendRequest(
             source=str(request.get("source") or "session_tab"),
             provider_id=provider_id,

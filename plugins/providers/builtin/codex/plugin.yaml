@@ -24,9 +24,6 @@ provider:
     type: unix
   compatibility:
     transport_policy: shared_app_server
-  message_hooks:
-    abusive_language_normalization:
-      enabled: true
   capabilities:
     sessions: true
     send: true
@@ -43,12 +40,6 @@ provider:
       - app
       - tui
       - hybrid
-    message_rewrite:
-      app_send: true
-      telegram: true
-      external_cli: remote_proxy
-      wrapper: ow-codex
-      proxy_alias: alias codexR='/opt/homebrew/bin/codex --remote "unix://$HOME/Library/Application Support/OnlineWorker/codex_remote_proxy.sock" --cd "$(pwd)"'
     session_access:
       list: owner_bridge
       read: owner_bridge

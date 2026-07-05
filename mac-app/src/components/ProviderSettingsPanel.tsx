@@ -63,24 +63,11 @@ function supportsLaunchMethods(provider: ProviderMetadata | undefined) {
 }
 
 function supportsExternalCliAuthConfig(provider: ProviderMetadata | undefined) {
-  return provider?.capabilities.messageRewrite?.externalCli === "http_proxy";
+  return provider?.id === "claude";
 }
 
 function supportsExternalCliLauncherWrap(provider: ProviderMetadata | undefined) {
   return supportsLaunchMethods(provider) && supportsExternalCliAuthConfig(provider);
-}
-
-function showsManagedRemoteProxyAlias(provider: ProviderMetadata | undefined) {
-  return Boolean(managedRemoteProxyAlias(provider));
-}
-
-const CIVILITY_MODE_SEALED = true;
-
-function managedRemoteProxyAlias(provider: ProviderMetadata | undefined) {
-  if (provider?.capabilities.messageRewrite?.externalCli !== "remote_proxy") {
-    return "";
-  }
-  return provider.capabilities.messageRewrite.proxyAlias?.trim() ?? "";
 }
 
 interface ProviderCliDraft {
@@ -121,28 +108,6 @@ function Toggle({
   );
 }
 
-function CopyCommandButton({ text }: { text: string }) {
-  const { t } = useI18n();
-  const [copied, setCopied] = useState(false);
-
-  const copy = async () => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={() => void copy()}
-      className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 transition hover:border-blue-200 hover:text-blue-700"
-      title={copied ? t.common.copied : t.common.copy}
-    >
-      {copied ? t.common.copied : t.common.copy}
-    </button>
-  );
-}
-
 export function ProviderSettingsPanel({ mode }: Props) {
   const { t } = useI18n();
   const texts = t.providerSettings;
@@ -151,7 +116,6 @@ export function ProviderSettingsPanel({ mode }: Props) {
   const [loading, setLoading] = useState(true);
   const [savingProviderId, setSavingProviderId] = useState<string | null>(null);
   const [savingCliProviderId, setSavingCliProviderId] = useState<string | null>(null);
-  const [savingHookProviderId, setSavingHookProviderId] = useState<string | null>(null);
   const [validatingProviderId, setValidatingProviderId] = useState<string | null>(null);
   const [validationReports, setValidationReports] = useState<Record<string, ProviderValidationReport>>({});
   const [cliDrafts, setCliDrafts] = useState<Record<string, ProviderCliDraft>>({});
@@ -333,29 +297,6 @@ export function ProviderSettingsPanel({ mode }: Props) {
     }
   };
 
-  const saveProviderCivilityMode = async (
-    providerId: string,
-    enabled: boolean
-  ) => {
-    setSavingHookProviderId(providerId);
-    try {
-      await invoke("set_provider_message_hook_enabled", {
-        providerId,
-        hookName: "abusive_language_normalization",
-        enabled,
-      });
-      clearProviderValidationReport(providerId);
-      startTransition(() => {
-        void load();
-      });
-      setError(null);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setSavingHookProviderId(null);
-    }
-  };
-
   const validateProviderConfig = async (providerId: string) => {
     if (validatingProviderId) {
       return;
@@ -408,24 +349,14 @@ export function ProviderSettingsPanel({ mode }: Props) {
           const provider = byId.get(setting.id);
           const busy = savingProviderId === setting.id;
           const cliBusy = savingCliProviderId === setting.id;
-          const hookBusy = savingHookProviderId === setting.id;
           const validating = validatingProviderId === setting.id;
           const report = validationReports[setting.id];
           const hiddenByDefault = provider?.visible === false;
           const cliAvailable = cliAvailability[setting.id] !== false;
           const canEnable = setting.enabled || cliAvailable;
-          const supportsExternalCliRewrite = Boolean(provider?.capabilities.messageRewrite?.externalCli);
-          const remoteProxyAlias = managedRemoteProxyAlias(provider);
-          const showManagedRemoteProxyAlias = showsManagedRemoteProxyAlias(provider);
           const canEditLaunchMethods = supportsLaunchMethods(provider);
           const supportsExternalCliAuth = supportsExternalCliAuthConfig(provider);
           const supportsExternalCliChildLauncher = supportsExternalCliLauncherWrap(provider);
-          const supportsMessageRewrite = !CIVILITY_MODE_SEALED && Boolean(
-            provider?.capabilities.messageRewrite?.appSend ||
-            provider?.capabilities.messageRewrite?.telegram ||
-            provider?.capabilities.messageRewrite?.externalCli
-          );
-          const civilityModeEnabled = provider?.messageHooks?.abusiveLanguageNormalization.enabled ?? true;
           const draft = cliDrafts[setting.id] ?? {
             bin: provider?.bin ?? provider?.install?.cliNames?.[0] ?? setting.id,
             authToken: provider?.externalCli?.authToken ?? "",
@@ -521,21 +452,6 @@ export function ProviderSettingsPanel({ mode }: Props) {
                   <span className="text-sm font-semibold text-gray-700">{texts.autostart}</span>
                 </label>
 
-                {provider && supportsMessageRewrite && (
-                  <label className={`flex items-center gap-3 ${hookBusy ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
-                    <Toggle
-                      checked={civilityModeEnabled}
-                      disabled={hookBusy}
-                      onChange={(checked) => {
-                        void saveProviderCivilityMode(setting.id, checked);
-                      }}
-                    />
-                    <span className="grid gap-0.5">
-                      <span className="text-sm font-semibold text-gray-700">{texts.civilityModeTitle}</span>
-                      <span className="text-xs font-medium text-slate-500">{texts.civilityModeDescription}</span>
-                    </span>
-                  </label>
-                )}
               </div>
 
               {report && (
@@ -573,27 +489,13 @@ export function ProviderSettingsPanel({ mode }: Props) {
                 </div>
               )}
 
-              {provider && (supportsExternalCliRewrite || showManagedRemoteProxyAlias || canEditLaunchMethods) && (
+              {provider && (supportsExternalCliAuth || canEditLaunchMethods) && (
                 <div className="mt-5 grid gap-3 rounded-xl border border-slate-200/80 bg-white/70 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <h4 className="text-sm font-bold text-gray-900">{texts.cliConfigTitle}</h4>
                     {cliBusy && <span className="text-xs font-semibold text-blue-600">{texts.saving}</span>}
                   </div>
-                  {showManagedRemoteProxyAlias && (
-                    <div className="grid gap-2 border-l-2 border-blue-200 pl-3">
-                      <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                          <div className="text-xs font-bold text-blue-900">{texts.externalCliProxyAliasTitle}</div>
-                          <div className="mt-0.5 text-xs font-medium text-blue-700">{texts.externalCliProxyAliasDescription}</div>
-                        </div>
-                        <CopyCommandButton text={remoteProxyAlias} />
-                      </div>
-                      <code className="block break-all rounded-md bg-slate-950 px-2.5 py-2 text-xs font-semibold text-slate-100">
-                        {remoteProxyAlias}
-                      </code>
-                    </div>
-                  )}
-                  {(supportsExternalCliRewrite || canEditLaunchMethods) && (
+                  {(supportsExternalCliAuth || canEditLaunchMethods) && (
                     <>
                       <div className="grid gap-3">
                         <label className="grid gap-1.5 text-xs font-bold text-slate-600">

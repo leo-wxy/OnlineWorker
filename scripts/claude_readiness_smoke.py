@@ -297,28 +297,6 @@ async def build_path_claude_method(
     }
 
 
-def build_ow_claude_method(configured_bin: str) -> dict[str, Any]:
-    wrapper = REPO_ROOT / "scripts" / "ow-claude"
-    available = wrapper.exists() and os.access(wrapper, os.X_OK)
-    configured = str(configured_bin or "").strip()
-    selected = configured == str(wrapper) or configured.endswith("/scripts/ow-claude")
-    return {
-        "id": "ow_claude_wrapper",
-        "label": "OnlineWorker ow-claude wrapper",
-        "selected": selected,
-        "detected": available,
-        "available": False,
-        "ready": None,
-        "reason": "configured" if selected else ("wrapperAvailable" if available else "missingWrapper"),
-        "detail": (
-            "Wrapper entrypoint exists, but it is only a configurable candidate and is not proof that Claude provider can send."
-            if available
-            else "scripts/ow-claude was not found or is not executable."
-        ),
-        "command": str(wrapper),
-    }
-
-
 def _owner_bridge_request(socket_path: Path, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
     with socket.socket(socket.AF_UNIX) as client:
         client.settimeout(timeout)
@@ -369,7 +347,6 @@ async def collect_readiness(args: argparse.Namespace) -> dict[str, Any]:
         ]
     methods.extend([
         await build_path_claude_method(configured_bin, configured_cli_readiness),
-        build_ow_claude_method(configured_bin),
     ])
     result: dict[str, Any] = {
         "provider": "claude",

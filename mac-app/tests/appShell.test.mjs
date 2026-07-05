@@ -220,7 +220,7 @@ test("maintenance keeps external Codex permission hook install out of the app sh
   assert.equal(en.includes("Codex Permission Entry"), false);
 });
 
-test("provider settings keeps civility mode controls sealed while rewrite is parked", () => {
+test("provider settings removes civility mode and rewrite metadata", () => {
   const panel = readFileSync(join(root, "src", "components", "ProviderSettingsPanel.tsx"), "utf8");
   const types = readFileSync(join(root, "src", "i18n", "types.ts"), "utf8");
   const zh = readFileSync(join(root, "src", "i18n", "locales", "zh.ts"), "utf8");
@@ -234,21 +234,20 @@ test("provider settings keeps civility mode controls sealed while rewrite is par
     "utf8"
   );
 
-  assert.match(panel, /const CIVILITY_MODE_SEALED = true/);
-  assert.match(panel, /supportsMessageRewrite/);
-  assert.match(panel, /!CIVILITY_MODE_SEALED && Boolean/);
-  assert.match(panel, /set_provider_message_hook_enabled/);
-  assert.match(panel, /abusive_language_normalization/);
-  assert.match(panel, /texts\.civilityModeTitle/);
-  assert.match(panel, /provider\?\.messageHooks\?\.abusiveLanguageNormalization\.enabled/);
-  assert.match(types, /civilityModeTitle:\s*string/);
-  assert.match(types, /civilityModeDescription:\s*string/);
-  assert.match(codexPlugin, /external_cli:\s*remote_proxy/);
-  assert.match(codexPlugin, /wrapper:\s*ow-codex/);
-  assert.match(claudePlugin, /external_cli:\s*http_proxy/);
-  assert.match(claudePlugin, /wrapper:\s*ow-claude/);
-  assert.match(zh, /文明模式/);
-  assert.match(en, /Civility mode/);
+  assert.equal(panel.includes("CIVILITY_MODE_SEALED"), false);
+  assert.equal(panel.includes("supportsMessageRewrite"), false);
+  assert.equal(panel.includes("set_provider_message_hook_enabled"), false);
+  assert.equal(panel.includes("abusive_language_normalization"), false);
+  assert.equal(panel.includes("texts.civilityModeTitle"), false);
+  assert.equal(panel.includes("messageHooks"), false);
+  assert.equal(types.includes("civilityModeTitle"), false);
+  assert.equal(types.includes("civilityModeDescription"), false);
+  assert.equal(codexPlugin.includes("message_rewrite"), false);
+  assert.equal(codexPlugin.includes("ow-codex"), false);
+  assert.equal(claudePlugin.includes("message_rewrite"), false);
+  assert.equal(claudePlugin.includes("ow-claude"), false);
+  assert.equal(zh.includes("文明模式"), false);
+  assert.equal(en.includes("Civility mode"), false);
 });
 
 test("provider settings exposes discovered hidden extensions with icons and a visible hint", () => {
@@ -267,7 +266,7 @@ test("provider settings exposes discovered hidden extensions with icons and a vi
   assert.match(en, /Hidden by default/);
 });
 
-test("provider settings exposes external CLI rewrite configuration in the app", () => {
+test("provider settings exposes external CLI configuration in the app", () => {
   const panel = readFileSync(join(root, "src", "components", "ProviderSettingsPanel.tsx"), "utf8");
   const types = readFileSync(join(root, "src", "types.ts"), "utf8");
   const i18nTypes = readFileSync(join(root, "src", "i18n", "types.ts"), "utf8");
@@ -279,7 +278,7 @@ test("provider settings exposes external CLI rewrite configuration in the app", 
   assert.match(types, /export interface ProviderExternalCliConfig/);
   assert.match(types, /externalCli:\s*ProviderExternalCliConfig;/);
   assert.match(panel, /set_provider_cli_config/);
-  assert.match(panel, /navigator\.clipboard\.writeText/);
+  assert.equal(panel.includes("navigator.clipboard.writeText"), false);
   assert.equal(panel.includes("externalCliUpstreamBaseUrl"), false);
   assert.equal(panel.includes("draft.upstreamBaseUrl"), false);
   assert.match(panel, /externalCliLaunchesManagedChildCli/);
@@ -289,9 +288,9 @@ test("provider settings exposes external CLI rewrite configuration in the app", 
   assert.match(panel, /supportsExternalCliLauncherWrap/);
   assert.match(panel, /primaryProviderSettings\(providers\)/);
   assert.match(panel, /extensionProviderSettings\(providers\)/);
-  assert.match(panel, /provider\?\.capabilities\.messageRewrite\?\.externalCli/);
-  assert.match(panel, /managedRemoteProxyAlias/);
-  assert.match(types, /proxyAlias\?:\s*string \| null/);
+  assert.equal(panel.includes("messageRewrite"), false);
+  assert.equal(panel.includes("managedRemoteProxyAlias"), false);
+  assert.equal(types.includes("proxyAlias"), false);
   assert.equal(panel.includes("CODEX_REMOTE_PROXY_ALIAS"), false);
   assert.equal(panel.includes("codexR"), false);
   assert.match(types, /launchMethods:\s*boolean/);
@@ -300,8 +299,8 @@ test("provider settings exposes external CLI rewrite configuration in the app", 
   assert.match(types, /discovery\?:\s*ProviderDiscoveryMetadata/);
   assert.match(i18nTypes, /cliConfigTitle:\s*string/);
   assert.match(i18nTypes, /launchMethodCommands:\s*string/);
-  assert.match(i18nTypes, /externalCliProxyAliasTitle:\s*string/);
-  assert.match(i18nTypes, /externalCliProxyAliasDescription:\s*string/);
+  assert.equal(i18nTypes.includes("externalCliProxyAliasTitle"), false);
+  assert.equal(i18nTypes.includes("externalCliProxyAliasDescription"), false);
   assert.match(i18nTypes, /externalCliAuthToken:\s*string/);
   assert.match(i18nTypes, /externalCliBaseUrl:\s*string/);
   assert.match(i18nTypes, /externalCliModel:\s*string/);
@@ -315,12 +314,12 @@ test("provider settings exposes external CLI rewrite configuration in the app", 
   assert.equal(zh.includes("上游 Base URL"), false);
   assert.equal(zh.includes("外挂 CLI"), false);
   assert.equal(zh.includes("启动器会再调用 claude"), false);
-  assert.match(zh, /发送前将不文明表达改写为普通表达。/);
+  assert.equal(zh.includes("发送前将不文明表达改写为普通表达。"), false);
   assert.match(zh, /启动后进入受管子 CLI/);
   assert.match(en, /CLI configuration/);
   assert.match(en, /Launch command candidates/);
   assert.equal(en.includes("Upstream Base URL"), false);
-  assert.match(en, /Rewrite abusive language into neutral wording before sending./);
+  assert.equal(en.includes("Rewrite abusive language into neutral wording before sending."), false);
   assert.match(en, /Open the managed child CLI after launcher starts/);
   assert.match(rustConfig, /pub async fn set_provider_cli_config/);
   assert.match(rustLib, /set_provider_cli_config/);

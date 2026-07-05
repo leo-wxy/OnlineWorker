@@ -20,7 +20,7 @@ def _socket_path(data_dir: str | None) -> str:
     normalized = os.path.abspath(data_dir)
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
     socket_dir = "/tmp" if os.path.isdir("/tmp") else tempfile.gettempdir()
-    return os.path.join(socket_dir, f"ow-claude-{digest}.sock")
+    return os.path.join(socket_dir, f"onlineworker-claude-{digest}.sock")
 
 
 def _read_payload() -> bytes:

@@ -913,7 +913,7 @@ def test_provider_session_adapter_exposes_lifecycle_reconnect_api(monkeypatch, t
     }
 
 
-def test_send_provider_session_message_keeps_text_while_message_rewrite_is_sealed(monkeypatch):
+def test_send_provider_session_message_passes_original_text_to_provider_hook(monkeypatch):
     called = {}
 
     class Facts:
@@ -988,9 +988,7 @@ def test_send_provider_session_message_keeps_text_while_message_rewrite_is_seale
     }
 
 
-def test_send_provider_session_message_respects_message_hook_config(monkeypatch):
-    from types import SimpleNamespace
-
+def test_send_provider_session_message_ignores_removed_global_message_hook_config(monkeypatch):
     called = {}
 
     class Facts:
@@ -1051,12 +1049,6 @@ def test_send_provider_session_message_respects_message_hook_config(monkeypatch)
         )
 
     monkeypatch.setattr(bridge, "_load_provider_descriptor", lambda provider_id: Descriptor())
-    monkeypatch.setattr(
-        bridge,
-        "load_config",
-        lambda *args, **kwargs: SimpleNamespace(message_hooks=SimpleNamespace(enabled=False)),
-    )
-
     import asyncio
 
     asyncio.run(fake_send())

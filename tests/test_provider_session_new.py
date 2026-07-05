@@ -183,7 +183,7 @@ def test_validate_new_provider_thread_request_treats_attachment_only_as_non_empt
 
 
 @pytest.mark.asyncio
-async def test_send_started_provider_thread_message_runs_gateway_and_message_hooks_send(monkeypatch):
+async def test_send_started_provider_thread_message_runs_message_hooks_send(monkeypatch):
     from core.provider_session_new import send_started_provider_thread_message
 
     state = AppState(storage=AppStorage())
@@ -221,10 +221,6 @@ async def test_send_started_provider_thread_message_runs_gateway_and_message_hoo
         )
 
     monkeypatch.setattr(
-        "core.provider_session_new.prepare_user_message_text",
-        AsyncMock(return_value=SimpleNamespace(text="rewritten text")),
-    )
-    monkeypatch.setattr(
         "core.provider_session_new.get_provider",
         lambda name, cfg=None: SimpleNamespace(
             message_hooks=SimpleNamespace(
@@ -249,12 +245,12 @@ async def test_send_started_provider_thread_message_runs_gateway_and_message_hoo
         adapter=adapter,
     )
 
-    assert result.text == "rewritten text"
+    assert result.text == "first message"
     assert result.thread_id == "tid-new"
     assert called["send"][2:] == (
         "overlay-tool:/tmp/workspace",
         "tid-new",
-        "rewritten text",
+            "first message",
         [{"kind": "file", "path": "/tmp/workspace/readme.md"}],
     )
     assert [event["kind"] for event in state.message_bus.recent_events()] == [
@@ -263,7 +259,7 @@ async def test_send_started_provider_thread_message_runs_gateway_and_message_hoo
     ]
     activity = state.message_bus.session_activity("overlay-tool", "tid-new")
     assert activity["workspacePath"] == "/tmp/workspace"
-    assert activity["lastUserMessage"] == "rewritten text"
+    assert activity["lastUserMessage"] == "first message"
 
 
 def test_build_provider_session_summary_shapes_provider_backed_session_row():

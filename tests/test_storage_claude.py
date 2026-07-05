@@ -469,7 +469,7 @@ def test_list_claude_threads_by_cwd_prefers_session_file_matching_workspace_slug
         ],
     )
     _write_claude_project_rows(
-        projects_dir / "-private-tmp-ow-claude-smoke" / f"{session_id}.jsonl",
+        projects_dir / "-private-tmp-claude-hook-smoke" / f"{session_id}.jsonl",
         [
             {
                 "type": "user",
@@ -1471,7 +1471,7 @@ def test_find_claude_project_session_file_prefers_workspace_copy_for_duplicate_s
     projects_dir = tmp_path / "projects"
     session_id = "11111111-1111-4111-8111-111111111111"
     canonical_path = projects_dir / "-Users-example-Projects-onlineWorker" / f"{session_id}.jsonl"
-    smoke_path = projects_dir / "-private-tmp-ow-claude-smoke" / f"{session_id}.jsonl"
+    smoke_path = projects_dir / "-private-tmp-claude-hook-smoke" / f"{session_id}.jsonl"
 
     _write_claude_project_rows(
         canonical_path,
@@ -1492,7 +1492,7 @@ def test_find_claude_project_session_file_prefers_workspace_copy_for_duplicate_s
             {
                 "type": "user",
                 "timestamp": "2026-04-07T10:31:18.002Z",
-                "cwd": "/private/tmp/ow-claude-smoke",
+                "cwd": "/private/tmp/claude-hook-smoke",
                 "sessionId": session_id,
                 "entrypoint": "sdk-cli",
                 "message": {"role": "user", "content": "请只回复 OK"},

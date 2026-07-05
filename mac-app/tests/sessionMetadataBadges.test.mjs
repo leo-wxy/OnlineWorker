@@ -71,7 +71,7 @@ test("generic provider chat keeps header state aligned without remounting on liv
   assert.match(genericChat, /if \(!active\) \{\s*return;\s*\}/s);
   assert.match(genericChat, /enabled: active && mode !== "new-session" && Boolean\(activeSession\.id\)/);
   assert.match(genericChat, /if \(hasLoadedRef\.current && messagesRef\.current\.length > 0\) \{\s*void refreshMessagesSilently\(\);\s*\} else \{\s*void loadMessages\(\);\s*\}/s);
-  assert.match(genericChat, /if \(!hasSessionSnapshotChanged\(messagesRef\.current, turns\)\) \{/);
+  assert.match(genericChat, /if \(!hasSessionSnapshotChanged\(messagesRef\.current, nextTurns\)\) \{/);
 });
 
 test("provider session composer sends through the provider owner bridge", () => {

@@ -165,14 +165,13 @@ fn cleanup_policy_from_config() -> ManagedProcessCleanupPolicy {
     ManagedProcessCleanupPolicy::default()
 }
 
-fn is_onlineworker_cli_wrapper_command(command_line: &str) -> bool {
+fn is_onlineworker_sidecar_command(command_line: &str) -> bool {
     let mut args = command_line.split_whitespace();
     args.any(|arg| {
         let normalized = arg.trim();
-        (normalized.starts_with("--ow-") && normalized.len() > "--ow-".len())
-            || normalized.ends_with("-tui-host")
+        normalized.ends_with("-tui-host")
             || normalized == "--provider-session-bridge"
-            // Keep legacy provider-specific wrapper flags as compatibility-only markers.
+            // Keep legacy provider-specific sidecar flags as compatibility-only markers.
             || normalized == "--codex-hook-bridge"
             || normalized == "--claude-hook-bridge"
             || normalized == "--codex-tui-host"
@@ -204,7 +203,7 @@ fn managed_bot_cleanup_pids_from_rows(output: &[u8], data_dir: &Path) -> Vec<u32
                     let trimmed = line.trim_start();
                     let (pid_raw, command_line) = trimmed.split_once(char::is_whitespace)?;
                     let pid = pid_raw.parse::<u32>().ok()?;
-                    if is_onlineworker_cli_wrapper_command(command_line) {
+                    if is_onlineworker_sidecar_command(command_line) {
                         return None;
                     }
                     if !command_line.contains(&expected_arg) {
@@ -267,7 +266,7 @@ fn pids_from_bot_process_rows(output: &[u8], data_dir: &Path) -> Vec<u32> {
                         return None;
                     }
                     if command_line.contains(&expected_arg) {
-                        if is_onlineworker_cli_wrapper_command(command_line) {
+                        if is_onlineworker_sidecar_command(command_line) {
                             None
                         } else {
                             Some(pid)
@@ -1255,23 +1254,23 @@ mod tests {
     }
 
     #[test]
-    fn managed_bot_cleanup_pids_exclude_cli_wrappers_for_same_data_dir() {
+    fn managed_bot_cleanup_pids_exclude_sidecars_for_same_data_dir() {
         let data_dir = Path::new("/Users/example/Library/Application Support/OnlineWorker");
         let rows = b"\
- 101 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker
- 102 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-primary
- 103 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-secondary
- 104 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --ow-secondary --data-dir /Users/example/Library/Application Support/OnlineWorker
- 108 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --provider-session-bridge --provider-id primary
- 109 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --codex-hook-bridge
- 105 /usr/bin/python3 /repo/main.py --data-dir /Users/example/Library/Application Support/OnlineWorker
- 106 /usr/bin/python3 /repo/main.py --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-primary
- 107 /usr/bin/python3 /repo/main.py --ow-secondary --data-dir /Users/example/Library/Application Support/OnlineWorker
+101 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker
+102 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-primary
+103 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-secondary
+104 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --ow-secondary --data-dir /Users/example/Library/Application Support/OnlineWorker
+108 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --provider-session-bridge --provider-id primary
+109 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --codex-hook-bridge
+105 /usr/bin/python3 /repo/main.py --data-dir /Users/example/Library/Application Support/OnlineWorker
+106 /usr/bin/python3 /repo/main.py --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-primary
+107 /usr/bin/python3 /repo/main.py --ow-secondary --data-dir /Users/example/Library/Application Support/OnlineWorker
 ";
 
         assert_eq!(
             managed_bot_cleanup_pids_from_rows(rows, data_dir),
-            vec![101, 105]
+            vec![101, 102, 103, 104, 105, 106, 107]
         );
     }
 }

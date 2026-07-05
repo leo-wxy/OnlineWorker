@@ -38,7 +38,7 @@ def claude_hook_socket_path(data_dir: str | None) -> str | None:
     normalized = os.path.abspath(data_dir)
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
     socket_dir = "/tmp" if os.path.isdir("/tmp") else tempfile.gettempdir()
-    return os.path.join(socket_dir, f"ow-claude-{digest}.sock")
+    return os.path.join(socket_dir, f"onlineworker-claude-{digest}.sock")
 
 
 def claude_hook_settings_path(data_dir: str | None) -> str | None:

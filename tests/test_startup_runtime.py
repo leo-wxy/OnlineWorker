@@ -1308,7 +1308,7 @@ async def test_post_init_shared_unix_starts_realtime_mirror_without_legacy_final
         "core.lifecycle.save_storage"
     ), patch("plugins.providers.builtin.codex.python.runtime.connect_adapter_with_retry", new=AsyncMock()) as connect_mock, patch(
         "plugins.providers.builtin.codex.python.runtime.ensure_codex_remote_message_proxy",
-        new=AsyncMock(return_value="unix:///tmp/ow-codex-proxy.sock"),
+        new=AsyncMock(return_value="unix:///tmp/onlineworker-codex-proxy.sock"),
     ), patch.object(
         LifecycleManager,
         "_cleanup_archived_threads",

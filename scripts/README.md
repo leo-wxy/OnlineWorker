@@ -18,19 +18,11 @@
 
 ## Runtime helpers
 
-- `ow-codex`：Codex CLI remote proxy 包装脚本。文明模式当前已暂停，脚本仍保留为内部开发入口；验证 CLI 原生弹窗与 TG 同步授权时优先使用 OnlineWorker 主进程暴露的 Unix proxy socket：
-
-  ```bash
-  alias codexR='/opt/homebrew/bin/codex --remote "unix://$HOME/Library/Application Support/OnlineWorker/codex_remote_proxy.sock" --cd "$(pwd)"'
-  ```
-
-  不要用 `--remote unix://` 验证 OnlineWorker 审批链路；它连接的是 Codex 默认 socket，会绕过 OnlineWorker proxy。
-- `ow-claude`：Claude CLI HTTP proxy 包装脚本。文明模式当前已封存，脚本仍可通过 `ANTHROPIC_BASE_URL` 把 Claude 请求导入本地代理并用 `--probe` 打印请求摘要，但不会改写 Anthropic `messages[].content` 用户文本；`--rewrite` / `--no-rewrite` 参数仅作为后续恢复链路的兼容保留项。若某个外部 launcher 会先运行自身逻辑再启动名为 `claude` 的二级进程，可显式传 `--launcher-wraps-claude --upstream-base-url <url>`，脚本会临时把 `claude` shim 放到 PATH 前面；具体 launcher 名称和 upstream 由用户配置提供，通用代码不内置私有命令或私有地址。
 - `codex_tui_host.py`：Codex TUI host wrapper 的本地运行入口，仍被 TUI 主控链路使用。
 
 ## Smoke / diagnostics
 
-- `claude_readiness_smoke.py`：Claude provider readiness 真实诊断脚本。它直接调用当前源码的 `ClaudeAdapter.check_readiness(force=True)`，可真实读取本机 `claude auth status` 与当前进程 `ANTHROPIC_*` runtime env，并读取 OnlineWorker `config.yaml` 中 Claude provider 当前配置的 `bin` 与可选 `launch_methods`。输出只包含 `ready/source/reason/authMethod/detail/apiProvider/launchMethod` 与 `methods[]` 里的非敏感候选方式，不打印 token 或原始 env。若用户显式配置多条 `launch_methods`，脚本会按顺序测试并标出最终选中的可用命令；未配置时保持单 `bin` 行为。`methods[]` 也会展示其他检测项，例如 `ow-claude` wrapper 文件存在但未配置为 provider bin 时只显示为候选，不会被误判成 provider 可发送。示例：
+- `claude_readiness_smoke.py`：Claude provider readiness 真实诊断脚本。它直接调用当前源码的 `ClaudeAdapter.check_readiness(force=True)`，可真实读取本机 `claude auth status` 与当前进程 `ANTHROPIC_*` runtime env，并读取 OnlineWorker `config.yaml` 中 Claude provider 当前配置的 `bin` 与可选 `launch_methods`。输出只包含 `ready/source/reason/authMethod/detail/apiProvider/launchMethod` 与 `methods[]` 里的非敏感候选方式，不打印 token 或原始 env。若用户显式配置多条 `launch_methods`，脚本会按顺序测试并标出最终选中的可用命令；未配置时保持单 `bin` 行为。示例：
 
   ```bash
   python3 scripts/claude_readiness_smoke.py

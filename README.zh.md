@@ -165,48 +165,6 @@ OnlineWorker 会把 provider 审批和问题提示统一呈现在 App / Telegram
 链路中。Codex 审批只接受 app-server server request，Telegram 按钮点击后
 通过 `reply_server_request(...)` 回写该 request。
 
-### Codex 文本发送
-
-文明模式已暂时关闭，App 和 Telegram 都会原样发送用户输入。相关设置入口
-不会在 App 中展示。
-
-### Codex Unix remote proxy
-
-Codex 使用 `protocol: unix` 时，OnlineWorker 会在 Codex app-server 之外再
-启动一个受管理的本地 Unix socket proxy：
-
-```bash
-unix://~/Library/Application Support/OnlineWorker/codex_remote_proxy.sock
-```
-
-外部 Codex CLI 需要连接这个 OnlineWorker proxy，而不是直接连接 Codex
-默认 app-server socket。推荐本机 alias：
-
-```bash
-alias codexR='/opt/homebrew/bin/codex --remote "unix://$HOME/Library/Application Support/OnlineWorker/codex_remote_proxy.sock" --cd "$(pwd)"'
-```
-
-固定 session 诊断时建议显式 resume，避免创建额外 session：
-
-```bash
-/opt/homebrew/bin/codex resume --remote "unix://$HOME/Library/Application Support/OnlineWorker/codex_remote_proxy.sock" --cd "$(pwd)" <session-id>
-```
-
-`--remote unix://` 会连接 Codex 默认 socket
-`~/.codex/app-server-control/app-server-control.sock`，它会绕过 OnlineWorker；
-这种连接只能让 OnlineWorker 看到 session 状态变化，拿不到需要回复的
-approval server request，因此 Telegram 按钮不能接管审批。
-
-OnlineWorker proxy 会：
-
-- 转发 Codex CLI 与上游 app-server 的 remote 消息；
-- 捕获 `execCommandApproval`、`applyPatchApproval` 和 `item/*/requestApproval`；
-- 将已绑定 session 的审批推送到对应 Telegram topic；
-- 根据 Telegram 按钮结果回写上游 app-server；
-- 找不到 session/topic 或 Telegram 上下文不可用时，透传给原生 CLI 审批兜底。
-
-proxy socket 和其父目录会分别设置为 `0600` / `0700`，限制在当前用户范围内。
-
 ### 会话操作
 
 Sessions 页面支持浏览、发送消息、按 Active/Archived 过滤，以及归档具体会话。归档是 provider-backed 操作：OnlineWorker 会先调用 provider 的真实归档路径，成功后才更新本地状态；如果 provider 返回失败，本地会话状态保持不变。

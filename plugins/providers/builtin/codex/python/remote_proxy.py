@@ -16,8 +16,6 @@ import websockets
 import websockets.exceptions
 
 from config import default_data_dir, get_data_dir
-from core.user_messages.contracts import UserMessageSendRequest
-from core.user_messages.gateway import prepare_user_message_text
 from plugins.providers.builtin.codex.python.approval_policy import (
     NOTICE_REMOTE_PROXY_CONTROL,
     SOURCE_REMOTE_PROXY,
@@ -34,8 +32,6 @@ from plugins.providers.builtin.codex.python.transport import (
 
 logger = logging.getLogger(__name__)
 
-CODEX_REMOTE_TEXT_METHODS = {"turn/start", "turn/steer"}
-CODEX_REMOTE_TEXT_TYPES = {"text"}
 CODEX_THREAD_COLLECTION_METHODS = {"thread/list", "thread/search"}
 CODEX_THREAD_LIST_METHOD = "thread/list"
 CODEX_APP_SERVER_RESOLVED_METHOD = "serverRequest/resolved"
@@ -272,82 +268,6 @@ class _ProxyApprovalRace:
         return True
 
 
-async def rewrite_codex_remote_client_message(
-    state,
-    raw: str,
-) -> tuple[str, bool]:
-    try:
-        payload = json.loads(raw)
-    except Exception:
-        return raw, False
-
-    if not isinstance(payload, dict):
-        return raw, False
-
-    method = str(payload.get("method") or "")
-    if method not in CODEX_REMOTE_TEXT_METHODS:
-        return raw, False
-
-    params = payload.get("params")
-    if not isinstance(params, dict):
-        return raw, False
-
-    input_items = params.get("input")
-    if not isinstance(input_items, list):
-        return raw, False
-
-    thread_id = _extract_thread_id(params)
-    workspace_id = _extract_cwd(params) or thread_id
-    changed = False
-
-    for item in input_items:
-        if not isinstance(item, dict):
-            continue
-        if item.get("type") not in CODEX_REMOTE_TEXT_TYPES:
-            continue
-        if item.get("text_elements"):
-            logger.info(
-                "[codex-remote-proxy] 跳过带 text_elements 的用户输入，避免破坏 UI span method=%s thread=%s",
-                method,
-                thread_id[:12],
-            )
-            continue
-        text = item.get("text")
-        if not isinstance(text, str):
-            continue
-
-        result = await prepare_user_message_text(
-            state,
-            UserMessageSendRequest(
-                source="codex_remote_proxy",
-                provider_id="codex",
-                workspace_id=workspace_id,
-                thread_id=thread_id,
-                text=text,
-                attachments=[],
-                metadata={
-                    "codex_remote_method": method,
-                    "app_server_proxy": True,
-                },
-            ),
-        )
-        if not result.changed:
-            continue
-        item["text"] = result.text
-        changed = True
-        logger.info(
-            "[codex-remote-proxy] 已改写 Codex CLI 用户输入 method=%s thread=%s before_len=%s after_len=%s",
-            method,
-            thread_id[:12],
-            len(text),
-            len(result.text),
-        )
-
-    if not changed:
-        return raw, False
-    return _json_dumps(payload), True
-
-
 class CodexRemoteMessageProxy:
     """Local proxy for Codex remote clients.
 
@@ -551,10 +471,6 @@ class CodexRemoteMessageProxy:
                 )
                 if suppress_client_response:
                     continue
-                outbound, _changed = await rewrite_codex_remote_client_message(
-                    self.state,
-                    message,
-                )
                 outbound = self._maybe_rewrite_thread_list_request(outbound, context)
             async with context.upstream_send_lock:
                 await upstream.send(outbound)
