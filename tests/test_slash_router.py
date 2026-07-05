@@ -758,6 +758,70 @@ async def test_list_threads_excludes_inactive_codex_state_only_placeholders(monk
 
 
 @pytest.mark.asyncio
+async def test_list_threads_excludes_inactive_claude_state_only_placeholders(monkeypatch):
+    from bot.handlers.thread import make_list_thread_handler
+
+    state = _build_state(tool="claude")
+    ws = state.storage.workspaces["claude:onlineWorker"]
+    ws.path = "/Users/wxy/Projects/FrciblyK12"
+    ws.threads["app:claude:placeholder"] = ThreadInfo(
+        thread_id="app:claude:placeholder",
+        topic_id=None,
+        preview="新建会话",
+        archived=False,
+        is_active=False,
+        source="app",
+    )
+    ws.threads["tid-real-1"] = ThreadInfo(
+        thread_id="tid-real-1",
+        topic_id=101,
+        preview="真实会话 1",
+        archived=False,
+        is_active=True,
+        source="provider",
+    )
+
+    monkeypatch.setattr(
+        "bot.handlers.thread.list_provider_threads",
+        lambda tool_name, workspace_path, limit=20: [
+            {"id": "tid-real-1", "preview": "真实会话 1", "createdAt": 300, "updatedAt": 300},
+            {"id": "tid-real-2", "preview": "真实会话 2", "createdAt": 200, "updatedAt": 200},
+        ],
+    )
+    monkeypatch.setattr(
+        "bot.handlers.thread._list_provider_local_threads",
+        lambda tool_name, workspace_path, limit=20: [],
+    )
+    monkeypatch.setattr(
+        "bot.handlers.thread.reconcile_workspace_threads_with_source",
+        lambda state_arg, ws_arg: ({"tid-real-1", "tid-real-2"}, False),
+    )
+    monkeypatch.setattr(
+        "bot.handlers.thread._list_provider_subagent_thread_ids",
+        lambda tool_name, thread_ids: set(),
+    )
+
+    update = MagicMock()
+    update.effective_message = MagicMock()
+    update.effective_message.message_thread_id = 50
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock(return_value=MagicMock(message_id=901))
+
+    handler = make_list_thread_handler(state, GROUP_CHAT_ID)
+    await handler(update, ctx)
+
+    sent = ctx.bot.send_message.await_args.kwargs["text"]
+    assert "真实会话 1" in sent
+    assert "真实会话 2" in sent
+    assert "新建会话" not in sent
+    reply_markup = ctx.bot.send_message.await_args.kwargs["reply_markup"]
+    button_texts = [button.text for row in reply_markup.inline_keyboard for button in row]
+    assert button_texts == ["✅ 真实会话 1", "📌 真实会话 2"]
+
+
+@pytest.mark.asyncio
 async def test_slash_router_new_from_thread_topic_creates_separate_provider_thread(monkeypatch):
     from bot.handlers import thread as thread_module
     from bot.handlers.slash import make_slash_command_handler
@@ -831,6 +895,72 @@ async def test_slash_router_new_from_thread_topic_creates_separate_provider_thre
 
 
 @pytest.mark.asyncio
+async def test_slash_router_new_from_thread_topic_creates_claude_provider_thread(monkeypatch):
+    from bot.handlers import thread as thread_module
+    from bot.handlers.slash import make_slash_command_handler
+
+    state = _build_state(tool="claude")
+    ws = state.storage.workspaces["claude:onlineWorker"]
+    ws.threads["current-thread"] = ThreadInfo(
+        thread_id="current-thread",
+        topic_id=100,
+        archived=False,
+        preview="current session",
+    )
+
+    adapter = MagicMock()
+    adapter.connected = True
+    adapter.start_thread = AsyncMock(return_value={"id": "claude-new-thread-1"})
+    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.send_user_message = AsyncMock(return_value={})
+    state.set_adapter("claude", adapter)
+
+    send_thread_control_panel = AsyncMock()
+    monkeypatch.setattr(
+        thread_module,
+        "send_thread_control_panel",
+        send_thread_control_panel,
+    )
+    monkeypatch.setattr(thread_module, "save_storage", lambda storage: None)
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.message_id = 511
+    update.effective_message.text = "/new Explain this project"
+    update.effective_message.caption = None
+    update.effective_message.photo = None
+    update.effective_message.message_thread_id = 100
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.create_forum_topic = AsyncMock(return_value=MagicMock(message_thread_id=200))
+    ctx.bot.send_message = AsyncMock(return_value=MagicMock(message_id=923))
+    ctx.args = None
+
+    handler = make_slash_command_handler(state, GROUP_CHAT_ID, state.config)
+    await handler(update, ctx)
+
+    adapter.start_thread.assert_awaited_once_with("claude:onlineWorker")
+    adapter.resume_thread.assert_not_awaited()
+    adapter.send_user_message.assert_awaited_once_with(
+        "claude:onlineWorker",
+        "claude-new-thread-1",
+        "Explain this project",
+    )
+    assert adapter.send_user_message.await_args.args[1] != "current-thread"
+
+    ctx.bot.create_forum_topic.assert_awaited_once()
+    assert ws.threads["claude-new-thread-1"].topic_id == 200
+    assert ws.threads["claude-new-thread-1"].preview == "Explain this project"
+
+    send_thread_control_panel.assert_awaited_once()
+    panel_call = send_thread_control_panel.await_args
+    assert panel_call.args[4].thread_id == "claude-new-thread-1"
+    assert panel_call.kwargs["topic_id"] == 200
+
+
+@pytest.mark.asyncio
 async def test_slash_router_new_without_text_rejects_codex_in_source_thread_topic(monkeypatch):
     from bot.handlers import thread as thread_module
     from bot.handlers.slash import make_slash_command_handler
@@ -866,6 +996,59 @@ async def test_slash_router_new_without_text_rejects_codex_in_source_thread_topi
     ctx.bot = MagicMock()
     ctx.bot.create_forum_topic = AsyncMock(return_value=MagicMock(message_thread_id=200))
     ctx.bot.send_message = AsyncMock(return_value=MagicMock(message_id=921))
+    ctx.args = None
+
+    handler = make_slash_command_handler(state, GROUP_CHAT_ID, state.config)
+    await handler(update, ctx)
+
+    adapter.start_thread.assert_not_awaited()
+    adapter.resume_thread.assert_not_awaited()
+    adapter.send_user_message.assert_not_awaited()
+    ctx.bot.create_forum_topic.assert_not_awaited()
+
+    ctx.bot.send_message.assert_awaited_once()
+    sent = ctx.bot.send_message.await_args.kwargs
+    assert sent["message_thread_id"] == 100
+    assert "不能创建空 thread" in sent["text"]
+    assert "/new <初始消息>" in sent["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_router_new_without_text_rejects_claude_in_source_thread_topic(monkeypatch):
+    from bot.handlers import thread as thread_module
+    from bot.handlers.slash import make_slash_command_handler
+
+    state = _build_state(tool="claude")
+    ws = state.storage.workspaces["claude:onlineWorker"]
+    ws.threads["current-thread"] = ThreadInfo(
+        thread_id="current-thread",
+        topic_id=100,
+        archived=False,
+        preview="current session",
+    )
+
+    adapter = MagicMock()
+    adapter.connected = True
+    adapter.start_thread = AsyncMock(return_value={"id": "should-not-start"})
+    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.send_user_message = AsyncMock(return_value={})
+    state.set_adapter("claude", adapter)
+
+    monkeypatch.setattr(thread_module, "save_storage", lambda storage: None)
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.message_id = 512
+    update.effective_message.text = "/new"
+    update.effective_message.caption = None
+    update.effective_message.photo = None
+    update.effective_message.message_thread_id = 100
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.create_forum_topic = AsyncMock(return_value=MagicMock(message_thread_id=200))
+    ctx.bot.send_message = AsyncMock(return_value=MagicMock(message_id=924))
     ctx.args = None
 
     handler = make_slash_command_handler(state, GROUP_CHAT_ID, state.config)

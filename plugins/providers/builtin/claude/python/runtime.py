@@ -182,6 +182,15 @@ def new_imported_thread_source() -> str:
     return "imported"
 
 
+def validate_new_thread(state, ws, initial_text: str | None) -> str | None:
+    if not initial_text:
+        return (
+            "claude 当前不能创建空 thread。\n"
+            "请使用 `/new <初始消息>`，这样 Claude CLI 才会通过首条消息创建真实 session。"
+        )
+    return None
+
+
 def build_approval_reply(approval, action: str) -> tuple[str, dict]:
     if action == "exec_deny":
         return "❌ 已拒绝", {"behavior": "deny"}

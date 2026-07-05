@@ -70,7 +70,10 @@ def create_provider_descriptor() -> ProviderDescriptor:
             read_thread_history=_read_thread_history,
             query_active_thread_ids=_query_active_thread_ids,
             query_running_thread_ids=_query_running_thread_ids,
-            include_state_only_thread=lambda thread_info: str(getattr(thread_info, "source", "") or "").strip().lower() == "app",
+            include_state_only_thread=lambda thread_info: (
+                str(getattr(thread_info, "source", "") or "").strip().lower() == "app"
+                and bool(getattr(thread_info, "is_active", False))
+            ),
             thread_list_is_authoritative=True,
             preserve_archived_threads=True,
         ),
@@ -102,6 +105,7 @@ def create_provider_descriptor() -> ProviderDescriptor:
         thread_hooks=ProviderThreadHooks(
             resolve_adapter=resolve_default_thread_adapter,
             new_imported_thread_source=runtime.new_imported_thread_source,
+            validate_new_thread=runtime.validate_new_thread,
             activate_new_thread=activate_default_new_thread,
             archive_thread=archive_default_thread,
             interrupt_thread=interrupt_default_thread,

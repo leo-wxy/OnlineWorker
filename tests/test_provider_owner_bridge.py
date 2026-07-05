@@ -1188,6 +1188,57 @@ async def test_provider_owner_bridge_start_session_message_uses_provider_thread_
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_start_session_message_creates_claude_thread(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+    from plugins.providers.builtin.claude.python.provider import create_provider_descriptor
+
+    class _FakeAdapter:
+        connected = True
+
+        def __init__(self):
+            self.registered = []
+            self.start_thread = AsyncMock(return_value={"id": "claude-new-thread"})
+            self.send_user_message = AsyncMock(return_value={})
+
+        def register_workspace_cwd(self, workspace_id: str, cwd: str) -> None:
+            self.registered.append((workspace_id, cwd))
+
+    adapter = _FakeAdapter()
+    state = AppState(storage=AppStorage())
+    state.set_adapter("claude", adapter)
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: create_provider_descriptor() if name == "claude" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_start_session_message(
+        {
+            "provider_id": "claude",
+            "workspace_dir": "/tmp/project-a",
+            "text": "first message",
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["accepted"] is True
+    assert response["thread_id"] == "claude-new-thread"
+    assert response["created_new_thread"] is True
+    adapter.start_thread.assert_awaited_once_with("claude:/tmp/project-a")
+    adapter.send_user_message.assert_awaited_once_with(
+        "claude:/tmp/project-a",
+        "claude-new-thread",
+        "first message",
+    )
+    assert adapter.registered == [("claude:/tmp/project-a", "/tmp/project-a")]
+
+    ws = state.storage.workspaces["claude:/tmp/project-a"]
+    assert ws.threads["claude-new-thread"].thread_id == "claude-new-thread"
+    assert ws.threads["claude-new-thread"].preview == "first message"
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_keeps_text_before_registry_message_hooks_while_rewrite_is_sealed(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
