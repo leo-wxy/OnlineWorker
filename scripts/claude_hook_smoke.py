@@ -63,14 +63,12 @@ def _resolve_bridge_python() -> str:
     return str(Path(sys.executable))
 
 
-def _cleanup_claude_smoke_session(session_id: str, preview: str) -> dict[str, Any]:
+def _cleanup_claude_smoke_session(session_id: str) -> dict[str, Any]:
     return cleanup_smoke_session(
         provider_id="claude",
         session_id=session_id,
         workspace_dir=str(REPO_ROOT),
-        preview=preview,
         data_dir=Path.home() / "Library/Application Support/OnlineWorker",
-        prefer_real_archive=False,
     )
 
 
@@ -301,10 +299,7 @@ async def run_permission_write_downloads(args: argparse.Namespace) -> int:
             for step in plan["runs"]:
                 step["target"].unlink(missing_ok=True)
         try:
-            cleanup_result = _cleanup_claude_smoke_session(
-                session_id,
-                "onlineworker claude hook smoke approval",
-            )
+            cleanup_result = _cleanup_claude_smoke_session(session_id)
         except Exception as exc:
             cleanup_error = exc
 
@@ -410,10 +405,7 @@ async def run_multiselect_bridge(args: argparse.Namespace) -> int:
         await adapter.disconnect()
         shutil.rmtree(data_dir, ignore_errors=True)
         try:
-            cleanup_result = _cleanup_claude_smoke_session(
-                session_id,
-                "onlineworker claude hook smoke ask",
-            )
+            cleanup_result = _cleanup_claude_smoke_session(session_id)
         except Exception as exc:
             cleanup_error = exc
 

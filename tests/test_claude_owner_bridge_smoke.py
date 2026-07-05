@@ -28,7 +28,7 @@ def test_run_smoke_cleans_up_session(monkeypatch, tmp_path):
 
     def fake_cleanup(**kwargs):
         cleanup_calls.append(kwargs)
-        return {"ok": True, "strategy": "local-overlay"}
+        return {"ok": True, "strategy": "real-archive"}
 
     monkeypatch.setattr(module, "_request", fake_request)
     monkeypatch.setattr(module, "_contains_assistant_marker", lambda _session, _marker: True)
@@ -54,4 +54,4 @@ def test_run_smoke_cleans_up_session(monkeypatch, tmp_path):
     assert cleanup_calls
     assert cleanup_calls[0]["provider_id"] == "claude"
     assert cleanup_calls[0]["workspace_dir"] == str(tmp_path)
-    assert result["cleanup"]["strategy"] == "local-overlay"
+    assert result["cleanup"]["strategy"] == "real-archive"

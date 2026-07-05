@@ -60,7 +60,6 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
     session_id = str(uuid.uuid4())
     marker = f"{args.marker_prefix}{session_id.split('-', 1)[0]}"
     text = f"Reply exactly: {marker}"
-    cleanup_preview = "onlineworker claude owner bridge smoke"
     cleanup_result: dict[str, Any] | None = None
     smoke_error: Exception | None = None
 
@@ -123,10 +122,8 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
             provider_id=args.provider,
             session_id=session_id,
             workspace_dir=workspace,
-            preview=cleanup_preview,
             data_dir=DEFAULT_DATA_DIR,
             socket_path=socket_path,
-            prefer_real_archive=True,
         )
     except Exception as exc:
         cleanup_error = exc
