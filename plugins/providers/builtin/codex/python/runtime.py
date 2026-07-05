@@ -1176,6 +1176,12 @@ async def send_message(
     has_photo: bool,
     attachments=None,
 ) -> None:
+    from plugins.providers.builtin.codex.python.tui_realtime_mirror import (
+        seed_codex_watch_baseline,
+        watch_codex_thread,
+    )
+
+    seed_codex_watch_baseline(state, ws_info, thread_info.thread_id)
     codex_state.mark_send_started(state, thread_info.thread_id)
     state.mark_provider_task_summary("codex", thread_info.thread_id, text)
     if attachments:
@@ -1185,8 +1191,10 @@ async def send_message(
             text,
             attachments=attachments,
         )
+        watch_codex_thread(state, ws_info, thread_info.thread_id)
         return
     await adapter.send_user_message(ws_info.daemon_workspace_id, thread_info.thread_id, text)
+    watch_codex_thread(state, ws_info, thread_info.thread_id)
 
 
 def resolve_thread_adapter(state, ws):
@@ -1221,7 +1229,14 @@ async def activate_new_thread(
     thread_id: str,
     initial_text: str | None,
 ) -> None:
+    from plugins.providers.builtin.codex.python.tui_realtime_mirror import (
+        seed_codex_watch_baseline,
+        watch_codex_thread,
+    )
+
+    seed_codex_watch_baseline(state, ws, thread_id)
     await adapter.send_user_message(workspace_id, thread_id, initial_text)
+    watch_codex_thread(state, ws, thread_id)
 
 
 async def archive_thread(state, ws, thread_id: str, active_adapter) -> None:

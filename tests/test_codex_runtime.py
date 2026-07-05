@@ -539,6 +539,116 @@ async def test_prepare_send_does_not_resume_imported_thread_before_send(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_send_message_watches_codex_transcript_after_tg_send(monkeypatch):
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    thread_info = ThreadInfo(
+        thread_id="thread-imported",
+        topic_id=206,
+        preview="历史导入会话",
+        archived=False,
+        is_active=True,
+        source="imported",
+    )
+    ws.threads["thread-imported"] = thread_info
+    storage.workspaces["codex:onlineWorker"] = ws
+    state = AppState(storage=storage)
+
+    adapter = MagicMock()
+    adapter.send_user_message = AsyncMock(return_value={})
+    seeded = []
+    watched = []
+
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_realtime_mirror.seed_codex_watch_baseline",
+        lambda state_arg, ws_arg, thread_id_arg: seeded.append((state_arg, ws_arg, thread_id_arg)),
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_realtime_mirror.watch_codex_thread",
+        lambda state_arg, ws_arg, thread_id_arg: watched.append((state_arg, ws_arg, thread_id_arg)),
+    )
+
+    await codex_runtime.send_message(
+        state,
+        adapter,
+        ws,
+        thread_info,
+        update=SimpleNamespace(),
+        context=SimpleNamespace(),
+        group_chat_id=1,
+        src_topic_id=206,
+        text="今天是几号？",
+        has_photo=False,
+    )
+
+    adapter.send_user_message.assert_awaited_once_with(
+        "codex:onlineWorker",
+        "thread-imported",
+        "今天是几号？",
+    )
+    assert seeded == [(state, ws, "thread-imported")]
+    assert watched == [(state, ws, "thread-imported")]
+
+
+@pytest.mark.asyncio
+async def test_activate_new_thread_watches_codex_transcript(monkeypatch):
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    thread_info = ThreadInfo(
+        thread_id="new-thread-1",
+        topic_id=206,
+        preview="Explain this project",
+        archived=False,
+        is_active=True,
+        source="app",
+    )
+    ws.threads["new-thread-1"] = thread_info
+    storage.workspaces["codex:onlineWorker"] = ws
+    state = AppState(storage=storage)
+
+    adapter = MagicMock()
+    adapter.send_user_message = AsyncMock(return_value={})
+    seeded = []
+    watched = []
+
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_realtime_mirror.seed_codex_watch_baseline",
+        lambda state_arg, ws_arg, thread_id_arg: seeded.append((state_arg, ws_arg, thread_id_arg)),
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_realtime_mirror.watch_codex_thread",
+        lambda state_arg, ws_arg, thread_id_arg: watched.append((state_arg, ws_arg, thread_id_arg)),
+    )
+
+    await codex_runtime.activate_new_thread(
+        state,
+        adapter,
+        ws,
+        "codex:onlineWorker",
+        "new-thread-1",
+        "Explain this project",
+    )
+
+    adapter.send_user_message.assert_awaited_once_with(
+        "codex:onlineWorker",
+        "new-thread-1",
+        "Explain this project",
+    )
+    assert seeded == [(state, ws, "new-thread-1")]
+    assert watched == [(state, ws, "new-thread-1")]
+
+
+@pytest.mark.asyncio
 async def test_prepare_send_does_not_resume_app_owned_thread_before_send(monkeypatch):
     ws = WorkspaceInfo(
         name="onlineWorker",

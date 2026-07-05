@@ -23,6 +23,7 @@ def _append_response_item(
     text: str,
     timestamp: str,
     turn_id: str = "",
+    passthrough_turn_id: str = "",
 ) -> None:
     content_type = "input_text" if role == "user" else "output_text"
     record = {
@@ -36,6 +37,10 @@ def _append_response_item(
     }
     if turn_id:
         record["payload"]["turn_id"] = turn_id
+    if passthrough_turn_id:
+        record["payload"]["internal_chat_message_metadata_passthrough"] = {
+            "turn_id": passthrough_turn_id,
+        }
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -316,6 +321,44 @@ async def test_sync_watched_thread_once_emits_commentary_and_final_events(tmp_pa
     assert bot.edit_message_text.await_count >= 1
     assert watch.idle_polls == 0
     assert watch.poll_interval_seconds == 0.5
+
+
+@pytest.mark.asyncio
+async def test_sync_watched_thread_once_reads_codex_internal_turn_id(tmp_path):
+    from plugins.providers.builtin.codex.python.tui_realtime_mirror import (
+        sync_watched_thread_once,
+        watch_codex_thread,
+    )
+
+    state, ws, session_file, sessions_dir = _make_state(tmp_path)
+    handler = AsyncMock()
+
+    _append_response_item(
+        session_file,
+        role="assistant",
+        phase="final_answer",
+        text="最终回复",
+        timestamp="2026-04-06T10:00:10Z",
+        passthrough_turn_id="turn-from-internal",
+    )
+
+    watch_codex_thread(state, ws, "tid-1", ttl_seconds=120)
+    watch = codex_state.get_runtime(state).watched_threads["tid-1"]
+    watch.session_file = str(session_file)
+
+    await sync_watched_thread_once(
+        state,
+        handler,
+        "tid-1",
+        watch,
+        sessions_dir=str(sessions_dir),
+    )
+
+    methods = [call.args[1]["message"]["method"] for call in handler.await_args_list]
+    assert methods == ["turn/started", "item/completed", "turn/completed"]
+    for call in handler.await_args_list:
+        params = call.args[1]["message"]["params"]
+        assert params["turnId"] == "turn-from-internal"
 
 
 @pytest.mark.asyncio

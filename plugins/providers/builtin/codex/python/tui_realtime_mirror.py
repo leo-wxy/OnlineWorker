@@ -607,7 +607,16 @@ def _parse_response_item(line: str) -> Optional[dict]:
         return None
 
     payload = obj.get("payload", {})
-    turn_id = str(payload.get("turn_id") or payload.get("turnId") or "").strip()
+    passthrough = payload.get("internal_chat_message_metadata_passthrough")
+    if not isinstance(passthrough, dict):
+        passthrough = {}
+    turn_id = str(
+        payload.get("turn_id")
+        or payload.get("turnId")
+        or passthrough.get("turn_id")
+        or passthrough.get("turnId")
+        or ""
+    ).strip()
     text = ""
     content_items = payload.get("content")
     if not isinstance(content_items, list):
