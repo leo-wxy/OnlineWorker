@@ -1411,7 +1411,7 @@ async def test_message_handler_in_app_shared_unix_mode_uses_app_adapter_for_tg_m
 
 
 @pytest.mark.asyncio
-async def test_codex_tui_host_remote_url_uses_unix_endpoint_through_remote_proxy():
+async def test_codex_tui_host_remote_url_uses_unix_endpoint_directly():
     from plugins.providers.builtin.codex.python import tui_bridge
 
     cfg = Config(
@@ -1443,8 +1443,8 @@ async def test_codex_tui_host_remote_url_uses_unix_endpoint_through_remote_proxy
             cfg.get_tool("codex"),
         )
 
-    assert remote_url == "unix:///tmp/onlineworker-proxy.sock"
-    proxy_mock.assert_awaited_once_with(state, "unix:///tmp/onlineworker-codex.sock")
+    assert remote_url == "unix:///tmp/onlineworker-codex.sock"
+    proxy_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio

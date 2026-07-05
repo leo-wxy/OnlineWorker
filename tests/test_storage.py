@@ -555,7 +555,7 @@ def test_query_codex_running_thread_ids_includes_recent_jsonl_open_turn(tmp_path
     assert query_codex_running_thread_ids("/tmp/workspace") == {"jsonl-active"}
 
 
-def test_list_codex_sessions_merges_sqlite_jsonl_and_running_state(tmp_path, monkeypatch):
+def test_list_codex_sessions_prefers_sqlite_thread_index(tmp_path, monkeypatch):
     db_path = tmp_path / "state_5.sqlite"
     conn = sqlite3.connect(db_path)
     conn.execute(
@@ -679,15 +679,11 @@ def test_list_codex_sessions_merges_sqlite_jsonl_and_running_state(tmp_path, mon
 
     result = list_codex_sessions(limit=20)
 
-    assert [item["id"] for item in result] == [
-        "jsonl-running",
-        "jsonl-only",
-        "sqlite-active",
-    ]
-    assert result[0]["providerActive"] is True
-    assert result[0]["title"] == "Running task"
-    assert result[1]["title"] == "JSONL only task"
-    assert result[2]["title"] == "SQLite thread"
+    assert [item["id"] for item in result] == ["sqlite-active"]
+    assert result[0]["providerActive"] is False
+    assert result[0]["title"] == "SQLite thread"
+    assert result[0]["source"] == "vscode"
+    assert result[0]["rolloutPath"] == "rollout"
     assert all(item["workspace"] == "/tmp/workspace" for item in result)
 
 

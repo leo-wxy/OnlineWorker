@@ -303,7 +303,7 @@ def _query_codex_active_thread_rows_by_workspace() -> tuple[dict[str, set[str]],
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
-            SELECT id, title, created_at, updated_at, source, cwd
+            SELECT id, title, created_at, updated_at, source, cwd, rollout_path
             FROM threads
             WHERE archived = 0
             ORDER BY created_at DESC
@@ -327,6 +327,8 @@ def _query_codex_active_thread_rows_by_workspace() -> tuple[dict[str, set[str]],
                 "preview": row["title"] or None,
                 "createdAt": row["created_at"] or 0,
                 "updatedAt": row["updated_at"] or 0,
+                "source": row["source"] or "",
+                "rolloutPath": row["rollout_path"] or "",
             }
         )
     return active_ids_by_workspace, rows_by_workspace
@@ -430,11 +432,19 @@ def _read_codex_session_meta(fpath: str) -> Optional[dict]:
     }
 
 
-def _codex_session_file_has_open_turn(fpath: str) -> bool:
+def _codex_session_file_has_open_turn(fpath: str, *, max_tail_bytes: int = 262_144) -> bool:
     current_turn_id: Optional[str] = None
     try:
-        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
+        with open(fpath, "rb") as raw:
+            try:
+                size = os.path.getsize(fpath)
+            except OSError:
+                size = 0
+            if size > max_tail_bytes:
+                raw.seek(size - max_tail_bytes)
+                raw.readline()
+            data = raw.read().decode("utf-8", errors="ignore")
+            for line in data.splitlines():
                 line = line.strip()
                 if not line:
                     continue
@@ -989,11 +999,19 @@ def list_codex_sessions(
     limit: int = 100,
     sessions_dir: Optional[str] = None,
 ) -> list[dict]:
-    index = _build_codex_session_index(sessions_dir)
-    workspace_counts = dict(index.get("workspace_counts", {}))
-    threads_by_workspace = dict(index.get("threads_by_workspace", {}))
-    running_ids_by_workspace = dict(index.get("running_ids_by_workspace", {}))
     active_ids_by_workspace, sqlite_threads_by_workspace = _query_codex_active_thread_rows_by_workspace()
+    if not sqlite_threads_by_workspace:
+        index = _build_codex_session_index(sessions_dir)
+        workspace_counts = dict(index.get("workspace_counts", {}))
+        threads_by_workspace = dict(index.get("threads_by_workspace", {}))
+        running_ids_by_workspace = dict(index.get("running_ids_by_workspace", {}))
+    else:
+        workspace_counts = {
+            workspace: len(rows)
+            for workspace, rows in sqlite_threads_by_workspace.items()
+        }
+        threads_by_workspace = {}
+        running_ids_by_workspace = {}
     workspaces = sorted(
         set(workspace_counts) | set(threads_by_workspace) | set(active_ids_by_workspace) | set(sqlite_threads_by_workspace),
         key=lambda item: (
@@ -1031,6 +1049,10 @@ def list_codex_sessions(
                     int(existing.get("updatedAt") or 0),
                     int(item.get("updatedAt") or 0),
                 )
+                if not existing.get("source"):
+                    existing["source"] = item.get("source")
+                if not existing.get("rolloutPath"):
+                    existing["rolloutPath"] = item.get("rolloutPath")
 
         running_ids = set(running_ids_by_workspace.get(workspace_path, set()))
         merged_items = list(merged_by_id.values())
@@ -1046,15 +1068,21 @@ def list_codex_sessions(
             thread_id = str(item.get("id") or "").strip()
             if not thread_id:
                 continue
+            rollout_path = str(item.get("rolloutPath") or "").strip()
+            provider_active = thread_id in running_ids
+            if not provider_active and rollout_path:
+                provider_active = _codex_session_file_has_open_turn(rollout_path)
             session_rows.append(
                 {
                     "id": thread_id,
                     "title": str(item.get("preview") or thread_id).strip() or thread_id,
                     "workspace": workspace_path,
                     "archived": bool(active_ids) and thread_id not in active_ids,
-                    "providerActive": thread_id in running_ids,
+                    "providerActive": provider_active,
                     "updatedAt": int(item.get("updatedAt") or 0),
                     "createdAt": int(item.get("createdAt") or 0),
+                    "source": str(item.get("source") or "").strip(),
+                    "rolloutPath": rollout_path,
                 }
             )
 

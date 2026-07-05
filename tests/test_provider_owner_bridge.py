@@ -1428,7 +1428,7 @@ async def test_provider_owner_bridge_passes_original_text_to_owner_bridge_router
 
 
 @pytest.mark.asyncio
-async def test_provider_owner_bridge_session_tab_bypasses_owner_bridge_router(monkeypatch, tmp_path):
+async def test_provider_owner_bridge_session_tab_routes_provider_thread_through_owner_bridge(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
     class _FakeAdapter:
@@ -1471,14 +1471,25 @@ async def test_provider_owner_bridge_session_tab_bypasses_owner_bridge_router(mo
             "workspace_dir": "/tmp/project-a",
         }
     )
-    if bridge._pending_send_tasks:
-        await asyncio.gather(*tuple(bridge._pending_send_tasks))
 
-    assert response["ok"] is True
-    assert response["accepted"] is True
-    route_send.assert_not_awaited()
-    provider.message_hooks.prepare_send.assert_awaited_once()
-    provider.message_hooks.send.assert_awaited_once()
+    assert response == {
+        "ok": True,
+        "accepted": True,
+        "provider_id": "overlay-tool",
+        "thread_id": "tid-cli",
+        "requested_thread_id": "tid-cli",
+        "remapped": False,
+        "workspace_id": "overlay-tool:/tmp/project-a",
+        "transport": "owned_visible_cli",
+    }
+    route_send.assert_awaited_once_with(
+        state,
+        storage.workspaces["overlay-tool:/tmp/project-a"],
+        storage.workspaces["overlay-tool:/tmp/project-a"].threads["tid-cli"],
+        text="hello from session tab",
+    )
+    provider.message_hooks.prepare_send.assert_not_awaited()
+    provider.message_hooks.send.assert_not_awaited()
 
 
 @pytest.mark.asyncio

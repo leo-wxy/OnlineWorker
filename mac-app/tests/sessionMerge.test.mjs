@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { mergeSessionTurns, overlayPendingUserTurn } from "../src/utils/sessionTurnMerge.js";
+import {
+  mergeSessionTurns,
+  overlayLocalUserTurns,
+  overlayPendingUserTurn,
+} from "../src/utils/sessionTurnMerge.js";
 
 test("mergeSessionTurns removes stale pending assistant when final snapshot arrives", () => {
   const existing = [
@@ -116,4 +120,30 @@ test("overlayPendingUserTurn ignores non-user-terminal activity states", () => {
   });
 
   assert.deepEqual(next, []);
+});
+
+test("overlayLocalUserTurns keeps a sent user message before the new assistant snapshot", () => {
+  const next = overlayLocalUserTurns(
+    [
+      { role: "user", content: "old question", displayMode: "plain" },
+      { role: "assistant", content: "old answer", displayMode: "markdown" },
+      { role: "assistant", content: "new answer", displayMode: "markdown" },
+    ],
+    [
+      {
+        content: "OW_FIX_VERIFY_2201 ok",
+        afterAssistantCount: 1,
+      },
+    ],
+  );
+
+  assert.deepEqual(
+    next.map((turn) => [turn.role, turn.content]),
+    [
+      ["user", "old question"],
+      ["assistant", "old answer"],
+      ["user", "OW_FIX_VERIFY_2201 ok"],
+      ["assistant", "new answer"],
+    ],
+  );
 });

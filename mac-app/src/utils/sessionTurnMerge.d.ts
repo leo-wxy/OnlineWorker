@@ -13,3 +13,11 @@ export function overlayPendingUserTurn(
   turns: SessionTurn[],
   raw: Record<string, unknown>,
 ): SessionTurn[];
+
+export function overlayLocalUserTurns(
+  turns: SessionTurn[],
+  localTurns: Array<{
+    content?: string | null;
+    afterAssistantCount?: number | null;
+  }>,
+): SessionTurn[];

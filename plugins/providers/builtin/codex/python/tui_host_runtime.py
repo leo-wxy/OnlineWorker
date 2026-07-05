@@ -19,6 +19,8 @@ from plugins.providers.builtin.codex.python.storage_runtime import list_codex_th
 
 logger = logging.getLogger(__name__)
 
+TUI_HOST_STARTUP_GRACE_SECONDS = 1.5
+
 
 def build_codex_resume_command(
     *,
@@ -80,6 +82,8 @@ def build_codex_tui_child_env(
     env["PWD"] = cwd
     env["CODEX_THREAD_ID"] = thread_id
     env["ONLINEWORKER_CODEX_TUI_HOST"] = "1"
+    if not str(env.get("TERM") or "").strip() or str(env.get("TERM") or "").strip().lower() == "dumb":
+        env["TERM"] = "xterm-256color"
     return env
 
 
@@ -180,6 +184,7 @@ class CodexTuiHost:
         self._server: Optional[asyncio.AbstractServer] = None
         self._master_fd: Optional[int] = None
         self._child_pid: Optional[int] = None
+        self._child_exit_code: Optional[int] = None
         self._pump_task: Optional[asyncio.Task] = None
         self._status_task: Optional[asyncio.Task] = None
 
@@ -218,11 +223,17 @@ class CodexTuiHost:
             os.execvp(cmd[0], cmd)
 
         self._child_pid = child_pid
+        self._child_exit_code = None
         self._master_fd = master_fd
         self._server = await asyncio.start_unix_server(self._handle_client, path=self.socket_path)
         self._pump_task = asyncio.create_task(self._pump_terminal_output(), name="codex-tui-host-pump")
         self._status_task = asyncio.create_task(self._status_loop(), name="codex-tui-host-status")
         await self._write_status()
+        await asyncio.sleep(TUI_HOST_STARTUP_GRACE_SECONDS)
+        if not self.is_running:
+            exit_code = self._child_exit_code
+            detail = f" exit={exit_code}" if exit_code is not None else ""
+            raise RuntimeError(f"codex TUI host 启动后已退出{detail}")
 
     async def stop(self) -> None:
         if self._status_task and not self._status_task.done():
@@ -309,7 +320,7 @@ class CodexTuiHost:
                 "active_thread_id": self.thread_id,
             }
 
-        if self._master_fd is None or self._child_pid is None:
+        if self._master_fd is None or not self.is_running:
             return {
                 "ok": False,
                 "error": "codex TUI host 未运行",
@@ -339,7 +350,7 @@ class CodexTuiHost:
     async def _write_status(self, *, force_offline: bool = False) -> None:
         child_alive = False
         if not force_offline and self._child_pid is not None:
-            child_alive = self._child_alive(self._child_pid)
+            child_alive = self.is_running
 
         payload = {
             "online": child_alive and self._server is not None,
@@ -355,13 +366,13 @@ class CodexTuiHost:
 
     @property
     def is_running(self) -> bool:
-        return self._child_pid is not None and self._child_alive(self._child_pid)
+        return self._child_pid is not None and self._reap_child_exit() is None and self._child_alive(self._child_pid)
 
     async def _pump_terminal_output(self) -> None:
         if self._master_fd is None:
             return
 
-        while self._child_pid is not None and self._child_alive(self._child_pid):
+        while self.is_running:
             try:
                 data = await asyncio.to_thread(os.read, self._master_fd, 4096)
             except OSError:
@@ -378,15 +389,34 @@ class CodexTuiHost:
 
     async def _wait_for_child_exit(self) -> int:
         while self._child_pid is not None:
-            pid, status = os.waitpid(self._child_pid, os.WNOHANG)
-            if pid == self._child_pid:
-                if os.WIFEXITED(status):
-                    return os.WEXITSTATUS(status)
-                if os.WIFSIGNALED(status):
-                    return 128 + os.WTERMSIG(status)
-                return 1
+            exit_code = self._reap_child_exit()
+            if exit_code is not None:
+                return exit_code
             await asyncio.sleep(0.5)
-        return 0
+        return self._child_exit_code if self._child_exit_code is not None else 0
+
+    def _reap_child_exit(self) -> Optional[int]:
+        child_pid = self._child_pid
+        if child_pid is None:
+            return self._child_exit_code
+        try:
+            pid, status = os.waitpid(child_pid, os.WNOHANG)
+        except ChildProcessError:
+            self._child_pid = None
+            if self._child_exit_code is None:
+                self._child_exit_code = 0
+            return self._child_exit_code
+        if pid != child_pid:
+            return None
+        if os.WIFEXITED(status):
+            exit_code = os.WEXITSTATUS(status)
+        elif os.WIFSIGNALED(status):
+            exit_code = 128 + os.WTERMSIG(status)
+        else:
+            exit_code = 1
+        self._child_pid = None
+        self._child_exit_code = exit_code
+        return exit_code
 
     @staticmethod
     def _child_alive(pid: int) -> bool:

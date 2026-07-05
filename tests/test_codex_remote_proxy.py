@@ -4,6 +4,7 @@ import os
 import stat
 import uuid
 from types import SimpleNamespace
+from urllib.parse import quote
 from unittest.mock import AsyncMock
 
 import pytest
@@ -24,6 +25,14 @@ from plugins.providers.builtin.codex.python.remote_proxy import (
 def test_codex_remote_proxy_default_unix_url_uses_data_dir(tmp_path):
     assert default_codex_remote_proxy_url(str(tmp_path)) == (
         f"unix://{tmp_path / CODEX_REMOTE_PROXY_SOCKET_NAME}"
+    )
+
+
+def test_codex_remote_proxy_default_unix_url_quotes_spaces():
+    data_dir = "/Users/example/Library/Application Support/OnlineWorker"
+
+    assert default_codex_remote_proxy_url(data_dir) == (
+        f"unix://{quote(f'{data_dir}/{CODEX_REMOTE_PROXY_SOCKET_NAME}', safe='/')}"
     )
 
 

@@ -1651,7 +1651,7 @@ class ProviderOwnerBridge:
 
         source = str(request.get("source") or "session_tab")
         owner_bridge_router = getattr(message_hooks, "try_route_owner_bridge_send", None)
-        if callable(owner_bridge_router) and not attachments and source != "session_tab":
+        if callable(owner_bridge_router) and not attachments:
             route_result = await owner_bridge_router(
                 self.state,
                 ws_info,

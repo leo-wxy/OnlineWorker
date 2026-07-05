@@ -78,6 +78,60 @@ export function overlayPendingUserTurn(turns, raw) {
   ]);
 }
 
+function completedAssistantCountBefore(turns, index) {
+  let count = 0;
+  for (let cursor = 0; cursor < index; cursor += 1) {
+    const turn = turns[cursor];
+    if (turn?.role === "assistant" && turn.pending !== true && normalizedString(turn.content)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function insertLocalUserTurn(turns, localTurn) {
+  const content = normalizedString(localTurn?.content);
+  if (!content) {
+    return turns;
+  }
+  const userTurn = {
+    role: "user",
+    content,
+    displayMode: "plain",
+  };
+  if (turns.some((turn) => turn?.role === "user" && isSameLogicalTurn(turn, userTurn))) {
+    return turns;
+  }
+
+  const afterAssistantCount = Math.max(0, Number(localTurn?.afterAssistantCount) || 0);
+  let insertIndex = turns.length;
+  for (let index = 0; index < turns.length; index += 1) {
+    const turn = turns[index];
+    if (
+      turn?.role === "assistant"
+      && turn.pending !== true
+      && normalizedString(turn.content)
+      && completedAssistantCountBefore(turns, index) >= afterAssistantCount
+    ) {
+      insertIndex = index;
+      break;
+    }
+  }
+
+  return [
+    ...turns.slice(0, insertIndex),
+    userTurn,
+    ...turns.slice(insertIndex),
+  ];
+}
+
+export function overlayLocalUserTurns(turns, localTurns) {
+  if (!Array.isArray(localTurns) || localTurns.length === 0) {
+    return turns;
+  }
+  return limitSessionTurns(localTurns.reduce(insertLocalUserTurn, turns));
+}
+
 export function mergeSessionTurns(existing, incoming) {
   if (incoming.length === 0) {
     return existing;

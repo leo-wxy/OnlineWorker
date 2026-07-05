@@ -311,6 +311,8 @@ async def _resolve_codex_tui_host_remote_url(state: AppState, tool_cfg: ToolConf
     upstream_url = _resolve_codex_remote_upstream_url(state, tool_cfg)
     if not upstream_url:
         return None
+    if upstream_url.startswith("unix://"):
+        return upstream_url
     try:
         return await ensure_codex_remote_message_proxy(state, upstream_url)
     except Exception:

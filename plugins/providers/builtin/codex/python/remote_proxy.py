@@ -10,7 +10,7 @@ import struct
 import subprocess
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import websockets
 import websockets.exceptions
@@ -95,7 +95,8 @@ def _state_data_dir(state) -> str:
 
 def default_codex_remote_proxy_url(data_dir: str | None = None) -> str:
     root = os.path.abspath(os.path.expanduser(str(data_dir or default_data_dir())))
-    return f"unix://{os.path.join(root, CODEX_REMOTE_PROXY_SOCKET_NAME)}"
+    socket_path = os.path.join(root, CODEX_REMOTE_PROXY_SOCKET_NAME)
+    return f"unix://{quote(socket_path, safe='/')}"
 
 
 def _harden_unix_socket_permissions(socket_path: str) -> None:

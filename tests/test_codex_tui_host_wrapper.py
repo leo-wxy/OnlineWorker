@@ -1,4 +1,5 @@
 import pytest
+import os
 from plugins.providers.builtin.codex.python.tui_host_runtime import (
     build_codex_resume_command,
     build_codex_tui_child_env,
@@ -85,6 +86,22 @@ def test_codex_tui_host_extra_args_do_not_duplicate_explicit_approval_reviewer()
     ]
 
 
+def test_codex_tui_host_does_not_treat_reaped_child_as_running(tmp_path, monkeypatch):
+    host = CodexTuiHost(
+        data_dir=str(tmp_path),
+        thread_id="tid-1",
+        cwd="/Users/example/Projects/onlineWorker",
+        codex_bin="codex",
+    )
+    host._child_pid = 1234
+
+    monkeypatch.setattr(os, "waitpid", lambda pid, flags: (1234, 0))
+
+    assert host.is_running is False
+    assert host._child_pid is None
+    assert host._child_exit_code == 0
+
+
 def test_build_codex_tui_child_env_marks_owned_thread_and_cwd():
     env = build_codex_tui_child_env(
         base_env={"PATH": "/usr/bin", "PWD": "/tmp/old"},
@@ -107,6 +124,16 @@ def test_build_codex_tui_child_env_preserves_parent_environment_values():
 
     assert env["PATH"] == "/usr/bin"
     assert env["HOME"] == "/Users/example"
+
+
+def test_build_codex_tui_child_env_replaces_dumb_terminal():
+    env = build_codex_tui_child_env(
+        base_env={"PATH": "/usr/bin", "TERM": "dumb"},
+        cwd="/Users/example/Projects/onlineWorker",
+        thread_id="tid-1",
+    )
+
+    assert env["TERM"] == "xterm-256color"
 
 
 def test_encode_terminal_input_wraps_message_and_enter():

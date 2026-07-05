@@ -32,6 +32,7 @@ import {
   FOREGROUND_REPLY_POLL,
   limitSessionTurns,
   mergeSessionTurns,
+  overlayLocalUserTurns,
   overlayPendingUserTurn,
   SessionChatHeader,
   SessionComposer,
@@ -93,6 +94,7 @@ export function GenericProviderChat({
   const liveStreamReadyRef = useRef(false);
   const hasLoadedRef = useRef(false);
   const pendingScrollBehaviorRef = useRef<ScrollBehavior>("auto");
+  const localUserTurnsRef = useRef<Array<{ content: string; afterAssistantCount: number }>>([]);
   const pendingUserMessage = typeof activeSession.raw?.lastUserMessage === "string"
     ? activeSession.raw.lastUserMessage.trim()
     : typeof activeSession.raw?.last_user_message === "string"
@@ -122,8 +124,16 @@ export function GenericProviderChat({
     setMessages(nextMessages);
   }, []);
 
+  const overlayVisibleUserTurns = useCallback((turns: SessionTurn[], raw = sessionOverlayRaw) => {
+    return overlayPendingUserTurn(
+      overlayLocalUserTurns(turns, localUserTurnsRef.current),
+      raw,
+    );
+  }, [pendingEventKind, pendingUserMessage]);
+
   useEffect(() => {
     liveStreamReadyRef.current = false;
+    localUserTurnsRef.current = [];
     setActiveSession(session);
   }, [session.id, session.type, session.workspace]);
 
@@ -157,7 +167,7 @@ export function GenericProviderChat({
     setError(null);
     try {
       const turns = await fetchProviderSession(activeSession.type, activeSession.id, activeSession.workspace);
-      const nextTurns = overlayPendingUserTurn(turns, sessionOverlayRaw);
+      const nextTurns = overlayVisibleUserTurns(turns);
       const overlayed = nextTurns !== turns;
       applyMessages(nextTurns, "auto");
       hasLoadedRef.current = true;
@@ -173,8 +183,7 @@ export function GenericProviderChat({
     activeSession.workspace,
     applyMessages,
     mode,
-    pendingEventKind,
-    pendingUserMessage,
+    overlayVisibleUserTurns,
   ]);
 
   const refreshMessagesSilently = useCallback(async () => {
@@ -183,7 +192,7 @@ export function GenericProviderChat({
     }
     try {
       const turns = await fetchProviderSession(activeSession.type, activeSession.id, activeSession.workspace);
-      const nextTurns = overlayPendingUserTurn(turns, sessionOverlayRaw);
+      const nextTurns = overlayVisibleUserTurns(turns);
       const overlayed = nextTurns !== turns;
       hasLoadedRef.current = true;
       if (!hasSessionSnapshotChanged(messagesRef.current, nextTurns)) {
@@ -205,8 +214,7 @@ export function GenericProviderChat({
     activeSession.workspace,
     applyMessages,
     mode,
-    pendingEventKind,
-    pendingUserMessage,
+    overlayVisibleUserTurns,
   ]);
 
   useEffect(() => {
@@ -223,11 +231,15 @@ export function GenericProviderChat({
     return () => {
       replyWatchTokenRef.current += 1;
     };
-  }, [active, loadMessages, refreshMessagesSilently, cancelReplyWatch]);
+    // Only reset reply polling when the visible session identity changes.
+    // Metadata updates from the same send can arrive while the final assistant
+    // snapshot is still being indexed; canceling here would leave the UI stuck
+    // in background-wait until a manual reload.
+  }, [active, activeSession.id, activeSession.type, activeSession.workspace, mode]);
 
   useEffect(() => {
     liveRefreshBlockedRef.current =
-      loading || sending || (replyWatchState !== null && replyWatchState !== "expired");
+      loading || sending;
   }, [loading, sending, replyWatchState]);
 
   useEffect(() => {
@@ -287,11 +299,11 @@ export function GenericProviderChat({
       intervalMs: 3000,
       getCurrentSnapshot: () => messagesRef.current,
       loadSnapshot: async () => {
-        return overlayPendingUserTurn(await fetchProviderSession(
+        return overlayVisibleUserTurns(await fetchProviderSession(
           activeSession.type,
           activeSession.id,
           activeSession.workspace,
-        ), sessionOverlayRaw);
+        ));
       },
       onSnapshot: (snapshot) => {
         const overlayed = Boolean(
@@ -318,6 +330,7 @@ export function GenericProviderChat({
     mode,
     pendingEventKind,
     pendingUserMessage,
+    overlayVisibleUserTurns,
   ]);
 
   const handleSend = async (trimmedText: string, nextAttachments: ComposerAttachment[]) => {
@@ -338,13 +351,20 @@ export function GenericProviderChat({
     const replyWatchToken = replyWatchTokenRef.current + 1;
     replyWatchTokenRef.current = replyWatchToken;
     const shouldContinue = () => replyWatchTokenRef.current === replyWatchToken;
+    const baselineAssistantCount = countAssistantEntries(previousMessages);
+    const localUserTurn = {
+      content: trimmedText,
+      afterAssistantCount: baselineAssistantCount,
+    };
+    localUserTurnsRef.current = [
+      ...localUserTurnsRef.current.filter((turn) => turn.content !== trimmedText),
+      localUserTurn,
+    ];
 
     setSending(true);
     setError(null);
     applyMessages(optimisticMessages, "smooth");
     setReplyWatchState("foreground");
-
-    const baselineAssistantCount = countAssistantEntries(previousMessages);
 
     try {
       const sendResult = mode === "new-session"
@@ -401,7 +421,7 @@ export function GenericProviderChat({
           currentSession.id,
           currentSession.workspace,
         );
-        const overlaySnapshot = overlayPendingUserTurn(snapshot, {
+        const overlaySnapshot = overlayVisibleUserTurns(snapshot, {
           lastUserMessage: trimmedText,
           lastEventKind: "message.user.accepted",
         });
@@ -409,9 +429,6 @@ export function GenericProviderChat({
         const nextSnapshot = shouldMergeSnapshot
           ? mergeSessionTurns(previousMessages, overlaySnapshot)
           : overlaySnapshot;
-        if (shouldContinue()) {
-          messagesRef.current = nextSnapshot;
-        }
         return nextSnapshot;
       };
       const applySnapshot = (snapshot: SessionTurn[]) => {
@@ -466,6 +483,7 @@ export function GenericProviderChat({
     } catch (sendError) {
       cancelReplyWatch();
       setError((sendError as Error).message);
+      localUserTurnsRef.current = localUserTurnsRef.current.filter((turn) => turn !== localUserTurn);
       applyMessages(previousMessages, "auto");
       return false;
     } finally {

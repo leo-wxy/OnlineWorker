@@ -3,13 +3,20 @@ import type { ComposerAttachment, SessionTurn } from "../../types";
 import {
   limitSessionTurns,
   mergeSessionTurns,
+  overlayLocalUserTurns,
   overlayPendingUserTurn,
   SESSION_BROWSER_VISIBLE_TURNS,
 } from "../../utils/sessionTurnMerge.js";
 import { StatePanel } from "./presentation";
 import { SessionMarkdown } from "./SessionMarkdown";
 
-export { limitSessionTurns, mergeSessionTurns, overlayPendingUserTurn, SESSION_BROWSER_VISIBLE_TURNS };
+export {
+  limitSessionTurns,
+  mergeSessionTurns,
+  overlayLocalUserTurns,
+  overlayPendingUserTurn,
+  SESSION_BROWSER_VISIBLE_TURNS,
+};
 
 function AssistantAvatar({ label }: { label: string }) {
   return (

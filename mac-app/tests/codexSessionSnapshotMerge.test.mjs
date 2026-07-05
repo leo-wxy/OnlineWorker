@@ -26,7 +26,8 @@ test("provider session view loads codex through generic provider session reads",
 
   assert.match(genericChat, /const turns = await fetchProviderSession\(activeSession\.type, activeSession\.id, activeSession\.workspace\)/);
   assert.match(genericChat, /const sessionOverlayRaw = \{\s*lastUserMessage: pendingUserMessage,\s*lastEventKind: pendingEventKind,\s*\};/s);
-  assert.match(genericChat, /overlayPendingUserTurn\(turns,\s*sessionOverlayRaw\)/);
+  assert.match(genericChat, /const overlayVisibleUserTurns = useCallback/);
+  assert.match(genericChat, /overlayPendingUserTurn\(\s*overlayLocalUserTurns\(turns, localUserTurnsRef\.current\),\s*raw,\s*\)/s);
   assert.match(genericChat, /enabled: active && mode !== "new-session" && Boolean\(activeSession\.id\)/);
   assert.match(genericChat, /usesExtendedReplyPolling/);
   assert.doesNotMatch(genericChat, /fetchCodexThreadState/);
@@ -44,13 +45,30 @@ test("provider session view keeps snapshot refresh active after the live stream 
   assert.match(genericChat, /const \[loading, setLoading\] = useState\(true\)/);
   assert.match(
     genericChat,
+    /liveRefreshBlockedRef\.current\s*=\s*loading \|\| sending;/,
+  );
+  assert.doesNotMatch(
+    genericChat,
     /liveRefreshBlockedRef\.current\s*=\s*loading \|\| sending \|\| \(replyWatchState !== null && replyWatchState !== "expired"\)/,
+  );
+  assert.doesNotMatch(
+    genericChat,
+    /liveRefreshBlockedRef\.current\s*=\s*loading \|\| sending \|\| replyWatchState === "foreground"/,
   );
   assert.match(
     genericChat,
-    /return overlayPendingUserTurn\(\s*await fetchProviderSession\(\s*activeSession\.type,\s*activeSession\.id,\s*activeSession\.workspace,\s*\),\s*sessionOverlayRaw\s*\);/s,
+    /Only reset reply polling when the visible session identity changes\./,
+  );
+  assert.match(
+    genericChat,
+    /\}, \[active, activeSession\.id, activeSession\.type, activeSession\.workspace, mode\]\);/,
+  );
+  assert.match(
+    genericChat,
+    /return overlayVisibleUserTurns\(await fetchProviderSession\(\s*activeSession\.type,\s*activeSession\.id,\s*activeSession\.workspace,\s*\)\);/s,
   );
   assert.doesNotMatch(genericChat, /return mergeSessionTurns\(messagesRef\.current, turns\)/);
+  assert.doesNotMatch(genericChat, /messagesRef\.current = nextSnapshot;/);
   assert.doesNotMatch(genericChat, /setMessages\(\[\]\)/);
   assert.match(genericChat, /const overlayed = nextTurns !== turns;/);
   assert.match(
@@ -75,7 +93,7 @@ test("session browser only uses smooth scroll for user-authored appends", () => 
   assert.match(genericChat, /endRef\.current\?\.scrollIntoView\(\{ behavior \}\);/);
   assert.match(
     genericChat,
-    /const overlaySnapshot = overlayPendingUserTurn\(\s*snapshot,\s*\{\s*lastUserMessage: trimmedText,\s*lastEventKind: "message.user.accepted",\s*\}\s*\);/s,
+    /const overlaySnapshot = overlayVisibleUserTurns\(\s*snapshot,\s*\{\s*lastUserMessage: trimmedText,\s*lastEventKind: "message.user.accepted",\s*\}\s*\);/s,
   );
   assert.match(genericChat, /applyMessages\(optimisticMessages,\s*"smooth"\);/);
   assert.doesNotMatch(genericChat, /scrollIntoView\(\{ behavior: "smooth" \}\)/);

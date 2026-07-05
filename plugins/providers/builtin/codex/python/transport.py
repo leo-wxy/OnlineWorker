@@ -1,7 +1,7 @@
 import os
 import socket
 import stat
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 
 DEFAULT_CODEX_UNIX_SOCKET = os.path.join(
@@ -40,7 +40,7 @@ def resolve_unix_socket_path(url: str) -> str:
 
     if not path:
         return os.path.join(default_codex_home(), DEFAULT_CODEX_UNIX_SOCKET)
-    return os.path.abspath(os.path.expanduser(path))
+    return os.path.abspath(os.path.expanduser(unquote(path)))
 
 
 def _unix_socket_accepting(path: str, timeout: float = 0.1) -> bool:
