@@ -683,6 +683,81 @@ async def test_slash_router_routes_workspace_fallback_command_from_thread_topic(
 
 
 @pytest.mark.asyncio
+async def test_list_threads_excludes_inactive_codex_state_only_placeholders(monkeypatch):
+    from bot.handlers.thread import make_list_thread_handler
+
+    state = _build_state(tool="codex")
+    ws = state.storage.workspaces["codex:onlineWorker"]
+    ws.path = "/Users/wxy/Projects/FrciblyK12"
+    ws.threads["app:codex:placeholder"] = ThreadInfo(
+        thread_id="app:codex:placeholder",
+        topic_id=None,
+        preview="新建会话",
+        archived=False,
+        is_active=False,
+        source="app",
+    )
+    ws.threads["draft:codex:1783173401561"] = ThreadInfo(
+        thread_id="draft:codex:1783173401561",
+        topic_id=None,
+        preview=None,
+        archived=False,
+        is_active=False,
+        source="app",
+    )
+    ws.threads["tid-real-1"] = ThreadInfo(
+        thread_id="tid-real-1",
+        topic_id=101,
+        preview="真实会话 1",
+        archived=False,
+        is_active=True,
+        source="provider",
+    )
+
+    monkeypatch.setattr(
+        "bot.handlers.thread.list_provider_threads",
+        lambda tool_name, workspace_path, limit=20: [
+            {"id": "tid-real-1", "preview": "真实会话 1", "createdAt": 300, "updatedAt": 300},
+            {"id": "tid-real-2", "preview": "真实会话 2", "createdAt": 200, "updatedAt": 200},
+            {"id": "tid-real-3", "preview": "真实会话 3", "createdAt": 100, "updatedAt": 100},
+        ],
+    )
+    monkeypatch.setattr(
+        "bot.handlers.thread._list_provider_local_threads",
+        lambda tool_name, workspace_path, limit=20: [],
+    )
+    monkeypatch.setattr(
+        "bot.handlers.thread.reconcile_workspace_threads_with_source",
+        lambda state_arg, ws_arg: ({"tid-real-1", "tid-real-2", "tid-real-3"}, False),
+    )
+    monkeypatch.setattr(
+        "bot.handlers.thread._list_provider_subagent_thread_ids",
+        lambda tool_name, thread_ids: set(),
+    )
+
+    update = MagicMock()
+    update.effective_message = MagicMock()
+    update.effective_message.message_thread_id = 50
+
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock(return_value=MagicMock(message_id=901))
+
+    handler = make_list_thread_handler(state, GROUP_CHAT_ID)
+    await handler(update, ctx)
+
+    sent = ctx.bot.send_message.await_args.kwargs["text"]
+    assert "真实会话 1" in sent
+    assert "真实会话 2" in sent
+    assert "真实会话 3" in sent
+    assert "新建会话" not in sent
+    assert "1783173401561" not in sent
+    reply_markup = ctx.bot.send_message.await_args.kwargs["reply_markup"]
+    button_texts = [button.text for row in reply_markup.inline_keyboard for button in row]
+    assert button_texts == ["✅ 真实会话 1", "📌 真实会话 2", "📌 真实会话 3"]
+
+
+@pytest.mark.asyncio
 async def test_slash_router_new_from_thread_topic_creates_separate_provider_thread(monkeypatch):
     from bot.handlers import thread as thread_module
     from bot.handlers.slash import make_slash_command_handler

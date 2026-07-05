@@ -92,6 +92,7 @@ async def test_workspace_overview_revives_stale_archived_active_thread(monkeypat
         GROUP_CHAT_ID,
         ws,
         "codex",
+        active_ids={"tid-1"},
     )
 
     args = send_mock.await_args.args
@@ -241,6 +242,59 @@ async def test_workspace_overview_for_claude_only_shows_provider_local_threads(m
 
 
 @pytest.mark.asyncio
+async def test_workspace_overview_only_builds_topic_buttons_for_active_threads(monkeypatch):
+    from bot.handlers.workspace import _send_workspace_thread_overview
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3230,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-active"] = ThreadInfo(
+        thread_id="tid-active",
+        topic_id=None,
+        preview="当前活跃任务",
+        archived=False,
+        is_active=True,
+    )
+    ws.threads["tid-inactive"] = ThreadInfo(
+        thread_id="tid-inactive",
+        topic_id=None,
+        preview="旧会话",
+        archived=False,
+        is_active=False,
+    )
+    state = AppState(storage=storage)
+    storage.workspaces["codex:onlineWorker"] = ws
+
+    send_mock = AsyncMock()
+    monkeypatch.setattr("bot.handlers.workspace._send_to_group", send_mock)
+
+    await _send_workspace_thread_overview(
+        state,
+        MagicMock(),
+        GROUP_CHAT_ID,
+        ws,
+        "codex",
+        active_ids={"tid-active"},
+    )
+
+    args = send_mock.await_args.args
+    kwargs = send_mock.await_args.kwargs
+    text = args[2]
+    assert "Active (1):" in text
+    assert "当前活跃任务" in text
+    assert "Inactive (1):" in text
+    assert "旧会话" in text
+    reply_markup = kwargs["reply_markup"]
+    button_texts = [button.text for row in reply_markup.inline_keyboard for button in row]
+    assert button_texts == ["📌 当前活跃任务"]
+
+
+@pytest.mark.asyncio
 async def test_open_workspace_uses_provider_workspace_hooks_for_custom_provider(monkeypatch):
     from bot.handlers.workspace import _open_workspace
     from config import ToolConfig
@@ -383,6 +437,64 @@ async def test_thread_open_uses_latest_codex_title_for_topic_name(monkeypatch):
     call_kwargs = bot.create_forum_topic.await_args.kwargs
     assert call_kwargs["name"] == "[codex/onlineWorker] latest title from sqlite"
     assert ws.threads["tid-1234567890abcdef"].preview == "latest title from sqlite"
+
+
+@pytest.mark.asyncio
+async def test_thread_open_rejects_inactive_thread_without_creating_topic(monkeypatch):
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3230,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-inactive"] = ThreadInfo(
+        thread_id="tid-inactive",
+        topic_id=None,
+        preview="旧会话",
+        archived=False,
+        is_active=False,
+    )
+    storage.workspaces["codex:onlineWorker"] = ws
+    state = AppState(storage=storage)
+
+    handler = make_thread_open_callback_handler(state, GROUP_CHAT_ID)
+
+    bot = MagicMock()
+    bot.create_forum_topic = AsyncMock()
+    bot.send_message = AsyncMock()
+
+    query = MagicMock()
+    query.data = make_thread_open_callback_data("codex:onlineWorker", "tid-inactive")
+    query.answer = AsyncMock()
+    query.get_bot.return_value = bot
+
+    update = MagicMock(callback_query=query)
+    context = MagicMock()
+
+    monkeypatch.setattr(
+        "bot.handlers.workspace.list_provider_threads",
+        lambda tool_name, path, limit=100: [],
+    )
+    monkeypatch.setattr(
+        "bot.handlers.workspace._list_provider_local_threads",
+        lambda tool_name, path, limit=100: [],
+    )
+    monkeypatch.setattr(
+        "bot.handlers.workspace.query_provider_active_thread_ids",
+        lambda tool_name, path: set(),
+    )
+    monkeypatch.setattr(
+        "bot.handlers.workspace.save_storage",
+        lambda storage_obj: None,
+    )
+
+    await handler.callback(update, context)
+
+    bot.create_forum_topic.assert_not_awaited()
+    assert query.answer.await_count >= 1
+    assert "inactive thread" in query.answer.await_args.args[0]
 
 
 @pytest.mark.asyncio

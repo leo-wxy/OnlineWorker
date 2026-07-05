@@ -869,6 +869,22 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                 await query.answer("⚠️ 该 thread 已归档，请重新 /list 或新建 thread", show_alert=True)
                 return
 
+        try:
+            active_thread_ids = query_provider_active_thread_ids(ws_info.tool, ws_info.path)
+        except Exception as e:
+            logger.debug("[thread_open] 查询 active thread 失败，使用本地状态判断：%s", e)
+            active_thread_ids = set()
+        if full_tid in active_thread_ids:
+            thread_info.is_active = True
+            if storage:
+                save_storage(storage)
+        elif not bool(getattr(thread_info, "is_active", False)):
+            thread_info.is_active = False
+            if storage:
+                save_storage(storage)
+            await query.answer("⚠️ inactive thread 不再创建 Topic，请用 /new 开启新会话", show_alert=True)
+            return
+
         # 并发保护：同一 thread 同时只允许一个创建/验证流程
         if full_tid in _creating_topics:
             await query.answer("⏳ 正在处理中，请稍候", show_alert=False)
@@ -1288,9 +1304,9 @@ async def _send_workspace_thread_overview(
 
     overview_text = "\n".join(lines)
 
-    # 所有非归档 thread 都生成按钮（已有 topic 的点击后会验证而非重建）
+    # 只允许 active thread 打开/创建 topic；inactive 仅在文本区展示。
     buttons = []
-    for item in display_threads:
+    for item in active_threads:
         tid = item["id"]
         label = item["preview"] or f"thread-{tid[-8:]}"
         icon = "✅" if item["topic_id"] else "📌"

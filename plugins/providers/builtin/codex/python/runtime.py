@@ -505,7 +505,10 @@ def build_approval_reply(approval, action: str) -> tuple[str, dict]:
 
 
 def include_state_only_thread(thread_info) -> bool:
-    return str(getattr(thread_info, "source", "") or "unknown").strip().lower() == "app"
+    return (
+        str(getattr(thread_info, "source", "") or "unknown").strip().lower() == "app"
+        and bool(getattr(thread_info, "is_active", False))
+    )
 
 
 def thread_control_intro_extra(thread_id: str, state_text: str) -> str:
