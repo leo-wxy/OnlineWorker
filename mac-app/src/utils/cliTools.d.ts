@@ -18,7 +18,7 @@ export interface CliInstallInfo {
   docsUrl?: string;
 }
 
-export interface CliCheckerTexts {
+export interface CliToolTexts {
   installViaNpm: string;
   installViaOfficialInstaller: string;
   installManually: (bin: string) => string;
@@ -31,6 +31,6 @@ export function buildSetupCliToolsFromProviderMetadata(
 export function getCliInstallInfo(
   toolName: string,
   bin: string,
-  texts: CliCheckerTexts,
+  texts: CliToolTexts,
   install?: ProviderMetadata["install"] | null
 ): CliInstallInfo;
