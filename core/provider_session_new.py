@@ -7,6 +7,7 @@ from core.messages.publishing import (
     publish_user_message_submitted,
 )
 from core.providers.registry import get_provider
+from core.providers.thread_result import extract_started_thread_id
 from core.storage import ThreadInfo, WorkspaceInfo
 from core.user_messages.contracts import UserMessageSendRequest
 
@@ -22,15 +23,6 @@ class StartedProviderThread:
 class SentProviderThreadMessage:
     thread_id: str
     text: str
-
-
-def extract_started_thread_id(result: object) -> str:
-    thread_id = result.get("id") if isinstance(result, dict) else None
-    if not thread_id and isinstance(result, dict):
-        thread = result.get("thread", {})
-        if isinstance(thread, dict):
-            thread_id = thread.get("id")
-    return str(thread_id or "").strip()
 
 
 def _new_thread_info(thread_id: str, *, source: str) -> ThreadInfo:

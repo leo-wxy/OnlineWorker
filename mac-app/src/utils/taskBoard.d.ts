@@ -78,8 +78,6 @@ export interface TaskBoardModel {
 
 export function isLowSignalTaskBoardText(value: unknown): boolean;
 
-export function taskBoardActivityKey(activity: TaskBoardSessionActivity): string;
-
 export function taskBoardSessionKey(providerId: string, sessionId: string): string;
 
 export function upsertTaskBoardActivity(

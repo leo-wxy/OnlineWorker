@@ -197,16 +197,6 @@ export interface AppTexts {
     botIdentity: (username: string, firstName: string) => string;
     groupIdentity: (title: string, chatType: string, forumBadge: string) => string;
   };
-  cliChecker: {
-    title: string;
-    allInstalled: string;
-    missingCount: (count: number) => string;
-    installViaNpm: string;
-    installViaOfficialInstaller: string;
-    installManually: (bin: string) => string;
-    installInstructions: (label: string) => string;
-    docs: string;
-  };
   config: {
     yamlTab: string;
     envTab: string;

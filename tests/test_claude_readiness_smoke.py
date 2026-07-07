@@ -90,9 +90,8 @@ def test_claude_readiness_smoke_script_prints_sanitized_mock_result(tmp_path):
     assert methods["runtime_env"]["selected"] is False
     assert methods["runtime_env"]["detected"] is False
     assert methods["runtime_env"]["available"] is False
-    assert methods["ow_claude_wrapper"]["detected"] is True
-    assert methods["ow_claude_wrapper"]["available"] is False
-    assert methods["ow_claude_wrapper"]["selected"] is False
+    assert "ow_claude_wrapper" not in methods
+    assert methods["path_claude"]["selected"] is False
     assert "ANTHROPIC_AUTH_TOKEN" not in result.stdout
 
 

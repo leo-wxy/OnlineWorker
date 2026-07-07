@@ -33,25 +33,6 @@ async def ensure_default_connected(state, adapter, ws_info, *, update, context, 
     return adapter
 
 
-async def prepare_default_send(
-    state,
-    adapter,
-    ws_info,
-    thread_info,
-    *,
-    update,
-    context,
-    group_chat_id: int,
-    src_topic_id,
-    text,
-    has_photo: bool,
-    attachments=None,
-) -> bool:
-    workspace_id = ws_info.daemon_workspace_id
-    await adapter.resume_thread(workspace_id, thread_info.thread_id)
-    return True
-
-
 async def send_default_message(
     state,
     adapter,

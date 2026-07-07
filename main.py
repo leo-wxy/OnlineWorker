@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import fcntl
-import json
 import logging
 import logging.handlers
 import os
@@ -10,7 +9,6 @@ import time
 from telegram import Update
 from telegram.ext import (
     Application,
-    CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
     TypeHandler,
@@ -23,18 +21,9 @@ from core.state import AppState
 from core.storage import load_storage
 from core.lifecycle import LifecycleManager
 from bot.filters import WhitelistFilter
-from bot.handlers.common import (
-    make_start_handler, make_ping_handler, make_echo_handler,
-    make_status_handler, make_help_handler, make_active_handler,
-    make_restart_handler, make_stop_handler,
-)
 from bot.handlers.workspace import (
-    make_workspace_handler, make_ws_open_callback_handler, make_thread_open_callback_handler,
-    make_cli_handler, make_cli_callback_handler,
-)
-from bot.handlers.thread import (
-    make_new_thread_handler, make_list_thread_handler,
-    make_archive_thread_handler, make_skills_handler, make_history_handler,
+    make_ws_open_callback_handler, make_thread_open_callback_handler,
+    make_cli_callback_handler,
 )
 from bot.handlers.slash import make_slash_command_handler
 from bot.handlers.message import make_message_handler, make_callback_handler
@@ -84,102 +73,6 @@ def _telegram_httpx_kwargs(cfg) -> dict:
 
 MAX_RAPID_CRASHES = 5       # 连续快速崩溃上限
 RAPID_CRASH_WINDOW = 60     # 秒内崩溃算"快速崩溃"
-
-
-def _print_provider_session_bridge_result(payload: object) -> None:
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
-    sys.stdout.flush()
-
-
-def _run_provider_session_bridge(
-    provider_id: str,
-    operation: str,
-    *,
-    session_id: str | None = None,
-    workspace_dir: str | None = None,
-    limit: int = 50,
-    text: str | None = None,
-    attachments: list[dict] | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-) -> int:
-    from core.provider_session_bridge import (
-        archive_provider_session,
-        get_provider_usage_summary,
-        list_provider_session_rows,
-        read_provider_session_rows,
-        send_provider_session_message,
-    )
-
-    normalized_provider = str(provider_id or "").strip()
-    if not normalized_provider:
-        raise ValueError("provider_id is required")
-
-    normalized_operation = str(operation or "").strip().lower()
-    if normalized_operation == "list":
-        _print_provider_session_bridge_result(
-            list_provider_session_rows(normalized_provider, limit_per_workspace=limit)
-        )
-        return 0
-
-    if normalized_operation == "read":
-        normalized_session_id = str(session_id or "").strip()
-        if not normalized_session_id:
-            raise ValueError("session_id is required for read operation")
-        _print_provider_session_bridge_result(
-            read_provider_session_rows(
-                normalized_provider,
-                normalized_session_id,
-                limit=limit,
-                workspace_dir=workspace_dir,
-            )
-        )
-        return 0
-
-    if normalized_operation == "send":
-        normalized_session_id = str(session_id or "").strip()
-        if not normalized_session_id:
-            raise ValueError("session_id is required for send operation")
-        normalized_text = str(text or "").strip()
-        if not normalized_text and not attachments:
-            raise ValueError("text or attachments are required for send operation")
-        asyncio.run(
-            send_provider_session_message(
-                normalized_provider,
-                normalized_session_id,
-                normalized_text,
-                workspace_dir=workspace_dir,
-                attachments=attachments or [],
-            )
-        )
-        _print_provider_session_bridge_result({"ok": True})
-        return 0
-
-    if normalized_operation == "archive":
-        normalized_session_id = str(session_id or "").strip()
-        if not normalized_session_id:
-            raise ValueError("session_id is required for archive operation")
-        asyncio.run(
-            archive_provider_session(
-                normalized_provider,
-                normalized_session_id,
-                workspace_dir=workspace_dir,
-            )
-        )
-        _print_provider_session_bridge_result({"ok": True})
-        return 0
-
-    if normalized_operation == "usage":
-        _print_provider_session_bridge_result(
-            get_provider_usage_summary(
-                normalized_provider,
-                str(start_date or "").strip(),
-                str(end_date or "").strip(),
-            )
-        )
-        return 0
-
-    raise ValueError(f"unsupported provider session bridge operation: {operation}")
 
 
 async def _log_raw_update(update: Update, context) -> None:
@@ -258,18 +151,6 @@ def main() -> None:
     parser.add_argument("--codex-tui-remote", default=None)
     parser.add_argument("--codex-tui-bin", default="codex")
     parser.add_argument("--codex-tui-extra-arg", action="append", default=[])
-    parser.add_argument(
-        "--provider-session-bridge",
-        action="store_true",
-        help="Run once as provider session bridge and exit",
-    )
-    parser.add_argument("--provider-id", default=None)
-    parser.add_argument("--provider-session-op", default=None)
-    parser.add_argument("--provider-session-id", default=None)
-    parser.add_argument("--provider-workspace-dir", default=None)
-    parser.add_argument("--provider-start-date", default=None)
-    parser.add_argument("--provider-end-date", default=None)
-    parser.add_argument("--provider-limit", type=int, default=50)
     args, unknown_args = parser.parse_known_args()
 
     data_dir = args.data_dir or default_data_dir()
@@ -282,7 +163,7 @@ def main() -> None:
     if args.codex_hook_bridge:
         from plugins.providers.builtin.codex.python.hook_bridge import run_codex_hook_bridge_once
 
-        raise SystemExit(run_codex_hook_bridge_once(data_dir))
+        raise SystemExit(run_codex_hook_bridge_once())
     if args.codex_tui_host:
         from plugins.providers.builtin.codex.python.tui_host_runtime import run_codex_tui_host_once
 
@@ -300,19 +181,6 @@ def main() -> None:
                 )
             )
         )
-    if args.provider_session_bridge:
-        raise SystemExit(
-            _run_provider_session_bridge(
-                args.provider_id,
-                args.provider_session_op,
-                session_id=args.provider_session_id,
-                workspace_dir=args.provider_workspace_dir,
-                limit=args.provider_limit,
-                start_date=args.provider_start_date,
-                end_date=args.provider_end_date,
-            )
-        )
-
     # Resolve paths based on data_dir ----------------------------------------
     if data_dir:
         lock_file = os.path.join(data_dir, "onlineworker.lock")

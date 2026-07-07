@@ -203,7 +203,7 @@ class LifecycleManager:
         for tool_cfg in self.cfg.tools:
             if tool_cfg.name not in provider_names:
                 provider_names.append(tool_cfg.name)
-        for name in self.state.registered_adapter_names():
+        for name in getattr(self.state, "adapters", {}):
             if name not in provider_names:
                 provider_names.append(name)
         return provider_names

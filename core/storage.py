@@ -37,7 +37,6 @@ class WorkspaceInfo:
     daemon_workspace_id: Optional[str] = None
     header_message_id: Optional[int] = None
     threads: dict = field(default_factory=dict)
-    _legacy_active_thread_id: Optional[str] = field(default=None, repr=False)
 
 
 @dataclass
@@ -98,9 +97,6 @@ def _workspace_info_from_dict(storage_key: str, d: dict) -> WorkspaceInfo:
         header_message_id=d.get("header_message_id"),
         threads=threads,
     )
-    legacy_tid = d.get("active_thread_id")
-    if legacy_tid and not threads:
-        ws._legacy_active_thread_id = legacy_tid
     return ws
 
 

@@ -5,15 +5,11 @@ use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::AppHandle;
 
 use super::config::ensure_data_dir;
-use super::provider_bridge_common::{
-    provider_bridge_env, provider_owner_bridge_socket_path, require_runtime_provider,
-    run_provider_bridge_sidecar,
-};
+use super::provider_bridge_common::{provider_owner_bridge_socket_path, require_runtime_provider};
 
-const PROVIDER_USAGE_BRIDGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
+const PROVIDER_USAGE_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -69,10 +65,10 @@ fn provider_usage_summary_via_owner_bridge(
     let mut socket = UnixStream::connect(&socket_path)
         .map_err(|e| format!("connect provider owner bridge failed: {e}"))?;
     socket
-        .set_read_timeout(Some(PROVIDER_USAGE_BRIDGE_TIMEOUT))
+        .set_read_timeout(Some(PROVIDER_USAGE_REQUEST_TIMEOUT))
         .map_err(|e| format!("set provider owner bridge read timeout failed: {e}"))?;
     socket
-        .set_write_timeout(Some(PROVIDER_USAGE_BRIDGE_TIMEOUT))
+        .set_write_timeout(Some(PROVIDER_USAGE_REQUEST_TIMEOUT))
         .map_err(|e| format!("set provider owner bridge write timeout failed: {e}"))?;
     let payload = serde_json::json!({
         "type": "usage_summary",
@@ -113,55 +109,8 @@ fn provider_usage_summary_via_owner_bridge(
     .map_err(|e| format!("parse provider owner bridge summary failed: {e}"))
 }
 
-async fn run_provider_usage_bridge(
-    app: &AppHandle,
-    provider_id: &str,
-    start_date: &str,
-    end_date: &str,
-) -> Result<ProviderUsageSummary, String> {
-    let data_dir = ensure_data_dir()?;
-    let args = vec![
-        "--data-dir".to_string(),
-        data_dir.to_string_lossy().to_string(),
-        "--provider-session-bridge".to_string(),
-        "--provider-id".to_string(),
-        provider_id.to_string(),
-        "--provider-session-op".to_string(),
-        "usage".to_string(),
-        "--provider-start-date".to_string(),
-        start_date.to_string(),
-        "--provider-end-date".to_string(),
-        end_date.to_string(),
-    ];
-
-    let output = run_provider_bridge_sidecar(
-        app,
-        args,
-        provider_bridge_env(&data_dir),
-        Some(PROVIDER_USAGE_BRIDGE_TIMEOUT),
-        "provider usage bridge",
-    )
-    .await?;
-    if !output.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let detail = if !stderr.is_empty() {
-            stderr
-        } else if !stdout.is_empty() {
-            stdout
-        } else {
-            format!("exit status {:?}, signal {:?}", output.code, output.signal)
-        };
-        return Err(detail);
-    }
-
-    serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("provider usage bridge returned invalid JSON: {}", error))
-}
-
 #[tauri::command]
 pub async fn get_provider_usage_summary(
-    app: AppHandle,
     provider_id: String,
     start_date: String,
     end_date: String,
@@ -184,15 +133,17 @@ pub async fn get_provider_usage_summary(
     }
 
     let data_dir = ensure_data_dir()?;
-    match provider_usage_summary_via_owner_bridge(&data_dir, &provider.id, &start_date, &end_date) {
-        Ok(summary) => Ok(summary),
-        Err(_) => run_provider_usage_bridge(&app, &provider.id, &start_date, &end_date).await,
-    }
+    provider_usage_summary_via_owner_bridge(&data_dir, &provider.id, &start_date, &end_date)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::summary_with_reason;
+    use super::{provider_usage_summary_via_owner_bridge, summary_with_reason};
+    use crate::commands::provider_bridge_common::provider_owner_bridge_socket_path;
+    use std::fs;
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+    use std::thread;
 
     #[test]
     fn summary_with_reason_marks_summary_as_unsupported() {
@@ -203,5 +154,74 @@ mod tests {
             summary.unsupported_reason.as_deref(),
             Some("owner bridge unavailable")
         );
+    }
+
+    #[test]
+    fn provider_usage_summary_uses_owner_bridge_socket() {
+        let temp_dir = std::env::temp_dir().join(format!("ow-usage-pob-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let socket_path = provider_owner_bridge_socket_path(&temp_dir);
+        let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept owner bridge socket");
+            let mut request = String::new();
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            reader
+                .read_line(&mut request)
+                .expect("read owner bridge request");
+            let request_json: serde_json::Value =
+                serde_json::from_str(request.trim()).expect("parse request");
+            assert_eq!(
+                request_json,
+                serde_json::json!({
+                    "type": "usage_summary",
+                    "provider_id": "codex",
+                    "start_date": "2026-05-10",
+                    "end_date": "2026-05-11",
+                })
+            );
+            writeln!(
+                stream,
+                "{}",
+                serde_json::json!({
+                    "ok": true,
+                    "summary": {
+                        "providerId": "codex",
+                        "updatedAtEpoch": 1770000000u64,
+                        "days": [
+                            {
+                                "date": "2026-05-11",
+                                "inputTokens": 10u64,
+                                "outputTokens": 5u64,
+                                "cacheCreationTokens": 2u64,
+                                "cacheReadTokens": 3u64,
+                                "totalTokens": 20u64,
+                                "totalCostUsd": 0.25
+                            }
+                        ]
+                    }
+                })
+            )
+            .expect("write owner bridge response");
+        });
+
+        let summary =
+            provider_usage_summary_via_owner_bridge(&temp_dir, "codex", "2026-05-10", "2026-05-11")
+                .expect("usage summary");
+
+        server.join().expect("owner bridge thread");
+        assert_eq!(summary.provider_id, "codex");
+        assert_eq!(summary.updated_at_epoch, 1_770_000_000);
+        assert_eq!(summary.days.len(), 1);
+        assert_eq!(summary.days[0].date, "2026-05-11");
+        assert_eq!(summary.days[0].input_tokens, 10);
+        assert_eq!(summary.days[0].output_tokens, 5);
+        assert_eq!(summary.days[0].cache_creation_tokens, 2);
+        assert_eq!(summary.days[0].cache_read_tokens, 3);
+        assert_eq!(summary.days[0].total_tokens, 20);
+        assert_eq!(summary.days[0].total_cost_usd, Some(0.25));
+        let _ = fs::remove_dir_all(temp_dir);
     }
 }

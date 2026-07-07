@@ -40,7 +40,7 @@ export function isLowSignalTaskBoardText(value) {
   return ["ok", "done", "yes", "no", "test", "ping"].includes(text);
 }
 
-export function taskBoardActivityKey(activity) {
+function taskBoardActivityKey(activity) {
   return `${activity.providerId}:${activity.sessionId}`;
 }
 

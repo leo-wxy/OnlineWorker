@@ -8,18 +8,6 @@ use super::{
 
 const LEGACY_NOTIFICATION_SUMMARY_PROMPT: &str = "You summarize OnlineWorker task completion notifications.\nReturn compact JSON with preview_title and summary.\npreview_title identifies the completed task.\nsummary explains the completed result.\n\nCurrent task:\n{{task_summary}}\n\nFinal assistant message:\n{{final_message}}\n";
 const DEFAULT_NOTIFICATION_SUMMARY_PROMPT: &str = "You summarize OnlineWorker task completion notifications.\nReturn JSON only, without markdown:\n{\"preview_title\": \"...\", \"summary\": \"...\"}\n\nRules:\n- preview_title must be a complete short Chinese title, ideally 6 to 12 Chinese characters.\n- Avoid English in preview_title unless it is a product or provider name.\n- Do not return truncated words, ellipsis, code fences, or punctuation-only titles.\n- summary must be one concise Chinese sentence describing what was completed.\n\nCurrent task:\n{{task_summary}}\n\nFinal assistant message:\n{{final_message}}\n";
-fn normalize_ai_service_id(raw: &str) -> String {
-    raw.trim().to_string()
-}
-
-fn normalize_ai_protocol(raw: &str) -> String {
-    raw.trim().to_string()
-}
-
-fn builtin_ai_services() -> Vec<ProviderAiServiceDefault> {
-    provider_ai_service_defaults()
-}
-
 fn fallback_service_id(
     service_ids: &BTreeSet<String>,
     services: &[AiServiceConfigEntry],
@@ -40,14 +28,14 @@ fn fallback_service_id(
 pub(super) fn normalize_ai_document(doc: &mut ProviderConfigDocument) {
     let ai = doc.ai.get_or_insert_with(AiConfigDocument::default);
     let services = ai.services.get_or_insert_with(Vec::new);
-    let builtin_services = builtin_ai_services();
+    let builtin_services = provider_ai_service_defaults();
     for builtin in &builtin_services {
         if !services.iter().any(|service| service.id == builtin.id) {
             services.push(builtin.config.clone());
         }
     }
     for service in services.iter_mut() {
-        service.id = normalize_ai_service_id(&service.id);
+        service.id = service.id.trim().to_string();
         service.name = if service.name.trim().is_empty() {
             service.id.clone()
         } else {
@@ -56,7 +44,7 @@ pub(super) fn normalize_ai_document(doc: &mut ProviderConfigDocument) {
         if service.protocol.trim().is_empty() {
             service.protocol = "openai_compatible_chat".to_string();
         } else {
-            service.protocol = normalize_ai_protocol(&service.protocol);
+            service.protocol = service.protocol.trim().to_string();
         }
         service.base_url = service.base_url.trim().trim_end_matches('/').to_string();
         service.endpoint = service.endpoint.trim().to_string();
@@ -84,7 +72,7 @@ pub(super) fn normalize_ai_document(doc: &mut ProviderConfigDocument) {
     let scenarios = ai.scenarios.get_or_insert_with(BTreeMap::new);
     let notification = scenarios
         .entry("notification_summary".to_string())
-        .or_insert_with(AiScenarioConfigEntry::default);
+        .or_default();
     if notification.output_schema.trim().is_empty() {
         notification.output_schema = "notification_summary_v1".to_string();
     }
@@ -120,7 +108,7 @@ pub(super) fn normalize_ai_document(doc: &mut ProviderConfigDocument) {
 
 pub(super) fn ai_metadata_from_document(doc: ProviderConfigDocument) -> AiConfigMetadata {
     let ai = doc.ai.unwrap_or_default();
-    let builtin_labels = builtin_ai_services()
+    let builtin_labels = provider_ai_service_defaults()
         .into_iter()
         .map(|service| (service.id.clone(), service))
         .collect::<BTreeMap<_, _>>();

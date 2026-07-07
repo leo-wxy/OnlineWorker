@@ -12,96 +12,8 @@ from core.messages import MessageEventBus, create_message_event
 from core.storage import AppStorage, ThreadInfo, WorkspaceInfo
 
 
-@pytest.mark.asyncio
-async def test_provider_owner_bridge_creates_provider_session(monkeypatch, tmp_path):
-    from core.provider_owner_bridge import ProviderOwnerBridge
-
-    class _FakeAdapter:
-        connected = True
-
-        def __init__(self):
-            self.registered = []
-            self.start_thread = AsyncMock(return_value={"thread": {"id": "tid-new"}})
-
-        def register_workspace_cwd(self, workspace_id: str, cwd: str):
-            self.registered.append((workspace_id, cwd))
-
-    state = AppState(storage=AppStorage())
-    adapter = _FakeAdapter()
-    state.set_adapter("overlay-tool", adapter)
-    monkeypatch.setattr(
-        "core.provider_owner_bridge.get_provider",
-        lambda name, *args, **kwargs: SimpleNamespace(name=name) if name == "overlay-tool" else None,
-    )
-
-    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
-    response = await bridge._handle_create_session(
-        {
-            "provider_id": "overlay-tool",
-            "workspace_dir": "/tmp/workspace",
-        }
-    )
-
-    assert response["ok"] is True
-    assert response["thread_id"] == "tid-new"
-    assert response["session"]["id"] == "tid-new"
-    assert response["session"]["workspace"] == "/tmp/workspace"
-    assert adapter.registered == [("overlay-tool:/tmp/workspace", "/tmp/workspace")]
-    adapter.start_thread.assert_awaited_once_with("overlay-tool:/tmp/workspace")
-    ws = state.storage.workspaces["overlay-tool:/tmp/workspace"]
-    assert ws.threads["tid-new"].thread_id == "tid-new"
-    assert ws.threads["tid-new"].archived is False
-
-
-@pytest.mark.asyncio
-async def test_provider_owner_bridge_creates_app_state_session_without_source_materialization(monkeypatch, tmp_path):
-    from core.provider_owner_bridge import ProviderOwnerBridge
-
-    class _FakeAdapter:
-        connected = True
-
-        def __init__(self):
-            self.registered = []
-            self.start_thread = AsyncMock(return_value={"thread": {"id": "tid-source"}})
-
-        def register_workspace_cwd(self, workspace_id: str, cwd: str):
-            self.registered.append((workspace_id, cwd))
-
-    state = AppState(storage=AppStorage())
-    adapter = _FakeAdapter()
-    state.set_adapter("codex", adapter)
-    monkeypatch.setattr(
-        "core.provider_owner_bridge.get_provider",
-        lambda name, *args, **kwargs: SimpleNamespace(
-            name=name,
-            facts=SimpleNamespace(
-                include_state_only_thread=lambda thread_info: thread_info.source == "app",
-            ),
-        )
-        if name == "codex"
-        else None,
-    )
-
-    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
-    response = await bridge._handle_create_session(
-        {
-            "provider_id": "codex",
-            "workspace_dir": "/tmp/workspace",
-            "create_mode": "app_state",
-        }
-    )
-
-    assert response["ok"] is True
-    assert response["thread_id"].startswith("app:codex:")
-    assert response["session"]["id"] == response["thread_id"]
-    assert response["session"]["workspace"] == "/tmp/workspace"
-    assert response["session"]["source"] == "app"
-    assert adapter.registered == [("codex:/tmp/workspace", "/tmp/workspace")]
-    adapter.start_thread.assert_not_awaited()
-    ws = state.storage.workspaces["codex:/tmp/workspace"]
-    assert ws.threads[response["thread_id"]].source == "app"
-    assert ws.threads[response["thread_id"]].archived is False
-    assert ws.threads[response["thread_id"]].is_active is False
+def _fail_state_only_hook(_thread_info):
+    raise AssertionError("state-only hook should not be used by ProviderOwnerBridge")
 
 
 @pytest.mark.asyncio
@@ -138,7 +50,7 @@ async def test_provider_owner_bridge_list_sessions_excludes_state_only_app_threa
                         "title": "Real",
                     }
                 ],
-                include_state_only_thread=lambda thread_info: thread_info.source == "app",
+                include_state_only_thread=_fail_state_only_hook,
             ),
         )
         if name == "codex"
@@ -193,7 +105,7 @@ async def test_provider_owner_bridge_list_sessions_excludes_legacy_draft_threads
             name=name,
             facts=SimpleNamespace(
                 list_sessions=lambda limit=100: [],
-                include_state_only_thread=lambda thread_info: thread_info.source == "app",
+                include_state_only_thread=_fail_state_only_hook,
             ),
         )
         if name == "codex"
@@ -242,7 +154,7 @@ async def test_provider_owner_bridge_serves_provider_usage_summary(monkeypatch, 
         if name == "overlay-tool"
         else None,
     )
-    monkeypatch.setattr("core.provider_session_bridge._unix_time_seconds", lambda: 1770000000)
+    monkeypatch.setattr("core.provider_usage._unix_time_seconds", lambda: 1770000000)
 
     bridge = ProviderOwnerBridge(AppState(storage=AppStorage()), data_dir=str(tmp_path))
     response = await bridge._handle_usage_summary(
@@ -2726,34 +2638,6 @@ async def test_provider_owner_bridge_reports_claude_logged_out_status_as_degrade
         "lines": ["• claude CLI：⚠️ 已连接，但不可用：Claude CLI is not logged in."],
     }
 
-
-
-@pytest.mark.asyncio
-async def test_provider_owner_bridge_ignores_legacy_mirror_approval(tmp_path):
-    from core.provider_owner_bridge import ProviderOwnerBridge
-
-    state = AppState(storage=AppStorage())
-    state.telegram_bot = object()
-    state.group_chat_id = -100123456789
-
-    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
-    response = await bridge._handle_mirror_approval(
-        {
-            "type": "mirror_approval",
-            "provider_id": "codex",
-            "thread_id": "tid-cli",
-            "workspace_dir": "/tmp/project-a",
-            "source": "codex_cli_hook",
-            "payload": {
-                "hook_event_name": "PermissionRequest",
-                "request_id": "codex-cli-hook:tid-cli:abc",
-                "command": "/bin/zsh -lc 'ps -axo pid,command'",
-            },
-        }
-    )
-
-    assert response == {"ok": True, "ignored": True, "reason": "approval_via_app_server_only"}
-    assert state.pending_approvals == {}
 
 
 @pytest.mark.asyncio

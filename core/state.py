@@ -317,16 +317,6 @@ class AppState:
         else:
             self.adapters[tool_name] = adapter
 
-    def is_adapter_connected(self, tool_name: str) -> bool:
-        adapter = self.get_adapter(tool_name)
-        return adapter is not None and getattr(adapter, "connected", False)
-
-    def registered_adapter_names(self) -> list[str]:
-        return list(self.adapters.keys())
-
-    def iter_adapters(self):
-        return self.adapters.items()
-
     def get_provider_runtime(self, tool_name: str) -> ProviderRuntimeState:
         return self.provider_runtime_state.setdefault(tool_name, ProviderRuntimeState())
 

@@ -410,32 +410,23 @@ def _thread_control_intro(tool_name: str, thread_id: str, state_text: str) -> st
     return intro
 
 
-def _resolve_thread_open_workspace(storage, data: str) -> tuple[Optional[WorkspaceInfo], Optional[str], Optional[str]]:
-    """解析 callback 所属 workspace 与 thread 定位 key。
-
-    返回：(workspace, unique_thread_token, legacy_thread_prefix)
-    """
-    if data.startswith(f"{_THREAD_OPEN_V2_PREFIX}:"):
+def _resolve_thread_open_workspace(storage, data: str) -> tuple[Optional[WorkspaceInfo], Optional[str]]:
+    """解析 v2 callback 所属 workspace 与 thread token。"""
+    if not data.startswith(f"{_THREAD_OPEN_V2_PREFIX}:"):
+        return None, None
+    try:
         _, ws_token, thread_token = data.split(":", 2)
-        matches: list[tuple[str, WorkspaceInfo]] = []
-        for storage_key, ws in storage.workspaces.items():
-            ws_id = _get_workspace_callback_identity(storage_key, ws)
-            if _make_thread_open_token(ws_id) == ws_token:
-                matches.append((ws_id, ws))
-        if len(matches) != 1:
-            return None, None, None
-        return matches[0][1], thread_token, None
+    except ValueError:
+        return None, None
 
-    if not data.startswith("thread_open:"):
-        return None, None, None
-
-    remaining = data[len("thread_open:"):]
+    matches: list[tuple[str, WorkspaceInfo]] = []
     for storage_key, ws in storage.workspaces.items():
         ws_id = _get_workspace_callback_identity(storage_key, ws)
-        prefix = f"{ws_id}:"
-        if remaining.startswith(prefix):
-            return ws, None, remaining[len(prefix):]
-    return None, None, None
+        if _make_thread_open_token(ws_id) == ws_token:
+            matches.append((ws_id, ws))
+    if len(matches) != 1:
+        return None, None
+    return matches[0][1], thread_token
 
 
 def make_workspace_handler(state: AppState, group_chat_id: int, cfg: Config):
@@ -706,8 +697,7 @@ def make_ws_open_callback_handler(state: AppState, group_chat_id: int) -> Callba
 def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> CallbackQueryHandler:
     """
     Handle thread_open callback:
-    - `thread_open_v2:<ws_token>:<thread_token>`：当前唯一定位格式
-    - `thread_open:<ws_id>:<thread_id_prefix>`：旧格式，只做兼容读取
+    - `thread_open_v2:<ws_token>:<thread_token>`：唯一定位格式
     """
     async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -720,7 +710,7 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
         
         await query.answer()
 
-        if not (data.startswith("thread_open:") or data.startswith(f"{_THREAD_OPEN_V2_PREFIX}:")):
+        if not data.startswith(f"{_THREAD_OPEN_V2_PREFIX}:"):
             logger.info(f"[thread_open] data 不匹配，跳过")
             return
 
@@ -729,8 +719,8 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
             await query.answer("❌ Storage 未初始化", show_alert=True)
             return
 
-        ws_info, thread_token, thread_id_prefix = _resolve_thread_open_workspace(storage, data)
-        if not ws_info or not (thread_token or thread_id_prefix):
+        ws_info, thread_token = _resolve_thread_open_workspace(storage, data)
+        if not ws_info or not thread_token:
             await query.answer("❌ Workspace 未找到", show_alert=True)
             return
         unavailable = _provider_unavailable_message(state, ws_info.tool)
@@ -739,56 +729,34 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
             return
 
         logger.info(
-            "[thread_open] 解析完成: ws=%s token=%s prefix=%s",
+            "[thread_open] 解析完成: ws=%s token=%s",
             ws_info.daemon_workspace_id or f"{ws_info.tool}:{ws_info.name}",
             thread_token,
-            thread_id_prefix,
         )
 
         # Find the thread — 先查 state.json，没有则从 SQLite 补注册
         thread_info = None
         full_tid = None
-        if thread_token:
-            state_matches = [
-                (tid, tinfo)
-                for tid, tinfo in ws_info.threads.items()
-                if _make_thread_open_token(tid) == thread_token
-            ]
-            if len(state_matches) == 1:
-                full_tid, thread_info = state_matches[0]
-            elif len(state_matches) > 1:
-                await query.answer("❌ thread 标识冲突，请重新 /list", show_alert=True)
-                return
-        else:
-            legacy_matches = [
-                (tid, tinfo)
-                for tid, tinfo in ws_info.threads.items()
-                if tid.startswith(thread_id_prefix) or tid[:32] == thread_id_prefix
-            ]
-            if len(legacy_matches) == 1:
-                full_tid, thread_info = legacy_matches[0]
-            elif len(legacy_matches) > 1:
-                await query.answer("⚠️ 旧按钮已过期，请重新运行 /list", show_alert=True)
-                return
+        state_matches = [
+            (tid, tinfo)
+            for tid, tinfo in ws_info.threads.items()
+            if _make_thread_open_token(tid) == thread_token
+        ]
+        if len(state_matches) == 1:
+            full_tid, thread_info = state_matches[0]
+        elif len(state_matches) > 1:
+            await query.answer("❌ thread 标识冲突，请重新 /list", show_alert=True)
+            return
 
         local_fallback_threads = None
         if not thread_info:
             # state.json 里没有，从各 provider 的本地事实源查
             db_sessions = list_provider_threads(ws_info.tool, ws_info.path, limit=50)
             local_fallback_threads = _list_provider_local_threads(ws_info.tool, ws_info.path, limit=50)
-            if thread_token:
-                db_matches = [
-                    s for s in db_sessions
-                    if _make_thread_open_token(s.get("id", "")) == thread_token
-                ]
-            else:
-                db_matches = [
-                    s for s in db_sessions
-                    if (s.get("id", "").startswith(thread_id_prefix) or s.get("id", "")[:32] == thread_id_prefix)
-                ]
-                if len(db_matches) > 1:
-                    await query.answer("⚠️ 旧按钮已过期，请重新运行 /list", show_alert=True)
-                    return
+            db_matches = [
+                s for s in db_sessions
+                if _make_thread_open_token(s.get("id", "")) == thread_token
+            ]
 
             if len(db_matches) > 1:
                 await query.answer("❌ thread 标识冲突，请重新 /list", show_alert=True)
@@ -798,19 +766,10 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
 
             if not matched:
                 fallback_threads = local_fallback_threads or []
-                if thread_token:
-                    fallback_matches = [
-                        s for s in fallback_threads
-                        if _make_thread_open_token(s.get("id", "")) == thread_token
-                    ]
-                else:
-                    fallback_matches = [
-                        s for s in fallback_threads
-                        if (s.get("id", "").startswith(thread_id_prefix) or s.get("id", "")[:32] == thread_id_prefix)
-                    ]
-                    if len(fallback_matches) > 1:
-                        await query.answer("⚠️ 旧按钮已过期，请重新运行 /list", show_alert=True)
-                        return
+                fallback_matches = [
+                    s for s in fallback_threads
+                    if _make_thread_open_token(s.get("id", "")) == thread_token
+                ]
                 if len(fallback_matches) > 1:
                     await query.answer("❌ thread 标识冲突，请重新 /list", show_alert=True)
                     return
@@ -1189,26 +1148,7 @@ async def _open_workspace(
         active_ids=active_ids,
     )
 
-    # 5b. Topics are created on-demand (when user clicks thread button)
-    # Removed automatic batch creation to avoid overwhelming the group with topics
-    # for tid, tinfo in ws_info.threads.items():
-    #     if tinfo.topic_id is not None or tinfo.archived:
-    #         continue
-    #     if not tinfo.is_active:
-    #         continue
-    #     try:
-    #         prefix = f"[{tool_name}/{name}] "
-    #         body = tinfo.preview if tinfo.preview else f"thread-{tid[-8:]}"
-    #         tname = (prefix + body)[:128]
-    #         t_topic = await bot.create_forum_topic(chat_id=group_chat_id, name=tname)
-    #         tinfo.topic_id = t_topic.message_thread_id
-    #         logger.info(f"thread {tid[:8]}… → Topic {tinfo.topic_id}")
-    #         if storage:
-    #             save_storage(storage)
-    #     except Exception as e:
-    #         logger.warning(f"为 thread {tid[:8]}… 建 Topic 失败：{e}")
-
-    # 5c. Send overview message to workspace topic
+    # 5b. Send overview message to workspace topic; thread topics are created on demand.
     await _send_workspace_thread_overview(
         state,
         bot,

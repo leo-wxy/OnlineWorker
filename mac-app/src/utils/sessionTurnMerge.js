@@ -1,4 +1,4 @@
-export const SESSION_BROWSER_VISIBLE_TURNS = 50;
+const SESSION_BROWSER_VISIBLE_TURNS = 50;
 
 export function limitSessionTurns(turns) {
   return turns.length <= SESSION_BROWSER_VISIBLE_TURNS

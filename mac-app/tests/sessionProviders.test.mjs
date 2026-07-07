@@ -1,19 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  visibleSessionProviderIds,
-  visibleSessionProviders,
-} from "../src/utils/sessionProviders.js";
+import { visibleSessionProviders } from "../src/utils/sessionProviders.js";
 
-test("visibleSessionProviderIds omits customprovider from default public session providers", () => {
+test("visibleSessionProviders omits customprovider from default public session providers", () => {
   const providers = [
     { id: "codex", label: "Codex", visible: true, managed: true, capabilities: { sessions: true } },
     { id: "customprovider", label: "Custom Provider", visible: false, managed: true, capabilities: { sessions: true } },
     { id: "claude", label: "Claude", visible: true, managed: true, capabilities: { sessions: true } },
   ];
 
-  assert.deepEqual(visibleSessionProviderIds(providers), ["codex", "claude"]);
+  assert.deepEqual(visibleSessionProviders(providers).map((provider) => provider.id), ["codex", "claude"]);
 });
 
 test("visibleSessionProviders keeps explicit visible customprovider session provider", () => {
@@ -28,21 +25,21 @@ test("visibleSessionProviders keeps explicit visible customprovider session prov
   ]);
 });
 
-test("visibleSessionProviderIds omits visible but disabled extension providers", () => {
+test("visibleSessionProviders omits visible but disabled extension providers", () => {
   const providers = [
     { id: "codex", label: "Codex", visible: true, managed: true, capabilities: { sessions: true } },
     { id: "customprovider", label: "Custom Provider", visible: true, managed: false, capabilities: { sessions: true } },
     { id: "claude", label: "Claude", visible: true, managed: true, capabilities: { sessions: true } },
   ];
 
-  assert.deepEqual(visibleSessionProviderIds(providers), ["codex", "claude"]);
+  assert.deepEqual(visibleSessionProviders(providers).map((provider) => provider.id), ["codex", "claude"]);
 });
 
-test("visibleSessionProviderIds omits providers that explicitly disable sessions", () => {
+test("visibleSessionProviders omits providers that explicitly disable sessions", () => {
   const providers = [
     { id: "codex", label: "Codex", visible: true, managed: true, capabilities: { sessions: true } },
     { id: "commands-only", label: "Commands Only", visible: true, managed: true, capabilities: { sessions: false } },
   ];
 
-  assert.deepEqual(visibleSessionProviderIds(providers), ["codex"]);
+  assert.deepEqual(visibleSessionProviders(providers).map((provider) => provider.id), ["codex"]);
 });

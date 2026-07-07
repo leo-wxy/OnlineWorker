@@ -7,7 +7,7 @@ import type {
   ProviderUsageSummary,
   SessionTurn,
 } from "../../types";
-import { limitSessionTurns } from "./shared";
+import { limitSessionTurns } from "../../utils/sessionTurnMerge.js";
 
 function normalizeDisplayMode(role: string): "plain" | "markdown" {
   return role === "assistant" ? "markdown" : "plain";
@@ -56,17 +56,6 @@ export async function fetchProviderSession(
     workspaceDir: workspaceDir ?? null,
   });
   return limitSessionTurns(normalizeSessionTurns(turns));
-}
-
-export async function createProviderSession(
-  providerId: string,
-  workspaceDir: string,
-): Promise<unknown> {
-  const result = await invoke<Record<string, unknown> | null>("create_provider_session", {
-    providerId,
-    workspaceDir,
-  });
-  return result?.session ?? result ?? {};
 }
 
 export async function sendProviderSessionMessage(

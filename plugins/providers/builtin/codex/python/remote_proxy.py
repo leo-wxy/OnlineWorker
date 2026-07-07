@@ -6,8 +6,6 @@ import json
 import logging
 import os
 import stat
-import struct
-import subprocess
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -32,12 +30,9 @@ from plugins.providers.builtin.codex.python.transport import (
 
 logger = logging.getLogger(__name__)
 
-CODEX_THREAD_COLLECTION_METHODS = {"thread/list", "thread/search"}
-CODEX_THREAD_LIST_METHOD = "thread/list"
 CODEX_APP_SERVER_RESOLVED_METHOD = "serverRequest/resolved"
 CODEX_REMOTE_PROXY_SOCKET_NAME = "codex_remote_proxy.sock"
 DEFAULT_APPROVAL_TIMEOUT_SECONDS = 600.0
-MACOS_LOCAL_PEERPID = 2
 UPSTREAM_UNAVAILABLE_CLOSE_CODE = 1013
 
 
@@ -65,10 +60,6 @@ def _extract_thread_id(params: dict[str, Any]) -> str:
         if isinstance(item, dict):
             thread_id = item.get("threadId") or item.get("thread_id")
     return str(thread_id or "").strip()
-
-
-def _extract_cwd(params: dict[str, Any]) -> str:
-    return str(params.get("cwd") or "").strip()
 
 
 def _json_dumps(payload: dict[str, Any]) -> str:
@@ -120,54 +111,6 @@ def _harden_unix_socket_permissions(socket_path: str) -> None:
         )
 
 
-def _client_peer_pid(client: websockets.ServerConnection) -> int | None:
-    transport = getattr(client, "transport", None)
-    if transport is None:
-        return None
-    sock = transport.get_extra_info("socket")
-    if sock is None:
-        return None
-    try:
-        raw = sock.getsockopt(0, MACOS_LOCAL_PEERPID, 4)
-    except OSError:
-        return None
-    if not raw or len(raw) < 4:
-        return None
-    pid = struct.unpack("i", raw[:4])[0]
-    return pid if pid > 0 else None
-
-
-def _cwd_for_pid(pid: int) -> str:
-    if pid <= 0:
-        return ""
-    lsof_bin = "/usr/sbin/lsof" if os.path.exists("/usr/sbin/lsof") else "lsof"
-    try:
-        result = subprocess.run(
-            [lsof_bin, "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
-            capture_output=True,
-            text=True,
-            timeout=1,
-            check=False,
-        )
-    except Exception:
-        return ""
-    if result.returncode != 0:
-        return ""
-    for line in result.stdout.splitlines():
-        if line.startswith("n"):
-            path = line[1:].strip()
-            if path and os.path.isabs(path):
-                return path
-    return ""
-
-
-def _client_process_cwd(client: websockets.ServerConnection) -> str:
-    pid = _client_peer_pid(client)
-    if pid is None:
-        return ""
-    return _cwd_for_pid(pid)
-
-
 async def _close_websocket_safely(
     connection: websockets.ServerConnection | websockets.ClientConnection,
     *,
@@ -212,10 +155,8 @@ def _consume_task_exception(task: asyncio.Task, *, label: str) -> None:
 
 
 class _ProxyConnectionContext:
-    def __init__(self, *, connection_id: str, client_cwd: str = "") -> None:
+    def __init__(self, *, connection_id: str) -> None:
         self.connection_id = connection_id
-        self.client_cwd = client_cwd
-        self.thread_collection_cwds: dict[str, str] = {}
         self.pending_approval_races: dict[str, _ProxyApprovalRace] = {}
         self.upstream_send_lock = asyncio.Lock()
         self.background_tasks: set[asyncio.Task] = set()
@@ -272,10 +213,10 @@ class _ProxyApprovalRace:
 class CodexRemoteMessageProxy:
     """Local proxy for Codex remote clients.
 
-    The proxy supports ws:// and unix:// app-server upstreams. Besides user
-    message rewrite, it mirrors app-server approval server requests to
-    OnlineWorker/TG while still forwarding them to the Codex CLI so the native
-    approval UI remains available.
+    The proxy supports ws:// and unix:// app-server upstreams. It mirrors
+    app-server approval server requests to OnlineWorker/TG while still
+    forwarding them to the Codex CLI so the native approval UI remains
+    available.
     """
 
     def __init__(
@@ -398,16 +339,7 @@ class CodexRemoteMessageProxy:
 
     async def _handle_client(self, client: websockets.ServerConnection) -> None:
         connection_id = self._next_connection_id()
-        context = _ProxyConnectionContext(
-            connection_id=connection_id,
-            client_cwd=_client_process_cwd(client),
-        )
-        if context.client_cwd:
-            logger.info(
-                "[codex-remote-proxy] client cwd resolved connection=%s cwd=%s",
-                connection_id,
-                context.client_cwd,
-            )
+        context = _ProxyConnectionContext(connection_id=connection_id)
         tasks: list[asyncio.Task] = []
         try:
             async with self._connect_upstream() as upstream:
@@ -472,7 +404,6 @@ class CodexRemoteMessageProxy:
                 )
                 if suppress_client_response:
                     continue
-                outbound = self._maybe_rewrite_thread_list_request(outbound, context)
             async with context.upstream_send_lock:
                 await upstream.send(outbound)
 
@@ -490,8 +421,6 @@ class CodexRemoteMessageProxy:
                     upstream,
                 )
                 self._maybe_handle_server_request_resolved(message, context)
-            if isinstance(message, str):
-                message = self._maybe_filter_thread_list_response(message, context)
             await client.send(message)
 
     def _maybe_mark_cli_approval_response(
@@ -584,94 +513,6 @@ class CodexRemoteMessageProxy:
             request_id,
         )
         return True
-
-    def _maybe_rewrite_thread_list_request(
-        self,
-        raw: str,
-        context: _ProxyConnectionContext,
-    ) -> str:
-        try:
-            payload = json.loads(raw)
-        except Exception:
-            return raw
-        if not isinstance(payload, dict):
-            return raw
-        request_id = payload.get("id")
-        method = str(payload.get("method") or "")
-        if request_id is None or method not in CODEX_THREAD_COLLECTION_METHODS:
-            return raw
-
-        params = payload.get("params")
-        if not isinstance(params, dict):
-            params = {}
-            payload["params"] = params
-
-        requested_cwd = _extract_cwd(params)
-        effective_cwd = requested_cwd or context.client_cwd
-        context.thread_collection_cwds[_json_rpc_id_key(request_id)] = effective_cwd
-        if requested_cwd or not effective_cwd or method != CODEX_THREAD_LIST_METHOD:
-            if not effective_cwd:
-                logger.warning(
-                    "[codex-remote-proxy] %s 缺少 cwd 且无法解析客户端 cwd，响应将过滤为空 request=%s",
-                    method,
-                    request_id,
-                )
-            return raw
-
-        params["cwd"] = effective_cwd
-        logger.info(
-            "[codex-remote-proxy] 已为 thread/list 补充 cwd request=%s cwd=%s",
-            request_id,
-            effective_cwd,
-        )
-        return _json_dumps(payload)
-
-    def _maybe_filter_thread_list_response(
-        self,
-        raw: str,
-        context: _ProxyConnectionContext,
-    ) -> str:
-        try:
-            payload = json.loads(raw)
-        except Exception:
-            return raw
-        if not isinstance(payload, dict):
-            return raw
-        request_id = payload.get("id")
-        if request_id is None:
-            return raw
-        request_key = _json_rpc_id_key(request_id)
-        if request_key not in context.thread_collection_cwds:
-            return raw
-
-        cwd = context.thread_collection_cwds.pop(request_key, "")
-        result = payload.get("result")
-        if not isinstance(result, dict):
-            return raw
-        data = result.get("data")
-        if not isinstance(data, list):
-            return raw
-
-        if cwd:
-            filtered = [
-                item
-                for item in data
-                if isinstance(item, dict) and str(item.get("cwd") or "") == cwd
-            ]
-        else:
-            filtered = []
-        if len(filtered) == len(data):
-            return raw
-
-        result["data"] = filtered
-        logger.info(
-            "[codex-remote-proxy] 已过滤 thread/list 响应 request=%s cwd=%s before=%s after=%s",
-            request_id,
-            cwd or "<unknown>",
-            len(data),
-            len(filtered),
-        )
-        return _json_dumps(payload)
 
     def _maybe_start_server_request_mirror(
         self,

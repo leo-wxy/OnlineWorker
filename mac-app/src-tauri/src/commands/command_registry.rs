@@ -750,7 +750,7 @@ fn conflict_telegram_name(preferred: &str, id: &str, attempt: u32) -> String {
     format!("{prefix}_{suffix}")
 }
 
-fn assign_telegram_names(commands: &mut Vec<CommandRegistryEntry>) {
+fn assign_telegram_names(commands: &mut [CommandRegistryEntry]) {
     let mut name_candidates: BTreeMap<String, (String, String)> = BTreeMap::new();
 
     for command in commands.iter() {
@@ -826,7 +826,7 @@ fn current_epoch_seconds() -> u64 {
         .as_secs()
 }
 
-fn sort_commands(commands: &mut Vec<CommandRegistryEntry>) {
+fn sort_commands(commands: &mut [CommandRegistryEntry]) {
     commands.sort_by(|left, right| {
         source_order(&left.source)
             .cmp(&source_order(&right.source))
@@ -836,7 +836,7 @@ fn sort_commands(commands: &mut Vec<CommandRegistryEntry>) {
     });
 }
 
-fn sort_discovered_commands(commands: &mut Vec<DiscoveredCommand>) {
+fn sort_discovered_commands(commands: &mut [DiscoveredCommand]) {
     commands.sort_by(|left, right| {
         source_order(&left.source)
             .cmp(&source_order(&right.source))
@@ -922,6 +922,7 @@ mod tests {
     use crate::commands::telegram::TelegramCommandScope;
     use std::collections::HashSet;
 
+    #[allow(clippy::too_many_arguments)]
     fn entry(
         id: &str,
         name: &str,

@@ -114,7 +114,7 @@ function countCommands(
   );
 }
 
-export function CommandRegistryView({
+function CommandRegistryView({
   registry,
   loading,
   refreshing,

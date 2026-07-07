@@ -158,7 +158,7 @@ class AppServerProcess:
 
         if self._proc.stderr is not None:
             self._stderr_task = asyncio.create_task(
-                self._drain_stderr(self._proc.stderr),
+                self._drain_stream(self._proc.stderr),
                 name="app-server-stderr",
             )
 
@@ -266,10 +266,6 @@ class AppServerProcess:
             pass
         except Exception as e:
             logger.debug(f"读取 app-server 输出失败：{e}")
-
-    async def _drain_stderr(self, stream: asyncio.StreamReader) -> None:
-        """兼容旧调用点，统一委托到通用 drain。"""
-        await self._drain_stream(stream)
 
     def _record_output_line(self, text: str) -> None:
         text = text.strip()

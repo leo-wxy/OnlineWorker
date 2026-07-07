@@ -1,6 +1,6 @@
-export const BOT_BACKEND_VIEW = "bot";
+const BOT_BACKEND_VIEW = "bot";
 
-export function visibleCommandProviders(providers) {
+function visibleCommandProviders(providers) {
   return (providers ?? []).filter(
     (provider) => provider?.visible === true && provider?.managed === true && provider?.id
   );

@@ -455,17 +455,14 @@ fn default_provider_compatibility(provider_id: &str) -> ProviderCompatibilityEnt
         .unwrap_or_default()
 }
 
-fn transport_policy(provider_id: &str) -> String {
+pub(crate) fn uses_shared_app_server_transport(provider_id: &str) -> bool {
     default_provider_compatibility(provider_id)
         .transport_policy
-        .unwrap_or_default()
+        .as_deref()
+        == Some(TRANSPORT_POLICY_SHARED_APP_SERVER)
 }
 
-fn uses_shared_app_server_transport(provider_id: &str) -> bool {
-    transport_policy(provider_id) == TRANSPORT_POLICY_SHARED_APP_SERVER
-}
-
-fn default_live_transport(
+pub(crate) fn default_live_transport(
     provider_id: &str,
     owner_transport: &str,
     control_mode: Option<&str>,
@@ -488,18 +485,6 @@ fn default_live_transport(
         }
     }
     owner_transport.to_string()
-}
-
-pub(crate) fn provider_default_live_transport(
-    provider_id: &str,
-    owner_transport: &str,
-    control_mode: Option<&str>,
-) -> String {
-    default_live_transport(provider_id, owner_transport, control_mode)
-}
-
-pub(crate) fn provider_uses_shared_app_server_transport(provider_id: &str) -> bool {
-    uses_shared_app_server_transport(provider_id)
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
@@ -733,7 +718,7 @@ fn trimmed_env_value(value: String) -> Option<String> {
 #[cfg(test)]
 thread_local! {
     static TEST_PROCESS_ENV_OVERRIDES: std::cell::RefCell<BTreeMap<String, Option<String>>> =
-        std::cell::RefCell::new(BTreeMap::new());
+        const { std::cell::RefCell::new(BTreeMap::new()) };
 }
 
 #[cfg(test)]
@@ -1103,7 +1088,7 @@ fn disabled_provider_config(provider_id: &str) -> ProviderConfigEntry {
     provider
 }
 
-fn infer_legacy_transport(
+pub(crate) fn infer_legacy_transport(
     tool_name: &str,
     explicit_protocol: Option<&str>,
     app_server_url: Option<&str>,
@@ -1131,15 +1116,6 @@ fn infer_legacy_transport(
     } else {
         default_transport
     }
-}
-
-pub(crate) fn infer_provider_legacy_transport(
-    tool_name: &str,
-    explicit_protocol: Option<&str>,
-    app_server_url: Option<&str>,
-    raw_port: Option<u16>,
-) -> String {
-    infer_legacy_transport(tool_name, explicit_protocol, app_server_url, raw_port)
 }
 
 fn read_env_key(raw: &str, key: &str) -> Option<String> {
@@ -1199,18 +1175,15 @@ fn normalize_provider_entry(provider_id: &str, provider: &mut ProviderConfigEntr
         .unwrap_or_else(|| default_owner_transport(provider_id));
     let mut owner_transport = owner_transport;
     let mut migrated_stdio_default = false;
-    if compatibility.transport_policy.as_deref() == Some(TRANSPORT_POLICY_SHARED_APP_SERVER) {
-        if explicit_protocol.as_deref() == Some("ws")
+    if compatibility.transport_policy.as_deref() == Some(TRANSPORT_POLICY_SHARED_APP_SERVER)
+        && ((explicit_protocol.as_deref() == Some("ws")
             && legacy_app_server_url.trim().is_empty()
             && legacy_app_server_port.unwrap_or(0) == 4722
-            && explicit_control_mode.is_empty()
-        {
-            owner_transport = "unix".to_string();
-            migrated_stdio_default = true;
-        } else if owner_transport == "stdio" && legacy_app_server_url.trim().is_empty() {
-            owner_transport = "unix".to_string();
-            migrated_stdio_default = true;
-        }
+            && explicit_control_mode.is_empty())
+            || (owner_transport == "stdio" && legacy_app_server_url.trim().is_empty()))
+    {
+        owner_transport = "unix".to_string();
+        migrated_stdio_default = true;
     }
 
     transport.kind = Some(owner_transport.clone());
@@ -1267,7 +1240,10 @@ fn normalize_provider_process(
     let mut cleanup_matchers = Vec::new();
     for matcher in process.cleanup_matchers {
         let matcher = matcher.trim();
-        if matcher.is_empty() || is_unsafe_provider_cleanup_matcher(matcher) {
+        if matcher.is_empty()
+            || is_obsolete_provider_cleanup_matcher(matcher)
+            || is_unsafe_provider_cleanup_matcher(matcher)
+        {
             continue;
         }
         if !cleanup_matchers
@@ -1278,6 +1254,10 @@ fn normalize_provider_process(
         }
     }
     Some(ProviderProcessEntry { cleanup_matchers })
+}
+
+fn is_obsolete_provider_cleanup_matcher(matcher: &str) -> bool {
+    matcher.to_ascii_lowercase().contains("--codex-hook-bridge")
 }
 
 fn provider_cleanup_has_onlineworker_marker(matcher: &str) -> bool {
@@ -1418,20 +1398,15 @@ fn legacy_tool_to_provider(tool: LegacyToolConfig) -> ProviderConfigEntry {
         .as_ref()
         .and_then(|transport| transport.app_server_port));
     if compatibility.transport_policy.as_deref() == Some(TRANSPORT_POLICY_SHARED_APP_SERVER)
-        && explicit_protocol.as_deref() == Some("ws")
         && app_server_url.as_deref().unwrap_or("").is_empty()
-        && raw_port.unwrap_or(0) == 4722
-        && explicit_control_mode
-            .as_deref()
-            .map(str::trim)
-            .unwrap_or("")
-            .is_empty()
-    {
-        owner_transport = "unix".to_string();
-        port = None;
-    } else if compatibility.transport_policy.as_deref() == Some(TRANSPORT_POLICY_SHARED_APP_SERVER)
-        && owner_transport == "stdio"
-        && app_server_url.as_deref().unwrap_or("").is_empty()
+        && ((explicit_protocol.as_deref() == Some("ws")
+            && raw_port.unwrap_or(0) == 4722
+            && explicit_control_mode
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("")
+                .is_empty())
+            || owner_transport == "stdio")
     {
         owner_transport = "unix".to_string();
         port = None;
@@ -1439,9 +1414,7 @@ fn legacy_tool_to_provider(tool: LegacyToolConfig) -> ProviderConfigEntry {
     if !managed {
         autostart = false;
     }
-    if owner_transport == "stdio" {
-        port = None;
-    } else if owner_transport == "unix" {
+    if matches!(owner_transport.as_str(), "stdio" | "unix") {
         port = None;
     }
 
@@ -1850,9 +1823,7 @@ pub(super) fn set_notification_channel_enabled_in_document(
         .notifications
         .get_or_insert_with(NotificationConfigDocument::default);
     let channels = notifications.channels.get_or_insert_with(BTreeMap::new);
-    let channel = channels
-        .entry(normalized_id.to_string())
-        .or_insert_with(NotificationChannelConfigEntry::default);
+    let channel = channels.entry(normalized_id.to_string()).or_default();
     channel.enabled = Some(enabled);
     normalize_notification_document(doc);
     doc.schema_version = Some(2);
@@ -1874,9 +1845,7 @@ pub(super) fn set_notification_channel_config_in_document(
         .notifications
         .get_or_insert_with(NotificationConfigDocument::default);
     let channels = notifications.channels.get_or_insert_with(BTreeMap::new);
-    let channel = channels
-        .entry(normalized_id.to_string())
-        .or_insert_with(NotificationChannelConfigEntry::default);
+    let channel = channels.entry(normalized_id.to_string()).or_default();
     channel.config = Some(config);
     normalize_notification_document(doc);
     doc.schema_version = Some(2);
@@ -1988,7 +1957,8 @@ providers:
       cleanupMatchers:
         - codex.*app-server
         - codex-aar
-        - onlineworker-bot --provider-session-bridge
+        - onlineworker-bot --codex-hook-bridge
+        - onlineworker-bot --claude-hook-bridge
         - custom-provider.*serve
 "#;
 
@@ -2000,7 +1970,7 @@ providers:
         assert_eq!(
             process.cleanup_matchers,
             vec![
-                "onlineworker-bot --provider-session-bridge".to_string(),
+                "onlineworker-bot --claude-hook-bridge".to_string(),
                 "custom-provider.*serve".to_string(),
             ]
         );
@@ -2162,9 +2132,9 @@ notifications:
     fn set_ai_config_keeps_services_and_scenarios_separate() {
         let mut doc = normalize_provider_document("").expect("normalized config");
         let services = vec![AiServiceConfigEntry {
-            id: "openai_default".to_string(),
-            name: "OpenAI".to_string(),
-            protocol: "openai_compatible_chat".to_string(),
+            id: " openai_default ".to_string(),
+            name: " OpenAI ".to_string(),
+            protocol: " openai_compatible_chat ".to_string(),
             base_url: "https://api.openai.com/v1/".to_string(),
             endpoint: String::new(),
             api_key: "sk-test".to_string(),
@@ -2199,6 +2169,8 @@ notifications:
             .expect("openai service");
         assert_eq!(service.base_url, "https://api.openai.com/v1");
         assert_eq!(service.api_key_env, "OPENAI_API_KEY");
+        assert_eq!(service.name, "OpenAI");
+        assert_eq!(service.protocol, "openai_compatible_chat");
         let mut scenarios = ai.scenarios.expect("scenarios");
         let scenario = scenarios
             .remove("notification_summary")

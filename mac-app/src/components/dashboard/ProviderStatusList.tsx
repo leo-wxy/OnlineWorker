@@ -1,6 +1,6 @@
 import type { AppTexts } from "../../i18n";
 import type { ProviderDashboardStatus } from "../../types";
-import { providerShowsPort, providerStatusValue } from "../../utils/dashboardProviderStatus.js";
+import { providerShowsPort } from "../../utils/dashboardProviderStatus.js";
 import {
   describeProvider,
   getServiceStyles,
@@ -233,9 +233,7 @@ function ProviderStatusCard({
                 <span className="inline-flex items-center rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700 ring-1 ring-inset ring-sky-100">
                   {texts.dashboard.portLabel ?? "Port"}
                 </span>
-                <span className="text-sm font-mono text-gray-800">
-                  {providerStatusValue(provider, statusText)}
-                </span>
+                <span className="text-sm font-mono text-gray-800">{provider.port}</span>
               </div>
             )}
             {statusItems.length > 0 ? (

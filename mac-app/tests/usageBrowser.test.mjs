@@ -37,6 +37,7 @@ test("usage browser discovers provider usage tabs from metadata", () => {
   assert.match(dateRange, /const DEFAULT_RANGE_DAYS = 7;/);
   assert.match(dateRange, /function localIsoDate\(date\)/);
   assert.match(dateRange, /export function buildDefaultUsageQuery/);
+  assert.doesNotMatch(dateRange, /export \{ DEFAULT_RANGE_DAYS, localIsoDate \};/);
   assert.match(page, /import \{ buildDefaultUsageQuery \} from "\.\.\/utils\/usageDateRange"/);
   assert.match(page, /const autoRangeRef = useRef\(true\)/);
   assert.match(page, /const refreshUsage = useCallback/);

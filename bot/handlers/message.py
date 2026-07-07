@@ -160,7 +160,7 @@ def _resolve_question_runtime(state: AppState, pending_question) -> tuple[str, o
         return tool_name, adapter, _reply_question
 
     candidates: list[tuple[str, object, object]] = []
-    for name, candidate_adapter in state.iter_adapters():
+    for name, candidate_adapter in state.adapters.items():
         candidate_provider = get_provider(name)
         candidate_interactions = (
             getattr(candidate_provider, "interactions", None)

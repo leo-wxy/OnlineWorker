@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional
 from telegram import Bot, Update
 from telegram.ext import ContextTypes
 from config import is_provider_exposed
-from core.provider_session_bridge import get_provider_usage_summary
+from core.provider_usage import get_provider_usage_summary
 from core.providers.facts import list_provider_threads, query_provider_active_thread_ids
 from core.providers.registry import get_provider
 from core.state import AppState
@@ -198,11 +198,12 @@ def _status_provider_names(state: AppState) -> list[str]:
         for tool in state.config.tools:
             if is_provider_exposed(tool.name) and tool.name not in names:
                 names.append(tool.name)
+    adapter_names = list(state.adapters)
     if not names:
-        for provider in filter(None, (get_provider(name) for name in state.registered_adapter_names())):
+        for provider in filter(None, (get_provider(name) for name in adapter_names)):
             if provider.name not in names:
                 names.append(provider.name)
-    for name in state.registered_adapter_names():
+    for name in adapter_names:
         if is_provider_exposed(name) and name not in names:
             names.append(name)
     return names
@@ -610,7 +611,7 @@ def make_active_handler(state: AppState, group_chat_id: int) -> Callable:
         results = []
         t_start = time.monotonic()
 
-        for tool_name, adapter in state.iter_adapters():
+        for tool_name, adapter in state.adapters.items():
             if adapter is None or not adapter.connected:
                 results.append(f"• {tool_name}：❌ 未连接")
                 continue

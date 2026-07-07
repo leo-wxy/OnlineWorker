@@ -7,30 +7,6 @@ export interface SetupCliTool {
   install?: ProviderMetadata["install"] | null;
 }
 
-export interface CliInstallStep {
-  desc: string;
-  cmd: string;
-}
-
-export interface CliInstallInfo {
-  label: string;
-  steps: CliInstallStep[];
-  docsUrl?: string;
-}
-
-export interface CliToolTexts {
-  installViaNpm: string;
-  installViaOfficialInstaller: string;
-  installManually: (bin: string) => string;
-}
-
 export function buildSetupCliToolsFromProviderMetadata(
   providers: ProviderMetadata[]
 ): SetupCliTool[];
-
-export function getCliInstallInfo(
-  toolName: string,
-  bin: string,
-  texts: CliToolTexts,
-  install?: ProviderMetadata["install"] | null
-): CliInstallInfo;

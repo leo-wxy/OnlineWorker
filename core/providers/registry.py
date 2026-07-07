@@ -159,24 +159,3 @@ def get_provider(name: str, config=None) -> Optional[ProviderDescriptor]:
 
 def list_providers() -> list[ProviderDescriptor]:
     return list(_PROVIDERS.values())
-
-
-def provider_supports_command_wrapper(name: str, command_name: str) -> bool:
-    provider = get_provider(name)
-    if provider is None:
-        return False
-    wrappers = getattr(provider.capabilities, "command_wrappers", ())
-    normalized = str(command_name or "").strip().lower()
-    return normalized in {str(item).strip().lower() for item in wrappers}
-
-
-def list_providers_supporting_command_wrapper(command_name: str) -> list[str]:
-    normalized = str(command_name or "").strip().lower()
-    if not normalized:
-        return []
-    supported: list[str] = []
-    for provider in list_providers():
-        wrappers = getattr(provider.capabilities, "command_wrappers", ())
-        if normalized in {str(item).strip().lower() for item in wrappers}:
-            supported.append(provider.name)
-    return supported

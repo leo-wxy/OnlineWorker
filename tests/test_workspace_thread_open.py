@@ -51,6 +51,41 @@ def test_make_thread_topic_name_collapses_preview_whitespace():
 
 
 @pytest.mark.asyncio
+async def test_thread_open_ignores_legacy_callback_format():
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3230,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-1234567890abcdef"] = ThreadInfo(
+        thread_id="tid-1234567890abcdef",
+        topic_id=None,
+        preview="old cached preview",
+        archived=False,
+        is_active=True,
+    )
+    storage.workspaces["codex:onlineWorker"] = ws
+    state = AppState(storage=storage)
+
+    handler = make_thread_open_callback_handler(state, GROUP_CHAT_ID)
+
+    bot = MagicMock()
+    bot.create_forum_topic = AsyncMock()
+    query = MagicMock()
+    query.data = "thread_open:codex:onlineWorker:tid-1234567890abcdef"
+    query.answer = AsyncMock()
+    query.get_bot.return_value = bot
+
+    await handler.callback(MagicMock(callback_query=query), MagicMock())
+
+    query.answer.assert_awaited_once_with()
+    bot.create_forum_topic.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_workspace_overview_revives_stale_archived_active_thread(monkeypatch):
     from bot.handlers.workspace import _send_workspace_thread_overview
 
@@ -396,7 +431,7 @@ async def test_thread_open_uses_latest_codex_title_for_topic_name(monkeypatch):
     bot.send_message = AsyncMock()
 
     query = MagicMock()
-    query.data = "thread_open:codex:onlineWorker:tid-1234567890abcdef"
+    query.data = make_thread_open_callback_data("codex:onlineWorker", "tid-1234567890abcdef")
     query.answer = AsyncMock()
     query.get_bot.return_value = bot
 
@@ -525,7 +560,7 @@ async def test_thread_open_renames_existing_topic_when_codex_title_changed(monke
     bot.send_message = AsyncMock()
 
     query = MagicMock()
-    query.data = "thread_open:codex:onlineWorker:tid-1234567890abcdef"
+    query.data = make_thread_open_callback_data("codex:onlineWorker", "tid-1234567890abcdef")
     query.answer = AsyncMock()
     query.get_bot.return_value = bot
 
@@ -605,7 +640,7 @@ async def test_thread_open_existing_claude_topic_without_cursor_sends_history_sn
     bot.edit_forum_topic = AsyncMock(return_value=True)
 
     query = MagicMock()
-    query.data = "thread_open:claude:ncmplayerengine:ses-phase16"
+    query.data = make_thread_open_callback_data("claude:ncmplayerengine", "ses-phase16")
     query.answer = AsyncMock()
     query.get_bot.return_value = bot
 
@@ -705,7 +740,7 @@ async def test_thread_open_existing_claude_topic_only_syncs_turns_after_cursor(m
     bot.edit_forum_topic = AsyncMock(return_value=True)
 
     query = MagicMock()
-    query.data = "thread_open:claude:ncmplayerengine:ses-phase16"
+    query.data = make_thread_open_callback_data("claude:ncmplayerengine", "ses-phase16")
     query.answer = AsyncMock()
     query.get_bot.return_value = bot
 
@@ -830,7 +865,10 @@ async def test_thread_open_customprovider_status_message_avoids_markdown_parse_r
     bot.create_forum_topic = AsyncMock(return_value=MagicMock(message_thread_id=4257))
 
     query = MagicMock()
-    query.data = "thread_open:customprovider:onlineWorker:ses_2ac5d4905ffeIe8iB6Ql0W0uP"
+    query.data = make_thread_open_callback_data(
+        "customprovider:onlineWorker",
+        "ses_2ac5d4905ffeIe8iB6Ql0W0uPX",
+    )
     query.answer = AsyncMock()
     query.get_bot.return_value = bot
 

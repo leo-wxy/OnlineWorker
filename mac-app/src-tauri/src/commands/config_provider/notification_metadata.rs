@@ -62,9 +62,7 @@ pub(super) fn normalize_notification_document(doc: &mut ProviderConfigDocument) 
     for default in
         notification_plugin_default_list(super::notification_plugin_manifest_sources_with_paths())
     {
-        let channel = channels
-            .entry(default.id.clone())
-            .or_insert_with(NotificationChannelConfigEntry::default);
+        let channel = channels.entry(default.id.clone()).or_default();
         channel.enabled = Some(channel.enabled.unwrap_or(default.default_enabled));
         channel.label.get_or_insert_with(|| default.label.clone());
         channel
@@ -194,6 +192,7 @@ fn notification_plugin_default_list(
     defaults
 }
 
+#[allow(clippy::too_many_arguments)]
 fn notification_channel_metadata_from_entry(
     channel_id: &str,
     channel: &NotificationChannelConfigEntry,

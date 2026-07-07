@@ -245,7 +245,7 @@ ONLINEWORKER_PLUGIN_SOURCE_DIRS=/path/to/provider-plugins/my-provider bash scrip
 新增或修改 provider 后，至少执行：
 
 ```bash
-/path/to/python3 -m pytest -q tests/test_config.py tests/test_provider_facts.py tests/test_provider_session_bridge.py
+/path/to/python3 -m pytest -q tests/test_config.py tests/test_provider_facts.py tests/test_provider_usage.py
 cargo test --manifest-path mac-app/src-tauri/Cargo.toml config_provider --lib
 cargo test --manifest-path mac-app/src-tauri/Cargo.toml command_catalog --lib
 node --test mac-app/tests/*.test.mjs

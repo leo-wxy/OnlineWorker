@@ -283,18 +283,6 @@ export const enTexts: AppTexts = {
       groupIdentity: (title: string, chatType: string, forumBadge: string) =>
         `${title} (${chatType}) ${forumBadge}`,
     },
-    cliChecker: {
-      title: "CLI Dependencies",
-      allInstalled: "All installed",
-      missingCount: (count: number) => `${count} missing`,
-      installViaNpm: "Install via npm",
-      installViaOfficialInstaller: "Install via the official installer",
-      installManually: (bin: string) =>
-        `Install ${bin} manually and ensure it is in PATH`,
-      installInstructions: (label: string) =>
-        `${label} install instructions:`,
-      docs: "Docs",
-    },
     config: {
       yamlTab: "config.yaml",
       envTab: ".env",

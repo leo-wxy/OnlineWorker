@@ -81,12 +81,17 @@ def test_get_adapter_for_workspace_uses_codex_thread_hook_fallback(monkeypatch):
 
 
 def test_registry_exposes_model_wrapper_capability_for_codex_only():
+    from bot.interaction_specs import get_wrapper_supported_providers, supports_thread_command_wrapper
+
     codex = get_provider("codex")
     customprovider = get_provider("customprovider")
 
     assert codex is not None
     assert customprovider is None
     assert "model" in getattr(codex.capabilities, "command_wrappers", ())
+    assert supports_thread_command_wrapper("codex", "model") is True
+    assert supports_thread_command_wrapper("claude", "model") is False
+    assert get_wrapper_supported_providers("model") == ["codex"]
 
 
 def test_start_codex_run_creates_current_run_state():

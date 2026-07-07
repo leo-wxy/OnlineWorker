@@ -5,7 +5,6 @@ import {
   buildCommandBackendViews,
   countCommandsForBackendView,
   matchesCommandBackendView,
-  visibleCommandProviders,
 } from "../src/utils/commandRegistryView.js";
 
 const COMMANDS = [
@@ -23,10 +22,6 @@ test("buildCommandBackendViews uses visible provider metadata and omits custompr
     { id: "claude", label: "Claude", visible: true, managed: true },
   ];
 
-  assert.deepEqual(visibleCommandProviders(providers).map((provider) => provider.id), [
-    "codex",
-    "claude",
-  ]);
   assert.deepEqual(buildCommandBackendViews(providers), ["bot", "codex", "claude"]);
 });
 

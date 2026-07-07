@@ -3,15 +3,16 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, SystemTime};
 
 use super::super::config_provider::{
-    infer_provider_legacy_transport, provider_default_live_transport, provider_default_metadata,
-    provider_metadata_from_raw, provider_uses_shared_app_server_transport,
-    public_default_provider_ids, ProviderIconEntry, ProviderMetadata, ProviderTuiHostEntry,
+    default_live_transport, infer_legacy_transport, provider_default_metadata,
+    provider_metadata_from_raw, public_default_provider_ids, uses_shared_app_server_transport,
+    ProviderIconEntry, ProviderMetadata, ProviderTuiHostEntry,
 };
+use super::super::provider_bridge_common::provider_owner_bridge_socket_path;
 use super::{ProviderDashboardStatus, ServiceHealth};
 
 #[derive(Deserialize, Default)]
@@ -102,20 +103,6 @@ fn provider_snapshot_from_metadata(provider: ProviderMetadata) -> ProviderConfig
     }
 }
 
-pub(super) fn is_hidden_provider(id: &str) -> bool {
-    let _ = id;
-    false
-}
-
-fn infer_legacy_transport(
-    tool_name: &str,
-    explicit_protocol: Option<&str>,
-    app_server_url: Option<&str>,
-    raw_port: Option<u16>,
-) -> String {
-    infer_provider_legacy_transport(tool_name, explicit_protocol, app_server_url, raw_port)
-}
-
 fn normalize_transport(value: Option<String>) -> Option<String> {
     value.and_then(|raw| {
         let trimmed = raw.trim().to_lowercase();
@@ -138,14 +125,6 @@ fn normalize_live_transport(value: Option<String>) -> Option<String> {
     })
 }
 
-fn default_live_transport(
-    tool_name: &str,
-    owner_transport: &str,
-    control_mode: Option<&str>,
-) -> String {
-    provider_default_live_transport(tool_name, owner_transport, control_mode)
-}
-
 pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<ProviderConfigSnapshot> {
     if let Ok(metadata) = provider_metadata_from_raw(raw.unwrap_or(""), None) {
         return metadata
@@ -162,9 +141,6 @@ pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<Provi
 
     if let Some(providers) = parsed.providers {
         for (id, provider) in providers {
-            if is_hidden_provider(&id) {
-                continue;
-            }
             let mut snapshot = default_provider_snapshot(&id);
             snapshot.managed = provider.managed.unwrap_or(snapshot.managed);
             snapshot.autostart =
@@ -187,11 +163,10 @@ pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<Provi
                 .or(provider.app_server_url)
                 .or(snapshot.app_server_url);
             snapshot.control_mode = provider.control_mode.or(snapshot.control_mode);
-            if provider_uses_shared_app_server_transport(&id) && snapshot.transport == "stdio" {
+            if uses_shared_app_server_transport(&id) && snapshot.transport == "stdio" {
                 snapshot.port = None;
                 snapshot.app_server_url = None;
-            } else if provider_uses_shared_app_server_transport(&id) && snapshot.transport == "unix"
-            {
+            } else if uses_shared_app_server_transport(&id) && snapshot.transport == "unix" {
                 snapshot.port = None;
             }
             snapshot.live_transport = normalize_live_transport(provider.live_transport)
@@ -209,9 +184,6 @@ pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<Provi
             if tool.name.trim().is_empty() {
                 continue;
             }
-            if is_hidden_provider(&tool.name) {
-                continue;
-            }
             let mut snapshot = default_provider_snapshot(&tool.name);
             let managed = tool.enabled.unwrap_or(true);
             snapshot.managed = managed;
@@ -226,7 +198,7 @@ pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<Provi
             let mut port = tool.app_server_port.or(snapshot.port);
             if let Some(owner_transport) = normalize_transport(tool.owner_transport) {
                 transport = owner_transport;
-            } else if provider_uses_shared_app_server_transport(&tool.name)
+            } else if uses_shared_app_server_transport(&tool.name)
                 && tool.protocol.as_deref() == Some("ws")
                 && tool.app_server_url.as_deref().unwrap_or("").is_empty()
                 && tool.app_server_port.unwrap_or(0) == 4722
@@ -239,14 +211,10 @@ pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<Provi
             snapshot.port = port;
             snapshot.app_server_url = tool.app_server_url.or(snapshot.app_server_url);
             snapshot.control_mode = tool.control_mode.or(snapshot.control_mode);
-            if provider_uses_shared_app_server_transport(&tool.name)
-                && snapshot.transport == "stdio"
-            {
+            if uses_shared_app_server_transport(&tool.name) && snapshot.transport == "stdio" {
                 snapshot.port = None;
                 snapshot.app_server_url = None;
-            } else if provider_uses_shared_app_server_transport(&tool.name)
-                && snapshot.transport == "unix"
-            {
+            } else if uses_shared_app_server_transport(&tool.name) && snapshot.transport == "unix" {
                 snapshot.port = None;
             }
             snapshot.live_transport =
@@ -270,7 +238,7 @@ pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<Provi
         }
     }
     let mut extras: Vec<_> = resolved.into_values().collect();
-    extras.retain(|provider| provider.visible && !is_hidden_provider(&provider.id));
+    extras.retain(|provider| provider.visible);
     extras.sort_by(|a, b| a.id.cmp(&b.id));
     ordered.extend(extras);
     ordered
@@ -305,10 +273,6 @@ fn provider_missing_cli_detail(provider: &ProviderConfigSnapshot) -> Option<Stri
     } else {
         Some(format!("CLI not found in PATH: {bin}"))
     }
-}
-
-fn provider_owner_bridge_socket_path(data_dir: &Path) -> PathBuf {
-    data_dir.join("provider_owner_bridge.sock")
 }
 
 const PROVIDER_OWNER_BRIDGE_STATUS_TIMEOUT: Duration = Duration::from_millis(1200);

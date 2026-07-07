@@ -207,10 +207,6 @@ def _hook_user_prompt(payload: dict[str, Any]) -> str:
     ).strip()
 
 
-def _hook_reason(payload: dict[str, Any]) -> str:
-    return str(payload.get("reason") or "").strip()
-
-
 def _hook_session_id(payload: dict[str, Any]) -> str:
     return str(payload.get("session_id") or payload.get("sessionId") or "").strip()
 
@@ -221,10 +217,6 @@ def _hook_cwd(payload: dict[str, Any]) -> str:
 
 def _hook_is_notification_question(payload: dict[str, Any]) -> bool:
     return _hook_event_name(payload) == "Notification" and bool(str(payload.get("question") or "").strip())
-
-
-def _hook_is_pretool_event(payload: dict[str, Any]) -> bool:
-    return _hook_event_name(payload) == "PreToolUse"
 
 
 def _hook_is_ask_user_question(payload: dict[str, Any]) -> bool:

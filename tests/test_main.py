@@ -74,7 +74,6 @@ def _stub_main_dependencies(monkeypatch, run_polling_calls, cfg, dummy_filter, *
             Regex=lambda pattern: dummy_filter,
         ),
     )
-    monkeypatch.setattr(main, "CommandHandler", lambda *args, **kwargs: object())
     monkeypatch.setattr(main, "MessageHandler", lambda *args, **kwargs: object())
     monkeypatch.setattr(main, "CallbackQueryHandler", lambda *args, **kwargs: object())
     monkeypatch.setattr(main, "TypeHandler", lambda *args, **kwargs: object())
@@ -88,24 +87,10 @@ def _stub_main_dependencies(monkeypatch, run_polling_calls, cfg, dummy_filter, *
     monkeypatch.setattr(main.time, "sleep", lambda *_args, **_kwargs: None)
 
     for factory_name in (
-        "make_start_handler",
-        "make_ping_handler",
-        "make_echo_handler",
-        "make_status_handler",
-        "make_help_handler",
-        "make_active_handler",
-        "make_restart_handler",
-        "make_stop_handler",
-        "make_workspace_handler",
         "make_ws_open_callback_handler",
         "make_thread_open_callback_handler",
-        "make_cli_handler",
         "make_cli_callback_handler",
-        "make_new_thread_handler",
-        "make_list_thread_handler",
-        "make_archive_thread_handler",
-        "make_skills_handler",
-        "make_history_handler",
+        "make_slash_command_handler",
         "make_message_handler",
         "make_callback_handler",
     ):
@@ -233,52 +218,6 @@ def test_main_prestarts_provider_runtime_before_telegram_polling(monkeypatch):
     )
 
 
-def test_provider_session_bridge_read_keeps_workspace_dir_separate(monkeypatch):
-    from core import provider_session_bridge
-
-    observed = {}
-
-    def fake_read_provider_session_rows(
-        provider_id,
-        session_id,
-        *,
-        limit=20,
-        workspace_dir=None,
-        sessions_dir=None,
-    ):
-        observed["provider_id"] = provider_id
-        observed["session_id"] = session_id
-        observed["limit"] = limit
-        observed["workspace_dir"] = workspace_dir
-        observed["sessions_dir"] = sessions_dir
-        return [{"role": "assistant", "content": "history"}]
-
-    monkeypatch.setattr(
-        provider_session_bridge,
-        "read_provider_session_rows",
-        fake_read_provider_session_rows,
-    )
-    monkeypatch.setattr(main, "_print_provider_session_bridge_result", lambda payload: observed.setdefault("payload", payload))
-
-    result = main._run_provider_session_bridge(
-        "codex",
-        "read",
-        session_id="session-1",
-        workspace_dir="/tmp/project",
-        limit=50,
-    )
-
-    assert result == 0
-    assert observed == {
-        "provider_id": "codex",
-        "session_id": "session-1",
-        "limit": 50,
-        "workspace_dir": "/tmp/project",
-        "sessions_dir": None,
-        "payload": [{"role": "assistant", "content": "history"}],
-    }
-
-
 def test_main_uses_stable_default_data_dir_when_flag_missing(monkeypatch, tmp_path):
     run_polling_calls = []
     dummy_filter = _DummyFilter()
@@ -319,7 +258,6 @@ def test_main_uses_stable_default_data_dir_when_flag_missing(monkeypatch, tmp_pa
             Regex=lambda pattern: dummy_filter,
         ),
     )
-    monkeypatch.setattr(main, "CommandHandler", lambda *args, **kwargs: object())
     monkeypatch.setattr(main, "MessageHandler", lambda *args, **kwargs: object())
     monkeypatch.setattr(main, "CallbackQueryHandler", lambda *args, **kwargs: object())
     monkeypatch.setattr(main, "TypeHandler", lambda *args, **kwargs: object())
@@ -335,24 +273,10 @@ def test_main_uses_stable_default_data_dir_when_flag_missing(monkeypatch, tmp_pa
     monkeypatch.setattr(main.time, "sleep", lambda *_args, **_kwargs: None)
 
     for factory_name in (
-        "make_start_handler",
-        "make_ping_handler",
-        "make_echo_handler",
-        "make_status_handler",
-        "make_help_handler",
-        "make_active_handler",
-        "make_restart_handler",
-        "make_stop_handler",
-        "make_workspace_handler",
         "make_ws_open_callback_handler",
         "make_thread_open_callback_handler",
-        "make_cli_handler",
         "make_cli_callback_handler",
-        "make_new_thread_handler",
-        "make_list_thread_handler",
-        "make_archive_thread_handler",
-        "make_skills_handler",
-        "make_history_handler",
+        "make_slash_command_handler",
         "make_message_handler",
         "make_callback_handler",
     ):

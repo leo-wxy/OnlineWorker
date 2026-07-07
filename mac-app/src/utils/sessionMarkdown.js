@@ -200,7 +200,7 @@ function TableCell({ children }) {
   return h("td", { className: "ow-session-md-table-cell border-t border-slate-100 px-3 py-2 align-top" }, children);
 }
 
-export const sessionMarkdownComponents = {
+const sessionMarkdownComponents = {
   h1: createHeading(
     "h1",
     "ow-session-md-heading mt-1 mb-3 text-[22px] font-bold leading-tight tracking-[-0.035em] text-slate-950",

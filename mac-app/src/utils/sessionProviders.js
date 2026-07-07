@@ -6,7 +6,3 @@ export function visibleSessionProviders(providers) {
     return provider.capabilities?.sessions !== false;
   });
 }
-
-export function visibleSessionProviderIds(providers) {
-  return visibleSessionProviders(providers).map((provider) => provider.id);
-}

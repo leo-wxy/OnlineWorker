@@ -11,6 +11,7 @@ from core.messages.publishing import (
     publish_user_message_accepted,
     publish_user_message_submitted,
 )
+from core.providers.thread_result import extract_started_thread_id
 from core.user_messages.contracts import UserMessageSendRequest
 from plugins.providers.builtin.codex.python.adapter import DEFAULT_APPROVALS_REVIEWER
 from plugins.providers.builtin.codex.python.errors import is_codex_unmaterialized_error
@@ -61,17 +62,6 @@ def _resolve_workspace_id(state, adapter, thread_id: str, cwd: str) -> Optional[
         return getattr(ws, "daemon_workspace_id", None) or storage_key
 
     return f"codex:{normalized_cwd}"
-
-
-def _extract_started_thread_id(result: object) -> str:
-    thread_id = result.get("id") if isinstance(result, dict) else None
-    if not thread_id and isinstance(result, dict):
-        thread = result.get("thread", {})
-        if isinstance(thread, dict):
-            thread_id = thread.get("id")
-    if not thread_id:
-        raise RuntimeError(f"Codex start_thread 返回无效 thread id：{result}")
-    return str(thread_id)
 
 
 def _ensure_storage_workspace(state, workspace_id: str, cwd: str):
@@ -156,7 +146,9 @@ async def _remap_unmaterialized_thread_for_app_send(
     from core.storage import ThreadInfo
 
     result = await adapter.start_thread(workspace_id)
-    new_thread_id = _extract_started_thread_id(result)
+    new_thread_id = extract_started_thread_id(result)
+    if not new_thread_id:
+        raise RuntimeError(f"Codex start_thread 返回无效 thread id：{result}")
     if new_thread_id == requested_thread_id:
         raise RuntimeError("Codex start_thread 返回了与原 thread 相同的 thread id")
 

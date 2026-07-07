@@ -36,90 +36,6 @@ def test_codex_remote_proxy_default_unix_url_quotes_spaces():
     )
 
 
-def test_codex_remote_proxy_injects_and_filters_thread_list_cwd():
-    proxy = CodexRemoteMessageProxy(
-        state=AppState(storage=AppStorage(), config=SimpleNamespace(data_dir="/tmp/onlineworker-test")),
-        upstream_url="unix:///tmp/codex-app-server.sock",
-        listen_url="unix:///tmp/onlineworker-proxy.sock",
-    )
-    context = _ProxyConnectionContext(
-        connection_id="client-1",
-        client_cwd="/Users/example/current",
-    )
-
-    outbound = proxy._maybe_rewrite_thread_list_request(
-        json.dumps({"id": 11, "method": "thread/list", "params": {}}),
-        context,
-    )
-
-    assert json.loads(outbound) == {
-        "id": 11,
-        "method": "thread/list",
-        "params": {"cwd": "/Users/example/current"},
-    }
-
-    response = proxy._maybe_filter_thread_list_response(
-        json.dumps(
-            {
-                "id": 11,
-                "result": {
-                    "data": [
-                        {"id": "same", "cwd": "/Users/example/current"},
-                        {"id": "other", "cwd": "/Users/example/other"},
-                        {"id": "missing"},
-                    ],
-                    "nextCursor": None,
-                    "backwardsCursor": None,
-                },
-            }
-        ),
-        context,
-    )
-
-    assert json.loads(response) == {
-        "id": 11,
-        "result": {
-            "data": [{"id": "same", "cwd": "/Users/example/current"}],
-            "nextCursor": None,
-            "backwardsCursor": None,
-        },
-    }
-
-
-def test_codex_remote_proxy_filters_thread_list_empty_when_cwd_unknown():
-    proxy = CodexRemoteMessageProxy(
-        state=AppState(storage=AppStorage(), config=SimpleNamespace(data_dir="/tmp/onlineworker-test")),
-        upstream_url="unix:///tmp/codex-app-server.sock",
-        listen_url="unix:///tmp/onlineworker-proxy.sock",
-    )
-    context = _ProxyConnectionContext(connection_id="client-1")
-
-    outbound = proxy._maybe_rewrite_thread_list_request(
-        json.dumps({"id": 12, "method": "thread/list", "params": {}}),
-        context,
-    )
-    assert json.loads(outbound) == {"id": 12, "method": "thread/list", "params": {}}
-
-    response = proxy._maybe_filter_thread_list_response(
-        json.dumps(
-            {
-                "id": 12,
-                "result": {
-                    "data": [
-                        {"id": "same", "cwd": "/Users/example/current"},
-                        {"id": "other", "cwd": "/Users/example/other"},
-                    ],
-                    "nextCursor": None,
-                    "backwardsCursor": None,
-                },
-            }
-        ),
-        context,
-    )
-
-    assert json.loads(response)["result"]["data"] == []
-
-
 @pytest.mark.asyncio
 async def test_codex_remote_proxy_mirrors_approval_while_forwarding_to_cli(monkeypatch):
     storage = AppStorage()
@@ -371,6 +287,77 @@ async def test_codex_remote_proxy_relays_unix_client_to_unix_upstream(tmp_path):
 
         assert seen == ['{"id": 1, "method": "ping", "params": {}}']
         assert json.loads(response) == {"id": 1, "result": {"ok": True}}
+    finally:
+        await proxy.stop()
+        upstream_server.close()
+        await upstream_server.wait_closed()
+        for path in (upstream_path, proxy_path):
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+        try:
+            os.rmdir(socket_root)
+        except OSError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_codex_remote_proxy_relays_thread_list_without_rewrite(tmp_path):
+    socket_root = f"/tmp/ow-rp-{uuid.uuid4().hex[:8]}"
+    os.makedirs(socket_root, exist_ok=True)
+    upstream_path = os.path.join(socket_root, "upstream.sock")
+    proxy_path = os.path.join(socket_root, "proxy.sock")
+    request = json.dumps({"id": 11, "method": "thread/list", "params": {}})
+    response = json.dumps(
+        {
+            "id": 11,
+            "result": {
+                "data": [
+                    {"id": "same", "cwd": "/Users/example/current"},
+                    {"id": "other", "cwd": "/Users/example/other"},
+                ],
+                "nextCursor": None,
+                "backwardsCursor": None,
+            },
+        }
+    )
+    seen = []
+
+    async def upstream_handler(conn):
+        seen.append(await conn.recv())
+        await conn.send(response)
+
+    upstream_server = await websockets.unix_serve(
+        upstream_handler,
+        path=upstream_path,
+        max_size=None,
+        ping_interval=None,
+        ping_timeout=None,
+        compression=None,
+    )
+    proxy = CodexRemoteMessageProxy(
+        state=AppState(storage=AppStorage(), config=SimpleNamespace(data_dir=str(tmp_path))),
+        upstream_url=f"unix://{upstream_path}",
+        listen_url=f"unix://{proxy_path}",
+        approval_timeout_seconds=1,
+    )
+
+    try:
+        await proxy.start()
+        async with websockets.unix_connect(
+            path=proxy_path,
+            uri="ws://localhost/",
+            max_size=None,
+            ping_interval=None,
+            ping_timeout=None,
+            compression=None,
+        ) as client:
+            await client.send(request)
+            relayed_response = await client.recv()
+
+        assert seen == [request]
+        assert json.loads(relayed_response) == json.loads(response)
     finally:
         await proxy.stop()
         upstream_server.close()

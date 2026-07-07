@@ -1,22 +1,7 @@
 import { type ReactNode, type RefObject, useEffect, useState } from "react";
 import type { ComposerAttachment, SessionTurn } from "../../types";
-import {
-  limitSessionTurns,
-  mergeSessionTurns,
-  overlayLocalUserTurns,
-  overlayPendingUserTurn,
-  SESSION_BROWSER_VISIBLE_TURNS,
-} from "../../utils/sessionTurnMerge.js";
 import { StatePanel } from "./presentation";
 import { SessionMarkdown } from "./SessionMarkdown";
-
-export {
-  limitSessionTurns,
-  mergeSessionTurns,
-  overlayLocalUserTurns,
-  overlayPendingUserTurn,
-  SESSION_BROWSER_VISIBLE_TURNS,
-};
 
 function AssistantAvatar({ label }: { label: string }) {
   return (
@@ -28,7 +13,7 @@ function AssistantAvatar({ label }: { label: string }) {
   );
 }
 
-export function TurnBubble({
+function TurnBubble({
   turn,
   assistantLabel,
 }: {
@@ -324,7 +309,7 @@ export type SessionMessagesLabels = ReplyWatchLabels & {
   noMessages: string;
 };
 
-export function getReplyWatchText(
+function getReplyWatchText(
   replyWatchState: ReplyWatchState | null,
   labels: ReplyWatchLabels,
 ) {

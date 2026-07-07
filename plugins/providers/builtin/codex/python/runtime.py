@@ -9,6 +9,7 @@ import urllib.request
 from typing import TYPE_CHECKING, Optional
 
 from config import get_data_dir
+from core.providers.thread_result import extract_started_thread_id
 from core.telegram_formatting import format_telegram_assistant_final_text
 from core.providers.lifecycle_runtime import _save_storage_via_lifecycle
 from core.providers.message_runtime import _interrupt_active_turn
@@ -17,7 +18,6 @@ from plugins.providers.builtin.codex.python.adapter import CodexAdapter
 from plugins.providers.builtin.codex.python.approval_policy import (
     SOURCE_REMOTE_PROXY,
     SOURCE_TUI_HOST,
-    build_mirror_approval_policy,
     is_app_server_approval_source,
 )
 from plugins.providers.builtin.codex.python.errors import is_codex_unmaterialized_error
@@ -1053,15 +1053,43 @@ def _codex_thread_has_source_record(workspace_path: str, thread_id: str) -> bool
     return storage_runtime.find_session_file(thread_id) is not None
 
 
-def _extract_started_thread_id(result: object) -> str:
-    thread_id = result.get("id") if isinstance(result, dict) else None
-    if not thread_id and isinstance(result, dict):
-        thread = result.get("thread", {})
-        if isinstance(thread, dict):
-            thread_id = thread.get("id")
-    if not thread_id:
-        raise RuntimeError(f"Codex start_thread 返回无效 thread id：{result}")
-    return str(thread_id)
+async def _codex_thread_is_listed_by_app_server(adapter, workspace_id: str, thread_id: str) -> bool:
+    if not workspace_id or not thread_id:
+        return False
+    try:
+        threads = await adapter.list_threads(workspace_id, limit=50)
+    except Exception:
+        logger.debug("[codex] 查询 app-server thread/list 失败", exc_info=True)
+        return False
+    if not isinstance(threads, list):
+        return False
+    for item in threads:
+        if not isinstance(item, dict):
+            continue
+        candidate_id = str(
+            item.get("id")
+            or item.get("thread_id")
+            or item.get("threadId")
+            or ""
+        ).strip()
+        if candidate_id == thread_id:
+            return True
+    return False
+
+
+async def _codex_thread_can_resume_in_app_server(adapter, workspace_id: str, thread_id: str) -> bool:
+    if not workspace_id or not thread_id:
+        return False
+    try:
+        await adapter.resume_thread(workspace_id, thread_id)
+        return True
+    except Exception:
+        logger.info(
+            "[codex] app-server resume thread 失败，将创建新 thread old=%s",
+            thread_id[:12],
+            exc_info=True,
+        )
+        return False
 
 
 def _replace_thread_binding(ws_info, thread_info, new_thread_id: str) -> None:
@@ -1074,15 +1102,6 @@ def _replace_thread_binding(ws_info, thread_info, new_thread_id: str) -> None:
     thread_info.source = "app"
     thread_info.is_active = True
     ws_info.threads[new_thread_id] = thread_info
-
-
-async def mirror_approval_policy(state, request: dict, ws_info, thread_info) -> dict:
-    thread_id = str(request.get("thread_id") or "").strip()
-    return build_mirror_approval_policy(
-        request,
-        thread_id=thread_id,
-        can_route_to_tui_host=can_route_cli_approval_to_tui_host(state, thread_id),
-    )
 
 
 async def try_route_owner_bridge_send(state, ws_info, thread_info, *, text: str):
@@ -1137,18 +1156,19 @@ async def prepare_send(
     attachments=None,
 ) -> bool:
     workspace_id = ws_info.daemon_workspace_id
-    workspace_path = str(getattr(ws_info, "path", "") or "")
     thread_id = str(getattr(thread_info, "thread_id", "") or "")
     thread_source = str(getattr(thread_info, "source", "") or "").strip().lower()
     should_materialize_app_thread = (
         thread_source == "app"
-        and not _codex_thread_has_source_record(workspace_path, thread_id)
+        and not await _codex_thread_can_resume_in_app_server(adapter, workspace_id, thread_id)
     )
 
     if should_materialize_app_thread:
         original_thread_id = thread_info.thread_id
         result = await adapter.start_thread(workspace_id)
-        new_thread_id = _extract_started_thread_id(result)
+        new_thread_id = extract_started_thread_id(result)
+        if not new_thread_id:
+            raise RuntimeError(f"Codex start_thread 返回无效 thread id：{result}")
         _replace_thread_binding(ws_info, thread_info, new_thread_id)
         logger.info(
             "[provider-message] codex app-state thread 首次发送已创建源端 thread old=%s new=%s",
@@ -2080,7 +2100,8 @@ def build_status_lines(state) -> list[str]:
     tool_cfg = state.config.get_tool("codex") if state.config is not None else None
     control_mode = tool_cfg.control_mode if tool_cfg is not None else "app"
 
-    if state.is_adapter_connected("codex"):
+    adapter = state.get_adapter("codex")
+    if adapter is not None and getattr(adapter, "connected", False):
         lines.append(f"• codex app-server：✅ 已连接 ({codex_mode_label})")
         return lines
 

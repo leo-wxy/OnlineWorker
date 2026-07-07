@@ -17,9 +17,7 @@ mod provider_status;
 #[path = "dashboard/recent_activity.rs"]
 mod recent_activity;
 pub use self::dashboard_types::*;
-use provider_status::{
-    build_provider_statuses, has_subservice_problem, is_hidden_provider, read_provider_snapshots,
-};
+use provider_status::{build_provider_statuses, has_subservice_problem, read_provider_snapshots};
 #[cfg(test)]
 use provider_status::{
     read_provider_runtime_status_via_owner_bridge_with_timeout, resolve_builtin_provider_snapshots,
@@ -50,11 +48,10 @@ pub async fn get_dashboard_state(
     state: tauri::State<'_, Arc<Mutex<BotState>>>,
 ) -> Result<DashboardState, String> {
     let _ = ensure_service_running_if_needed(&app, state.inner()).await?;
-    compute_dashboard_state(&app, state.inner()).await
+    compute_dashboard_state(state.inner()).await
 }
 
 pub(crate) async fn compute_dashboard_state(
-    app: &tauri::AppHandle,
     state: &Arc<Mutex<BotState>>,
 ) -> Result<DashboardState, String> {
     let dir = ensure_data_dir()?;
@@ -92,7 +89,7 @@ pub(crate) async fn compute_dashboard_state(
         providers,
         telegram_connected: telegram.connected,
         telegram_detail: telegram.detail,
-        recent_activity: read_recent_activity_summary(app, &dir).await,
+        recent_activity: read_recent_activity_summary(&dir).await,
     }))
 }
 
@@ -100,7 +97,7 @@ pub(crate) fn build_dashboard_state(input: DashboardComputationInput) -> Dashboa
     let visible_providers: Vec<ProviderDashboardStatus> = input
         .providers
         .into_iter()
-        .filter(|provider| !is_hidden_provider(&provider.id) && provider.managed)
+        .filter(|provider| provider.managed)
         .collect();
     let telegram = match input.telegram_connected {
         Some(true) => ConnectionStatus::Connected,
@@ -1202,12 +1199,9 @@ providers:
         });
         std::fs::write(&state_path, serde_json::to_string(&payload).unwrap()).unwrap();
 
-        let summary = read_recent_activity_summary_from_paths_with_provider_sessions(
-            &dir,
-            None,
-            &HashMap::new(),
-        )
-        .expect("recent activity");
+        let summary =
+            read_recent_activity_summary_from_paths_with_provider_sessions(&dir, &HashMap::new())
+                .expect("recent activity");
         assert_eq!(
             summary.active_workspace_id.as_deref(),
             Some("primary:onlineWorker")
@@ -1277,7 +1271,6 @@ providers:
         write_preview("first snapshot");
         let first = read_recent_activity_summary_cached_with_now(
             &dir,
-            None,
             &provider_sessions("first snapshot"),
             base,
         )
@@ -1290,7 +1283,6 @@ providers:
         write_preview("second snapshot");
         let cached = read_recent_activity_summary_cached_with_now(
             &dir,
-            None,
             &provider_sessions("second snapshot"),
             base + Duration::from_secs(RECENT_ACTIVITY_CACHE_TTL.as_secs() / 2),
         )
@@ -1302,7 +1294,6 @@ providers:
 
         let refreshed = read_recent_activity_summary_cached_with_now(
             &dir,
-            None,
             &provider_sessions("second snapshot"),
             base + RECENT_ACTIVITY_CACHE_TTL + Duration::from_secs(1),
         )
@@ -1459,7 +1450,6 @@ providers:
 
         let summary = read_recent_activity_summary_from_paths_with_provider_sessions(
             &dir,
-            None,
             &HashMap::from([(
                 "codemaker".to_string(),
                 vec![ProviderSessionRow {
@@ -1500,7 +1490,6 @@ providers:
         let workspace_path = "/Users/example/Projects/provider-owned-workspace";
         let summary = read_recent_activity_summary_from_paths_with_provider_sessions(
             &dir,
-            None,
             &HashMap::from([(
                 "claude".to_string(),
                 vec![ProviderSessionRow {

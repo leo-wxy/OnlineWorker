@@ -130,7 +130,10 @@ fn cleanup_process_matchers(policy: ManagedProcessCleanupPolicy) -> Vec<String> 
     let mut matchers = vec![];
     for matcher in policy.provider_matchers {
         let matcher = matcher.trim();
-        if matcher.is_empty() || is_unsafe_global_cleanup_matcher(matcher) {
+        if matcher.is_empty()
+            || is_obsolete_provider_cleanup_matcher(matcher)
+            || is_unsafe_global_cleanup_matcher(matcher)
+        {
             continue;
         }
         if !matchers.iter().any(|existing| existing == matcher) {
@@ -138,6 +141,10 @@ fn cleanup_process_matchers(policy: ManagedProcessCleanupPolicy) -> Vec<String> 
         }
     }
     matchers
+}
+
+fn is_obsolete_provider_cleanup_matcher(matcher: &str) -> bool {
+    matcher.to_ascii_lowercase().contains("--codex-hook-bridge")
 }
 
 fn has_onlineworker_ownership_marker(matcher: &str) -> bool {
@@ -170,7 +177,6 @@ fn is_onlineworker_sidecar_command(command_line: &str) -> bool {
     args.any(|arg| {
         let normalized = arg.trim();
         normalized.ends_with("-tui-host")
-            || normalized == "--provider-session-bridge"
             // Keep legacy provider-specific sidecar flags as compatibility-only markers.
             || normalized == "--codex-hook-bridge"
             || normalized == "--claude-hook-bridge"
@@ -594,8 +600,7 @@ fn start_monitor(
                         // Only restart on abnormal exit:
                         // - exit code non-zero (crash)
                         // - NOT signal termination (SIGTERM/SIGKILL from pkill or service_stop)
-                        let crashed =
-                            payload.signal.is_none() && payload.code.map_or(true, |c| c != 0);
+                        let crashed = payload.signal.is_none() && payload.code != Some(0);
                         should_restart = bot.auto_restart && crashed;
                     }
 
@@ -1089,10 +1094,12 @@ mod tests {
                 "third-party.*app-server".to_string(),
                 "custom-provider.*serve".to_string(),
                 "onlineworker-bot --ow-primary".to_string(),
+                "onlineworker-bot --codex-hook-bridge".to_string(),
             ],
         });
         assert!(!matchers.contains(&"codex.*app-server".to_string()));
         assert!(!matchers.contains(&"third-party.*app-server".to_string()));
+        assert!(!matchers.contains(&"onlineworker-bot --codex-hook-bridge".to_string()));
         assert!(matchers.contains(&"custom-provider.*serve".to_string()));
         assert!(matchers.contains(&"onlineworker-bot --ow-primary".to_string()));
     }
@@ -1248,7 +1255,7 @@ mod tests {
     #[test]
     fn pids_from_bot_process_rows_matches_data_dir_with_spaces() {
         let data_dir = Path::new("/Users/example/Library/Application Support/OnlineWorker");
-        let rows = b" 123 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker\n 456 /usr/bin/python3 -c sleep onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker\n 789 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --provider-session-bridge --provider-id codex\n";
+        let rows = b" 123 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker\n 456 /usr/bin/python3 -c sleep onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker\n 789 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --codex-hook-bridge\n";
 
         assert_eq!(pids_from_bot_process_rows(rows, data_dir), vec![123]);
     }
@@ -1261,7 +1268,6 @@ mod tests {
 102 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-primary
 103 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-secondary
 104 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --ow-secondary --data-dir /Users/example/Library/Application Support/OnlineWorker
-108 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --provider-session-bridge --provider-id primary
 109 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --codex-hook-bridge
 105 /usr/bin/python3 /repo/main.py --data-dir /Users/example/Library/Application Support/OnlineWorker
 106 /usr/bin/python3 /repo/main.py --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-primary

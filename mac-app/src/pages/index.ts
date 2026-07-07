@@ -4,4 +4,4 @@ export { SessionBrowser } from "./SessionBrowser";
 export { TaskBoard } from "./TaskBoard";
 export type { TaskBoardOpenSessionTarget } from "./TaskBoard";
 export { UsageBrowser } from "./UsageBrowser";
-export { SetupWizard, GuideTab } from "./SetupWizard";
+export { SetupWizard } from "./SetupWizard";

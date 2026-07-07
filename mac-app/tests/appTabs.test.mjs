@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  ALL_APP_TABS,
   PRIMARY_APP_TABS,
   isSupportedAppTab,
 } from "../src/utils/appTabs.js";
@@ -12,8 +11,7 @@ test("PRIMARY_APP_TABS excludes config from the main navigation", () => {
   assert.equal(PRIMARY_APP_TABS.includes("config"), false);
 });
 
-test("ALL_APP_TABS still keeps config as an internal supported route", () => {
-  assert.equal(ALL_APP_TABS.includes("config"), true);
+test("isSupportedAppTab keeps config as an internal supported route", () => {
   assert.equal(isSupportedAppTab("config"), true);
 });
 

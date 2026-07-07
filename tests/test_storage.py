@@ -142,6 +142,29 @@ def test_load_storage_missing_tool_infers_provider_from_prefixed_key(tmp_path):
     assert storage.workspaces["legacy"].tool == ""
 
 
+def test_load_storage_ignores_legacy_active_thread_id(tmp_path):
+    path = str(tmp_path / "state.json")
+    data = {
+        "workspaces": {
+            "codex:repo": {
+                "name": "repo",
+                "path": "/repo",
+                "tool": "codex",
+                "active_thread_id": "tid-legacy",
+                "threads": {},
+            },
+        },
+        "active_workspace": "codex:repo",
+    }
+    with open(path, "w") as f:
+        json.dump(data, f)
+
+    storage = load_storage(path)
+
+    assert storage.workspaces["codex:repo"].threads == {}
+    assert not hasattr(storage.workspaces["codex:repo"], "_legacy_active_thread_id")
+
+
 def test_workspace_info_no_topic_id(tmp_path):
     """topic_id 为 None 时也能正常保存/加载。"""
     path = str(tmp_path / "state.json")
@@ -685,85 +708,6 @@ def test_list_codex_sessions_prefers_sqlite_thread_index(tmp_path, monkeypatch):
     assert result[0]["source"] == "vscode"
     assert result[0]["rolloutPath"] == "rollout"
     assert all(item["workspace"] == "/tmp/workspace" for item in result)
-
-
-def test_query_codemaker_running_session_ids_uses_time_compacting_only(tmp_path):
-    from codemaker.python.storage_runtime import (
-        query_codemaker_active_session_ids,
-        query_codemaker_running_session_ids,
-    )
-
-    db_path = tmp_path / "opencode.db"
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        """
-        CREATE TABLE session (
-            id TEXT PRIMARY KEY,
-            project_id TEXT NOT NULL,
-            parent_id TEXT,
-            slug TEXT NOT NULL,
-            directory TEXT NOT NULL,
-            title TEXT NOT NULL,
-            version TEXT NOT NULL,
-            share_url TEXT,
-            summary_additions INTEGER,
-            summary_deletions INTEGER,
-            summary_files INTEGER,
-            summary_diffs TEXT,
-            revert TEXT,
-            permission TEXT,
-            time_created INTEGER NOT NULL,
-            time_updated INTEGER NOT NULL,
-            time_compacting INTEGER,
-            time_archived INTEGER,
-            workspace_id TEXT,
-            path TEXT,
-            agent TEXT,
-            model TEXT,
-            cost REAL DEFAULT 0 NOT NULL,
-            tokens_input INTEGER DEFAULT 0 NOT NULL,
-            tokens_output INTEGER DEFAULT 0 NOT NULL,
-            tokens_reasoning INTEGER DEFAULT 0 NOT NULL,
-            tokens_cache_read INTEGER DEFAULT 0 NOT NULL,
-            tokens_cache_write INTEGER DEFAULT 0 NOT NULL
-        )
-        """
-    )
-    rows = [
-        (
-            "cm-running", "proj-1", None, "running", "/tmp/workspace", "Running task", "1",
-            None, None, None, None, None, None, None, 1000, 2000, 3000, None,
-            None, None, None, None, 0, 0, 0, 0, 0, 0,
-        ),
-        (
-            "cm-idle", "proj-1", None, "idle", "/tmp/workspace", "Idle task", "1",
-            None, None, None, None, None, None, None, 1100, 2100, None, None,
-            None, None, None, None, 0, 0, 0, 0, 0, 0,
-        ),
-        (
-            "cm-archived", "proj-1", None, "archived", "/tmp/workspace", "Archived task", "1",
-            None, None, None, None, None, None, None, 1200, 2200, 3300, 4400,
-            None, None, None, None, 0, 0, 0, 0, 0, 0,
-        ),
-    ]
-    conn.executemany(
-        """
-        INSERT INTO session VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-        )
-        """,
-        rows,
-    )
-    conn.commit()
-    conn.close()
-
-    assert query_codemaker_active_session_ids("/tmp/workspace", db_path=str(db_path)) == {
-        "cm-running",
-        "cm-idle",
-    }
-    assert query_codemaker_running_session_ids("/tmp/workspace", db_path=str(db_path)) == {
-        "cm-running",
-    }
 
 
 def test_read_thread_history_preserves_phase_from_session_jsonl(tmp_path):

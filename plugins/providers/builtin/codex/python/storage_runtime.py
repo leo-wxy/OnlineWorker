@@ -375,63 +375,6 @@ def _build_codex_session_index(
     }
 
 
-def _read_codex_session_meta(fpath: str) -> Optional[dict]:
-    try:
-        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-            first_line = f.readline().strip()
-    except Exception:
-        return None
-
-    if not first_line:
-        return None
-
-    try:
-        meta = json.loads(first_line)
-    except json.JSONDecodeError:
-        return None
-
-    if meta.get("type") != "session_meta":
-        return None
-
-    payload = meta.get("payload", {})
-    if not isinstance(payload, dict):
-        payload = {}
-
-    if _is_codex_subagent_source(payload.get("source")):
-        return None
-
-    cwd = payload.get("cwd") or meta.get("cwd")
-    if not cwd or not isinstance(cwd, str) or not os.path.isabs(cwd):
-        return None
-
-    tid = (
-        payload.get("id")
-        or meta.get("id")
-        or _extract_codex_thread_id_from_filename(os.path.basename(fpath))
-    )
-    if not tid:
-        return None
-
-    created_at = (
-        _parse_codex_timestamp_ms(payload.get("timestamp"))
-        or _parse_codex_timestamp_ms(meta.get("timestamp"))
-        or int(os.path.getmtime(fpath) * 1000)
-    )
-    try:
-        file_mtime_ms = int(os.path.getmtime(fpath) * 1000)
-    except OSError:
-        file_mtime_ms = created_at
-
-    return {
-        "id": tid,
-        "cwd": cwd,
-        "preview": _read_codex_first_user_preview_from_file(fpath),
-        "createdAt": created_at,
-        "updatedAt": max(created_at, file_mtime_ms),
-        "sessionFile": fpath,
-    }
-
-
 def _codex_session_file_has_open_turn(fpath: str, *, max_tail_bytes: int = 262_144) -> bool:
     current_turn_id: Optional[str] = None
     try:
@@ -507,38 +450,6 @@ def _extract_codex_thread_id_from_filename(fname: str) -> str:
     if len(parts) < 6:
         return ""
     return "-".join(parts[-5:])
-
-
-def _read_codex_first_user_preview_from_file(fpath: str) -> Optional[str]:
-    """读取 session jsonl 中第一条真实用户输入，作为 /list 预览。"""
-    try:
-        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-            next(f, None)
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if obj.get("type") != "response_item":
-                    continue
-                payload = obj.get("payload", {})
-                if payload.get("role") != "user":
-                    continue
-                for c in payload.get("content", []):
-                    if c.get("type") != "input_text":
-                        continue
-                    text = (c.get("text") or "").strip()
-                    if not text:
-                        continue
-                    if text.startswith("#") or text.startswith("<"):
-                        continue
-                    return text
-    except Exception:
-        return None
-    return None
 
 
 def _normalize_turn_text(text: str) -> str:

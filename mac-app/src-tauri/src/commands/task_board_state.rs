@@ -263,6 +263,7 @@ pub async fn get_task_board_session_activities() -> Result<Vec<TaskBoardSessionA
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn reply_task_board_approval(
     provider_id: String,
     workspace_id: String,

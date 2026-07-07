@@ -9,6 +9,12 @@ import type {
 } from "../../types";
 import { shouldClearReplyWatch } from "../../utils/replyWatch.js";
 import { applySessionStreamEvent } from "../../utils/sessionEventModel.js";
+import {
+  limitSessionTurns,
+  mergeSessionTurns,
+  overlayLocalUserTurns,
+  overlayPendingUserTurn,
+} from "../../utils/sessionTurnMerge.js";
 import { ProviderSessionBadges } from "./badges";
 import {
   buildSnapshotSignature,
@@ -30,10 +36,6 @@ import {
   CODEX_BACKGROUND_REPLY_POLL,
   CODEX_FOREGROUND_REPLY_POLL,
   FOREGROUND_REPLY_POLL,
-  limitSessionTurns,
-  mergeSessionTurns,
-  overlayLocalUserTurns,
-  overlayPendingUserTurn,
   SessionChatHeader,
   SessionComposer,
   SessionMessages,

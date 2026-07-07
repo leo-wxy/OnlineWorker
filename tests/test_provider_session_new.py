@@ -8,6 +8,15 @@ from core.storage import AppStorage
 from core.storage import ThreadInfo, WorkspaceInfo
 
 
+def test_extract_started_thread_id_normalizes_supported_shapes():
+    from core.providers.thread_result import extract_started_thread_id
+
+    assert extract_started_thread_id({"id": " tid-top "}) == "tid-top"
+    assert extract_started_thread_id({"thread": {"id": "tid-nested"}}) == "tid-nested"
+    assert extract_started_thread_id({}) == ""
+    assert extract_started_thread_id(None) == ""
+
+
 @pytest.mark.asyncio
 async def test_start_real_provider_thread_materializes_new_thread():
     from core.provider_session_new import start_real_provider_thread

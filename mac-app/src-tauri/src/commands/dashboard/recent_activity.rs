@@ -3,16 +3,11 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::{Duration, SystemTime};
-use tauri::AppHandle;
 
 use super::super::provider_sessions::load_provider_sessions_with_overlays;
 use super::RecentActivitySummary;
 
 pub(super) const RECENT_ACTIVITY_CACHE_TTL: Duration = Duration::from_secs(15);
-
-fn legacy_activity_db_path() -> Option<PathBuf> {
-    None
-}
 
 #[derive(Clone, Debug)]
 pub(super) struct WorkspaceSnapshot {
@@ -37,7 +32,6 @@ pub(super) struct WorkspaceActivityCandidate {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct RecentActivityCacheKey {
     data_dir: PathBuf,
-    legacy_activity_db: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -82,10 +76,6 @@ fn workspace_name_from_path(path: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
-}
-
-fn provider_workspace_id(tool: &str, workspace_path: &str) -> String {
-    format!("{tool}:{workspace_path}")
 }
 
 fn parse_workspace_snapshot(workspace_id: &str, workspace: &Value) -> Option<WorkspaceSnapshot> {
@@ -230,7 +220,7 @@ fn collect_workspace_snapshots(
                 continue;
             }
             snapshots.push(WorkspaceSnapshot {
-                id: provider_workspace_id(tool, workspace_path),
+                id: format!("{tool}:{workspace_path}"),
                 name: workspace_name_from_path(workspace_path),
                 tool: tool.clone(),
                 path: workspace_path.to_string(),
@@ -242,7 +232,6 @@ fn collect_workspace_snapshots(
 }
 
 async fn load_provider_session_rows_for_state(
-    app: &AppHandle,
     data_dir: &Path,
 ) -> HashMap<String, Vec<ProviderSessionRow>> {
     let path = data_dir.join("onlineworker_state.json");
@@ -267,7 +256,7 @@ async fn load_provider_session_rows_for_state(
 
     let mut by_tool = HashMap::new();
     for tool in tools {
-        let Ok(value) = load_provider_sessions_with_overlays(app, &tool, false).await else {
+        let Ok(value) = load_provider_sessions_with_overlays(&tool, false).await else {
             continue;
         };
         let rows = value
@@ -282,21 +271,6 @@ async fn load_provider_session_rows_for_state(
         by_tool.insert(tool, rows);
     }
     by_tool
-}
-
-fn build_recent_activity_summary_from_candidate(
-    candidate: WorkspaceActivityCandidate,
-) -> RecentActivitySummary {
-    RecentActivitySummary {
-        active_workspace_id: Some(candidate.workspace_id),
-        active_workspace_name: candidate.workspace_name,
-        active_workspace_path: Some(candidate.workspace_path),
-        active_tool: Some(candidate.tool.clone()),
-        active_session_id: Some(candidate.session_id),
-        active_session_tool: Some(candidate.tool),
-        highlighted_thread_preview: candidate.preview,
-        active_thread_count: candidate.active_thread_count,
-    }
 }
 
 fn read_recent_activity_summary_from_state(
@@ -344,27 +318,18 @@ fn read_recent_activity_summary_from_state(
     })
 }
 
-pub(super) async fn read_recent_activity_summary(
-    app: &AppHandle,
-    data_dir: &Path,
-) -> Option<RecentActivitySummary> {
-    let legacy_activity_db = legacy_activity_db_path();
+pub(super) async fn read_recent_activity_summary(data_dir: &Path) -> Option<RecentActivitySummary> {
     let now = SystemTime::now();
     let cache_key = RecentActivityCacheKey {
         data_dir: data_dir.to_path_buf(),
-        legacy_activity_db: legacy_activity_db.clone(),
     };
     if let Some(summary) = cached_recent_activity(&cache_key, now) {
         return summary;
     }
 
-    let provider_sessions_by_tool = load_provider_session_rows_for_state(app, data_dir).await;
-    let summary = read_recent_activity_summary_cached_with_now(
-        data_dir,
-        legacy_activity_db.as_deref(),
-        &provider_sessions_by_tool,
-        now,
-    );
+    let provider_sessions_by_tool = load_provider_session_rows_for_state(data_dir).await;
+    let summary =
+        read_recent_activity_summary_cached_with_now(data_dir, &provider_sessions_by_tool, now);
     cache_recent_activity(cache_key, now, summary.clone());
     summary
 }
@@ -381,7 +346,7 @@ fn cached_recent_activity(
     now: SystemTime,
 ) -> Option<Option<RecentActivitySummary>> {
     if let Ok(cache) = recent_activity_cache().lock() {
-        if let Some(entry) = cache.get(&cache_key) {
+        if let Some(entry) = cache.get(cache_key) {
             let fresh = now
                 .duration_since(entry.cached_at)
                 .map(|age| age < RECENT_ACTIVITY_CACHE_TTL)
@@ -412,13 +377,11 @@ fn cache_recent_activity(
 
 pub(super) fn read_recent_activity_summary_cached_with_now(
     data_dir: &Path,
-    legacy_activity_db: Option<&Path>,
     provider_sessions_by_tool: &HashMap<String, Vec<ProviderSessionRow>>,
     now: SystemTime,
 ) -> Option<RecentActivitySummary> {
     let cache_key = RecentActivityCacheKey {
         data_dir: data_dir.to_path_buf(),
-        legacy_activity_db: legacy_activity_db.map(Path::to_path_buf),
     };
     if let Some(summary) = cached_recent_activity(&cache_key, now) {
         return summary;
@@ -426,7 +389,6 @@ pub(super) fn read_recent_activity_summary_cached_with_now(
 
     let summary = read_recent_activity_summary_from_paths_with_provider_sessions(
         data_dir,
-        legacy_activity_db,
         provider_sessions_by_tool,
     );
     cache_recent_activity(cache_key, now, summary.clone());
@@ -435,7 +397,6 @@ pub(super) fn read_recent_activity_summary_cached_with_now(
 
 pub(super) fn read_recent_activity_summary_from_paths_with_provider_sessions(
     data_dir: &Path,
-    _legacy_activity_db: Option<&Path>,
     provider_sessions_by_tool: &HashMap<String, Vec<ProviderSessionRow>>,
 ) -> Option<RecentActivitySummary> {
     let path = data_dir.join("onlineworker_state.json");
@@ -466,7 +427,16 @@ pub(super) fn read_recent_activity_summary_from_paths_with_provider_sessions(
         .max_by_key(|candidate| candidate.updated_at);
 
     if let Some(candidate) = latest {
-        return Some(build_recent_activity_summary_from_candidate(candidate));
+        return Some(RecentActivitySummary {
+            active_workspace_id: Some(candidate.workspace_id),
+            active_workspace_name: candidate.workspace_name,
+            active_workspace_path: Some(candidate.workspace_path),
+            active_tool: Some(candidate.tool.clone()),
+            active_session_id: Some(candidate.session_id),
+            active_session_tool: Some(candidate.tool),
+            highlighted_thread_preview: candidate.preview,
+            active_thread_count: candidate.active_thread_count,
+        });
     }
 
     if has_provider_rows {

@@ -760,18 +760,6 @@ def _find_claude_project_session_file(
     return matches[0]
 
 
-def _read_claude_project_session_preview(session_file: Optional[str]) -> Optional[str]:
-    for row in _iter_claude_project_rows(session_file):
-        if row.get("isSidechain") is True:
-            continue
-        if row.get("type") not in ("user", "last-prompt"):
-            continue
-        text = _extract_claude_row_text(row)
-        if text and not _is_claude_display_command(text):
-            return text
-    return None
-
-
 def _read_claude_project_session_cwd(session_file: Optional[str]) -> Optional[str]:
     for row in _iter_claude_project_rows(session_file):
         cwd = _normalize_claude_project_path(row.get("cwd"))

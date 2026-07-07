@@ -509,5 +509,3 @@ export function SetupWizard({ onComplete }: Props) {
     </div>
   );
 }
-
-export const GuideTab = SetupWizard;

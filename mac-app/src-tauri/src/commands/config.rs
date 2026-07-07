@@ -9,9 +9,8 @@ use super::config_provider::{
     set_ai_config_in_document, set_notification_channel_config_in_document,
     set_notification_channel_enabled_in_document, set_provider_cli_config_in_document,
     set_provider_flags_in_document, visible_provider_ids_from_raw, AiConfigMetadata,
-    AiScenarioConfigEntry, AiServiceConfigEntry,
-    NotificationChannelMetadata, ProviderExternalCliConfig, ProviderLaunchMethodConfig,
-    ProviderMetadata, ProviderRuntimePolicy,
+    AiScenarioConfigEntry, AiServiceConfigEntry, NotificationChannelMetadata,
+    ProviderExternalCliConfig, ProviderLaunchMethodConfig, ProviderMetadata, ProviderRuntimePolicy,
 };
 
 pub(crate) const DEFAULT_APP_NAME: &str = "OnlineWorker";
@@ -79,13 +78,6 @@ const SENSITIVE_KEYS: &[&str] = &[
     "SECRET",
     "PASSWORD",
 ];
-const LEGACY_EXTERNAL_CLI_ENV_KEYS: &[&str] = &[
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_MODEL",
-];
-
 fn default_env_template() -> String {
     format!(
         "# {} .env\n\nTELEGRAM_TOKEN=\nALLOWED_USER_ID=\nGROUP_CHAT_ID=\n",
@@ -100,11 +92,7 @@ fn is_sensitive_key(key: &str) -> bool {
 }
 
 fn is_legacy_external_cli_env_key(key: &str) -> bool {
-    let upper = key.trim().to_uppercase();
-    upper.starts_with("ANTHROPIC_")
-        || LEGACY_EXTERNAL_CLI_ENV_KEYS
-            .iter()
-            .any(|candidate| *candidate == upper)
+    key.trim().to_uppercase().starts_with("ANTHROPIC_")
 }
 
 fn sanitize_env_content(raw: &str) -> String {
@@ -124,7 +112,7 @@ fn sanitize_env_content(raw: &str) -> String {
     }
 }
 
-fn cleanup_legacy_external_cli_config(dir: &PathBuf) -> Result<(), String> {
+fn cleanup_legacy_external_cli_config(dir: &Path) -> Result<(), String> {
     let env = dir.join(".env");
     if env.exists() {
         let raw = std::fs::read_to_string(&env).map_err(|e| format!("Cannot read .env: {}", e))?;
@@ -588,19 +576,6 @@ pub(crate) fn read_provider_metadata_from_disk() -> Result<Vec<ProviderMetadata>
     super::config_provider::provider_metadata_from_raw(&config_raw, Some(&env_raw))
 }
 
-pub(crate) fn read_notification_channels_from_disk(
-) -> Result<Vec<NotificationChannelMetadata>, String> {
-    let config_raw = std::fs::read_to_string(config_path()).unwrap_or_default();
-    let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
-    notification_channel_metadata_from_raw(&config_raw, Some(&env_raw))
-}
-
-pub(crate) fn read_ai_config_from_disk() -> Result<AiConfigMetadata, String> {
-    let config_raw = std::fs::read_to_string(config_path()).unwrap_or_default();
-    let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
-    ai_config_metadata_from_raw(&config_raw, Some(&env_raw))
-}
-
 pub(crate) fn read_visible_provider_ids_from_disk() -> Result<Vec<String>, String> {
     let config_raw = std::fs::read_to_string(config_path()).unwrap_or_default();
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
@@ -631,12 +606,16 @@ pub async fn validate_provider_config(
 
 #[tauri::command]
 pub async fn get_notification_channels() -> Result<Vec<NotificationChannelMetadata>, String> {
-    read_notification_channels_from_disk()
+    let config_raw = std::fs::read_to_string(config_path()).unwrap_or_default();
+    let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
+    notification_channel_metadata_from_raw(&config_raw, Some(&env_raw))
 }
 
 #[tauri::command]
 pub async fn get_ai_config() -> Result<AiConfigMetadata, String> {
-    read_ai_config_from_disk()
+    let config_raw = std::fs::read_to_string(config_path()).unwrap_or_default();
+    let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
+    ai_config_metadata_from_raw(&config_raw, Some(&env_raw))
 }
 
 #[tauri::command]
@@ -897,10 +876,9 @@ pub async fn list_env_keys() -> Result<Vec<String>, String> {
         .filter_map(|line| {
             if line.starts_with('#') || line.is_empty() {
                 None
-            } else if let Some(eq_pos) = line.find('=') {
-                Some(line[..eq_pos].trim().to_string())
             } else {
-                None
+                line.find('=')
+                    .map(|eq_pos| line[..eq_pos].trim().to_string())
             }
         })
         .collect();
@@ -994,6 +972,7 @@ ANTHROPIC_API_KEY=dummy
 ANTHROPIC_AUTH_TOKEN=token-123
 ANTHROPIC_BASE_URL=https://runtime.example.test/langbase
 ANTHROPIC_MODEL=claude-opus-4-6
+ANTHROPIC_EXPERIMENTAL_FLAG=1
 GROUP_CHAT_ID=-1001
 ";
 
@@ -1005,6 +984,7 @@ GROUP_CHAT_ID=-1001
         assert!(!sanitized.contains("ANTHROPIC_AUTH_TOKEN"));
         assert!(!sanitized.contains("ANTHROPIC_BASE_URL"));
         assert!(!sanitized.contains("ANTHROPIC_MODEL"));
+        assert!(!sanitized.contains("ANTHROPIC_EXPERIMENTAL_FLAG"));
         assert!(!sanitized.contains("runtime.example.test"));
     }
 

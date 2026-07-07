@@ -6,6 +6,7 @@ import urllib.error
 import urllib.request
 
 from config import ToolConfig, get_data_dir
+from core.providers.thread_result import extract_started_thread_id
 from plugins.providers.builtin.codex.python.adapter import CodexAdapter
 from plugins.providers.builtin.codex.python.process import AppServerProcess
 from core.providers.facts import query_provider_active_thread_ids
@@ -492,12 +493,8 @@ async def start_thread_via_tui_bridge(state: AppState, ws: WorkspaceInfo) -> str
     if not workspace_id:
         raise RuntimeError("workspace 未关联 daemon ID")
 
-    def _extract_thread_id(result: object) -> str:
-        thread_id = result.get("id") if isinstance(result, dict) else None
-        if not thread_id and isinstance(result, dict):
-            thread = result.get("thread", {})
-            if isinstance(thread, dict):
-                thread_id = thread.get("id")
+    def _require_thread_id(result: object) -> str:
+        thread_id = extract_started_thread_id(result)
         if not thread_id:
             raise RuntimeError(f"start_thread 返回无效结果：{result}")
         return thread_id
@@ -505,11 +502,11 @@ async def start_thread_via_tui_bridge(state: AppState, ws: WorkspaceInfo) -> str
     adapter = get_persistent_codex_adapter(state)
     if adapter is not None:
         result = await adapter.start_thread(workspace_id)
-        return _extract_thread_id(result)
+        return _require_thread_id(result)
 
     async def _op(tmp_adapter: CodexAdapter) -> str:
         result = await tmp_adapter.start_thread(workspace_id)
-        return _extract_thread_id(result)
+        return _require_thread_id(result)
 
     return await with_codex_tui_bridge(state, ws, _op)
 

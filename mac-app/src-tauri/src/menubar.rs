@@ -277,7 +277,7 @@ async fn update_menubar_state(
     tray: Option<&TrayIcon<Wry>>,
 ) -> Result<(), String> {
     let service = ensure_service_running_if_needed(app, state).await?;
-    let dashboard = compute_dashboard_state(app, state).await.ok();
+    let dashboard = compute_dashboard_state(state).await.ok();
     let tray_status = compute_tray_status(
         service.running,
         dashboard

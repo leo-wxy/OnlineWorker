@@ -19,5 +19,3 @@ export function buildDefaultUsageQuery(baseDate = new Date()) {
     endDate: isoDateOffset(0, baseDate),
   };
 }
-
-export { DEFAULT_RANGE_DAYS, localIsoDate };

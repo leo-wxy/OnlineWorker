@@ -32,8 +32,8 @@ use commands::config::{
 use commands::dashboard::get_dashboard_state;
 use commands::logs::{get_log_file_path, start_log_tail, stop_log_tail};
 use commands::provider_sessions::{
-    archive_provider_session, create_provider_session, list_provider_sessions,
-    read_provider_session, send_provider_session_message, stage_session_composer_attachments,
+    archive_provider_session, list_provider_sessions, read_provider_session,
+    send_provider_session_message, stage_session_composer_attachments,
     start_provider_session_event_stream, start_provider_session_message,
     stop_provider_session_event_stream,
 };
@@ -348,7 +348,7 @@ pub fn run() {
         .manage(Arc::new(Mutex::new(BotState::new())))
         .manage(AppExitState::default())
         .setup(|app| {
-            apply_default_provider_overlay_env(&app.handle());
+            apply_default_provider_overlay_env(app.handle());
             // Ensure main window is visible on startup
             // (window-state plugin may restore visible:false from cache)
             if let Some(window) = app.get_webview_window("main") {
@@ -401,7 +401,6 @@ pub fn run() {
             open_provider_tui_host_terminal,
             list_provider_sessions,
             read_provider_session,
-            create_provider_session,
             archive_provider_session,
             send_provider_session_message,
             start_provider_session_message,
@@ -462,13 +461,11 @@ pub fn run() {
         tauri::RunEvent::Reopen {
             has_visible_windows,
             ..
-        } => {
-            if should_restore_main_window_on_reopen(has_visible_windows) {
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    let _ = window.unminimize();
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+        } if should_restore_main_window_on_reopen(has_visible_windows) => {
+            if let Some(window) = app_handle.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
             }
         }
         _ => {}

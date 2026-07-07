@@ -280,16 +280,6 @@ export const zhTexts: AppTexts = {
       groupIdentity: (title: string, chatType: string, forumBadge: string) =>
         `${title}（${chatType}）${forumBadge}`,
     },
-    cliChecker: {
-      title: "CLI 依赖",
-      allInstalled: "全部已安装",
-      missingCount: (count: number) => `缺失 ${count} 个`,
-      installViaNpm: "通过 npm 安装",
-      installViaOfficialInstaller: "通过官方安装脚本安装",
-      installManually: (bin: string) => `请手动安装 ${bin}，并确保它在 PATH 中`,
-      installInstructions: (label: string) => `${label} 的安装说明：`,
-      docs: "文档",
-    },
     config: {
       yamlTab: "config.yaml",
       envTab: ".env",

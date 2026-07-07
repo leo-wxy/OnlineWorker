@@ -19,5 +19,3 @@ assertType<CommandSource>(null as unknown as CommandSource);
 assertType<CommandBackend>(null as unknown as CommandBackend);
 assertType<CommandStatus>(null as unknown as CommandStatus);
 assertType<typeof CommandRegistry>(CommandRegistry);
-
-export const commandRegistryContract = true;

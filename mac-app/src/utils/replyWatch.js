@@ -1,8 +1,9 @@
 import { hasAdvancedAssistantReply } from "./sessionPolling.js";
-import { getSessionStreamKind } from "./sessionStreamKinds.js";
 
 export function shouldClearReplyWatch(previousSnapshot, nextSnapshot, event) {
-  const eventKind = getSessionStreamKind(event, { preferSemantic: true });
+  const eventKind =
+    (typeof event?.semanticKind === "string" && event.semanticKind.trim()) ||
+    (typeof event?.kind === "string" && event.kind.trim());
   if (!eventKind) {
     return false;
   }

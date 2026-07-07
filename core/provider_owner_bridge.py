@@ -7,7 +7,6 @@ import logging
 import os
 import re
 import time
-import uuid
 from types import SimpleNamespace
 from typing import Optional
 
@@ -158,48 +157,6 @@ def _resolve_workspace(state, provider_id: str, workspace_dir: str):
     )
 
 
-def _resolve_workspace_and_thread_for_mirror(state, provider_id: str, thread_id: str, workspace_dir: str):
-    normalized_thread_id = str(thread_id or "").strip()
-    normalized_workspace_dir = str(workspace_dir or "").strip()
-
-    if normalized_thread_id:
-        found = state.find_thread_by_id_global(normalized_thread_id)
-        if found is not None:
-            return found
-
-    if getattr(state, "storage", None) is not None and normalized_workspace_dir:
-        for ws in state.storage.workspaces.values():
-            if getattr(ws, "tool", "") != provider_id:
-                continue
-            if getattr(ws, "path", "") != normalized_workspace_dir:
-                continue
-            thread = ws.threads.get(normalized_thread_id)
-            if thread is None:
-                thread = _new_thread_info(
-                    normalized_thread_id,
-                    source=_new_thread_source(provider_id),
-                )
-            return ws, thread
-
-    if not normalized_workspace_dir:
-        return None, None
-
-    workspace_id = _workspace_key(provider_id, normalized_workspace_dir)
-    ws = SimpleNamespace(
-        name=os.path.basename(normalized_workspace_dir) or normalized_workspace_dir,
-        path=normalized_workspace_dir,
-        tool=provider_id,
-        topic_id=None,
-        daemon_workspace_id=workspace_id,
-        threads={},
-    )
-    thread = _new_thread_info(
-        normalized_thread_id,
-        source=_new_thread_source(provider_id),
-    )
-    return ws, thread
-
-
 def _build_provider_approval_reply(provider, approval, action: str) -> tuple[str, dict]:
     interactions = getattr(provider, "interactions", None) if provider is not None else None
     build_reply = getattr(interactions, "build_approval_reply", None) if interactions is not None else None
@@ -297,13 +254,6 @@ def _is_app_state_thread_id(provider_id: str, thread_id: str) -> bool:
     normalized_provider_id = str(provider_id or "").strip()
     normalized_thread_id = str(thread_id or "").strip()
     return bool(normalized_provider_id) and normalized_thread_id.startswith(f"app:{normalized_provider_id}:")
-
-
-def _state_only_session_rows(state, provider_id: str, facts, seen: set[tuple[str, str]]) -> list[dict]:
-    # Session Tab must only show provider-backed sessions. App-created
-    # state-only placeholders are draft implementation details, not sessions.
-    _ = (state, provider_id, facts, seen)
-    return []
 
 
 async def _run_sync_with_timeout(
@@ -455,33 +405,6 @@ def _preview_from_turns(turns: list[dict], *, title: str) -> str:
         if not _preview_equals_title(content, title):
             return content
     return ""
-
-
-def _approval_mirror_dedupe_key(
-    provider_id: str,
-    thread_id: str,
-    workspace_dir: str,
-    payload: dict,
-) -> str:
-    command = _approval_mirror_command(payload)
-    return "\x1f".join(
-        [
-            str(provider_id or ""),
-            str(thread_id or ""),
-            str(workspace_dir or ""),
-            str(command or ""),
-        ]
-    )
-
-
-def _approval_mirror_command(payload: dict) -> str:
-    tool_input = payload.get("tool_input")
-    command = payload.get("command")
-    if not command and isinstance(tool_input, dict):
-        command = tool_input.get("command") or tool_input.get("cmd")
-    if command is None:
-        command = payload.get("tool_name") or ""
-    return str(command or "")
 
 
 def _event_payload_text(payload: dict, *keys: str) -> str:
@@ -651,8 +574,6 @@ class ProviderOwnerBridge:
                 response = await self._handle_list_sessions(request)
             elif request_type == "read_session":
                 response = await self._handle_read_session(request)
-            elif request_type == "create_session":
-                response = await self._handle_create_session(request)
             elif request_type == "archive_session":
                 response = await self._handle_archive_session(request)
             elif request_type == "runtime_status":
@@ -669,8 +590,6 @@ class ProviderOwnerBridge:
                 return
             elif request_type == "reply_approval":
                 response = await self._handle_reply_approval(request)
-            elif request_type == "mirror_approval":
-                response = await self._handle_mirror_approval(request)
             else:
                 response = {
                     "ok": False,
@@ -791,7 +710,6 @@ class ProviderOwnerBridge:
                         if source:
                             row["source"] = source
                         sessions.append(row)
-                    sessions.extend(_state_only_session_rows(self.state, provider_id, facts, seen))
                     read_thread_history = getattr(facts, "read_thread_history", None)
                     if callable(read_thread_history):
                         hydration_candidates = [
@@ -980,7 +898,6 @@ class ProviderOwnerBridge:
                     row["source"] = source
                 sessions.append(row)
 
-        sessions.extend(_state_only_session_rows(self.state, provider_id, facts, seen))
         sessions.sort(
             key=lambda item: (
                 -_safe_int(item.get("updatedAt")),
@@ -1312,7 +1229,7 @@ class ProviderOwnerBridge:
         }
 
     async def _handle_usage_summary(self, request: dict) -> dict:
-        from core.provider_session_bridge import _normalize_usage_summary
+        from core.provider_usage import _normalize_usage_summary
 
         provider_id = str(request.get("provider_id") or "").strip()
         start_date = str(request.get("start_date") or "").strip()
@@ -1343,84 +1260,6 @@ class ProviderOwnerBridge:
         return {
             "ok": True,
             "summary": _normalize_usage_summary(provider_id, raw_summary),
-        }
-
-    async def _handle_create_session(self, request: dict) -> dict:
-        provider_id = str(request.get("provider_id") or "").strip()
-        workspace_dir = str(request.get("workspace_dir") or "").strip()
-        create_mode = str(request.get("create_mode") or request.get("mode") or "").strip()
-
-        if not provider_id:
-            return {"ok": False, "error": "缺少 provider_id"}
-        if not workspace_dir:
-            return {"ok": False, "error": "缺少 workspace_dir"}
-
-        provider = get_provider(provider_id, getattr(self.state, "config", None))
-        if provider is None:
-            return {"ok": False, "error": f"Provider '{provider_id}' 未启用"}
-
-        ws_info = _resolve_workspace(self.state, provider_id, workspace_dir)
-        if ws_info is None:
-            return {"ok": False, "error": "缺少 workspace_dir，无法创建 provider 会话"}
-
-        workspace_id = getattr(ws_info, "daemon_workspace_id", None) or _workspace_key(provider_id, ws_info.path)
-        ws_info.daemon_workspace_id = workspace_id
-
-        adapter = self.state.get_adapter(provider_id)
-        if adapter is None or not getattr(adapter, "connected", False):
-            return {"ok": False, "error": f"{provider_id} adapter 未连接"}
-        if hasattr(adapter, "register_workspace_cwd"):
-            try:
-                adapter.register_workspace_cwd(workspace_id, ws_info.path)
-            except Exception:
-                logger.debug("[provider-owner-bridge] register_workspace_cwd 失败", exc_info=True)
-
-        if create_mode in {"app_state", "app", "state_only"}:
-            thread_id = f"app:{provider_id}:{uuid.uuid4()}"
-            thread_info = ws_info.threads.get(thread_id)
-            if thread_info is None:
-                thread_info = _new_thread_info(thread_id, source="app")
-                ws_info.threads[thread_id] = thread_info
-        else:
-            try:
-                started = await start_real_provider_thread(
-                    adapter,
-                    ws_info,
-                    workspace_id,
-                    provider_id=provider_id,
-                    preview=None,
-                    source=_new_thread_source(provider_id),
-                )
-            except Exception as exc:
-                return {"ok": False, "error": str(exc)}
-            thread_id = started.thread_id
-            thread_info = started.thread_info
-        thread_info.archived = False
-        thread_info.is_active = False
-        thread_info.source = "app" if create_mode in {"app_state", "app", "state_only"} else thread_info.source
-        thread_info.preview = getattr(thread_info, "preview", None) or "新建会话"
-
-        if getattr(self.state, "storage", None) is not None:
-            try:
-                save_storage(self.state.storage)
-            except Exception as exc:
-                return {"ok": False, "error": f"会话已创建，但保存本地状态失败: {exc}"}
-        self._list_sessions_cache.clear()
-
-        now = int(time.time())
-        return {
-            "ok": True,
-            "provider_id": provider_id,
-            "thread_id": thread_id,
-            "workspace_id": workspace_id,
-            "workspace_dir": ws_info.path,
-            "session": build_provider_session_summary(
-                ws_info,
-                thread_info,
-                preview_text=thread_info.preview,
-                provider_active=False,
-                now=now,
-            ),
         }
 
     async def _handle_read_session(self, request: dict) -> dict:
@@ -1489,23 +1328,6 @@ class ProviderOwnerBridge:
             "detail": detail,
             "lines": lines,
         }
-
-    async def _handle_mirror_approval(self, request: dict) -> dict:
-        provider_id = str(request.get("provider_id") or "").strip()
-        thread_id = str(request.get("thread_id") or "").strip()
-        workspace_dir = str(request.get("workspace_dir") or "").strip()
-        if not provider_id:
-            return {"ok": False, "error": "缺少 provider_id"}
-
-        logger.info(
-            "[provider-hook-mirror] 忽略 legacy mirror_approval；审批只走 app-server request/response "
-            "provider=%s thread=%s workspace=%s source=%s",
-            provider_id,
-            thread_id[:12] if thread_id else "?",
-            workspace_dir or "?",
-            str(request.get("source") or ""),
-        )
-        return {"ok": True, "ignored": True, "reason": "approval_via_app_server_only"}
 
     async def _handle_reply_approval(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()

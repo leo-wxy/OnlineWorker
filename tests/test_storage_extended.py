@@ -5,6 +5,7 @@
 """
 import json
 import os
+from datetime import datetime
 import pytest
 from plugins.providers.builtin.codex.python import storage_runtime as storage_module
 from plugins.providers.builtin.codex.python.storage_runtime import scan_codex_session_cwds
@@ -13,10 +14,20 @@ from plugins.providers.builtin.codex.python.storage_runtime import scan_codex_se
 def write_jsonl(path: str, first_line: dict, extra: str = ""):
     """写一个 .jsonl 文件，首行为 JSON，后续可追加任意内容。"""
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    payload = first_line.get("payload")
+    if first_line.get("type") == "session_meta" and isinstance(payload, dict):
+        payload.setdefault("id", os.path.splitext(os.path.basename(path))[0])
     with open(path, "w", encoding="utf-8") as f:
         f.write(json.dumps(first_line) + "\n")
         if extra:
             f.write(extra + "\n")
+    timestamp = payload.get("timestamp") if isinstance(payload, dict) else None
+    if isinstance(timestamp, str) and timestamp:
+        try:
+            seconds = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).timestamp()
+            os.utime(path, (seconds, seconds))
+        except Exception:
+            pass
 
 
 class TestScanCodexSessionCwds:

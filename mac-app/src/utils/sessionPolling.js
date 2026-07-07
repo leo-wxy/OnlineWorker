@@ -28,7 +28,7 @@ function buildTurnSignature(turn) {
   });
 }
 
-export function getLastAssistantSignature(snapshot) {
+function getLastAssistantSignature(snapshot) {
   if (!Array.isArray(snapshot)) {
     return null;
   }
@@ -223,30 +223,4 @@ export async function pollAssistantReply(options) {
       (Array.isArray(baselineSnapshot) && hasAdvancedAssistantReply(baselineSnapshot, latestSnapshot)),
     cancelled: false,
   };
-}
-
-/**
- * 发送后继续轮询，直到 assistant 回复稳定或达到最大次数。
- *
- * 这里不以“第一条 assistant 出现”为完成条件，因为 provider 可能先写 commentary，
- * 也可能在发送接口返回后稍晚才把最终回复落库。
- *
- * @template T
- * @param {{
- *   loadSnapshot: () => Promise<T[]>,
- *   getAssistantCount: (snapshot: T[]) => number,
- *   getSignature: (snapshot: T[]) => string,
- *   baselineAssistantCount: number,
- *   baselineSnapshot?: T[],
- *   onUpdate?: (snapshot: T[]) => void,
- *   intervalMs?: number,
- *   maxAttempts?: number,
- *   stablePollsRequired?: number,
- *   shouldContinue?: () => boolean,
- * }} options
- * @returns {Promise<T[]>}
- */
-export async function pollForSettledAssistantReply(options) {
-  const result = await pollAssistantReply(options);
-  return result.snapshot;
 }
