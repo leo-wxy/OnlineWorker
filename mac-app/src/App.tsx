@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -7,6 +7,7 @@ import {
   ConfigEditor,
   LogWindow,
   MaintenanceSettingsPanel,
+  MenubarPopover,
   NotificationSettingsPanel,
   ProviderSettingsPanel,
 } from "./components";
@@ -33,9 +34,21 @@ import {
 } from "./utils/appTabs.js";
 
 const APP_NAVIGATE_TAB_EVENT = "app:navigate-tab";
+const APP_OPEN_SESSION_EVENT = "app:open-session";
+const MENUBAR_POPOVER_WINDOW_LABEL = "menubar-popover";
+
+function detectCurrentWindowLabel() {
+  try {
+    return getCurrentWindow().label;
+  } catch {
+    return "main";
+  }
+}
 
 export default function App() {
   const { locale, setLocale, t } = useI18n();
+  const windowLabel = useMemo(detectCurrentWindowLabel, []);
+  const isMenubarPopover = windowLabel === MENUBAR_POPOVER_WINDOW_LABEL;
   const [activeTab, setActiveTab] = useState<AppTab>("dashboard");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsSection, setSettingsSection] = useState<"onlineworker" | "agents" | "extensions" | "maintenance" | "advanced">("onlineworker");
@@ -50,6 +63,9 @@ export default function App() {
 
   // First-run detection: auto-switch to Guide tab on first launch
   useEffect(() => {
+    if (isMenubarPopover) {
+      return;
+    }
     (async () => {
       try {
         const firstRun = await invoke<boolean>("check_first_run");
@@ -62,9 +78,12 @@ export default function App() {
         // If the command fails (e.g., dev mode without Tauri), just continue normally
       }
     })();
-  }, []);
+  }, [isMenubarPopover]);
 
   useEffect(() => {
+    if (isMenubarPopover) {
+      return;
+    }
     let unlisten: (() => void) | null = null;
 
     void listen<string>(APP_NAVIGATE_TAB_EVENT, (event) => {
@@ -86,9 +105,41 @@ export default function App() {
         unlisten();
       }
     };
-  }, []);
+  }, [isMenubarPopover]);
 
   useEffect(() => {
+    if (isMenubarPopover) {
+      return;
+    }
+    let unlisten: (() => void) | null = null;
+
+    void listen<TaskBoardOpenSessionTarget>(APP_OPEN_SESSION_EVENT, (event) => {
+      setSessionOpenTarget({
+        providerId: event.payload.providerId,
+        sessionId: event.payload.sessionId,
+        workspace: event.payload.workspace,
+      });
+      setActiveTab("sessions");
+      setShowLogs(false);
+    })
+      .then((dispose) => {
+        unlisten = dispose;
+      })
+      .catch(() => {
+        // Non-Tauri environments do not expose native event APIs.
+      });
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, [isMenubarPopover]);
+
+  useEffect(() => {
+    if (isMenubarPopover) {
+      return;
+    }
     let activeStreamId: number | null = null;
     let disposed = false;
     const channel = new Channel<TaskBoardActivityStreamEvent>();
@@ -140,7 +191,7 @@ export default function App() {
         console.warn("Failed to stop task board activity badge stream", error);
       });
     };
-  }, []);
+  }, [isMenubarPopover]);
 
   const getTabIcon = (tab: AppTab) => {
     switch (tab) {
@@ -175,6 +226,10 @@ export default function App() {
     setActiveTab("sessions");
     setShowLogs(false);
   }, []);
+
+  if (isMenubarPopover) {
+    return <MenubarPopover />;
+  }
 
   return (
     <div className="relative flex h-screen w-screen overflow-hidden ow-app-shell text-[var(--ow-text)]">

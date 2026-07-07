@@ -6,3 +6,4 @@ export { AiSettingsPanel } from "./AiSettingsPanel";
 export { MaintenanceSettingsPanel } from "./MaintenanceSettingsPanel";
 export { CliChecker } from "./CliChecker";
 export { ConnectivityTest } from "./ConnectivityTest";
+export { MenubarPopover } from "./menubar-popover/MenubarPopover";

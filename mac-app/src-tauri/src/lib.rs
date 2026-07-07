@@ -51,7 +51,10 @@ use commands::task_board_state::{
 };
 use commands::telegram::{test_bot_permissions, test_bot_token, test_group_access};
 use commands::terminal::{open_finder, open_provider_tui_host_terminal, open_terminal};
-use menubar::{setup_menubar, show_main_window};
+use menubar::{
+    get_menubar_popover_snapshot, open_menubar_popover_session, open_menubar_tab, setup_menubar,
+    show_main_window,
+};
 
 #[derive(Default)]
 struct AppExitState {
@@ -100,7 +103,11 @@ impl AppExitState {
 }
 
 fn should_hide_window_on_close(window_label: &str, app_is_exiting: bool) -> bool {
-    window_label == "main" && !app_is_exiting
+    matches!(window_label, "main" | "menubar-popover") && !app_is_exiting
+}
+
+fn should_hide_window_on_focus_loss(window_label: &str, focused: bool) -> bool {
+    window_label == "menubar-popover" && !focused
 }
 
 fn should_cleanup_on_destroy(app_is_exiting: bool) -> bool {
@@ -411,6 +418,9 @@ pub fn run() {
             start_provider_session_event_stream,
             stop_provider_session_event_stream,
             get_provider_usage_summary,
+            get_menubar_popover_snapshot,
+            open_menubar_popover_session,
+            open_menubar_tab,
             get_task_board_session_activities,
             get_task_board_state,
             pin_task_board_session,
@@ -442,6 +452,11 @@ pub fn run() {
                 let exit_state = app.state::<AppExitState>();
                 if should_cleanup_on_destroy(exit_state.is_exiting()) {
                     cleanup_managed_processes_for_exit_once(&app);
+                }
+            }
+            tauri::WindowEvent::Focused(focused) => {
+                if should_hide_window_on_focus_loss(window.label(), *focused) {
+                    let _ = window.hide();
                 }
             }
             _ => {}
@@ -483,7 +498,7 @@ mod tests {
         default_provider_overlay_env, launch_service_self_check_delay,
         prepare_single_instance_startup, probe_existing_instance, service_guard_check_interval,
         should_auto_start_service_after_launch, should_auto_start_service_in_session,
-        should_cleanup_on_destroy, should_hide_window_on_close,
+        should_cleanup_on_destroy, should_hide_window_on_close, should_hide_window_on_focus_loss,
         should_restore_main_window_on_reopen, single_instance_socket_path, AppExitState,
         ExistingInstanceStatus, SingleInstanceStartup,
     };
@@ -505,6 +520,11 @@ mod tests {
     }
 
     #[test]
+    fn popover_window_close_hides_window_when_app_is_not_exiting() {
+        assert!(should_hide_window_on_close("menubar-popover", false));
+    }
+
+    #[test]
     fn main_window_close_does_not_hide_window_when_app_is_already_exiting() {
         assert!(!should_hide_window_on_close("main", true));
     }
@@ -512,6 +532,13 @@ mod tests {
     #[test]
     fn non_main_window_close_does_not_hide_window() {
         assert!(!should_hide_window_on_close("settings", false));
+    }
+
+    #[test]
+    fn popover_focus_loss_hides_only_popover_window() {
+        assert!(should_hide_window_on_focus_loss("menubar-popover", false));
+        assert!(!should_hide_window_on_focus_loss("menubar-popover", true));
+        assert!(!should_hide_window_on_focus_loss("main", false));
     }
 
     #[test]
