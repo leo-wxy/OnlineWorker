@@ -183,10 +183,10 @@ export function MenubarPopover() {
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-transparent p-[1px] text-[var(--ow-text)]">
-      <div className="relative flex h-full flex-col overflow-hidden rounded-[22px] border border-slate-200/80 bg-[rgba(255,255,255,0.98)] backdrop-blur-2xl">
-        <section className="shrink-0 border-b border-slate-200/70 bg-gradient-to-b from-white to-slate-50/86 px-3.5 pb-3 pt-3.5">
+      <div className="relative flex h-full flex-col overflow-hidden rounded-[18px] border border-slate-200/80 bg-[rgba(255,255,255,0.98)] backdrop-blur-xl">
+        <section className="shrink-0 border-b border-slate-200/70 bg-white px-3 pb-2 pt-2">
           <div className="flex items-center gap-2">
-            <div className="ow-segment grid min-w-0 flex-1 auto-cols-fr grid-flow-col gap-1 rounded-[14px] p-1">
+            <div className="ow-segment grid min-w-0 flex-1 auto-cols-fr grid-flow-col gap-1 rounded-[12px] p-1">
               <ProviderTabButton
                 active={selectedTab === OVERVIEW_TAB_ID}
                 label="总览"
@@ -204,7 +204,7 @@ export function MenubarPopover() {
             <button
               type="button"
               onClick={() => void loadSnapshot()}
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-[12px] border border-slate-200/80 bg-white/86 text-slate-500 transition hover:border-slate-300 hover:text-gray-950 disabled:cursor-wait disabled:opacity-60"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] border border-slate-200/80 bg-white/86 text-slate-500 transition hover:border-slate-300 hover:text-gray-950 disabled:cursor-wait disabled:opacity-60"
               disabled={loading}
               title="Refresh"
             >
@@ -252,7 +252,7 @@ export function MenubarPopover() {
           )}
         </main>
 
-        <div className="grid h-11 shrink-0 grid-cols-3 border-t border-slate-200/70 bg-white/90">
+        <div className="grid h-10 shrink-0 grid-cols-3 border-t border-slate-200/70 bg-white/90">
           <PopoverActionButton
             label="Tasks"
             icon={<TaskBoardIcon />}
@@ -299,14 +299,14 @@ function OverviewPanel({
   onOpenSession: (lane: MenubarPopoverSessionLane) => void;
 }) {
   return (
-    <div className="space-y-3 px-3.5 py-3">
-      <section className="rounded-[18px] border border-slate-200/76 bg-white px-4 py-3.5">
+    <div className="space-y-2.5 px-3 py-2.5">
+      <section className="rounded-[14px] border border-slate-200/76 bg-white px-3.5 py-3">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <p className="text-[11px] font-extrabold uppercase tracking-[0.12em] text-slate-400">
+            <p className="text-[10px] font-extrabold tracking-[0.04em] text-slate-400">
               Today usage
             </p>
-            <div className="mt-1 text-[30px] font-black leading-none tracking-normal text-gray-950">
+            <div className="mt-1 text-[28px] font-black leading-none tracking-normal text-gray-950">
               {loading ? "..." : totalTokensText}
             </div>
           </div>
@@ -317,7 +317,7 @@ function OverviewPanel({
         </div>
       </section>
 
-      <section className="rounded-[18px] border border-slate-200/76 bg-white">
+      <section className="rounded-[14px] border border-slate-200/76 bg-white">
         <SectionTitle title="Providers" subtitle="Token summary" />
         <div className="divide-y divide-slate-100">
           {providers.length > 0 ? (
@@ -330,7 +330,7 @@ function OverviewPanel({
         </div>
       </section>
 
-      <section className="rounded-[18px] border border-slate-200/76 bg-white">
+      <section className="rounded-[14px] border border-slate-200/76 bg-white">
         <SectionTitle title="Latest sessions" subtitle="One recent session per provider" />
         <div className="divide-y divide-slate-100">
           {lanes.length > 0 ? (
@@ -379,8 +379,8 @@ function ProviderPanel({
   ];
 
   return (
-    <div className="space-y-3 px-3.5 py-3">
-      <section className={`rounded-[18px] border ${accent.cardBorder} bg-white px-4 py-3.5`}>
+    <div className="space-y-2.5 px-3 py-2.5">
+      <section className={`rounded-[14px] border ${accent.cardBorder} bg-white px-3.5 py-3`}>
         <div className="flex items-center gap-3">
           <ProviderAvatar provider={provider} />
           <div className="min-w-0 flex-1">
@@ -399,7 +399,7 @@ function ProviderPanel({
         </div>
       </section>
 
-      <section className="rounded-[18px] border border-slate-200/76 bg-white">
+      <section className="rounded-[14px] border border-slate-200/76 bg-white">
         <SectionTitle title="Usage" subtitle="Input / Output / Cache" />
         <div className="grid grid-cols-2 gap-2 px-3.5 pb-3.5">
           {breakdown.map((item) => (
@@ -408,7 +408,7 @@ function ProviderPanel({
         </div>
       </section>
 
-      <section className="rounded-[18px] border border-slate-200/76 bg-white">
+      <section className="rounded-[14px] border border-slate-200/76 bg-white">
         <SectionTitle title="Latest session" subtitle={lane?.updatedAtEpoch ? formatRelativeAge(lane.updatedAtEpoch, nowMs) : "No activity"} />
         {lane ? (
           <LatestSessionRow
@@ -438,7 +438,7 @@ function ProviderTabButton({
     <button
       type="button"
       onClick={onClick}
-      className={`h-7 min-w-0 rounded-[10px] px-2 text-[12px] font-extrabold transition ${
+      className={`h-7 min-w-0 rounded-[9px] px-2 text-[12px] font-extrabold transition ${
         active
           ? "bg-white text-gray-950"
           : "text-slate-500 hover:bg-white/70 hover:text-gray-900"
@@ -453,7 +453,7 @@ function ProviderTabButton({
 function ProviderUsageRow({ provider }: { provider: MenubarPopoverUsageProvider }) {
   const accent = providerAccent(provider.providerId);
   return (
-    <div className="flex min-h-[46px] items-center justify-between gap-3 px-3.5 py-2.5">
+    <div className="flex min-h-[42px] items-center justify-between gap-3 px-3.5 py-2">
       <div className="flex min-w-0 items-center gap-2.5">
         <span className={`h-2 w-2 shrink-0 rounded-full ${accent.laneDot}`} />
         <span className="truncate text-[12px] font-extrabold text-slate-800">{provider.label}</span>
@@ -508,7 +508,7 @@ function LatestSessionRow({
       onClick={() => onOpenSession(lane)}
       disabled={Boolean(isBusy)}
       className={`group grid w-full grid-cols-[minmax(0,1fr)_32px] items-center gap-2 px-3.5 text-left transition hover:bg-slate-50/92 disabled:cursor-wait disabled:opacity-70 ${
-        compact ? "min-h-[78px] py-2.5" : "min-h-[96px] py-3"
+        compact ? "min-h-[64px] py-2" : "min-h-[86px] py-2.5"
       }`}
     >
       <div className="min-w-0">
@@ -534,7 +534,7 @@ function LatestSessionRow({
           </p>
         )}
       </div>
-      <span className={`grid h-8 w-8 place-items-center rounded-[10px] ${accent.actionText} opacity-70 transition group-hover:bg-white group-hover:opacity-100`}>
+      <span className={`grid h-8 w-8 place-items-center rounded-[9px] ${accent.actionText} opacity-70 transition group-hover:bg-white group-hover:opacity-100`}>
         <ArrowUpRightIcon />
       </span>
     </button>
@@ -543,7 +543,7 @@ function LatestSessionRow({
 
 function UsageBreakdownCell({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 rounded-[14px] border border-slate-200/70 bg-slate-50/66 px-3 py-2.5">
+    <div className="min-w-0 rounded-[12px] border border-slate-200/70 bg-slate-50/66 px-2.5 py-2">
       <p className="truncate text-[9px] font-extrabold uppercase tracking-[0.08em] text-slate-400">
         {label}
       </p>
@@ -563,7 +563,7 @@ function ProviderAvatar({ provider }: { provider: MenubarPopoverUsageProvider })
     .toUpperCase() || provider.providerId.slice(0, 2).toUpperCase();
 
   return (
-    <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-[15px] ${accent.avatarBg} ${accent.tileText} text-[13px] font-black`}>
+    <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-[12px] ${accent.avatarBg} ${accent.tileText} text-[13px] font-black`}>
       {initials}
     </div>
   );
@@ -571,7 +571,7 @@ function ProviderAvatar({ provider }: { provider: MenubarPopoverUsageProvider })
 
 function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 px-3.5 py-3">
+    <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
       <h3 className="truncate text-[12px] font-black text-gray-950">{title}</h3>
       <p className="shrink-0 truncate text-[10px] font-bold text-slate-400">{subtitle}</p>
     </div>
@@ -602,7 +602,7 @@ function PopoverActionButton({
       type="button"
       onClick={onClick}
       disabled={busy}
-      className="flex h-11 items-center justify-center gap-1.5 border-r border-slate-200/70 px-2 text-[10px] font-extrabold text-slate-600 transition last:border-r-0 hover:bg-slate-50 hover:text-gray-950 disabled:cursor-wait disabled:opacity-70"
+      className="flex h-10 items-center justify-center gap-1.5 border-r border-slate-200/70 px-2 text-[10px] font-extrabold text-slate-600 transition last:border-r-0 hover:bg-slate-50 hover:text-gray-950 disabled:cursor-wait disabled:opacity-70"
     >
       <span className="text-slate-400">{icon}</span>
       <span>{label}</span>
@@ -624,7 +624,7 @@ function MetricTile({
       ? "bg-[var(--ow-green-soft)] text-[var(--ow-green)]"
       : "bg-[var(--ow-amber-soft)] text-[var(--ow-amber)]";
   return (
-    <div className={`min-w-[58px] rounded-[14px] px-2.5 py-2 text-center ${className}`}>
+    <div className={`min-w-[54px] rounded-[12px] px-2.5 py-1.5 text-center ${className}`}>
       <div className="text-[17px] font-black leading-5">{value}</div>
       <div className="text-[8px] font-extrabold uppercase tracking-[0.08em]">{label}</div>
     </div>

@@ -1064,6 +1064,25 @@ def _extract_started_thread_id(result: object) -> str:
     return str(thread_id)
 
 
+async def _codex_thread_can_resume_in_app_server(
+    adapter,
+    workspace_id: str,
+    thread_id: str,
+) -> bool:
+    if not workspace_id or not thread_id:
+        return False
+    try:
+        await adapter.resume_thread(workspace_id, thread_id)
+        return True
+    except Exception:
+        logger.info(
+            "[codex] app-server resume thread 失败，将创建新 thread old=%s",
+            thread_id[:12],
+            exc_info=True,
+        )
+        return False
+
+
 def _replace_thread_binding(ws_info, thread_info, new_thread_id: str) -> None:
     old_thread_id = str(getattr(thread_info, "thread_id", "") or "")
     if not new_thread_id or new_thread_id == old_thread_id:
@@ -1137,12 +1156,11 @@ async def prepare_send(
     attachments=None,
 ) -> bool:
     workspace_id = ws_info.daemon_workspace_id
-    workspace_path = str(getattr(ws_info, "path", "") or "")
     thread_id = str(getattr(thread_info, "thread_id", "") or "")
     thread_source = str(getattr(thread_info, "source", "") or "").strip().lower()
     should_materialize_app_thread = (
         thread_source == "app"
-        and not _codex_thread_has_source_record(workspace_path, thread_id)
+        and not await _codex_thread_can_resume_in_app_server(adapter, workspace_id, thread_id)
     )
 
     if should_materialize_app_thread:

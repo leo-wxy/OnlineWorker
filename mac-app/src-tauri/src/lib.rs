@@ -125,8 +125,8 @@ pub(crate) fn cleanup_managed_processes_for_exit_once(app: &tauri::AppHandle) {
     });
 }
 
-fn should_restore_main_window_on_reopen(has_visible_windows: bool) -> bool {
-    !has_visible_windows
+fn should_restore_main_window_on_reopen(_has_visible_windows: bool) -> bool {
+    false
 }
 
 fn single_instance_socket_path(data_dir: &Path) -> PathBuf {
@@ -557,8 +557,8 @@ mod tests {
     }
 
     #[test]
-    fn macos_reopen_restores_main_window_when_all_windows_are_hidden() {
-        assert!(should_restore_main_window_on_reopen(false));
+    fn macos_reopen_does_not_restore_main_window_when_all_windows_are_hidden() {
+        assert!(!should_restore_main_window_on_reopen(false));
     }
 
     #[test]

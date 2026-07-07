@@ -649,7 +649,7 @@ async def test_activate_new_thread_watches_codex_transcript(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_prepare_send_does_not_resume_app_owned_thread_before_send(monkeypatch):
+async def test_prepare_send_reuses_app_thread_when_app_server_resume_succeeds(monkeypatch):
     ws = WorkspaceInfo(
         name="onlineWorker",
         path="/Users/example/Projects/onlineWorker",
@@ -689,8 +689,8 @@ async def test_prepare_send_does_not_resume_app_owned_thread_before_send(monkeyp
     )
 
     assert should_continue is True
+    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "thread-app")
     adapter.start_thread.assert_not_awaited()
-    adapter.resume_thread.assert_not_awaited()
     interrupt_mock.assert_awaited_once_with(
         state,
         adapter,
@@ -700,6 +700,69 @@ async def test_prepare_send_does_not_resume_app_owned_thread_before_send(monkeyp
     )
     assert ws.threads["thread-app"] is thread_info
     assert thread_info.source == "app"
+
+
+@pytest.mark.asyncio
+async def test_prepare_send_materializes_app_thread_when_resume_reports_not_found(monkeypatch):
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    thread_info = ThreadInfo(
+        thread_id="thread-app-stale",
+        topic_id=206,
+        preview="App 会话",
+        archived=False,
+        is_active=True,
+        source="app",
+    )
+    ws.threads["thread-app-stale"] = thread_info
+    state = AppState(storage=AppStorage())
+
+    adapter = MagicMock()
+    adapter.start_thread = AsyncMock(return_value={"id": "thread-real"})
+    adapter.resume_thread = AsyncMock(
+        side_effect=RuntimeError("thread not found: thread-app-stale")
+    )
+
+    interrupt_mock = AsyncMock()
+    monkeypatch.setattr(codex_runtime, "_interrupt_active_turn", interrupt_mock)
+    monkeypatch.setattr(
+        codex_runtime,
+        "_codex_thread_has_source_record",
+        lambda workspace_path, thread_id: True,
+    )
+
+    should_continue = await codex_runtime.prepare_send(
+        state,
+        adapter,
+        ws,
+        thread_info,
+        update=SimpleNamespace(),
+        context=SimpleNamespace(),
+        group_chat_id=1,
+        src_topic_id=206,
+        text="继续",
+        has_photo=False,
+    )
+
+    assert should_continue is True
+    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "thread-app-stale")
+    adapter.start_thread.assert_awaited_once_with("codex:onlineWorker")
+    assert set(ws.threads) == {"thread-real"}
+    assert ws.threads["thread-real"] is thread_info
+    assert thread_info.thread_id == "thread-real"
+    assert thread_info.source == "app"
+    assert thread_info.is_active is True
+    interrupt_mock.assert_awaited_once_with(
+        state,
+        adapter,
+        "codex:onlineWorker",
+        "thread-real",
+        label="codex",
+    )
 
 
 @pytest.mark.asyncio
@@ -723,11 +786,17 @@ async def test_prepare_send_materializes_state_only_app_thread(monkeypatch):
 
     adapter = MagicMock()
     adapter.start_thread = AsyncMock(return_value={"id": "thread-real"})
-    adapter.resume_thread = AsyncMock(return_value={})
+    adapter.resume_thread = AsyncMock(
+        side_effect=RuntimeError("thread not found: app:codex:draft")
+    )
 
     interrupt_mock = AsyncMock()
     monkeypatch.setattr(codex_runtime, "_interrupt_active_turn", interrupt_mock)
-    monkeypatch.setattr(codex_runtime, "_codex_thread_has_source_record", lambda workspace_path, thread_id: False)
+    monkeypatch.setattr(
+        codex_runtime,
+        "_codex_thread_has_source_record",
+        lambda workspace_path, thread_id: False,
+    )
 
     should_continue = await codex_runtime.prepare_send(
         state,
@@ -743,8 +812,8 @@ async def test_prepare_send_materializes_state_only_app_thread(monkeypatch):
     )
 
     assert should_continue is True
+    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "app:codex:draft")
     adapter.start_thread.assert_awaited_once_with("codex:onlineWorker")
-    adapter.resume_thread.assert_not_awaited()
     assert set(ws.threads) == {"thread-real"}
     assert ws.threads["thread-real"] is thread_info
     assert thread_info.thread_id == "thread-real"

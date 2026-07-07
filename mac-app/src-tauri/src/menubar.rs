@@ -1,17 +1,17 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::utils::config::Color;
 use tauri::{
-    AppHandle, Emitter, Manager, PhysicalPosition, Rect, WebviewUrl, WebviewWindowBuilder, Wry,
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Rect, Size, WebviewUrl,
+    WebviewWindowBuilder, Wry,
 };
 use tokio::sync::Mutex;
 
@@ -19,74 +19,24 @@ use crate::commands::config::{app_name, ensure_data_dir, read_provider_metadata_
 use crate::commands::dashboard::{compute_dashboard_state, DashboardState, SystemHealth};
 use crate::commands::provider_sessions::load_provider_sessions_with_overlays;
 use crate::commands::provider_usage::get_provider_usage_summary;
-use crate::commands::service::{
-    ensure_service_running_if_needed, snapshot_service_status, start_service_internal,
-    stop_service_internal, BotState,
-};
+use crate::commands::service::{ensure_service_running_if_needed, BotState};
 use crate::commands::task_board_state::{
     get_task_board_session_activities, TaskBoardSessionActivity,
 };
-use crate::{cleanup_managed_processes_for_exit_once, AppExitState};
 
 const APP_TRAY_ID: &str = "main-tray";
 const MAIN_WINDOW_LABEL: &str = "main";
 const MENUBAR_POPOVER_WINDOW_LABEL: &str = "menubar-popover";
-const APP_TRAY_TITLE_ID: &str = "tray_app_title";
-const APP_TRAY_STATUS_ID: &str = "tray_status";
-const APP_TRAY_WORKSPACE_ID: &str = "tray_workspace";
-const APP_TRAY_SESSION_ID: &str = "tray_session";
-const APP_TRAY_THREADS_ID: &str = "tray_threads";
-const APP_TRAY_ATTENTION_ID: &str = "tray_attention";
-const APP_TRAY_USAGE_ID: &str = "tray_usage";
-const APP_TRAY_OPEN_DASHBOARD_ID: &str = "tray_open_dashboard";
-const APP_TRAY_OPEN_TASKS_ID: &str = "tray_open_tasks";
-const APP_TRAY_OPEN_SESSIONS_ID: &str = "tray_open_sessions";
-const APP_TRAY_OPEN_USAGE_ID: &str = "tray_open_usage";
-const APP_TRAY_OPEN_SETUP_ID: &str = "tray_open_setup";
-const APP_TRAY_TOGGLE_SERVICE_ID: &str = "tray_toggle_service";
-const APP_TRAY_QUIT_ID: &str = "tray_quit";
 const APP_NAVIGATE_TAB_EVENT: &str = "app:navigate-tab";
 const APP_OPEN_SESSION_EVENT: &str = "app:open-session";
-const STATUS_PREFIX: &str = "Status: ";
-const WORKSPACE_PREFIX: &str = "Workspace: ";
-const SESSION_PREFIX: &str = "Active Session: ";
-const THREADS_PREFIX: &str = "Active Threads: ";
-const ATTENTION_PREFIX: &str = "Needs Attention: ";
-const USAGE_PREFIX: &str = "Usage Today: ";
 const REFRESH_INTERVAL_SECONDS: u64 = 4;
-const USAGE_REFRESH_INTERVAL_SECONDS: u64 = 300;
 const MENUBAR_POPOVER_WIDTH: f64 = 420.0;
 const MENUBAR_POPOVER_HEIGHT: f64 = 410.0;
+const MENUBAR_POPOVER_TARGET_HEIGHT: f64 = 560.0;
 const MENUBAR_POPOVER_MARGIN: i32 = 8;
 const MENUBAR_POPOVER_VERTICAL_OFFSET: i32 = 6;
 const CUSTOM_TRAY_ICON_RELATIVE_PATH: &str = "icons/tray-template.png";
 const CUSTOM_TRAY_ICON_2X_RELATIVE_PATH: &str = "icons/tray-template@2x.png";
-
-#[derive(Clone)]
-struct TrayMenuHandles {
-    status_item: MenuItem<Wry>,
-    workspace_item: MenuItem<Wry>,
-    session_item: MenuItem<Wry>,
-    threads_item: MenuItem<Wry>,
-    attention_item: MenuItem<Wry>,
-    usage_item: MenuItem<Wry>,
-    toggle_service_item: MenuItem<Wry>,
-}
-
-#[derive(Debug)]
-struct TrayRuntimeState {
-    last_usage_refresh: Option<Instant>,
-    usage_label: String,
-}
-
-impl Default for TrayRuntimeState {
-    fn default() -> Self {
-        Self {
-            last_usage_refresh: None,
-            usage_label: usage_menu_label(TrayUsageValue::Loading),
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TrayStatus {
@@ -103,13 +53,6 @@ impl TrayStatus {
             Self::Degraded => "Degraded",
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TrayUsageValue {
-    Loading,
-    NoData,
-    TotalTokens(u64),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -244,166 +187,17 @@ fn ensure_popover_window(app: &AppHandle) -> Result<(), String> {
 }
 
 pub(crate) fn setup_menubar(app: &AppHandle, state: Arc<Mutex<BotState>>) -> tauri::Result<()> {
-    let app_title = app_name();
-    let app_title_item = MenuItem::with_id(app, APP_TRAY_TITLE_ID, app_title, false, None::<&str>)?;
-    let status_item = MenuItem::with_id(
-        app,
-        APP_TRAY_STATUS_ID,
-        format!("{}Unknown", STATUS_PREFIX),
-        false,
-        None::<&str>,
-    )?;
-    let workspace_item = MenuItem::with_id(
-        app,
-        APP_TRAY_WORKSPACE_ID,
-        workspace_menu_label(None),
-        false,
-        None::<&str>,
-    )?;
-    let session_item = MenuItem::with_id(
-        app,
-        APP_TRAY_SESSION_ID,
-        session_menu_label(None),
-        false,
-        None::<&str>,
-    )?;
-    let threads_item = MenuItem::with_id(
-        app,
-        APP_TRAY_THREADS_ID,
-        threads_menu_label(0),
-        false,
-        None::<&str>,
-    )?;
-    let attention_item = MenuItem::with_id(
-        app,
-        APP_TRAY_ATTENTION_ID,
-        attention_menu_label(None),
-        false,
-        None::<&str>,
-    )?;
-    let usage_item = MenuItem::with_id(
-        app,
-        APP_TRAY_USAGE_ID,
-        usage_menu_label(TrayUsageValue::Loading),
-        false,
-        None::<&str>,
-    )?;
-    let open_dashboard_item = MenuItem::with_id(
-        app,
-        APP_TRAY_OPEN_DASHBOARD_ID,
-        "Open Dashboard",
-        true,
-        None::<&str>,
-    )?;
-    let open_tasks_item = MenuItem::with_id(
-        app,
-        APP_TRAY_OPEN_TASKS_ID,
-        "Open Task Board",
-        true,
-        None::<&str>,
-    )?;
-    let open_sessions_item = MenuItem::with_id(
-        app,
-        APP_TRAY_OPEN_SESSIONS_ID,
-        "Open Sessions",
-        true,
-        None::<&str>,
-    )?;
-    let open_usage_item = MenuItem::with_id(
-        app,
-        APP_TRAY_OPEN_USAGE_ID,
-        "Open Usage",
-        true,
-        None::<&str>,
-    )?;
-    let open_setup_item = MenuItem::with_id(
-        app,
-        APP_TRAY_OPEN_SETUP_ID,
-        "Open Setup",
-        true,
-        None::<&str>,
-    )?;
-    let toggle_service_item = MenuItem::with_id(
-        app,
-        APP_TRAY_TOGGLE_SERVICE_ID,
-        service_toggle_label(false),
-        true,
-        None::<&str>,
-    )?;
-    let quit_item = MenuItem::with_id(app, APP_TRAY_QUIT_ID, "Quit", true, None::<&str>)?;
-    let top_separator = PredefinedMenuItem::separator(app)?;
-    let bottom_separator = PredefinedMenuItem::separator(app)?;
-
-    let menu = Menu::with_items(
-        app,
-        &[
-            &app_title_item,
-            &status_item,
-            &workspace_item,
-            &session_item,
-            &threads_item,
-            &attention_item,
-            &usage_item,
-            &top_separator,
-            &open_dashboard_item,
-            &open_tasks_item,
-            &open_sessions_item,
-            &open_usage_item,
-            &open_setup_item,
-            &bottom_separator,
-            &toggle_service_item,
-            &quit_item,
-        ],
-    )?;
-
-    let handles = TrayMenuHandles {
-        status_item: status_item.clone(),
-        workspace_item: workspace_item.clone(),
-        session_item: session_item.clone(),
-        threads_item: threads_item.clone(),
-        attention_item: attention_item.clone(),
-        usage_item: usage_item.clone(),
-        toggle_service_item: toggle_service_item.clone(),
-    };
-    let runtime_state = Arc::new(Mutex::new(TrayRuntimeState::default()));
-
-    let tray = build_tray(
-        app,
-        &menu,
-        state.clone(),
-        handles.clone(),
-        runtime_state.clone(),
-    )?;
-    start_menubar_refresh_loop(app.clone(), state, handles, tray, runtime_state);
+    let tray = build_tray(app)?;
+    start_menubar_refresh_loop(app.clone(), state, tray);
 
     Ok(())
 }
 
-fn build_tray(
-    app: &AppHandle,
-    menu: &Menu<Wry>,
-    state: Arc<Mutex<BotState>>,
-    handles: TrayMenuHandles,
-    runtime_state: Arc<Mutex<TrayRuntimeState>>,
-) -> tauri::Result<TrayIcon<Wry>> {
-    let menu_state = state.clone();
-    let menu_handles = handles.clone();
-    let menu_runtime_state = runtime_state.clone();
-
+fn build_tray(app: &AppHandle) -> tauri::Result<TrayIcon<Wry>> {
     let mut builder = TrayIconBuilder::with_id(APP_TRAY_ID)
-        .menu(menu)
         .tooltip(app_name())
         .show_menu_on_left_click(false)
         .icon_as_template(true)
-        .on_menu_event(move |app, event| {
-            handle_tray_menu_event(
-                app,
-                event,
-                menu_state.clone(),
-                menu_handles.clone(),
-                menu_runtime_state.clone(),
-            );
-        })
         .on_tray_icon_event(move |tray, event| {
             handle_tray_icon_event(tray, event);
         });
@@ -413,69 +207,6 @@ fn build_tray(
     }
 
     builder.build(app)
-}
-
-fn handle_tray_menu_event(
-    app: &AppHandle,
-    event: MenuEvent,
-    state: Arc<Mutex<BotState>>,
-    handles: TrayMenuHandles,
-    runtime_state: Arc<Mutex<TrayRuntimeState>>,
-) {
-    match event.id().as_ref() {
-        APP_TRAY_OPEN_DASHBOARD_ID => {
-            let _ = navigate_to_tab(app, "dashboard");
-        }
-        APP_TRAY_OPEN_TASKS_ID => {
-            let _ = navigate_to_tab(app, "tasks");
-        }
-        APP_TRAY_OPEN_SESSIONS_ID => {
-            let _ = navigate_to_tab(app, "sessions");
-        }
-        APP_TRAY_OPEN_USAGE_ID => {
-            let _ = navigate_to_tab(app, "usage");
-        }
-        APP_TRAY_OPEN_SETUP_ID => {
-            let _ = navigate_to_tab(app, "setup");
-        }
-        APP_TRAY_TOGGLE_SERVICE_ID => {
-            let app = app.clone();
-            tauri::async_runtime::spawn(async move {
-                let service_running = snapshot_service_status(&state)
-                    .await
-                    .map(|status| status.running)
-                    .unwrap_or(false);
-
-                let result = if service_running {
-                    stop_service_internal(&state).await
-                } else {
-                    start_service_internal(&app, &state).await
-                };
-
-                if let Err(error) = result {
-                    eprintln!("[menubar] tray service toggle failed: {}", error);
-                }
-
-                let tray = app.tray_by_id(APP_TRAY_ID);
-                if let Err(error) =
-                    update_menubar_state(&app, &state, &handles, tray.as_ref(), &runtime_state)
-                        .await
-                {
-                    eprintln!(
-                        "[menubar] tray state refresh after action failed: {}",
-                        error
-                    );
-                }
-            });
-        }
-        APP_TRAY_QUIT_ID => {
-            let exit_state = app.state::<AppExitState>();
-            exit_state.mark_exiting();
-            cleanup_managed_processes_for_exit_once(app);
-            app.exit(0);
-        }
-        _ => {}
-    }
 }
 
 fn handle_tray_icon_event(tray: &TrayIcon<Wry>, event: TrayIconEvent) {
@@ -508,6 +239,7 @@ fn toggle_menubar_popover(
         return Ok(());
     }
 
+    resize_menubar_popover(&window, app, icon_rect, click_position)?;
     position_menubar_popover(&window, app, icon_rect, click_position)?;
     window.unminimize().map_err(|error| error.to_string())?;
     window.show().map_err(|error| error.to_string())?;
@@ -560,6 +292,47 @@ fn position_menubar_popover(
     window
         .set_position(next_position)
         .map_err(|error| error.to_string())
+}
+
+fn resize_menubar_popover(
+    window: &tauri::WebviewWindow,
+    app: &AppHandle,
+    icon_rect: Option<Rect>,
+    click_position: Option<PhysicalPosition<f64>>,
+) -> Result<LogicalSize<f64>, String> {
+    let monitors = app
+        .available_monitors()
+        .map_err(|error| error.to_string())?;
+    let primary_monitor = app.primary_monitor().map_err(|error| error.to_string())?;
+    let target_monitor = click_position
+        .and_then(|position| monitor_containing_point(&monitors, position))
+        .or_else(|| icon_rect.and_then(|rect| monitor_for_rect_anchor(&monitors, rect)))
+        .or(primary_monitor.as_ref());
+    let height = menubar_popover_height_for_monitor(target_monitor);
+    let size = LogicalSize::new(MENUBAR_POPOVER_WIDTH, height);
+    window
+        .set_size(Size::Logical(size))
+        .map_err(|error| error.to_string())?;
+    Ok(size)
+}
+
+fn menubar_popover_height_for_monitor(monitor: Option<&tauri::Monitor>) -> f64 {
+    let Some(monitor) = monitor else {
+        return MENUBAR_POPOVER_TARGET_HEIGHT;
+    };
+    let available_height = monitor.work_area().size.height as f64 / monitor.scale_factor();
+    menubar_popover_height_for_available_height(available_height)
+}
+
+fn menubar_popover_height_for_available_height(available_height: f64) -> f64 {
+    let available_height =
+        available_height - (MENUBAR_POPOVER_MARGIN * 2 + MENUBAR_POPOVER_VERTICAL_OFFSET) as f64;
+    if available_height < MENUBAR_POPOVER_HEIGHT {
+        return available_height.max(320.0);
+    }
+    MENUBAR_POPOVER_TARGET_HEIGHT
+        .min(available_height)
+        .max(MENUBAR_POPOVER_HEIGHT)
 }
 
 fn anchored_popover_position_from_rect(
@@ -667,20 +440,12 @@ fn clamp_i32(value: i32, min: i32, max: i32) -> i32 {
     value.clamp(min, max)
 }
 
-fn start_menubar_refresh_loop(
-    app: AppHandle,
-    state: Arc<Mutex<BotState>>,
-    handles: TrayMenuHandles,
-    tray: TrayIcon<Wry>,
-    runtime_state: Arc<Mutex<TrayRuntimeState>>,
-) {
+fn start_menubar_refresh_loop(app: AppHandle, state: Arc<Mutex<BotState>>, tray: TrayIcon<Wry>) {
     tauri::async_runtime::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_secs(REFRESH_INTERVAL_SECONDS));
         loop {
             ticker.tick().await;
-            if let Err(error) =
-                update_menubar_state(&app, &state, &handles, Some(&tray), &runtime_state).await
-            {
+            if let Err(error) = update_menubar_state(&app, &state, Some(&tray)).await {
                 eprintln!("[menubar] tray state refresh failed: {}", error);
             }
 
@@ -694,9 +459,7 @@ fn start_menubar_refresh_loop(
 async fn update_menubar_state(
     app: &AppHandle,
     state: &Arc<Mutex<BotState>>,
-    handles: &TrayMenuHandles,
     tray: Option<&TrayIcon<Wry>>,
-    runtime_state: &Arc<Mutex<TrayRuntimeState>>,
 ) -> Result<(), String> {
     let service = ensure_service_running_if_needed(app, state).await?;
     let dashboard = compute_dashboard_state(app, state).await.ok();
@@ -706,7 +469,6 @@ async fn update_menubar_state(
         .map(|activity| activity.active_thread_count)
         .unwrap_or(0);
     let attention_count = load_needs_attention_count().await.ok();
-    let usage_label = usage_menu_label_cached(app, runtime_state).await;
     let tray_status = compute_tray_status(
         service.running,
         dashboard
@@ -714,49 +476,6 @@ async fn update_menubar_state(
             .map(|state| &state.overall)
             .unwrap_or(&SystemHealth::Unknown),
     );
-
-    handles
-        .status_item
-        .set_text(format!("{}{}", STATUS_PREFIX, tray_status.label()))
-        .map_err(|e: tauri::Error| e.to_string())?;
-    handles
-        .workspace_item
-        .set_text(workspace_menu_label(
-            dashboard
-                .as_ref()
-                .and_then(|state| state.recent_activity.as_ref())
-                .and_then(|activity| activity.active_workspace_name.as_deref()),
-        ))
-        .map_err(|e: tauri::Error| e.to_string())?;
-    handles
-        .session_item
-        .set_text(session_menu_label(
-            dashboard
-                .as_ref()
-                .and_then(|state| state.recent_activity.as_ref())
-                .and_then(|activity| activity.active_session_id.as_deref()),
-        ))
-        .map_err(|e: tauri::Error| e.to_string())?;
-    handles
-        .threads_item
-        .set_text(threads_menu_label(active_threads))
-        .map_err(|e: tauri::Error| e.to_string())?;
-    handles
-        .attention_item
-        .set_text(attention_menu_label(attention_count))
-        .map_err(|e: tauri::Error| e.to_string())?;
-    handles
-        .usage_item
-        .set_text(usage_label)
-        .map_err(|e: tauri::Error| e.to_string())?;
-    handles
-        .toggle_service_item
-        .set_text(service_toggle_label(service.running))
-        .map_err(|e: tauri::Error| e.to_string())?;
-    handles
-        .toggle_service_item
-        .set_enabled(true)
-        .map_err(|e: tauri::Error| e.to_string())?;
 
     if let Some(tray) = tray {
         tray.set_tooltip(Some(build_tray_tooltip(
@@ -774,53 +493,6 @@ async fn update_menubar_state(
 async fn load_needs_attention_count() -> Result<usize, String> {
     let activities = get_task_board_session_activities().await?;
     Ok(count_needs_attention(&activities))
-}
-
-async fn usage_menu_label_cached(
-    app: &AppHandle,
-    runtime_state: &Arc<Mutex<TrayRuntimeState>>,
-) -> String {
-    {
-        let state = runtime_state.lock().await;
-        if state
-            .last_usage_refresh
-            .map(|instant| instant.elapsed() < Duration::from_secs(USAGE_REFRESH_INTERVAL_SECONDS))
-            .unwrap_or(false)
-        {
-            return state.usage_label.clone();
-        }
-    }
-
-    let next_label = match load_usage_menu_label(app).await {
-        Ok(label) => label,
-        Err(error) => {
-            eprintln!("[menubar] tray usage snapshot refresh failed: {}", error);
-            let state = runtime_state.lock().await;
-            state.usage_label.clone()
-        }
-    };
-
-    let mut state = runtime_state.lock().await;
-    state.last_usage_refresh = Some(Instant::now());
-    state.usage_label = next_label.clone();
-    next_label
-}
-
-async fn load_usage_menu_label(app: &AppHandle) -> Result<String, String> {
-    let usage_providers = load_popover_usage_providers(app).await?;
-    let total_tokens = usage_providers
-        .iter()
-        .filter_map(|provider| provider.tokens_today)
-        .fold(0_u64, u64::saturating_add);
-    let has_usage_data = usage_providers
-        .iter()
-        .any(|provider| provider.tokens_today.is_some());
-
-    if has_usage_data {
-        Ok(usage_menu_label(TrayUsageValue::TotalTokens(total_tokens)))
-    } else {
-        Ok(usage_menu_label(TrayUsageValue::NoData))
-    }
 }
 
 fn build_tray_tooltip(
@@ -1553,53 +1225,6 @@ fn compute_tray_status(service_running: bool, overall: &SystemHealth) -> TraySta
     }
 }
 
-fn workspace_menu_label(workspace_name: Option<&str>) -> String {
-    format!(
-        "{}{}",
-        WORKSPACE_PREFIX,
-        workspace_name.unwrap_or("No workspace")
-    )
-}
-
-fn session_menu_label(session_id: Option<&str>) -> String {
-    format!(
-        "{}{}",
-        SESSION_PREFIX,
-        session_id.unwrap_or("No active session")
-    )
-}
-
-fn threads_menu_label(active_threads: u32) -> String {
-    format!("{}{}", THREADS_PREFIX, active_threads)
-}
-
-fn attention_menu_label(attention_count: Option<usize>) -> String {
-    match attention_count {
-        Some(count) => format!("{}{}", ATTENTION_PREFIX, count),
-        None => format!("{}--", ATTENTION_PREFIX),
-    }
-}
-
-fn usage_menu_label(value: TrayUsageValue) -> String {
-    match value {
-        TrayUsageValue::Loading => format!("{}...", USAGE_PREFIX),
-        TrayUsageValue::NoData => format!("{}--", USAGE_PREFIX),
-        TrayUsageValue::TotalTokens(total_tokens) => {
-            format!("{}{}", USAGE_PREFIX, format_token_count(total_tokens))
-        }
-    }
-}
-
-fn format_token_count(total_tokens: u64) -> String {
-    if total_tokens >= 1_000_000 {
-        format!("{:.1}M tok", total_tokens as f64 / 1_000_000.0)
-    } else if total_tokens >= 1_000 {
-        format!("{:.1}k tok", total_tokens as f64 / 1_000.0)
-    } else {
-        format!("{} tok", total_tokens)
-    }
-}
-
 fn count_needs_attention(activities: &[TaskBoardSessionActivity]) -> usize {
     activities
         .iter()
@@ -1612,14 +1237,6 @@ fn count_needs_attention(activities: &[TaskBoardSessionActivity]) -> usize {
         .count()
 }
 
-fn service_toggle_label(service_running: bool) -> &'static str {
-    if service_running {
-        "Stop Service"
-    } else {
-        "Start Service"
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -1629,12 +1246,11 @@ mod tests {
     use crate::commands::task_board_state::TaskBoardSessionActivity;
 
     use super::{
-        anchored_popover_position, attention_menu_label, build_popover_snapshot,
-        compute_tray_status, count_needs_attention, format_token_count,
-        popover_provider_specs_from_metadata, resolve_custom_tray_icon_paths, service_toggle_label,
-        session_menu_label, threads_menu_label, usage_breakdown_from_usage_summary,
-        usage_menu_label, workspace_menu_label, MenubarPopoverOpenSessionTarget,
-        MenubarPopoverSessionCandidate, MenubarPopoverUsageProvider, TrayStatus, TrayUsageValue,
+        anchored_popover_position, build_popover_snapshot, compute_tray_status,
+        count_needs_attention, menubar_popover_height_for_available_height,
+        popover_provider_specs_from_metadata, resolve_custom_tray_icon_paths,
+        usage_breakdown_from_usage_summary, MenubarPopoverOpenSessionTarget,
+        MenubarPopoverSessionCandidate, MenubarPopoverUsageProvider, TrayStatus,
     };
 
     fn usage_provider(
@@ -1685,65 +1301,6 @@ mod tests {
             compute_tray_status(true, &SystemHealth::Healthy),
             TrayStatus::Running
         );
-    }
-
-    #[test]
-    fn service_toggle_label_reflects_current_runtime_state() {
-        assert_eq!(service_toggle_label(false), "Start Service");
-        assert_eq!(service_toggle_label(true), "Stop Service");
-    }
-
-    #[test]
-    fn workspace_menu_label_uses_placeholder_when_workspace_is_missing() {
-        assert_eq!(workspace_menu_label(None), "Workspace: No workspace");
-        assert_eq!(
-            workspace_menu_label(Some("onlineWorker")),
-            "Workspace: onlineWorker"
-        );
-    }
-
-    #[test]
-    fn session_menu_label_uses_placeholder_when_session_is_missing() {
-        assert_eq!(
-            session_menu_label(None),
-            "Active Session: No active session"
-        );
-        assert_eq!(
-            session_menu_label(Some("session-123")),
-            "Active Session: session-123"
-        );
-    }
-
-    #[test]
-    fn threads_menu_label_reflects_current_activity_count() {
-        assert_eq!(threads_menu_label(0), "Active Threads: 0");
-        assert_eq!(threads_menu_label(3), "Active Threads: 3");
-    }
-
-    #[test]
-    fn attention_menu_label_uses_placeholder_until_snapshot_is_available() {
-        assert_eq!(attention_menu_label(None), "Needs Attention: --");
-        assert_eq!(attention_menu_label(Some(2)), "Needs Attention: 2");
-    }
-
-    #[test]
-    fn usage_menu_label_formats_loading_no_data_and_real_totals() {
-        assert_eq!(
-            usage_menu_label(TrayUsageValue::Loading),
-            "Usage Today: ..."
-        );
-        assert_eq!(usage_menu_label(TrayUsageValue::NoData), "Usage Today: --");
-        assert_eq!(
-            usage_menu_label(TrayUsageValue::TotalTokens(12_300)),
-            "Usage Today: 12.3k tok"
-        );
-    }
-
-    #[test]
-    fn token_count_format_uses_compact_suffixes() {
-        assert_eq!(format_token_count(999), "999 tok");
-        assert_eq!(format_token_count(1_200), "1.2k tok");
-        assert_eq!(format_token_count(2_500_000), "2.5M tok");
     }
 
     #[test]
@@ -1859,6 +1416,13 @@ mod tests {
                 Path::new("/tmp/onlineworker-app/icons/tray-template.png").to_path_buf(),
             ]
         );
+    }
+
+    #[test]
+    fn menubar_popover_height_uses_available_screen_space() {
+        assert_eq!(menubar_popover_height_for_available_height(900.0), 560.0);
+        assert_eq!(menubar_popover_height_for_available_height(480.0), 458.0);
+        assert_eq!(menubar_popover_height_for_available_height(330.0), 320.0);
     }
 
     #[test]
