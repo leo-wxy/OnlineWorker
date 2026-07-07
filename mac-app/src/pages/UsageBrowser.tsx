@@ -17,6 +17,22 @@ function formatCost(value?: number | null) {
   return `$${value.toFixed(2)}`;
 }
 
+function describeUnknownError(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+  if (error && typeof error === "object") {
+    const message = Reflect.get(error, "message");
+    if (typeof message === "string" && message.trim()) {
+      return message;
+    }
+  }
+  return fallback;
+}
+
 function chartBackground(providerId: string) {
   const gradients = [
     "linear-gradient(180deg, rgba(139,92,246,0.95) 0%, rgba(167,139,250,0.82) 100%)",
@@ -72,7 +88,7 @@ export function UsageBrowser() {
         setProviders([]);
         setActiveProviderId(null);
         setSummary(null);
-        setError((loadError as Error).message);
+        setError(describeUnknownError(loadError, t.usage.unavailable));
       })
       .finally(() => {
         if (!cancelled) {
@@ -90,17 +106,20 @@ export function UsageBrowser() {
     setRefreshing(hasLoadedBefore);
     try {
       const next = await fetchProviderUsageSummary(providerId, query);
+      if (!next || typeof next !== "object") {
+        throw new Error(t.usage.unavailable);
+      }
       setSummary(next);
       setError(null);
       hasLoadedRef.current = true;
     } catch (loadError) {
       setSummary(null);
-      setError((loadError as Error).message);
+      setError(describeUnknownError(loadError, t.usage.unavailable));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [t.usage.unavailable]);
 
   const refreshUsage = useCallback(() => {
     if (!activeProvider?.id) {

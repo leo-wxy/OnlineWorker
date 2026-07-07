@@ -9,6 +9,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 CODEX_SESSIONS_DIR = "~/.codex/sessions"
+_CODEX_SESSION_FILE_CACHE: dict[str, dict[str, object]] = {}
 
 
 def _is_codex_subagent_source(source) -> bool:
@@ -133,6 +134,40 @@ def _collect_jsonl_files(root: str) -> list[str]:
                 result.append(os.path.join(current_root, fname))
     result.sort()
     return result
+
+
+def _session_file_signature(fpath: str) -> tuple[int, int] | None:
+    try:
+        stat = os.stat(fpath)
+    except OSError:
+        return None
+    return int(stat.st_mtime_ns), int(stat.st_size)
+
+
+def _cached_scan_codex_session_file(
+    fpath: str,
+) -> tuple[Optional[dict], bool, dict[str, dict[str, object]]]:
+    signature = _session_file_signature(fpath)
+    if signature is None:
+        _CODEX_SESSION_FILE_CACHE.pop(fpath, None)
+        return None, False, {}
+
+    cached = _CODEX_SESSION_FILE_CACHE.get(fpath)
+    if cached is not None and cached.get("signature") == signature:
+        return (
+            cached.get("meta"),  # type: ignore[return-value]
+            bool(cached.get("is_running", False)),
+            cached.get("usage_buckets") or {},  # type: ignore[return-value]
+        )
+
+    meta, is_running, usage_buckets = _scan_codex_session_file(fpath)
+    _CODEX_SESSION_FILE_CACHE[fpath] = {
+        "signature": signature,
+        "meta": meta,
+        "is_running": is_running,
+        "usage_buckets": usage_buckets,
+    }
+    return meta, is_running, usage_buckets
 
 
 def _merge_codex_usage_bucket(
@@ -340,9 +375,11 @@ def _build_codex_session_index(
     threads_by_workspace: dict[str, dict[str, dict]] = {}
     running_ids_by_workspace: dict[str, set[str]] = {}
     usage_buckets: dict[str, dict[str, object]] = {}
+    current_files: set[str] = set()
 
     for fpath in _collect_jsonl_files(sessions_root):
-        meta, is_running, file_usage_buckets = _scan_codex_session_file(fpath)
+        current_files.add(fpath)
+        meta, is_running, file_usage_buckets = _cached_scan_codex_session_file(fpath)
         if meta is not None:
             workspace = str(meta["cwd"])
             workspace_counts[workspace] = workspace_counts.get(workspace, 0) + 1
@@ -364,6 +401,10 @@ def _build_codex_session_index(
             if is_running:
                 running_ids_by_workspace.setdefault(workspace, set()).add(meta["id"])
         _merge_codex_usage_bucket(usage_buckets, file_usage_buckets)
+
+    for cached_path in tuple(_CODEX_SESSION_FILE_CACHE.keys()):
+        if cached_path not in current_files:
+            _CODEX_SESSION_FILE_CACHE.pop(cached_path, None)
 
     return {
         "workspace_counts": workspace_counts,

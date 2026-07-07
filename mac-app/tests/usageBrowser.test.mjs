@@ -59,6 +59,9 @@ test("usage browser discovers provider usage tabs from metadata", () => {
   assert.match(page, /height:\s*`\$\{height\}px`/);
   assert.match(page, /background:/);
   assert.match(page, /t\.usage\.title/);
+  assert.match(page, /function describeUnknownError\(error: unknown, fallback: string\)/);
+  assert.match(page, /if \(!next \|\| typeof next !== "object"\) \{/);
+  assert.match(page, /setError\(describeUnknownError\(loadError, t\.usage\.unavailable\)\);/);
   assert.doesNotMatch(page, /t\.usage\.providerTabs\[activeProvider\]/);
 });
 

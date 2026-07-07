@@ -477,6 +477,45 @@ def test_codex_provider_usage_summary_reads_session_token_counts(monkeypatch, tm
     }
 
 
+def test_codex_session_index_reuses_cached_file_scan_until_file_changes(monkeypatch, tmp_path):
+    from plugins.providers.builtin.codex.python import storage_runtime
+
+    sessions_dir = tmp_path / "codex-sessions"
+    day_dir = sessions_dir / "2026" / "05" / "11"
+    day_dir.mkdir(parents=True)
+    session_file = day_dir / "rollout.jsonl"
+    session_file.write_text('{"type":"session_meta","payload":{"id":"t1","cwd":"/tmp/project"}}\n', encoding="utf-8")
+
+    observed = {"calls": 0}
+    real_scan = storage_runtime._scan_codex_session_file
+
+    def wrapped_scan(fpath):
+        observed["calls"] += 1
+        return real_scan(fpath)
+
+    monkeypatch.setattr(storage_runtime, "_scan_codex_session_file", wrapped_scan)
+    monkeypatch.setattr(storage_runtime, "CODEX_SESSIONS_DIR", str(sessions_dir))
+    storage_runtime._CODEX_SESSION_FILE_CACHE.clear()
+
+    storage_runtime._build_codex_session_index()
+    storage_runtime._build_codex_session_index()
+    assert observed["calls"] == 1
+
+    session_file.write_text(
+        "\n".join(
+            [
+                '{"type":"session_meta","payload":{"id":"t1","cwd":"/tmp/project"}}',
+                '{"timestamp":"2026-05-11T01:00:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    storage_runtime._build_codex_session_index()
+    assert observed["calls"] == 2
+
+
 def test_claude_provider_usage_summary_reads_project_usage(monkeypatch, tmp_path):
     from plugins.providers.builtin.claude.python import storage_runtime
 
