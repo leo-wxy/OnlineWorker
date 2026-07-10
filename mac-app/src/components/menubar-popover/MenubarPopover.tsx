@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
@@ -48,6 +48,7 @@ export function MenubarPopover() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [selectedTab, setSelectedTab] = useState(OVERVIEW_TAB_ID);
+  const snapshotLoadInFlight = useRef(false);
 
   useEffect(() => {
     const previousHtmlBackground = document.documentElement.style.background;
@@ -69,6 +70,10 @@ export function MenubarPopover() {
   }, []);
 
   const loadSnapshot = useCallback(async () => {
+    if (snapshotLoadInFlight.current) {
+      return;
+    }
+    snapshotLoadInFlight.current = true;
     setLoading(true);
     try {
       const next = await invoke<MenubarPopoverSnapshot>("get_menubar_popover_snapshot");
@@ -78,6 +83,7 @@ export function MenubarPopover() {
       console.error("Failed to load menubar popover snapshot", loadError);
       setError(loadError instanceof Error ? loadError.message : "Failed to load popover data");
     } finally {
+      snapshotLoadInFlight.current = false;
       setLoading(false);
     }
   }, []);

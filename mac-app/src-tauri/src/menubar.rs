@@ -648,7 +648,7 @@ async fn load_popover_session_candidates(
     let mut candidates = Vec::new();
 
     for provider in providers {
-        match load_provider_sessions_with_overlays(app, &provider.provider_id, false).await {
+        match load_provider_sessions_with_overlays(app, &provider.provider_id, true).await {
             Ok(sessions) => {
                 candidates.extend(parse_provider_session_candidates(
                     &provider.provider_id,

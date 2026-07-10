@@ -9,6 +9,10 @@ const source = readFileSync(
   join(__dirname, "..", "src", "components", "menubar-popover", "MenubarPopover.tsx"),
   "utf8",
 );
+const rustSource = readFileSync(
+  join(__dirname, "..", "src-tauri", "src", "menubar.rs"),
+  "utf8",
+);
 
 test("menubar popover keeps dynamic provider tabs and existing navigation actions", () => {
   assert.match(source, /providers\.map\(\(provider\) => \(/);
@@ -39,4 +43,14 @@ test("menubar provider tab uses the provider rail detail layout", () => {
   assert.match(source, /formatUsd\(provider\.totalCostUsd\)/);
   assert.doesNotMatch(source, /function ProviderUsageRow/);
   assert.doesNotMatch(source, /function MetricTile/);
+});
+
+test("menubar refreshes provider sessions without overlapping snapshot loads", () => {
+  assert.match(
+    rustSource,
+    /load_provider_sessions_with_overlays\(app, &provider\.provider_id, true\)/,
+  );
+  assert.match(source, /const snapshotLoadInFlight = useRef\(false\)/);
+  assert.match(source, /if \(snapshotLoadInFlight\.current\) \{\s*return;\s*\}/);
+  assert.match(source, /snapshotLoadInFlight\.current = false/);
 });
