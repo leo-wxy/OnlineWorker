@@ -4,21 +4,6 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 # 授权按钮有效期（秒），默认 30 分钟
 APPROVAL_TTL_SECONDS = 30 * 60
 
-
-def build_confirm_keyboard(message_id: int) -> InlineKeyboardMarkup:
-    """构建消息确认 inline keyboard。
-    
-    callback_data 格式：
-      confirm:<message_id>
-      cancel:<message_id>
-    """
-    buttons = [
-        InlineKeyboardButton("✅ Confirm", callback_data=f"confirm:{message_id}"),
-        InlineKeyboardButton("❌ Cancel", callback_data=f"cancel:{message_id}"),
-    ]
-    return InlineKeyboardMarkup([buttons])
-
-
 def build_approval_keyboard(message_id: int) -> InlineKeyboardMarkup:
     """构建沙盒权限授权 inline keyboard。
 

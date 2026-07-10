@@ -160,17 +160,6 @@ def _list_provider_subagent_thread_ids(tool_name: str, thread_ids: list[str]) ->
         return set()
     return set(list_subagent_thread_ids(thread_ids) or set())
 
-
-def _provider_thread_source(tool_name: str, *, default: str = "unknown") -> str:
-    hooks = _get_thread_hooks(tool_name)
-    callback = getattr(hooks, "new_imported_thread_source", None) if hooks is not None else None
-    if callable(callback):
-        value = str(callback() or "").strip()
-        if value:
-            return value
-    return default
-
-
 def _collect_session_ids(sessions: list[dict]) -> set[str]:
     return {
         str(session.get("id") or "")

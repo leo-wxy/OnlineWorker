@@ -17,7 +17,6 @@ from plugins.providers.builtin.codex.python.adapter import CodexAdapter
 from plugins.providers.builtin.codex.python.approval_policy import (
     SOURCE_REMOTE_PROXY,
     SOURCE_TUI_HOST,
-    build_mirror_approval_policy,
     is_app_server_approval_source,
 )
 from plugins.providers.builtin.codex.python.errors import is_codex_unmaterialized_error
@@ -1093,15 +1092,6 @@ def _replace_thread_binding(ws_info, thread_info, new_thread_id: str) -> None:
     thread_info.source = "app"
     thread_info.is_active = True
     ws_info.threads[new_thread_id] = thread_info
-
-
-async def mirror_approval_policy(state, request: dict, ws_info, thread_info) -> dict:
-    thread_id = str(request.get("thread_id") or "").strip()
-    return build_mirror_approval_policy(
-        request,
-        thread_id=thread_id,
-        can_route_to_tui_host=can_route_cli_approval_to_tui_host(state, thread_id),
-    )
 
 
 async def try_route_owner_bridge_send(state, ws_info, thread_info, *, text: str):

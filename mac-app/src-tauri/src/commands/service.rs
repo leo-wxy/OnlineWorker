@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 use tauri::AppHandle;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
@@ -870,29 +870,6 @@ pub async fn check_cli(bin: String) -> Result<bool, String> {
     Ok(output.status.success())
 }
 
-/// Check HTTP endpoint health with a real HTTP GET request.
-#[tauri::command]
-pub async fn check_http_health(url: String) -> Result<bool, String> {
-    let url_clone = url.clone();
-    tauri::async_runtime::spawn_blocking(move || probe_http_health(&url_clone))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-fn probe_http_health(url: &str) -> Result<bool, String> {
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(500))
-        .timeout_read(Duration::from_millis(500))
-        .timeout_write(Duration::from_millis(500))
-        .build();
-
-    match agent.get(url).call() {
-        Ok(resp) => Ok(resp.status() == 200),
-        Err(ureq::Error::Status(code, _)) => Ok(code == 200),
-        Err(_) => Ok(false),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::should_ignore_sidecar_output_event;
@@ -901,14 +878,12 @@ mod tests {
         cleanup_owner_bridge_socket_files_in_dir, cleanup_process_matchers, command_program_token,
         compute_service_status, managed_bot_cleanup_pids_from_rows, overlay_env_spec,
         overlay_env_spec_from_app_env, pid_parent_pairs_from_output, pids_from_bot_process_rows,
-        probe_http_health, process_tree_pids, read_env_key, select_primary_pid,
+        process_tree_pids, read_env_key, select_primary_pid,
         should_attempt_background_service_recovery, BotState, ManagedProcessCleanupPolicy,
         LEGACY_OWNER_BRIDGE_SOCKET_FILENAME,
     };
     use std::collections::HashMap;
     use std::fs;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
     use std::path::Path;
     use std::thread;
     use std::time::Duration;
@@ -953,41 +928,6 @@ mod tests {
         let status = compute_service_status(true, Some(123), false, None);
         assert!(!status.running);
         assert_eq!(status.pid, None);
-    }
-
-    #[test]
-    fn probe_http_health_returns_true_for_http_200() {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
-        let addr = listener.local_addr().expect("listener addr");
-
-        let handle = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept connection");
-            let mut buf = [0_u8; 1024];
-            let _ = stream.read(&mut buf);
-            let response = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK";
-            stream.write_all(response).expect("write response");
-        });
-
-        let ok = probe_http_health(&format!("http://{addr}/readyz")).expect("probe result");
-        handle.join().expect("server thread join");
-
-        assert!(ok);
-    }
-
-    #[test]
-    fn probe_http_health_returns_false_for_bare_tcp_port() {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
-        let addr = listener.local_addr().expect("listener addr");
-
-        let handle = thread::spawn(move || {
-            let (_stream, _) = listener.accept().expect("accept connection");
-            thread::sleep(Duration::from_millis(50));
-        });
-
-        let ok = probe_http_health(&format!("http://{addr}/readyz")).expect("probe result");
-        handle.join().expect("server thread join");
-
-        assert!(!ok);
     }
 
     #[test]

@@ -21,17 +21,3 @@ class WhitelistFilter(filters.UpdateFilter):
         if not passed:
             logger.debug(f"[whitelist] 拒绝：user_id={user_id} != allowed={self.allowed_user_id}")
         return passed
-
-
-class ThreadTopicTextFilter(filters.MessageFilter):
-    """仅匹配已知 thread topic 中的文本消息。"""
-
-    def __init__(self, state):
-        self.state = state
-        super().__init__()
-
-    def filter(self, message) -> bool:
-        topic_id = getattr(message, "message_thread_id", None)
-        if topic_id is None:
-            return False
-        return self.state.find_thread_by_topic_id(topic_id) is not None

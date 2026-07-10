@@ -12,7 +12,6 @@ from core.provider_runtime_state import (
     ProviderPendingApprovalDecision,
     ProviderRunState,
     ProviderRuntimeState,
-    ProviderWatchState,
 )
 from core.im_routes import ImRouteStore
 from core.storage import AppStorage, WorkspaceInfo, ThreadInfo

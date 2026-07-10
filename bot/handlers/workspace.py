@@ -74,7 +74,6 @@ _WS_LIST_KEY = "workspace_list_session"
 
 # 每次打开 workspace 时同步的最大 thread 数
 _THREAD_SYNC_LIMIT = 10
-_THREAD_HISTORY_SYNC_LOOKBACK = 50
 
 # 正在创建 topic 的 thread_id 集合，防止并发重复创建
 _creating_topics: set[str] = set()

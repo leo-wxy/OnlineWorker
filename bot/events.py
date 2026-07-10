@@ -1538,10 +1538,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         except Exception as e:
             logger.error(f"[streaming] 发占位消息失败：{e}")
 
-    async def _handle_item_started(ctx: EventContext) -> None:
-        """item/started — no-op, just return."""
-        return
-
     async def _handle_agent_message_delta(ctx: EventContext) -> None:
         """item/agentMessage/delta"""
         if ctx.message_kind != "message.assistant.delta":
@@ -2057,7 +2053,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         "approval_requested": _handle_approval,
         "question_requested": _handle_question,
         "turn_started": _handle_turn_started,
-        "item_started": _handle_item_started,
         "assistant_delta": _handle_agent_message_delta,
         "assistant_completed": _handle_item_completed,
         "shell_command_completed": _handle_item_completed,

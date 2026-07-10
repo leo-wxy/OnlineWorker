@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import Optional
 
 from core.provider_runtime_state import ProviderInterruptionState, ProviderRunState, ProviderRuntimeState
@@ -118,11 +117,3 @@ def resolve_interruption(
         status=status,
         tg_message_id=tg_message_id,
     )
-
-
-def get_interruption(state, interruption_id: str) -> Optional[ProviderInterruptionState]:
-    return get_runtime(state).interruptions.get(interruption_id)
-
-
-def has_interruption(state, interruption_id: str) -> bool:
-    return interruption_id in get_runtime(state).interruptions

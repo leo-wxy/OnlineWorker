@@ -255,20 +255,6 @@ function hasNeedsAttentionSignal(raw) {
   return NEEDS_ATTENTION_STATUSES.has(readStatusValue(raw));
 }
 
-function hasRunningSignal(raw) {
-  if (
-    raw.running === true ||
-    raw.isRunning === true ||
-    raw.is_running === true ||
-    raw.streaming === true ||
-    raw.inProgress === true ||
-    raw.in_progress === true
-  ) {
-    return true;
-  }
-  return RUNNING_STATUSES.has(readStatusValue(raw));
-}
-
 function activityNeedsAttention(activity) {
   const status = normalizedString(activity.status).toLowerCase();
   return status === "needs_attention" || status === "failed";

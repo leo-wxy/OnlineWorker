@@ -27,7 +27,7 @@ from bot.interaction_specs import (
     refresh_command_wrapper,
 )
 from core.state import AppState, PendingCommandWrapper
-from core.storage import save_storage, ThreadInfo
+from core.storage import save_storage
 from core.user_messages.contracts import UserMessageSendRequest
 from core.user_messages.gateway import prepare_user_message_text
 from core.messages.publishing import (

@@ -27,7 +27,6 @@ from bot.events import (
 from bot.handlers.common import (
     tg_approval_request_text,
     tg_empty_turn_completed_text,
-    tg_processing_ack_text,
     tg_send_failed_text,
 )
 
@@ -67,9 +66,6 @@ class TestIsNetworkError:
 
 
 class TestTelegramMessageContract:
-    def test_processing_ack_text(self):
-        assert tg_processing_ack_text() == "✅ 已收到，处理中。完成后会把最终回复同步到这里。"
-
     def test_send_failed_text(self):
         assert tg_send_failed_text("boom") == "❌ 发送失败：boom"
 

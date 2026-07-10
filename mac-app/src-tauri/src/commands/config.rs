@@ -910,30 +910,6 @@ pub async fn write_env_field(key: String, value: String) -> Result<(), String> {
     std::fs::write(&path, new_content).map_err(|e| format!("Cannot write .env: {}", e))
 }
 
-/// List all keys in .env (excluding comments and empty lines)
-#[tauri::command]
-pub async fn list_env_keys() -> Result<Vec<String>, String> {
-    let path = env_path();
-    let raw = sanitize_env_content(
-        &std::fs::read_to_string(&path).map_err(|e| format!("Cannot read .env: {}", e))?,
-    );
-
-    let keys: Vec<String> = raw
-        .lines()
-        .filter_map(|line| {
-            if line.starts_with('#') || line.is_empty() {
-                None
-            } else if let Some(eq_pos) = line.find('=') {
-                Some(line[..eq_pos].trim().to_string())
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    Ok(keys)
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;

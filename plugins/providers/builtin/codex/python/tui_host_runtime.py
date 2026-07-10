@@ -8,13 +8,10 @@ import sys
 import time
 from typing import Optional
 
-from core.providers.facts import query_provider_active_thread_ids
 from plugins.providers.builtin.codex.python.tui_host_protocol import (
-    build_send_message_request,
     host_socket_path,
     write_host_status,
 )
-from core.storage import load_storage, save_storage
 from plugins.providers.builtin.codex.python.storage_runtime import list_codex_threads_by_cwd
 
 logger = logging.getLogger(__name__)
@@ -395,27 +392,3 @@ class CodexTuiHost:
             return True
         except ProcessLookupError:
             return False
-
-
-async def send_message_request(
-    *,
-    socket_path: str,
-    thread_id: str,
-    text: str,
-    topic_id: Optional[int] = None,
-) -> dict:
-    reader, writer = await asyncio.open_unix_connection(socket_path)
-    try:
-        writer.write(
-            json.dumps(
-                build_send_message_request(thread_id=thread_id, text=text, topic_id=topic_id),
-                ensure_ascii=False,
-            ).encode("utf-8")
-            + b"\n"
-        )
-        await writer.drain()
-        raw = await reader.readline()
-        return json.loads(raw.decode("utf-8")) if raw else {}
-    finally:
-        writer.close()
-        await writer.wait_closed()

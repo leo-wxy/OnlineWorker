@@ -9,7 +9,6 @@ NEEDS_ATTENTION_STATUS = "needs_attention"
 RUNNING_STATUS = "running"
 COMPLETED_STATUS = "completed"
 FAILED_STATUS = "failed"
-IDLE_STATUS = "idle"
 UUID_TITLE_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,

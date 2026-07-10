@@ -11,7 +11,6 @@ import tempfile
 from typing import Any
 
 
-CLAUDE_HOOK_SOCKET_FILENAME = "claude_hook_bridge.sock"
 CLAUDE_HOOK_SETTINGS_FILENAME = "claude_hook_settings.json"
 CLAUDE_MANAGED_BLOCKING_HOOK_TIMEOUT_SECONDS = 86400
 CLAUDE_NON_BLOCKING_HOOK_TIMEOUT_SECONDS = 5

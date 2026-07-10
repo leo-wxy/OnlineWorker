@@ -30,12 +30,6 @@ def _provider_message_hooks_config(state: Any, provider_id: str):
 def _effective_message_hooks_config(state: Any, provider_id: str):
     return _provider_message_hooks_config(state, provider_id) or _message_hooks_config(state)
 
-
-def _hook_enabled(state: Any, hook_name: str) -> bool:
-    message_hooks = _message_hooks_config(state)
-    return _hook_enabled_from_config(message_hooks, hook_name)
-
-
 def _hook_enabled_for_context(state: Any, hook_name: str, context: UserMessageHookContext) -> bool:
     message_hooks = _effective_message_hooks_config(state, context.provider_id)
     return _hook_enabled_from_config(message_hooks, hook_name)

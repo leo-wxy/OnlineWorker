@@ -1,21 +1,7 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import Any, Optional
-
-
-CODEX_SEMANTIC_EVENT_KINDS = {
-    "run_started",
-    "assistant_progress",
-    "tool_started",
-    "tool_completed",
-    "approval_requested",
-    "approval_resolved",
-    "turn_aborted",
-    "turn_completed",
-    "sync_failed",
-}
 
 
 @dataclass(frozen=True)
@@ -203,97 +189,6 @@ def parse_codex_app_server_semantic_event(
             status=status,
             reason=reason,
             raw_kind=raw_method,
-            raw_payload=payload,
-        )
-
-    return None
-
-
-def parse_codex_rollout_semantic_event(
-    record: dict[str, Any] | str,
-) -> CodexSemanticEvent | None:
-    """Map a codex rollout JSONL record into the normalized semantic event vocabulary."""
-    if isinstance(record, str):
-        try:
-            record = json.loads(record)
-        except json.JSONDecodeError:
-            return None
-    if not isinstance(record, dict):
-        return None
-
-    line_type = _string_value(record.get("type"))
-    payload = record.get("payload", {})
-    if not isinstance(payload, dict):
-        return None
-
-    raw_kind = line_type
-    turn_id = _string_value(payload.get("turn_id") or payload.get("turnId")) or None
-
-    if line_type == "event_msg":
-        payload_type = _string_value(payload.get("type"))
-        if payload_type == "task_started":
-            return CodexSemanticEvent(
-                kind="run_started",
-                turn_id=turn_id,
-                raw_kind=payload_type,
-                raw_payload=payload,
-            )
-        if payload_type == "turn_aborted":
-            return CodexSemanticEvent(
-                kind="turn_aborted",
-                turn_id=turn_id,
-                reason=_string_value(payload.get("reason")),
-                raw_kind=payload_type,
-                raw_payload=payload,
-            )
-        if payload_type == "task_complete":
-            return CodexSemanticEvent(
-                kind="turn_completed",
-                turn_id=turn_id,
-                text=_string_value(payload.get("last_agent_message")),
-                raw_kind=payload_type,
-                raw_payload=payload,
-            )
-        if payload_type == "agent_message":
-            return _semantic_from_agent_message(
-                {
-                    "text": payload.get("message", ""),
-                    "phase": payload.get("phase", ""),
-                },
-                raw_kind=payload_type,
-                turn_id=turn_id,
-            )
-        return None
-
-    if line_type != "response_item":
-        return None
-
-    payload_type = _string_value(payload.get("type"))
-    if payload_type == "message":
-        if _string_value(payload.get("role")) != "assistant":
-            return None
-        return _semantic_from_agent_message(
-            payload,
-            raw_kind=f"{line_type}:{payload_type}",
-            turn_id=turn_id,
-        )
-
-    if payload_type == "function_call":
-        return CodexSemanticEvent(
-            kind="tool_started",
-            turn_id=turn_id,
-            tool_name=_string_value(payload.get("name")),
-            call_id=_string_value(payload.get("call_id")),
-            raw_kind=f"{line_type}:{payload_type}",
-            raw_payload=payload,
-        )
-
-    if payload_type == "function_call_output":
-        return CodexSemanticEvent(
-            kind="tool_completed",
-            turn_id=turn_id,
-            call_id=_string_value(payload.get("call_id")),
-            raw_kind=f"{line_type}:{payload_type}",
             raw_payload=payload,
         )
 

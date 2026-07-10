@@ -88,7 +88,3 @@ def normalize_streamed_reply_for_sync(text: str) -> str:
 def event_semantic_payload(ctx) -> dict[str, Any]:
     payload = ctx.event.semantic_payload
     return payload if isinstance(payload, dict) else {}
-
-
-def event_semantic_kind(ctx) -> str:
-    return str(ctx.event.semantic_kind or "").strip()

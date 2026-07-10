@@ -159,48 +159,6 @@ def _resolve_workspace(state, provider_id: str, workspace_dir: str):
     )
 
 
-def _resolve_workspace_and_thread_for_mirror(state, provider_id: str, thread_id: str, workspace_dir: str):
-    normalized_thread_id = str(thread_id or "").strip()
-    normalized_workspace_dir = str(workspace_dir or "").strip()
-
-    if normalized_thread_id:
-        found = state.find_thread_by_id_global(normalized_thread_id)
-        if found is not None:
-            return found
-
-    if getattr(state, "storage", None) is not None and normalized_workspace_dir:
-        for ws in state.storage.workspaces.values():
-            if getattr(ws, "tool", "") != provider_id:
-                continue
-            if getattr(ws, "path", "") != normalized_workspace_dir:
-                continue
-            thread = ws.threads.get(normalized_thread_id)
-            if thread is None:
-                thread = _new_thread_info(
-                    normalized_thread_id,
-                    source=_new_thread_source(provider_id),
-                )
-            return ws, thread
-
-    if not normalized_workspace_dir:
-        return None, None
-
-    workspace_id = _workspace_key(provider_id, normalized_workspace_dir)
-    ws = SimpleNamespace(
-        name=os.path.basename(normalized_workspace_dir) or normalized_workspace_dir,
-        path=normalized_workspace_dir,
-        tool=provider_id,
-        topic_id=None,
-        daemon_workspace_id=workspace_id,
-        threads={},
-    )
-    thread = _new_thread_info(
-        normalized_thread_id,
-        source=_new_thread_source(provider_id),
-    )
-    return ws, thread
-
-
 def _build_provider_approval_reply(provider, approval, action: str) -> tuple[str, dict]:
     interactions = getattr(provider, "interactions", None) if provider is not None else None
     build_reply = getattr(interactions, "build_approval_reply", None) if interactions is not None else None
@@ -456,33 +414,6 @@ def _preview_from_turns(turns: list[dict], *, title: str) -> str:
         if not _preview_equals_title(content, title):
             return content
     return ""
-
-
-def _approval_mirror_dedupe_key(
-    provider_id: str,
-    thread_id: str,
-    workspace_dir: str,
-    payload: dict,
-) -> str:
-    command = _approval_mirror_command(payload)
-    return "\x1f".join(
-        [
-            str(provider_id or ""),
-            str(thread_id or ""),
-            str(workspace_dir or ""),
-            str(command or ""),
-        ]
-    )
-
-
-def _approval_mirror_command(payload: dict) -> str:
-    tool_input = payload.get("tool_input")
-    command = payload.get("command")
-    if not command and isinstance(tool_input, dict):
-        command = tool_input.get("command") or tool_input.get("cmd")
-    if command is None:
-        command = payload.get("tool_name") or ""
-    return str(command or "")
 
 
 def _event_payload_text(payload: dict, *keys: str) -> str:

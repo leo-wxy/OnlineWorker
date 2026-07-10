@@ -10,7 +10,7 @@ import sys
 import time
 from datetime import date, timedelta
 from typing import Any, Callable, Optional
-from telegram import Bot, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 from config import is_provider_exposed
 from core.provider_session_bridge import get_provider_usage_summary
@@ -19,8 +19,6 @@ from core.providers.registry import get_provider
 from core.state import AppState
 from core.storage import save_storage
 from bot.utils import (
-    MAX_TG_LEN,
-    utf16_len as _utf16_len,
     truncate_text as _truncate_text,
     send_to_group as _send_to_group,
 )
@@ -206,12 +204,6 @@ def _status_provider_names(state: AppState) -> list[str]:
         if is_provider_exposed(name) and name not in names:
             names.append(name)
     return names
-
-
-def tg_processing_ack_text() -> str:
-    """TG 在 TUI 主控模式下的最小处理中文案。"""
-    return "✅ 已收到，处理中。完成后会把最终回复同步到这里。"
-
 
 def tg_send_failed_text(error: object) -> str:
     """TG 发送失败时的统一提示。"""

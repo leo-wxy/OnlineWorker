@@ -4,7 +4,6 @@
 
 @layer base {
   :root {
-    --ow-bg: #f4f7fb;
     --ow-sidebar: rgba(242, 246, 250, 0.92);
     --ow-panel: rgba(255, 255, 255, 0.9);
     --ow-panel-soft: rgba(248, 250, 252, 0.84);
@@ -12,7 +11,6 @@
     --ow-line-soft: rgba(148, 163, 184, 0.14);
     --ow-text: #172033;
     --ow-muted: #64748b;
-    --ow-faint: #94a3b8;
     --ow-blue: #2563eb;
     --ow-blue-soft: rgba(37, 99, 235, 0.1);
     --ow-green: #059669;
@@ -60,12 +58,6 @@
   background: #9ca3af;
   border: 2px solid transparent;
   background-clip: padding-box;
-}
-
-.glass {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 }
 
 .chat-bg {

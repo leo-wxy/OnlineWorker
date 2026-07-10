@@ -24,7 +24,7 @@ use commands::command_registry::{
 };
 use commands::config::{
     check_first_run, create_default_config, get_ai_config, get_notification_channels,
-    get_provider_metadata, list_env_keys, read_config, read_env, read_env_field, read_env_raw,
+    get_provider_metadata, read_config, read_env, read_env_field, read_env_raw,
     read_provider_runtime_policies_from_disk, reveal_env_field, set_ai_config,
     set_notification_channel_config, set_notification_channel_enabled, set_provider_cli_config,
     set_provider_flags, set_provider_message_hook_enabled, validate_provider_config, write_config,
@@ -40,7 +40,7 @@ use commands::provider_sessions::{
 };
 use commands::provider_usage::get_provider_usage_summary;
 use commands::service::{
-    check_cli, check_http_health, service_restart, service_start, service_status, service_stop,
+    check_cli, service_restart, service_start, service_status, service_stop,
     shutdown_managed_processes_for_app_exit, snapshot_service_status, start_service_internal,
     BotState, ServiceStatus,
 };
@@ -351,7 +351,6 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(Arc::new(Mutex::new(BotState::new())))
         .manage(AppExitState::default())
@@ -379,7 +378,6 @@ pub fn run() {
             service_status,
             test_ai_service_connection,
             get_dashboard_state,
-            check_http_health,
             check_cli,
             get_attachment_cache_stats,
             clear_attachment_cache,
@@ -403,7 +401,6 @@ pub fn run() {
             set_notification_channel_enabled,
             get_provider_metadata,
             validate_provider_config,
-            list_env_keys,
             reveal_env_field,
             open_terminal,
             open_finder,
