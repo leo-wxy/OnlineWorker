@@ -12,7 +12,6 @@ import {
   formatTokenCount,
   lanePreviewText,
   providerAccent,
-  statusTone,
 } from "../../utils/menubarPopover";
 
 const OVERVIEW_TAB_ID = "overview";
@@ -183,44 +182,42 @@ export function MenubarPopover() {
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-transparent p-[1px] text-[var(--ow-text)]">
-      <div className="relative flex h-full flex-col overflow-hidden rounded-[18px] border border-slate-200/80 bg-[rgba(255,255,255,0.98)] backdrop-blur-xl">
-        <section className="shrink-0 border-b border-slate-200/70 bg-white px-3 pb-2 pt-2">
-          <div className="flex items-center gap-2">
-            <div className="ow-segment grid min-w-0 flex-1 auto-cols-fr grid-flow-col gap-1 rounded-[12px] p-1">
+      <div className="relative flex h-full flex-col overflow-hidden rounded-[16px] border border-slate-200/90 bg-slate-50">
+        <header className="flex h-[50px] shrink-0 items-center gap-2 border-b border-slate-200/80 bg-white px-3">
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <ProviderTabButton
+              active={selectedTab === OVERVIEW_TAB_ID}
+              label="总览"
+              onClick={() => setSelectedTab(OVERVIEW_TAB_ID)}
+            />
+            {providers.map((provider) => (
               <ProviderTabButton
-                active={selectedTab === OVERVIEW_TAB_ID}
-                label="总览"
-                onClick={() => setSelectedTab(OVERVIEW_TAB_ID)}
+                key={provider.providerId}
+                active={selectedTab === provider.providerId}
+                label={provider.label}
+                onClick={() => setSelectedTab(provider.providerId)}
               />
-              {providers.map((provider) => (
-                <ProviderTabButton
-                  key={provider.providerId}
-                  active={selectedTab === provider.providerId}
-                  label={provider.label}
-                  onClick={() => setSelectedTab(provider.providerId)}
-                />
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => void loadSnapshot()}
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] border border-slate-200/80 bg-white/86 text-slate-500 transition hover:border-slate-300 hover:text-gray-950 disabled:cursor-wait disabled:opacity-60"
-              disabled={loading}
-              title="Refresh"
-            >
-              <RefreshIcon className={loading ? "animate-spin" : ""} />
-            </button>
+            ))}
           </div>
-        </section>
+          <button
+            type="button"
+            onClick={() => void loadSnapshot()}
+            className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[7px] text-slate-500 transition hover:bg-slate-100 hover:text-gray-950 disabled:cursor-wait disabled:opacity-60"
+            disabled={loading}
+            title="Refresh"
+          >
+            <RefreshIcon className={loading ? "animate-spin" : ""} />
+          </button>
+        </header>
 
         {error && (
-          <div className="shrink-0 border-b border-rose-100 bg-rose-50/90 px-3.5 py-2 text-[11px] font-semibold text-rose-700">
+          <div className="shrink-0 border-b border-rose-100 bg-rose-50 px-3.5 py-2 text-[11px] font-semibold text-rose-700">
             <div className="flex items-center justify-between gap-3">
               <span className="min-w-0 truncate">{error}</span>
               <button
                 type="button"
                 onClick={() => void loadSnapshot()}
-                className="rounded-lg border border-rose-100 bg-white px-2 py-1 text-[10px] font-extrabold text-rose-700"
+                className="rounded-[6px] border border-rose-200 bg-white px-2 py-1 text-[10px] font-bold text-rose-700"
               >
                 Retry
               </button>
@@ -228,9 +225,9 @@ export function MenubarPopover() {
           </div>
         )}
 
-        <main className="min-h-0 flex-1 overflow-y-auto bg-slate-50/42">
+        <main className="min-h-0 flex-1 overflow-y-auto bg-slate-50">
           {selectedProvider ? (
-            <ProviderPanel
+            <ProviderRailPanel
               provider={selectedProvider}
               lane={laneByProviderId.get(selectedProvider.providerId) ?? null}
               busyKey={busyKey}
@@ -238,7 +235,7 @@ export function MenubarPopover() {
               onOpenSession={openSession}
             />
           ) : (
-            <OverviewPanel
+            <OverviewRailPanel
               loading={loading && !snapshot}
               providers={providers}
               lanes={lanes}
@@ -252,7 +249,7 @@ export function MenubarPopover() {
           )}
         </main>
 
-        <div className="grid h-10 shrink-0 grid-cols-3 border-t border-slate-200/70 bg-white/90">
+        <div className="grid h-11 shrink-0 grid-cols-3 border-t border-slate-200/80 bg-white">
           <PopoverActionButton
             label="Tasks"
             icon={<TaskBoardIcon />}
@@ -277,7 +274,7 @@ export function MenubarPopover() {
   );
 }
 
-function OverviewPanel({
+function OverviewRailPanel({
   loading,
   providers,
   lanes,
@@ -299,45 +296,42 @@ function OverviewPanel({
   onOpenSession: (lane: MenubarPopoverSessionLane) => void;
 }) {
   return (
-    <div className="space-y-2.5 px-3 py-2.5">
-      <section className="rounded-[14px] border border-slate-200/76 bg-white px-3.5 py-3">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <p className="text-[10px] font-extrabold tracking-[0.04em] text-slate-400">
-              Today usage
-            </p>
-            <div className="mt-1 text-[28px] font-black leading-none tracking-normal text-gray-950">
-              {loading ? "..." : totalTokensText}
-            </div>
+    <div>
+      <section className="min-h-[138px] border-b border-slate-200/80 bg-white px-[18px] pb-4 pt-5">
+        <p className="text-[10px] font-bold text-slate-500">Today usage</p>
+        <div className="mt-2 flex items-end justify-between gap-4">
+          <div className="min-w-0 truncate text-[39px] font-bold leading-none text-gray-950">
+            {loading ? "..." : totalTokensText}
+            <span className="ml-1 text-[12px] font-semibold text-slate-500">tokens</span>
           </div>
-          <div className="grid shrink-0 grid-cols-2 gap-2">
-            <MetricTile label="Active" value={activeSessionCount} tone="green" />
-            <MetricTile label="Reply" value={needsAttentionCount} tone="amber" />
+          <div className="flex shrink-0 gap-4 pb-0.5">
+            <OverviewPulse
+              label="Active"
+              value={activeSessionCount}
+              className="text-[var(--ow-green)]"
+            />
+            <OverviewPulse
+              label="Reply"
+              value={needsAttentionCount}
+              className="text-[var(--ow-amber)]"
+            />
           </div>
         </div>
+        <UsageSegments providers={providers} />
       </section>
 
-      <section className="rounded-[14px] border border-slate-200/76 bg-white">
-        <SectionTitle title="Providers" subtitle="Token summary" />
-        <div className="divide-y divide-slate-100">
-          {providers.length > 0 ? (
-            providers.map((provider) => (
-              <ProviderUsageRow key={provider.providerId} provider={provider} />
-            ))
-          ) : (
-            <EmptyLine label={loading ? "Loading providers" : "No providers available"} />
-          )}
+      <section className="px-3.5 pb-3.5">
+        <div className="flex h-11 items-center justify-between gap-3">
+          <h3 className="text-[12px] font-bold text-gray-950">Active sessions</h3>
+          <p className="text-[10px] font-medium text-slate-500">
+            Latest from each provider
+          </p>
         </div>
-      </section>
-
-      <section className="rounded-[14px] border border-slate-200/76 bg-white">
-        <SectionTitle title="Latest sessions" subtitle="One recent session per provider" />
-        <div className="divide-y divide-slate-100">
+        <div className="overflow-hidden rounded-[9px] border border-slate-200 bg-white">
           {lanes.length > 0 ? (
             lanes.map((lane) => (
-              <LatestSessionRow
+              <SessionRailRow
                 key={lane.providerId}
-                compact
                 lane={lane}
                 busyKey={busyKey}
                 nowMs={nowMs}
@@ -353,7 +347,7 @@ function OverviewPanel({
   );
 }
 
-function ProviderPanel({
+function ProviderRailPanel({
   provider,
   lane,
   busyKey,
@@ -370,48 +364,44 @@ function ProviderPanel({
   const workspaceText = lane?.workspaceName || lane?.workspace || "No active workspace";
   const status = lane?.status || (lane?.sessionId ? "Active" : "Idle");
   const breakdown = [
-    { label: "Tokens today", value: formatPopoverTokenCount(provider.tokensToday, provider.estimated) },
     { label: "Input", value: formatPopoverTokenCount(provider.inputTokens) },
     { label: "Output", value: formatPopoverTokenCount(provider.outputTokens) },
-    { label: "Cache write", value: formatPopoverTokenCount(provider.cacheCreationTokens) },
-    { label: "Cache read", value: formatPopoverTokenCount(provider.cacheReadTokens) },
-    { label: "Cost", value: formatUsd(provider.totalCostUsd) },
+    { label: "Cache W", value: formatPopoverTokenCount(provider.cacheCreationTokens) },
+    { label: "Cache R", value: formatPopoverTokenCount(provider.cacheReadTokens) },
   ];
 
   return (
-    <div className="space-y-2.5 px-3 py-2.5">
-      <section className={`rounded-[14px] border ${accent.cardBorder} bg-white px-3.5 py-3`}>
-        <div className="flex items-center gap-3">
-          <ProviderAvatar provider={provider} />
-          <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-2">
-              <h2 className="truncate text-[17px] font-black leading-5 text-gray-950">
-                {provider.label}
-              </h2>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-[0.05em] ${statusTone(status).chip}`}>
-                {status}
-              </span>
-            </div>
-            <p className="mt-1 truncate text-[11px] font-semibold text-slate-500">
-              {workspaceText}
-            </p>
-          </div>
+    <div className="space-y-0 px-3.5 py-3.5">
+      <section className="relative min-h-[148px] overflow-hidden rounded-[9px] border border-slate-200 bg-white px-4 py-4">
+        <span className={`absolute inset-y-0 left-0 w-[3px] ${accent.laneDot}`} />
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <h2 className="truncate text-[15px] font-bold text-gray-950">{provider.label}</h2>
+          <p className="min-w-0 truncate text-[9px] font-medium text-slate-500">
+            {workspaceText} · {status}
+          </p>
         </div>
-      </section>
-
-      <section className="rounded-[14px] border border-slate-200/76 bg-white">
-        <SectionTitle title="Usage" subtitle="Input / Output / Cache" />
-        <div className="grid grid-cols-2 gap-2 px-3.5 pb-3.5">
+        <div className="mt-4 text-[32px] font-bold leading-none text-gray-950">
+          {formatPopoverTokenCount(provider.tokensToday, provider.estimated)}
+        </div>
+        <div className="mt-4 grid grid-cols-4 gap-2">
           {breakdown.map((item) => (
-            <UsageBreakdownCell key={item.label} label={item.label} value={item.value} />
+            <ProviderMetric key={item.label} label={item.label} value={item.value} />
           ))}
         </div>
       </section>
 
-      <section className="rounded-[14px] border border-slate-200/76 bg-white">
-        <SectionTitle title="Latest session" subtitle={lane?.updatedAtEpoch ? formatRelativeAge(lane.updatedAtEpoch, nowMs) : "No activity"} />
+      <div className="flex h-11 items-center justify-between gap-3 px-0.5">
+        <h3 className="text-[12px] font-bold text-gray-950">Latest session</h3>
+        <p className="text-[10px] font-medium text-slate-500">
+          {lane?.updatedAtEpoch ? formatRelativeAge(lane.updatedAtEpoch, nowMs) : "No activity"}
+          {" · "}
+          {formatUsd(provider.totalCostUsd)}
+        </p>
+      </div>
+
+      <div className="overflow-hidden rounded-[9px] border border-slate-200 bg-white">
         {lane ? (
-          <LatestSessionRow
+          <SessionRailRow
             lane={lane}
             busyKey={busyKey}
             nowMs={nowMs}
@@ -420,7 +410,60 @@ function ProviderPanel({
         ) : (
           <EmptyLine label="No recent session" />
         )}
-      </section>
+      </div>
+    </div>
+  );
+}
+
+function OverviewPulse({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: number;
+  className: string;
+}) {
+  return (
+    <div className="text-right">
+      <strong className={`block text-[18px] font-bold leading-5 ${className}`}>{value}</strong>
+      <span className="mt-0.5 block text-[9px] font-semibold text-slate-500">{label}</span>
+    </div>
+  );
+}
+
+function UsageSegments({ providers }: { providers: MenubarPopoverUsageProvider[] }) {
+  const visibleProviders = providers.filter((provider) => (provider.tokensToday ?? 0) > 0);
+  const total = visibleProviders.reduce((sum, provider) => sum + (provider.tokensToday ?? 0), 0);
+
+  return (
+    <div className="mt-4 flex h-1 overflow-hidden rounded-sm bg-slate-200">
+      {total > 0 ? (
+        visibleProviders.map((provider) => {
+          const accent = providerAccent(provider.providerId);
+          return (
+            <span
+              key={provider.providerId}
+              className={`h-full ${accent.laneDot}`}
+              style={{ width: `${((provider.tokensToday ?? 0) / total) * 100}%` }}
+              title={`${provider.label}: ${formatPopoverTokenCount(provider.tokensToday, provider.estimated)}`}
+            />
+          );
+        })
+      ) : (
+        <span className="h-full w-full bg-slate-300" />
+      )}
+    </div>
+  );
+}
+
+function ProviderMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <span className="block truncate text-[8px] font-semibold text-slate-500">{label}</span>
+      <strong className="mt-1 block truncate font-mono text-[11px] font-bold text-gray-950">
+        {value}
+      </strong>
     </div>
   );
 }
@@ -438,47 +481,25 @@ function ProviderTabButton({
     <button
       type="button"
       onClick={onClick}
-      className={`h-7 min-w-0 rounded-[9px] px-2 text-[12px] font-extrabold transition ${
+      className={`h-7 shrink-0 rounded-[7px] px-2.5 text-[11px] font-semibold transition ${
         active
-          ? "bg-white text-gray-950"
-          : "text-slate-500 hover:bg-white/70 hover:text-gray-900"
+          ? "bg-slate-100 text-gray-950"
+          : "text-slate-500 hover:bg-slate-50 hover:text-gray-900"
       }`}
       title={label}
     >
-      <span className="block truncate">{label}</span>
+      {label}
     </button>
   );
 }
 
-function ProviderUsageRow({ provider }: { provider: MenubarPopoverUsageProvider }) {
-  const accent = providerAccent(provider.providerId);
-  return (
-    <div className="flex min-h-[42px] items-center justify-between gap-3 px-3.5 py-2">
-      <div className="flex min-w-0 items-center gap-2.5">
-        <span className={`h-2 w-2 shrink-0 rounded-full ${accent.laneDot}`} />
-        <span className="truncate text-[12px] font-extrabold text-slate-800">{provider.label}</span>
-      </div>
-      <div className="shrink-0 text-right">
-        <div className="text-[13px] font-black text-gray-950">
-          {formatPopoverTokenCount(provider.tokensToday, provider.estimated)}
-        </div>
-        <div className="text-[9px] font-bold uppercase tracking-[0.08em] text-slate-400">
-          tokens
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function LatestSessionRow({
+function SessionRailRow({
   lane,
-  compact = false,
   busyKey,
   nowMs,
   onOpenSession,
 }: {
   lane: MenubarPopoverSessionLane;
-  compact?: boolean;
   busyKey: string | null;
   nowMs: number;
   onOpenSession: (lane: MenubarPopoverSessionLane) => void;
@@ -492,11 +513,13 @@ function LatestSessionRow({
 
   if (!lane.sessionId) {
     return (
-      <div className="flex min-h-[54px] items-center gap-2.5 px-3.5 py-2.5">
-        <span className={`h-2 w-2 shrink-0 rounded-full ${accent.laneDot}`} />
-        <div className="min-w-0">
-          <p className="truncate text-[12px] font-extrabold text-slate-700">{lane.label}</p>
-          <p className="truncate text-[11px] font-semibold text-slate-400">No recent session</p>
+      <div className="grid min-h-[66px] grid-cols-[3px_minmax(0,1fr)] border-b border-slate-100 last:border-b-0">
+        <span className={accent.laneDot} />
+        <div className="flex min-w-0 items-center px-3 py-2.5">
+          <div className="min-w-0">
+            <p className="truncate text-[10px] font-semibold text-slate-500">{lane.label}</p>
+            <p className="mt-1 truncate text-[12px] font-semibold text-slate-700">No recent session</p>
+          </div>
         </div>
       </div>
     );
@@ -507,74 +530,30 @@ function LatestSessionRow({
       type="button"
       onClick={() => onOpenSession(lane)}
       disabled={Boolean(isBusy)}
-      className={`group grid w-full grid-cols-[minmax(0,1fr)_32px] items-center gap-2 px-3.5 text-left transition hover:bg-slate-50/92 disabled:cursor-wait disabled:opacity-70 ${
-        compact ? "min-h-[64px] py-2" : "min-h-[86px] py-2.5"
-      }`}
+      className="group grid min-h-[74px] w-full grid-cols-[3px_minmax(0,1fr)_30px] border-b border-slate-100 bg-white text-left transition last:border-b-0 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-70"
     >
-      <div className="min-w-0">
-        <div className="mb-1 flex min-w-0 items-center gap-2">
-          {compact && (
-            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-extrabold ${accent.tileBg} ${accent.tileText}`}>
-              {lane.label}
-            </span>
-          )}
-          <span className="min-w-0 truncate text-[10px] font-bold text-slate-500">
+      <span className={accent.laneDot} />
+      <div className="min-w-0 px-3 py-2.5">
+        <div className="flex min-w-0 items-center justify-between gap-3 text-[9px] font-semibold text-slate-500">
+          <span className="min-w-0 truncate">
             {workspaceText}
+            <span className={`ml-1.5 ${accent.laneText}`}>· {lane.label}</span>
           </span>
-          <span className="shrink-0 text-[9px] font-bold text-slate-400">
-            {formatRelativeAge(lane.updatedAtEpoch, nowMs)}
-          </span>
+          <span className="shrink-0">{formatRelativeAge(lane.updatedAtEpoch, nowMs)}</span>
         </div>
-        <p className="truncate text-[14px] font-black leading-5 text-gray-950">
+        <p className="mt-1 truncate text-[12px] font-bold leading-4 text-gray-950">
           {titleText}
         </p>
         {previewText && (
-          <p className="mt-0.5 truncate text-[11px] font-medium leading-4 text-slate-500">
+          <p className="mt-0.5 truncate text-[10px] font-normal leading-[14px] text-slate-500">
             {previewText}
           </p>
         )}
       </div>
-      <span className={`grid h-8 w-8 place-items-center rounded-[9px] ${accent.actionText} opacity-70 transition group-hover:bg-white group-hover:opacity-100`}>
+      <span className="grid place-items-center text-slate-400 transition group-hover:text-gray-900">
         <ArrowUpRightIcon />
       </span>
     </button>
-  );
-}
-
-function UsageBreakdownCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0 rounded-[12px] border border-slate-200/70 bg-slate-50/66 px-2.5 py-2">
-      <p className="truncate text-[9px] font-extrabold uppercase tracking-[0.08em] text-slate-400">
-        {label}
-      </p>
-      <p className="mt-1 truncate text-[15px] font-black leading-5 text-gray-950">{value}</p>
-    </div>
-  );
-}
-
-function ProviderAvatar({ provider }: { provider: MenubarPopoverUsageProvider }) {
-  const accent = providerAccent(provider.providerId);
-  const initials = provider.label
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase() || provider.providerId.slice(0, 2).toUpperCase();
-
-  return (
-    <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-[12px] ${accent.avatarBg} ${accent.tileText} text-[13px] font-black`}>
-      {initials}
-    </div>
-  );
-}
-
-function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
-      <h3 className="truncate text-[12px] font-black text-gray-950">{title}</h3>
-      <p className="shrink-0 truncate text-[10px] font-bold text-slate-400">{subtitle}</p>
-    </div>
   );
 }
 
@@ -602,32 +581,11 @@ function PopoverActionButton({
       type="button"
       onClick={onClick}
       disabled={busy}
-      className="flex h-10 items-center justify-center gap-1.5 border-r border-slate-200/70 px-2 text-[10px] font-extrabold text-slate-600 transition last:border-r-0 hover:bg-slate-50 hover:text-gray-950 disabled:cursor-wait disabled:opacity-70"
+      className="flex h-11 items-center justify-center gap-1.5 border-r border-slate-200/80 px-2 text-[10px] font-semibold text-slate-600 transition last:border-r-0 hover:bg-slate-50 hover:text-gray-950 disabled:cursor-wait disabled:opacity-70"
     >
       <span className="text-slate-400">{icon}</span>
       <span>{label}</span>
     </button>
-  );
-}
-
-function MetricTile({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone: "green" | "amber";
-}) {
-  const className =
-    tone === "green"
-      ? "bg-[var(--ow-green-soft)] text-[var(--ow-green)]"
-      : "bg-[var(--ow-amber-soft)] text-[var(--ow-amber)]";
-  return (
-    <div className={`min-w-[54px] rounded-[12px] px-2.5 py-1.5 text-center ${className}`}>
-      <div className="text-[17px] font-black leading-5">{value}</div>
-      <div className="text-[8px] font-extrabold uppercase tracking-[0.08em]">{label}</div>
-    </div>
   );
 }
 
