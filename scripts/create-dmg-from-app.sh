@@ -7,7 +7,7 @@ VERSION="$(tr -d '[:space:]' < "$PROJECT_ROOT/VERSION")"
 APP_BUNDLE="${ONLINEWORKER_APP_BUNDLE_PATH:-$PROJECT_ROOT/mac-app/src-tauri/target/release/bundle/macos/OnlineWorker.app}"
 DMG_OUTPUT_DIR="${ONLINEWORKER_DMG_OUTPUT_DIR:-$PROJECT_ROOT/mac-app/src-tauri/target/release/bundle/dmg}"
 DITTO_BIN="${DITTO_BIN:-ditto}"
-HDIUTIL_BIN="${HDIUTIL_BIN:-hdiutil}"
+DISKUTIL_BIN="${DISKUTIL_BIN:-diskutil}"
 
 case "${ONLINEWORKER_DMG_ARCH:-$(uname -m)}" in
 	arm64 | aarch64)
@@ -44,11 +44,10 @@ mkdir -p "$DMG_OUTPUT_DIR"
 DMG_PATH="$DMG_OUTPUT_DIR/OnlineWorker_${VERSION}_${DMG_ARCH}.dmg"
 rm -f "$DMG_PATH"
 
-"$HDIUTIL_BIN" create \
-	-volname OnlineWorker \
-	-srcfolder "$STAGING_DIR" \
-	-ov \
-	-format UDZO \
+"$DISKUTIL_BIN" image create from \
+	--format UDZO \
+	--volumeName OnlineWorker \
+	"$STAGING_DIR" \
 	"$DMG_PATH"
 
 if [ ! -f "$DMG_PATH" ]; then

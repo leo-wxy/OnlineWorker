@@ -33,14 +33,14 @@ def test_headless_dmg_fallback_packages_an_existing_app_bundle(tmp_path):
     )
     fake_ditto.chmod(0o755)
 
-    fake_hdiutil = tmp_path / "hdiutil"
-    fake_hdiutil.write_text(
-        "#!/bin/bash\nset -euo pipefail\noutput=\"${@: -1}\"\n"
-        "test -L \"${5}/Applications\"\nmkdir -p \"$(dirname \"$output\")\"\n"
+    fake_diskutil = tmp_path / "diskutil"
+    fake_diskutil.write_text(
+        "#!/bin/bash\nset -euo pipefail\nsource=\"${@: -2:1}\"\noutput=\"${@: -1}\"\n"
+        "test -L \"${source}/Applications\"\nmkdir -p \"$(dirname \"$output\")\"\n"
         "printf dmg > \"$output\"\n",
         encoding="utf-8",
     )
-    fake_hdiutil.chmod(0o755)
+    fake_diskutil.chmod(0o755)
 
     env = os.environ.copy()
     env.update(
@@ -49,7 +49,8 @@ def test_headless_dmg_fallback_packages_an_existing_app_bundle(tmp_path):
             "ONLINEWORKER_DMG_OUTPUT_DIR": str(output_dir),
             "ONLINEWORKER_DMG_ARCH": "aarch64",
             "DITTO_BIN": str(fake_ditto),
-            "HDIUTIL_BIN": str(fake_hdiutil),
+            "DISKUTIL_BIN": str(fake_diskutil),
+            "HDIUTIL_BIN": str(tmp_path / "must-not-run-hdiutil"),
         }
     )
 
