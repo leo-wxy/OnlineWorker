@@ -118,6 +118,14 @@ struct MenubarPopoverSessionCandidate {
     status: Option<String>,
     updated_at_epoch: Option<u64>,
     sort_rank: u64,
+    active: bool,
+    source: MenubarPopoverSessionCandidateSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenubarPopoverSessionCandidateSource {
+    Provider,
+    LocalState,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -738,6 +746,8 @@ fn load_local_state_session_candidates(
                 },
                 updated_at_epoch: explicit_epoch.filter(|value| *value >= 1_000_000_000),
                 sort_rank,
+                active,
+                source: MenubarPopoverSessionCandidateSource::LocalState,
             });
         }
     }
@@ -939,21 +949,59 @@ fn build_popover_session_lane(
                 .partial_cmp(&right.updated_at)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-    let latest_candidate = candidates
+    let latest_provider_candidate = candidates
         .iter()
-        .filter(|candidate| candidate.provider_id == provider.provider_id)
+        .filter(|candidate| {
+            candidate.provider_id == provider.provider_id
+                && candidate.source == MenubarPopoverSessionCandidateSource::Provider
+        })
+        .max_by_key(|candidate| candidate.sort_rank);
+    let latest_active_provider_candidate = candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.provider_id == provider.provider_id
+                && candidate.source == MenubarPopoverSessionCandidateSource::Provider
+                && candidate.active
+        })
+        .max_by_key(|candidate| candidate.sort_rank);
+    let latest_local_candidate = candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.provider_id == provider.provider_id
+                && candidate.source == MenubarPopoverSessionCandidateSource::LocalState
+        })
         .max_by_key(|candidate| candidate.sort_rank);
 
-    if let Some(candidate) = latest_candidate {
-        let matching_activity = activities.iter().find(|activity| {
-            activity.provider_id == candidate.provider_id
-                && activity.session_id == candidate.session_id
-        });
+    if let Some(candidate) = latest_active_provider_candidate {
+        let matching_activity = matching_session_activity(activities, candidate);
+        return build_candidate_session_lane(provider, candidate, matching_activity);
+    }
+
+    if let Some(candidate) = latest_provider_candidate {
+        if latest_activity
+            .map(|activity| activity_rank_epoch(activity) > candidate_rank_epoch(candidate))
+            .unwrap_or(false)
+        {
+            let matching_candidate =
+                matching_session_candidate(candidates, latest_activity.unwrap());
+            return build_activity_session_lane(
+                provider,
+                latest_activity.unwrap(),
+                matching_candidate,
+            );
+        }
+
+        let matching_activity = matching_session_activity(activities, candidate);
         return build_candidate_session_lane(provider, candidate, matching_activity);
     }
 
     if let Some(activity) = latest_activity {
-        return build_activity_session_lane(provider, activity, None);
+        let matching_candidate = matching_session_candidate(candidates, activity);
+        return build_activity_session_lane(provider, activity, matching_candidate);
+    }
+
+    if let Some(candidate) = latest_local_candidate {
+        return build_candidate_session_lane(provider, candidate, None);
     }
 
     MenubarPopoverSessionLane {
@@ -967,6 +1015,32 @@ fn build_popover_session_lane(
         status: None,
         updated_at_epoch: None,
     }
+}
+
+fn matching_session_activity<'a>(
+    activities: &'a [TaskBoardSessionActivity],
+    candidate: &MenubarPopoverSessionCandidate,
+) -> Option<&'a TaskBoardSessionActivity> {
+    activities.iter().find(|activity| {
+        activity.provider_id == candidate.provider_id && activity.session_id == candidate.session_id
+    })
+}
+
+fn matching_session_candidate<'a>(
+    candidates: &'a [MenubarPopoverSessionCandidate],
+    activity: &TaskBoardSessionActivity,
+) -> Option<&'a MenubarPopoverSessionCandidate> {
+    candidates.iter().find(|candidate| {
+        candidate.provider_id == activity.provider_id && candidate.session_id == activity.session_id
+    })
+}
+
+fn candidate_rank_epoch(candidate: &MenubarPopoverSessionCandidate) -> u64 {
+    candidate.updated_at_epoch.unwrap_or(candidate.sort_rank)
+}
+
+fn activity_rank_epoch(activity: &TaskBoardSessionActivity) -> u64 {
+    activity.updated_at.max(0.0) as u64
 }
 
 fn build_activity_session_lane(
@@ -1054,6 +1128,22 @@ fn parse_provider_session_candidate(
     }
 
     let session_id = value_text(row, &["id", "sessionId", "session_id", "thread_id"])?;
+    let status = value_text(row, &["status", "state"]);
+    let active = value_bool(row, &["providerActive", "is_active", "active"]).unwrap_or(false)
+        || status
+            .as_deref()
+            .map(|value| value.eq_ignore_ascii_case("active"))
+            .unwrap_or(false);
+    let updated_at_epoch = value_epoch(
+        row,
+        &[
+            "updatedAt",
+            "updated_at",
+            "lastActivityAt",
+            "createdAt",
+            "created_at",
+        ],
+    );
 
     Some(MenubarPopoverSessionCandidate {
         provider_id: provider_id.to_string(),
@@ -1073,28 +1163,15 @@ fn parse_provider_session_candidate(
             row,
             &["preview", "lastMessage", "last_message", "lastFinalMessage"],
         ),
-        status: value_text(row, &["status", "state"]),
-        updated_at_epoch: value_epoch(
-            row,
-            &[
-                "updatedAt",
-                "updated_at",
-                "lastActivityAt",
-                "createdAt",
-                "created_at",
-            ],
-        ),
-        sort_rank: value_epoch(
-            row,
-            &[
-                "updatedAt",
-                "updated_at",
-                "lastActivityAt",
-                "createdAt",
-                "created_at",
-            ],
-        )
-        .unwrap_or(0),
+        status: if active {
+            Some("Active".to_string())
+        } else {
+            status
+        },
+        updated_at_epoch,
+        sort_rank: updated_at_epoch.unwrap_or(0),
+        active,
+        source: MenubarPopoverSessionCandidateSource::Provider,
     })
 }
 
@@ -1244,13 +1321,15 @@ mod tests {
     use crate::commands::dashboard::SystemHealth;
     use crate::commands::provider_usage::{ProviderUsageDay, ProviderUsageSummary};
     use crate::commands::task_board_state::TaskBoardSessionActivity;
+    use serde_json::json;
 
     use super::{
         anchored_popover_position, build_popover_snapshot, compute_tray_status,
         count_needs_attention, menubar_popover_height_for_available_height,
-        popover_provider_specs_from_metadata, resolve_custom_tray_icon_paths,
-        usage_breakdown_from_usage_summary, MenubarPopoverOpenSessionTarget,
-        MenubarPopoverSessionCandidate, MenubarPopoverUsageProvider, TrayStatus,
+        parse_provider_session_candidate, popover_provider_specs_from_metadata,
+        resolve_custom_tray_icon_paths, usage_breakdown_from_usage_summary,
+        MenubarPopoverOpenSessionTarget, MenubarPopoverSessionCandidate,
+        MenubarPopoverSessionCandidateSource, MenubarPopoverUsageProvider, TrayStatus,
     };
 
     fn usage_provider(
@@ -1484,6 +1563,8 @@ mod tests {
                     status: None,
                     updated_at_epoch: Some(200),
                     sort_rank: 200,
+                    active: false,
+                    source: MenubarPopoverSessionCandidateSource::Provider,
                 },
                 MenubarPopoverSessionCandidate {
                     provider_id: "codex".into(),
@@ -1494,6 +1575,8 @@ mod tests {
                     status: None,
                     updated_at_epoch: Some(100),
                     sort_rank: 100,
+                    active: false,
+                    source: MenubarPopoverSessionCandidateSource::Provider,
                 },
             ],
         );
@@ -1553,6 +1636,8 @@ mod tests {
                 status: None,
                 updated_at_epoch: Some(200),
                 sort_rank: 200,
+                active: false,
+                source: MenubarPopoverSessionCandidateSource::Provider,
             }],
         );
 
@@ -1568,6 +1653,143 @@ mod tests {
         assert_eq!(
             snapshot.latest_sessions[0].latest_preview.as_deref(),
             Some("等待授权")
+        );
+    }
+
+    #[test]
+    fn popover_snapshot_prefers_current_provider_session_over_stale_local_state() {
+        let activities = vec![TaskBoardSessionActivity {
+            provider_id: "codex".into(),
+            workspace_id: "codex:/tmp/onlineworker-combined".into(),
+            workspace_path: "/tmp/onlineworker-combined".into(),
+            session_id: "old-session".into(),
+            title: "今天是几号？".into(),
+            status: "completed".into(),
+            attention_reason: String::new(),
+            attention_kind: String::new(),
+            request_id: String::new(),
+            approval_source: String::new(),
+            mirrored_only: false,
+            last_user_message: "今天是几号？".into(),
+            last_assistant_message: "今天是 2026年06月22日".into(),
+            last_final_message: "今天是 2026年06月22日".into(),
+            last_event_kind: "message.assistant.final".into(),
+            updated_at: 100.0,
+        }];
+
+        let snapshot = build_popover_snapshot(
+            1_720_000_000,
+            vec![usage_provider("codex", "Codex", None)],
+            activities,
+            vec![
+                MenubarPopoverSessionCandidate {
+                    provider_id: "codex".into(),
+                    session_id: "current-session".into(),
+                    workspace: Some("/tmp/onlineworker-combined".into()),
+                    title: Some("当前 menubar 调试".into()),
+                    latest_preview: Some("正在处理 latest session".into()),
+                    status: Some("Active".into()),
+                    updated_at_epoch: Some(200),
+                    sort_rank: 200,
+                    active: true,
+                    source: MenubarPopoverSessionCandidateSource::Provider,
+                },
+                MenubarPopoverSessionCandidate {
+                    provider_id: "codex".into(),
+                    session_id: "old-session".into(),
+                    workspace: Some("/tmp/onlineworker-combined".into()),
+                    title: Some("今天是几号？".into()),
+                    latest_preview: Some("旧 state 残留".into()),
+                    status: Some("Active".into()),
+                    updated_at_epoch: None,
+                    sort_rank: 1_000_000_000_000,
+                    active: true,
+                    source: MenubarPopoverSessionCandidateSource::LocalState,
+                },
+            ],
+        );
+
+        assert_eq!(
+            snapshot.latest_sessions[0].session_id.as_deref(),
+            Some("current-session")
+        );
+        assert_eq!(
+            snapshot.latest_sessions[0].title.as_deref(),
+            Some("当前 menubar 调试")
+        );
+        assert_eq!(
+            snapshot.latest_sessions[0].latest_preview.as_deref(),
+            Some("正在处理 latest session")
+        );
+    }
+
+    #[test]
+    fn popover_snapshot_uses_newer_task_board_activity_when_provider_session_is_older() {
+        let activities = vec![TaskBoardSessionActivity {
+            provider_id: "codex".into(),
+            workspace_id: "codex:/tmp/onlineworker-combined".into(),
+            workspace_path: "/tmp/onlineworker-combined".into(),
+            session_id: "new-activity".into(),
+            title: "Task Board newer".into(),
+            status: "running".into(),
+            attention_reason: String::new(),
+            attention_kind: String::new(),
+            request_id: String::new(),
+            approval_source: String::new(),
+            mirrored_only: false,
+            last_user_message: "new input".into(),
+            last_assistant_message: String::new(),
+            last_final_message: String::new(),
+            last_event_kind: "message.user.accepted".into(),
+            updated_at: 300.0,
+        }];
+
+        let snapshot = build_popover_snapshot(
+            1_720_000_000,
+            vec![usage_provider("codex", "Codex", None)],
+            activities,
+            vec![MenubarPopoverSessionCandidate {
+                provider_id: "codex".into(),
+                session_id: "older-provider".into(),
+                workspace: Some("/tmp/older".into()),
+                title: Some("Provider older".into()),
+                latest_preview: Some("older".into()),
+                status: None,
+                updated_at_epoch: Some(200),
+                sort_rank: 200,
+                active: false,
+                source: MenubarPopoverSessionCandidateSource::Provider,
+            }],
+        );
+
+        assert_eq!(
+            snapshot.latest_sessions[0].session_id.as_deref(),
+            Some("new-activity")
+        );
+        assert_eq!(
+            snapshot.latest_sessions[0].status.as_deref(),
+            Some("Running")
+        );
+    }
+
+    #[test]
+    fn provider_session_candidate_marks_provider_active_rows() {
+        let row = json!({
+            "id": "codex-current",
+            "title": "Current Codex",
+            "providerActive": true,
+            "updatedAt": 1_783_665_734_921_u64
+        });
+
+        let candidate = parse_provider_session_candidate("codex", &row).unwrap();
+
+        assert!(candidate.active);
+        assert_eq!(candidate.status.as_deref(), Some("Active"));
+        assert_eq!(candidate.updated_at_epoch, Some(1_783_665_734));
+        assert_eq!(candidate.sort_rank, 1_783_665_734);
+        assert_eq!(
+            candidate.source,
+            MenubarPopoverSessionCandidateSource::Provider
         );
     }
 
