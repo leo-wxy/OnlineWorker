@@ -56,7 +56,13 @@ jobs:
       - name: Build DMG
         env:
           PYTHON_ARM64: ${{ env.pythonLocation }}/bin/python
-        run: bash scripts/build.sh
+        run: |
+          if bash scripts/build.sh; then
+            exit 0
+          fi
+
+          echo "::warning::Tauri DMG bundling failed; trying the headless fallback"
+          bash scripts/create-dmg-from-app.sh
 
       - name: Resolve release tag
         id: release_tag
