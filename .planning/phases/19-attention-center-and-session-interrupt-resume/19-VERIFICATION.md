@@ -1,10 +1,10 @@
 ---
-status: human_needed
+status: passed
 phase: 19
 verified: 2026-07-11
 requirements: [ATTN-01, SESS-CTRL-01]
 automated_score: 2/2
-human_score: 3/4
+human_score: 3/4-with-explicit-waiver
 ---
 
 # Phase 19 Verification
@@ -27,13 +27,13 @@ Source implementation satisfies the two Phase 19 requirements under automated co
 
 ## Installed Verification
 
-- Fast package/install/restart passed for version `1.7.4`; final DMG SHA-256: `36d2224db838dcf427b5e92c0f5eb813aff9283e21be4e31b319ed26498c3432`.
-- Final installed processes launched from `/Applications/OnlineWorker.app`; app PID `60983`, bot parent/child PIDs `61087` / `61164` at verification time.
+- Fast package/install/restart passed for version `1.8.0`; final DMG SHA-256: `b9f4bd7e74635b7bfc77e26eaf7f4f9db7b55f491c9474eadfd025d63793f502`.
+- Final installed processes launched from `/Applications/OnlineWorker.app`; app PID `62171`, with bot processes verified under the installed app at verification time.
 - Owner bridge remained healthy while opening Claude Sessions and issuing five rapid refreshes; the previous request storm, blocked log flush, connection refusal, and white screen did not recur.
 - Claude source-archive unsupported errors now fall back to a reversible OnlineWorker archive overlay; both Phase 19 Claude UAT Sessions were verified in Archived.
 
-## Human Verification Required
+## Human Verification Closeout
 
-1. Installed-app narrow-width visual check below the responsive breakpoint.
+The installed-app narrow-width visual check below the responsive breakpoint was not executed. The user explicitly selected Phase 19 closeout without milestone archival on 2026-07-11, accepting this item as a documented waiver. Automated responsive coverage remains passing; no installed narrow-width visual pass is claimed.
 
-The phase must not be marked fully complete until that item is passed or explicitly waived.
+Phase 19 is complete with this explicit waiver.

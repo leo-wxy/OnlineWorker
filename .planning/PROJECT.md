@@ -13,9 +13,9 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 ## Current State
 
 - Latest archived milestone: `v1.2.1`
-- Release tag: `1.7.4`
+- Release tag: `1.8.0`
 - Active milestone: General AI Capability and Session Operations
-- Active roadmap phase: Phase 19 — Attention Center And Session Interrupt/Resume
+- Active roadmap phase: None; Phase 19 is complete and milestone archival remains separate
 
 ## Requirements
 
@@ -33,11 +33,12 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 - ✓ Provider asynchronous failures can surface as visible Session Browser error turns through provider-neutral read normalization — v1.2.1 Phase 5
 - ✓ Provider-private session/workspace parsing stays behind provider/plugin boundaries, while shared App surfaces consume normalized provider facts — Phase 17
 - ✓ App and Telegram new-session entry points share a real provider-backed creation/first-message core with no visible local draft session — Phase 18
+- ✓ The existing Task Board provides grouped attention/running/recent-ended work with selected Session detail and recent conversation context — v1.8.0 Phase 19
+- ✓ Provider-owned interrupt, same-Session Continue, and recovery operate without local terminal fabrication or message replay — v1.8.0 Phase 19
 
 ### Active
 
-- [ ] Add a focused pending-action center for actionable approval, question, failure, and stalled-session states.
-- [ ] Add provider-owned Session interrupt/resume/recovery controls that operate on real provider sessions and fail clearly when unsupported.
+(No active phase requirements; define the next milestone before adding new scope.)
 
 ### Out of Scope
 
@@ -85,6 +86,7 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 - 2026-07-11: Reliability follow-up restored the full Python/Rust/frontend source regression gates and corrected menubar usage/active-session semantics.
 - 2026-07-11: Phase 17 and Phase 18 closed after canonical UAT/verification, full source gates, version `1.7.4` package/install/relaunch checks, and installed App provider-session materialization. Real Telegram UAT was explicitly waived and is not claimed as passed.
 - 2026-07-11: Phase 19 added for the pending-action center and Session interrupt/resume/recovery; global search is explicitly out of scope.
+- 2026-07-11: Phase 19 completed with source and installed core UAT, published as `v1.8.0`; installed narrow-width visual UAT was explicitly waived without claiming a pass.
 
 ---
-*Last updated: 2026-07-11 after Phase 18 closure*
+*Last updated: 2026-07-11 after Phase 19 closure*

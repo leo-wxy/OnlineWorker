@@ -31,5 +31,5 @@ These items were explicitly deferred from the archived v1.2.1 milestone and rema
 |-------------|-------|--------|
 | NOTIFY-01 | Phase 6 | Implemented |
 | NOTIFY-02 | Phase 6 | Implemented |
-| ATTN-01 | Phase 19 | Implemented; installed desktop UAT passed, narrow visual check pending |
+| ATTN-01 | Phase 19 | Complete; installed desktop UAT passed, narrow visual check explicitly waived |
 | SESS-CTRL-01 | Phase 19 | Implemented; installed interrupt, Continue, recovery, no-replay UAT passed |

@@ -2,26 +2,26 @@
 gsd_state_version: 1.0
 milestone: general-ai-capability-and-session-operations
 milestone_name: General AI Capability and Session Operations
-current_phase: 19
-current_phase_name: Attention Center And Session Interrupt/Resume
-current_plan: 19-02 installed UAT nearly complete
-status: Awaiting narrow-window visual UAT
+current_phase: null
+current_phase_name: Milestone closeout
+current_plan: null
+status: Phase 19 complete; milestone archival remains separate
 last_updated: "2026-07-11T08:21:38.000Z"
 progress:
   total_phases: 14
-  completed_phases: 13
+  completed_phases: 14
   total_plans: 29
-  completed_plans: 17
-  percent: 59
+  completed_plans: 19
+  percent: 66
 ---
 
 # Project State
 
 **Updated:** 2026-07-11
 **Current milestone:** General AI Capability and Session Operations
-**Current phase:** 19 — Attention Center And Session Interrupt/Resume
-**Status:** Awaiting narrow-window visual UAT
-**Current plan:** 19-02 installed UAT nearly complete
+**Current phase:** None — Phase 19 is complete
+**Status:** Phase 19 complete; milestone archival remains separate
+**Current plan:** None
 **Last archived milestone:** v1.2.1
 
 ## Current Status
@@ -45,7 +45,7 @@ progress:
 - Phase 16 is complete and installed-app verified. It addresses the Phase 14 UAT finding that external provider sessions can run without entering the message bus. Phase 16 is strictly plugin-scoped: the Claude plugin owns global hook merge/lifecycle mapping through a lightweight non-blocking relay; distribution-provided provider plugins own their own external listener behavior; OpenCode-compatible listener behavior is reference-only and does not add an OpenCode provider; core/message bus only receives normalized events and TaskBoard only consumes bus projection. Source regression and installed-app validation covered Claude, Codex, and the distribution-provided provider flow, including TaskBoard attention/running/completed refresh, approval buttons, final message refresh, side-nav attention badge refresh, and stable title/content rendering. A Codex app-server raw approval request id fix was added and revalidated in the installed app. Computer Use verification on 2026-06-08 confirmed the test approval card cleared from `需要处理`, the Claude test card cleared from `执行中` after `SessionEnd`, and only the current Codex work session remained visible.
 - Phase 17 is complete. Provider-private session/workspace parsing stays behind provider/plugin boundaries; shared surfaces consume normalized provider facts. Full source gates, version `1.7.4` package/install/relaunch, IPC, binary identity, and installed owner-bridge provider-facts checks passed. Real Telegram visual UAT was explicitly waived and is not claimed as passed.
 - Phase 18 is complete. App and Telegram entry points share `core/provider_session_new.py` for provider validation, real-thread materialization, and first-message send while keeping App pending and Telegram topic-binding shells separate. Packaged App smoke materialized real Codex and Claude sessions with their first messages. Real Telegram `/new` UAT was explicitly waived and is not claimed as passed.
-- Phase 19 source and installed desktop/live-provider behavior are verified. The existing Task Board uses grouped attention/running/recent-ended rows with a selected detail pane and recent conversation excerpts; provider-owned interrupt/recovery and same-Session Continue focus passed installed UAT. A recovery-created Claude process used the exact same Session id through `--resume` without replay. Concurrent Session list requests are coalesced and blocking owner-bridge I/O is isolated from Tauri async workers, preventing the observed request storm, log-pipe stall, owner-bridge refusal, and white screen. Claude sessions without source archive support now use a reversible local archive overlay. Installed narrow-width visual UAT remains pending.
+- Phase 19 is complete. Source and installed desktop/live-provider behavior are verified. The existing Task Board uses grouped attention/running/recent-ended rows with a selected detail pane and recent conversation excerpts; provider-owned interrupt/recovery and same-Session Continue focus passed installed UAT. A recovery-created Claude process used the exact same Session id through `--resume` without replay. Concurrent Session list requests are coalesced and blocking owner-bridge I/O is isolated from Tauri async workers, preventing the observed request storm, log-pipe stall, owner-bridge refusal, and white screen. Claude sessions without source archive support use a reversible local archive overlay. The installed narrow-width visual check was explicitly waived at closeout and is not claimed as passed.
 - Phase 17's intermediate preview/cache/hydration fixes and their earlier installed evidence are consolidated in `17-01-SUMMARY.md`; `17-VERIFICATION.md` is the canonical closure result.
 
 ## Archived Milestone
@@ -71,14 +71,14 @@ progress:
 | 16. Provider External Event Ingress | Completed and installed-app verified on branch `codex/phase-16-provider-event-ingress`; provider plugin ingress, lightweight Claude relay, TaskBoard refresh, and attention cleanup validation passed | None |
 | 17. Provider Session Core Isolation | Completed; canonical verification passed and installed provider facts verified | None; live Telegram visual UAT was waived and remains unclaimed |
 | 18. Provider Session New Flow | Completed; canonical verification passed and packaged App real-session materialization verified | None; live Telegram `/new` UAT was waived and remains unclaimed |
-| 19. Attention Center And Session Interrupt/Resume | Source and installed desktop/live-provider UAT passed | Verify installed narrow-width list/detail replacement or explicitly waive it |
+| 19. Attention Center And Session Interrupt/Resume | Completed; source and installed core UAT passed | None; installed narrow-width visual check was explicitly waived and remains unclaimed |
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 **Core value:** Developers can reliably control local AI coding CLI workflows from an installed Mac app while receiving timely remote notifications and final results through supported notification channels.
-**Current focus:** Phase 19 — Attention Center And Session Interrupt/Resume
+**Current focus:** Milestone closeout or next-milestone definition
 
 ## Key Preserved Decisions
 
@@ -197,9 +197,10 @@ See: `.planning/PROJECT.md` (updated 2026-07-11)
 - Phase 17 completed on 2026-07-11: canonical UAT/verification passed, full source gates passed, version `1.7.4` package/install/relaunch checks passed, and installed owner-bridge provider facts were verified. Real Telegram visual UAT was waived and remains unclaimed.
 - Phase 18 completed on 2026-07-11: canonical UAT/verification passed and packaged App requests materialized real Codex and Claude sessions with their first messages. Real Telegram `/new` UAT was waived and remains unclaimed.
 - Phase 19 added on 2026-07-11: Attention Center And Session Interrupt/Resume. Global search is explicitly excluded.
+- Phase 19 completed on 2026-07-11 with source and installed core UAT, version `1.8.0` package/install verification, and explicit waiver of the unexecuted installed narrow-width visual check.
 
 ## Session Continuity
 
 Last session: 2026-07-11
-Stopped at: Phase 19 installed desktop/live-provider UAT passed; narrow-window visual UAT pending
+Stopped at: Phase 19 complete; milestone archival remains separate
 Resume file: None

@@ -1,5 +1,5 @@
 ---
-status: testing
+status: complete
 phase: 19-attention-center-and-session-interrupt-resume
 source: [19-VERIFICATION.md]
 started: 2026-07-11
@@ -16,7 +16,7 @@ result: passed in installed `OnlineWorker.app`; desktop B+A hierarchy, selected 
 
 ### 2. Installed narrow-width list/detail replacement
 expected: Narrow width replaces the split view with list/detail navigation and Back.
-result: pending; automated responsive contract passes, but Computer Use could not resize the installed window below the breakpoint, so installed narrow visual behavior is not claimed.
+result: waived at Phase 19 closeout by explicit user choice. Automated responsive contract passes, but the installed window was not visually exercised below the breakpoint, so this item is not represented as passed.
 
 ### 3. Real provider Session lifecycle
 expected: Owned active turn exposes Interrupt; success appears only after provider abort/cancel evidence; user interruption moves to recent-ended with Continue; recovery reconnects/resumes the same Session without replay.
@@ -31,10 +31,10 @@ result: passed. Five rapid refresh clicks kept the page responsive, socket descr
 total: 4
 passed: 3
 issues: 0
-pending: 1
-skipped: 0
+pending: 0
+skipped: 1
 blocked: 0
 
-## Gaps
+## Closeout Note
 
-- Installed narrow-width visual behavior remains unverified; source responsive coverage passes, but the installed window could not be resized below the breakpoint through Computer Use.
+- Installed narrow-width visual behavior remains unverified and was explicitly waived for Phase 19 closeout. Source responsive coverage passes; no installed visual pass is claimed.

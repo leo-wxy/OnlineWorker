@@ -25,7 +25,7 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 16: Provider External Event Ingress** - Add provider-plugin-owned external event ingress for Claude and distribution-provided provider plugins so externally launched sessions can enter the Phase 14 message bus. Claude uses a marker-based global hook merge; OpenCode-compatible listener behavior is reference-only for compatible provider plugins, not a new product surface. Implementation remains scoped to provider plugin directories plus focused tests and generic bus projection fixes.
 - [x] **Phase 17: Provider Session Core Isolation** - Provider-private parsing stays in provider/plugin code; shared surfaces consume generic owner-bridge facts. Full source gates and installed package/IPC/provider-facts checks passed; real Telegram visual UAT was explicitly waived and is not claimed as passed. (completed 2026-07-11)
 - [x] **Phase 18: Provider Session New Flow** - App and Telegram share `core/provider_session_new.py` for validation, real thread materialization, and first-message send while retaining separate transport shells. Packaged App materialization passed for Codex and Claude; real Telegram `/new` UAT was explicitly waived and is not claimed as passed. (completed 2026-07-11)
-- [ ] **Phase 19: Attention Center And Session Interrupt/Resume** - Add a focused pending-action center and provider-owned Session interrupt/resume/recovery controls. Global search is explicitly excluded from this phase.
+- [x] **Phase 19: Attention Center And Session Interrupt/Resume** - Added the focused Task Board attention center and provider-owned Session interrupt/resume/recovery controls. Source and installed core UAT passed; narrow-width installed visual UAT was explicitly waived without claiming a pass. (completed 2026-07-11)
 
 ## Phase Details
 
@@ -783,4 +783,4 @@ Plans:
 - [x] 19-01 — Provider-owned interrupt/recovery control and activity truth (source verified)
 - [x] 19-02 — B+A attention center UI and same-Session Continue focus (source verified)
 
-**Status:** Source and installed desktop/live-provider verification passed on 2026-07-11, including interruption, same-Session Continue/recovery, no replay, Session request-storm/white-screen hardening, and reversible Claude local archive overlays. Installed narrow-width visual UAT remains pending.
+**Status:** Completed on 2026-07-11. Source and installed desktop/live-provider verification passed, including interruption, same-Session Continue/recovery, no replay, Session request-storm/white-screen hardening, reversible Claude local archive overlays, and the widened desktop detail content. Installed narrow-width visual UAT was explicitly waived and is not represented as passed.
