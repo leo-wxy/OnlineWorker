@@ -473,11 +473,43 @@ test("task board does not render approval buttons for external mirrored CLI appr
   assert.match(taskModel, /mirroredOnly: activity\.mirroredOnly === true/);
 });
 
-test("task board clamps activity preview without covering card footer", () => {
+test("phase 19 task board uses grouped detail layout and continue only focuses the existing composer", () => {
+  const taskBoard = readFileSync(join(root, "src", "pages", "TaskBoard.tsx"), "utf8");
+  const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
+  const sessions = readFileSync(join(root, "src", "pages", "SessionBrowser.tsx"), "utf8");
+  const chat = readFileSync(join(root, "src", "components", "session-browser", "GenericProviderChat.tsx"), "utf8");
+  const shared = readFileSync(join(root, "src", "components", "session-browser", "shared.tsx"), "utf8");
+
+  assert.match(taskBoard, /board\.recentEnded/);
+  assert.match(taskBoard, /需要你/);
+  assert.match(taskBoard, /正在运行/);
+  assert.match(taskBoard, /最近结束/);
+  assert.match(taskBoard, /control_task_board_session/);
+  assert.match(taskBoard, /会话片段/);
+  assert.match(taskBoard, /fetchProviderSession/);
+  assert.match(taskBoard, /selectRecentConversationTurns/);
+  assert.match(taskBoard, /selectedConversationTurns/);
+  assert.match(taskBoard, /const \[mobileDetailOpen,\s*setMobileDetailOpen\] = useState\(false\)/);
+  assert.match(taskBoard, /setMobileDetailOpen\(true\)/);
+  assert.match(taskBoard, /setMobileDetailOpen\(false\)/);
+  assert.match(taskBoard, /lg:hidden/);
+  assert.match(taskBoard, /focusComposerKey:/);
+  assert.match(app, /focusComposerKey: event\.payload\.focusComposerKey/);
+  assert.match(sessions, /focusComposerKey\?: number/);
+  assert.match(sessions, /focusComposerKey=\{openTarget\?\.focusComposerKey\}/);
+  assert.match(chat, /focusComposerKey\?: number/);
+  assert.match(chat, /focusKey=\{focusComposerKey\}/);
+  assert.match(shared, /focusKey\?: number/);
+  assert.match(shared, /textareaRef\.current\?\.focus\(\)/);
+  assert.equal(taskBoard.includes("generated prompt"), false);
+});
+
+test("task board keeps grouped-row preview compact without covering its footer", () => {
   const taskBoard = readFileSync(join(root, "src", "pages", "TaskBoard.tsx"), "utf8");
 
-  assert.match(taskBoard, /WebkitLineClamp:\s*3/);
-  assert.match(taskBoard, /maxHeight:\s*"3\.75rem"/);
+  assert.match(taskBoard, /min-h-\[132px\]/);
+  assert.match(taskBoard, /WebkitLineClamp:\s*2/);
+  assert.match(taskBoard, /maxHeight:\s*"2\.5rem"/);
   assert.equal(taskBoard.includes("line-clamp-3 min-h-[4.5rem]"), false);
   assert.match(taskBoard, /mt-auto flex items-center justify-between/);
 });

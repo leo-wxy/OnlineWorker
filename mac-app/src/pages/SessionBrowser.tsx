@@ -26,6 +26,7 @@ import {
   nextSelectedSessionId,
   resolveSessionSnapshotUpdate,
 } from "../utils/sessionBrowserState.js";
+import { createSingleFlightByKey } from "../utils/singleFlight.js";
 import {
   SessionListPanel,
   SessionProviderToolbar,
@@ -52,6 +53,7 @@ interface SessionBrowserOpenTarget {
   providerId: string;
   sessionId: string;
   workspace?: string;
+  focusComposerKey?: number;
 }
 
 interface Props {
@@ -138,6 +140,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
   const loadedProvidersRef = useRef<Set<ProviderFilter>>(new Set());
   const activatedProvidersRef = useRef<Set<ProviderFilter>>(new Set());
   const loadingProvidersRef = useRef<Set<ProviderFilter>>(new Set());
+  const providerLoadFlightsRef = useRef(createSingleFlightByKey<ProviderFilter>());
   const emptyForceRefreshAttemptsRef = useRef<Map<ProviderFilter, number>>(new Map());
   const loadTokenRef = useRef(0);
   const retryTimerRef = useRef<number | null>(null);
@@ -271,7 +274,10 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     loadingProvidersRef.current.add(provider);
     setLoading(true);
     try {
-      const sessions = await fetchProviderSessions(provider, { forceRefresh: options?.forceRefresh ?? false });
+      const sessions = await providerLoadFlightsRef.current.run(
+        provider,
+        () => fetchProviderSessions(provider, { forceRefresh: options?.forceRefresh ?? false }),
+      );
       const normalizedSessions = normalizeGenericProviderSessions(
         provider,
         sessions,
@@ -358,7 +364,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     setSessionContextMenu(null);
     setWorkspaceContextMenu(null);
     setArchiveNotice(null);
-  }, [openTarget?.providerId, openTarget?.sessionId, openTarget?.workspace]);
+  }, [openTarget?.focusComposerKey, openTarget?.providerId, openTarget?.sessionId, openTarget?.workspace]);
 
   useEffect(() => {
     if (!active || !openTarget || openTarget.providerId !== providerFilter) {
@@ -802,6 +808,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
               onSessionRemapped={
                 effectiveSelectedSession.type === providerFilter ? handleSessionRemapped : undefined
               }
+              focusComposerKey={openTarget?.focusComposerKey}
               active={active}
             />
           ) : pendingSelectedSession ? (

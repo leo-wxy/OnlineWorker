@@ -1,4 +1,4 @@
-import { type ReactNode, type RefObject, useEffect, useState } from "react";
+import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import type { ComposerAttachment, SessionTurn } from "../../types";
 import {
   limitSessionTurns,
@@ -96,6 +96,7 @@ export function TurnBubble({
 
 export function SessionComposer({
   resetKey,
+  focusKey,
   sending,
   stagingAttachments,
   disabled,
@@ -111,6 +112,7 @@ export function SessionComposer({
   onSend,
 }: {
   resetKey: string;
+  focusKey?: number;
   sending: boolean;
   stagingAttachments?: boolean;
   disabled?: boolean;
@@ -126,10 +128,19 @@ export function SessionComposer({
   onSend: (text: string, attachments: ComposerAttachment[]) => Promise<boolean | void>;
 }) {
   const [draft, setDraft] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     setDraft("");
   }, [resetKey]);
+
+  useEffect(() => {
+    if (!focusKey) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusKey]);
 
   const handleSubmit = async () => {
     const text = draft.trim();
@@ -157,6 +168,7 @@ export function SessionComposer({
       <div className="ow-page-frame-soft rounded-[24px] p-3">
         <div className="rounded-[20px] border border-slate-200/80 bg-white/92 shadow-sm transition-all focus-within:border-blue-200 focus-within:shadow-[0_10px_24px_rgba(37,99,235,0.08)]">
           <textarea
+            ref={textareaRef}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {

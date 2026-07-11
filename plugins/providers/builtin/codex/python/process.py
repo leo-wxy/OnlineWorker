@@ -10,6 +10,8 @@ codex app-server 子进程生命周期管理。
 import asyncio
 import logging
 import os
+import shlex
+import signal
 import urllib.request
 from collections import deque
 from typing import Optional
@@ -17,6 +19,7 @@ from typing import Optional
 from plugins.providers.builtin.codex.python.transport import (
     is_unix_endpoint,
     prepare_unix_socket_path,
+    resolve_unix_socket_path,
     unix_socket_accepting,
 )
 
@@ -45,6 +48,41 @@ def _build_subprocess_env() -> dict:
     prepend = [p for p in extra_paths if p not in current_parts]
     env["PATH"] = ":".join(prepend + current_parts) if current_parts else ":".join(prepend)
     return env
+
+
+def _is_owned_unix_listener_command(command_line: str, listen_url: str) -> bool:
+    """命令行是否精确匹配 OnlineWorker 启动的 app-server。"""
+    try:
+        args = shlex.split(command_line)
+    except ValueError:
+        args = command_line.split()
+
+    try:
+        app_server_index = args.index("app-server")
+    except ValueError:
+        return False
+    app_server_args = args[app_server_index + 1 :]
+
+    hooks_disabled = "--disable=hooks" in app_server_args
+    listen_matches = f"--listen={listen_url}" in app_server_args
+    for index, arg in enumerate(app_server_args[:-1]):
+        if arg == "--disable" and app_server_args[index + 1] == "hooks":
+            hooks_disabled = True
+        if arg == "--listen" and app_server_args[index + 1] == listen_url:
+            listen_matches = True
+    return hooks_disabled and listen_matches
+
+
+async def _capture_command_output(*cmd: str, env: Optional[dict] = None) -> tuple[int, str]:
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        env=env,
+    )
+    output, _ = await proc.communicate()
+    text = output.decode(errors="replace").strip() if output else ""
+    return int(proc.returncode or 0), text
 
 
 async def _read_process_failure(
@@ -78,6 +116,7 @@ class AppServerProcess:
         port: int = 0,
         protocol: str = "ws",
         listen_url: str = "",
+        owned_unix: bool = False,
     ):
         """
         Args:
@@ -85,11 +124,13 @@ class AppServerProcess:
             port: 监听端口，0 = 动态分配（OS 选择）
             protocol: "ws"、"unix" 或 "stdio"
             listen_url: 显式监听 URL，主要用于 `unix://PATH`
+            owned_unix: Unix socket 是否由 OnlineWorker 独占管理
         """
         self.codex_bin = codex_bin
         self.port = port
         self.protocol = protocol
         self.listen_url = listen_url
+        self.owned_unix = owned_unix
         self._proc: Optional[asyncio.subprocess.Process] = None
         self._stderr_task: Optional[asyncio.Task] = None
         self._stdout_task: Optional[asyncio.Task] = None
@@ -108,6 +149,8 @@ class AppServerProcess:
 
         listen_url = self._build_listen_url()
         if is_unix_endpoint(listen_url):
+            if self.owned_unix and unix_socket_accepting(listen_url):
+                await self._stop_existing_owned_unix_listener(listen_url)
             prepare_unix_socket_path(listen_url)
             if unix_socket_accepting(listen_url):
                 self.ws_url = listen_url
@@ -135,6 +178,81 @@ class AppServerProcess:
         if self.protocol == "unix":
             return await self._start_unix()
         return await self._start_ws()
+
+    async def _stop_existing_owned_unix_listener(self, listen_url: str) -> None:
+        """仅终止精确占用 OnlineWorker 专属 socket 的旧 app-server。"""
+        socket_path = resolve_unix_socket_path(listen_url)
+        code, output = await _capture_command_output("/usr/sbin/lsof", "-t", socket_path)
+        pids = sorted(
+            {
+                int(line.strip())
+                for line in output.splitlines()
+                if line.strip().isdigit()
+            }
+        )
+        if code != 0 or not pids:
+            raise RuntimeError("OnlineWorker 专属 app-server socket 已占用，但无法识别监听进程")
+
+        owned_identities: list[tuple[int, str]] = []
+        active_owner_pids: list[int] = []
+        for pid in pids:
+            ps_code, identity = await _capture_command_output(
+                "/bin/ps",
+                "-ww",
+                "-p",
+                str(pid),
+                "-o",
+                "pid=,ppid=,lstart=,command=",
+            )
+            if ps_code == 0 and _is_owned_unix_listener_command(identity, listen_url):
+                identity_parts = identity.split(maxsplit=2)
+                if (
+                    len(identity_parts) >= 2
+                    and identity_parts[0].isdigit()
+                    and identity_parts[1].isdigit()
+                    and int(identity_parts[0]) == pid
+                ):
+                    if int(identity_parts[1]) == 1:
+                        owned_identities.append((pid, identity))
+                    else:
+                        active_owner_pids.append(pid)
+
+        if active_owner_pids:
+            raise RuntimeError(
+                "OnlineWorker 专属 app-server 仍由活跃实例持有，拒绝抢占："
+                + ",".join(str(pid) for pid in active_owner_pids)
+            )
+
+        if not owned_identities:
+            raise RuntimeError("OnlineWorker 专属 app-server socket 被非托管进程占用，拒绝终止")
+
+        for pid, identity in owned_identities:
+            ps_code, current_identity = await _capture_command_output(
+                "/bin/ps",
+                "-ww",
+                "-p",
+                str(pid),
+                "-o",
+                "pid=,ppid=,lstart=,command=",
+            )
+            if ps_code != 0:
+                continue
+            if current_identity != identity:
+                raise RuntimeError(f"app-server PID {pid} 身份已变化，拒绝终止")
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                continue
+            except PermissionError as exc:
+                raise RuntimeError(f"无权终止旧 app-server PID {pid}") from exc
+
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + 5.0
+        while loop.time() < deadline:
+            if not unix_socket_accepting(listen_url):
+                return
+            await asyncio.sleep(0.1)
+        raise RuntimeError("旧 OnlineWorker app-server 未在 5 秒内退出")
 
     def _build_listen_url(self) -> str:
         if self.listen_url:

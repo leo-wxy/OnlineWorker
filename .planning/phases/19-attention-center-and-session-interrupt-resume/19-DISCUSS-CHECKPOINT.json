@@ -1,0 +1,62 @@
+{
+  "phase": "19",
+  "phase_name": "Attention Center And Session Interrupt/Resume",
+  "timestamp": "2026-07-11T03:16:57Z",
+  "areas_completed": [
+    "Task Board information architecture",
+    "Session interrupt behavior"
+  ],
+  "areas_remaining": [
+    "Pending-state membership and ordering",
+    "Session resume and recovery behavior",
+    "Unsupported and mirrored-only states"
+  ],
+  "decisions": {
+    "Task Board information architecture": [
+      {
+        "question": "Should the attention center be a new surface or reuse the existing Task Board Tab?",
+        "answer": "Reuse the existing Task Board Tab and allow its internal UI to be redesigned.",
+        "options_presented": [
+          "New independent attention surface",
+          "Reuse the existing Task Board Tab"
+        ]
+      },
+      {
+        "question": "Which mature layout pattern should drive the redesign?",
+        "answer": "Use the agent-grouped list from Variant B as the main structure, then add Variant A's right-hand detail pane for the selected row.",
+        "options_presented": [
+          "A: Linear-style triage split view",
+          "B: Codex/Cursor-style agent groups",
+          "C: GitHub-style notification inbox",
+          "B+A synthesis"
+        ]
+      }
+    ],
+    "Session interrupt behavior": [
+      {
+        "question": "How is interrupt availability and success determined?",
+        "answer": "Show interrupt only when the provider supports it, OnlineWorker owns a real control channel, a concrete active turn exists, and the Session is not mirrored-only. Clicking enters a transient interrupting state; success is confirmed only by the provider's aborted/cancelled event.",
+        "options_presented": [
+          "Infer interruption from inactivity",
+          "Use provider-owned capability, active-turn identity, control ownership, and terminal event confirmation"
+        ]
+      },
+      {
+        "question": "Where should a Session appear after interruption succeeds?",
+        "answer": "A user-initiated interrupt moves to Recently ended and keeps a Continue action. Unexpected aborts or failures move to Needs you.",
+        "options_presented": [
+          "User interrupt to Recently ended; unexpected abort/failure to Needs you",
+          "All interruptions to Needs you",
+          "Hide interrupted Sessions from Task Board"
+        ]
+      }
+    ]
+  },
+  "deferred_ideas": [],
+  "canonical_refs": [
+    ".planning/PROJECT.md",
+    ".planning/ROADMAP.md",
+    ".planning/phases/18-provider-session-new-flow/CONTEXT.md",
+    ".planning/sketches/002-task-board-market-patterns/README.md"
+  ]
+}

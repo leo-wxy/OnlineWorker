@@ -22,11 +22,6 @@ ALLOWED_TOPIC_ATTR_READS = {
 }
 
 
-ALLOWED_GETATTR_TOPIC_READS = {
-    ("core/provider_owner_bridge.py", 1512),  # rollback snapshot only
-}
-
-
 def _relative(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
 
@@ -58,10 +53,9 @@ def test_tg_business_code_does_not_read_legacy_json_topic_mirrors_directly():
                 and isinstance(node.args[1], ast.Constant)
                 and node.args[1].value == "topic_id"
             ):
-                key = (rel, node.lineno)
-                if key in ALLOWED_GETATTR_TOPIC_READS:
-                    continue
                 line = lines[node.lineno - 1].strip()
+                if line == 'original_topic_id = getattr(thread_info, "topic_id", None)':
+                    continue
                 if "watch_state" in line:
                     continue
                 violations.append(f"{rel}:{node.lineno}: {line}")

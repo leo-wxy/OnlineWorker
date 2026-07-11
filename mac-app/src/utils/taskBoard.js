@@ -59,6 +59,21 @@ export function removeTaskBoardActivity(activities, providerId, sessionId) {
   return activities.filter((item) => item.providerId !== providerId || item.sessionId !== sessionId);
 }
 
+export function selectRecentConversationTurns(turns, limit = 6) {
+  const normalizedLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 6;
+  if (normalizedLimit === 0 || !Array.isArray(turns)) {
+    return [];
+  }
+  return turns.flatMap((turn) => {
+    const role = typeof turn?.role === "string" ? turn.role.trim().toLowerCase() : "";
+    const content = typeof turn?.content === "string" ? turn.content.trim() : "";
+    if (!content || (role !== "user" && role !== "assistant")) {
+      return [];
+    }
+    return [{ role, content }];
+  }).slice(-normalizedLimit);
+}
+
 function normalizedBoardText(value) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
 }
@@ -313,6 +328,26 @@ function compareTasks(left, right) {
   return left.title.localeCompare(right.title);
 }
 
+function attentionPriority(task) {
+  if (!task.mirroredOnly && ["approval", "question"].includes(task.attentionKind)) {
+    return 0;
+  }
+  return task.mirroredOnly ? 2 : 1;
+}
+
+function compareAttentionTasks(left, right) {
+  const priorityDifference = attentionPriority(left) - attentionPriority(right);
+  if (priorityDifference !== 0) {
+    return priorityDifference;
+  }
+  const leftTime = left.updatedAtEpochMs ?? Number.MAX_SAFE_INTEGER;
+  const rightTime = right.updatedAtEpochMs ?? Number.MAX_SAFE_INTEGER;
+  if (leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+  return left.title.localeCompare(right.title);
+}
+
 export function buildTaskBoardModel({
   sessions,
   sessionActivities = [],
@@ -354,6 +389,10 @@ export function buildTaskBoardModel({
     const key = taskBoardSessionKey(providerId, sessionId);
     const session = sessionsByKey.get(key);
     const needsAttention = activityNeedsAttention(activity);
+    const status = normalizedString(activity.status).toLowerCase();
+    const attentionKind = normalizedString(activity.attentionKind).toLowerCase();
+    const interrupted = status === "completed" && attentionKind === "interrupted";
+    const recentEnded = status === "completed";
     const providerActive = readProviderActiveSignal(session?.raw ?? {});
     const running = !needsAttention && activityRunning(activity) && providerActive !== false;
     const pinned = pinnedKeys.has(key);
@@ -387,10 +426,21 @@ export function buildTaskBoardModel({
       preview,
       archived: Boolean(session?.archived),
       needsAttention,
-      attentionKind: normalizedString(activity.attentionKind).toLowerCase(),
+      status,
+      attentionKind,
       requestId: normalizedString(activity.requestId),
       approvalSource: normalizedString(activity.approvalSource),
       mirroredOnly: activity.mirroredOnly === true,
+      canInterrupt: activity.canInterrupt === true,
+      canRecover: activity.canRecover === true,
+      controlReason: normalizedString(activity.controlReason),
+      controlMode: normalizedString(activity.controlMode) || "external",
+      recentEvents: Array.isArray(activity.recentEvents) ? activity.recentEvents.slice(0, 5) : [],
+      lastUserMessage: normalizedString(activity.lastUserMessage),
+      lastAssistantMessage: normalizedString(activity.lastAssistantMessage),
+      interrupted,
+      canContinue: interrupted && normalizedString(activity.controlMode) === "owned",
+      recentEnded,
       running,
       pinned,
       statusReason: activityStatusReason(activity, fallbackReason),
@@ -447,10 +497,21 @@ export function buildTaskBoardModel({
       preview,
       archived: session.archived,
       needsAttention,
+      status: needsAttention ? "needs_attention" : running ? "running" : "idle",
       attentionKind: "",
       requestId: "",
       approvalSource: "",
       mirroredOnly: false,
+      canInterrupt: false,
+      canRecover: false,
+      controlReason: "",
+      controlMode: "external",
+      recentEvents: [],
+      lastUserMessage: "",
+      lastAssistantMessage: normalizedString(preview),
+      interrupted: false,
+      canContinue: false,
+      recentEnded: false,
       running,
       pinned,
       statusReason: needsAttention || running ? fallbackReason : "",
@@ -479,10 +540,21 @@ export function buildTaskBoardModel({
       preview: uniquePreview(recentActivity?.highlightedThreadPreview, recentActivity?.highlightedThreadPreview || activeSessionId),
       archived: false,
       needsAttention: false,
+      status: "running",
       attentionKind: "",
       requestId: "",
       approvalSource: "",
       mirroredOnly: false,
+      canInterrupt: false,
+      canRecover: false,
+      controlReason: "",
+      controlMode: "external",
+      recentEvents: [],
+      lastUserMessage: "",
+      lastAssistantMessage: "",
+      interrupted: false,
+      canContinue: false,
+      recentEnded: false,
       running: true,
       pinned: pinnedKeys.has(key),
       statusReason: "正在执行",
@@ -498,12 +570,12 @@ export function buildTaskBoardModel({
     if (task.needsAttention || task.running) {
       return true;
     }
-    return task.pinned;
+    return task.recentEnded || task.pinned;
   });
 
   const needsAttentionTasks = boardTasks
     .filter((task) => task.needsAttention)
-    .sort(compareTasks)
+    .sort(compareAttentionTasks)
     .slice(0, BOARD_LANE_LIMIT);
   const needsAttentionTaskKeys = new Set(needsAttentionTasks.map((task) => task.id));
   const runningTasks = boardTasks
@@ -515,15 +587,21 @@ export function buildTaskBoardModel({
     .filter((task) => !needsAttentionTaskKeys.has(task.id) && !runningTaskKeys.has(task.id) && task.pinned)
     .sort(compareTasks)
     .slice(0, BOARD_LANE_LIMIT);
+  const recentEndedTasks = boardTasks
+    .filter((task) => !needsAttentionTaskKeys.has(task.id) && !runningTaskKeys.has(task.id) && (task.recentEnded || task.pinned))
+    .sort(compareTasks)
+    .slice(0, BOARD_LANE_LIMIT);
 
   return {
     needsAttention: needsAttentionTasks,
     running: runningTasks,
     pinnedIdle: pinnedIdleTasks,
+    recentEnded: recentEndedTasks,
     counts: {
       needsAttention: boardTasks.filter((task) => task.needsAttention).length,
       running: boardTasks.filter((task) => !task.needsAttention && task.running).length,
       pinnedIdle: boardTasks.filter((task) => !task.needsAttention && !task.running && task.pinned).length,
+      recentEnded: boardTasks.filter((task) => !task.needsAttention && !task.running && (task.recentEnded || task.pinned)).length,
       total: tasks.length,
     },
     generatedAtEpochMs,

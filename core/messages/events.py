@@ -92,6 +92,7 @@ class SessionActivity:
     request_id: str = ""
     approval_source: str = ""
     mirrored_only: bool = False
+    active_turn_id: str = ""
     last_user_message: str = ""
     last_assistant_message: str = ""
     last_final_message: str = ""
@@ -111,6 +112,7 @@ class SessionActivity:
             "requestId": self.request_id,
             "approvalSource": self.approval_source,
             "mirroredOnly": self.mirrored_only,
+            "activeTurnId": self.active_turn_id,
             "lastUserMessage": self.last_user_message,
             "lastAssistantMessage": self.last_assistant_message,
             "lastFinalMessage": self.last_final_message,

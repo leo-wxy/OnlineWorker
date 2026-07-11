@@ -8,6 +8,10 @@ DEFAULT_CODEX_UNIX_SOCKET = os.path.join(
     "app-server-control",
     "app-server-control.sock",
 )
+ONLINEWORKER_CODEX_UNIX_SOCKET = os.path.join(
+    "app-server-control",
+    "onlineworker-app-server.sock",
+)
 
 
 def is_unix_endpoint(url: str) -> bool:
@@ -20,6 +24,12 @@ def is_default_unix_endpoint(url: str) -> bool:
 
 def default_codex_home() -> str:
     return os.path.expanduser(os.environ.get("CODEX_HOME") or "~/.codex")
+
+
+def onlineworker_codex_unix_url() -> str:
+    """Return the dedicated Unix endpoint owned by OnlineWorker."""
+    path = os.path.join(default_codex_home(), ONLINEWORKER_CODEX_UNIX_SOCKET)
+    return f"unix://{path}"
 
 
 def resolve_unix_socket_path(url: str) -> str:

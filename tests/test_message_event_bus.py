@@ -652,6 +652,83 @@ def test_mirrored_approval_projection_is_marked_for_attention_without_app_contro
     assert activity["attentionReason"] == "需要处理授权请求：git remote get-url origin"
 
 
+def test_user_interrupted_turn_is_recent_terminal_not_actionable_failure():
+    bus = MessageEventBus()
+    bus.publish(
+        create_message_event(
+            "turn.started",
+            provider_id="codex",
+            workspace_id="codex:/tmp/project",
+            session_id="thread-interrupted",
+            created_at=10,
+        )
+    )
+    bus.publish(
+        create_message_event(
+            "turn.completed",
+            provider_id="codex",
+            workspace_id="codex:/tmp/project",
+            session_id="thread-interrupted",
+            payload={"status": "interrupted"},
+            created_at=20,
+        )
+    )
+
+    activity = bus.session_activity("codex", "thread-interrupted")
+    assert activity["status"] == "completed"
+    assert activity["attentionKind"] == "interrupted"
+    assert activity["attentionReason"] == "任务已由用户中断"
+    assert activity["lastEventKind"] == "turn.completed"
+
+
+def test_user_interruption_classification_survives_followup_completed_event():
+    bus = MessageEventBus()
+    bus.publish(
+        create_message_event(
+            "turn.failed",
+            provider_id="codex",
+            workspace_id="codex:/tmp/project",
+            session_id="thread-interrupted",
+            payload={"status": "aborted", "reason": "interrupted"},
+            created_at=20,
+        )
+    )
+    bus.publish(
+        create_message_event(
+            "turn.completed",
+            provider_id="codex",
+            workspace_id="codex:/tmp/project",
+            session_id="thread-interrupted",
+            created_at=21,
+        )
+    )
+
+    activity = bus.session_activity("codex", "thread-interrupted")
+    assert activity["status"] == "completed"
+    assert activity["attentionKind"] == "interrupted"
+    assert activity["attentionReason"] == "任务已由用户中断"
+    assert activity["lastEventKind"] == "turn.completed"
+
+
+def test_unexpected_cancelled_turn_remains_actionable_failure():
+    bus = MessageEventBus()
+    bus.publish(
+        create_message_event(
+            "turn.failed",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            session_id="thread-failed",
+            payload={"status": "cancelled", "reason": "provider process exited"},
+            created_at=20,
+        )
+    )
+
+    activity = bus.session_activity("claude", "thread-failed")
+    assert activity["status"] == "failed"
+    assert activity["attentionKind"] == "failure"
+    assert activity["attentionReason"] == "provider process exited"
+
+
 def test_session_archived_removes_activity_projection():
     state = SimpleNamespace(message_bus=MessageEventBus())
     state.message_bus.publish(

@@ -11,6 +11,11 @@ The v1.2.1 milestone requirements are archived at [milestones/v1.2.1-REQUIREMENT
 - [x] **NOTIFY-01**: User-facing notifications can be emitted through a plugin-based notification router rather than being limited to Telegram-specific notification channels.
 - [x] **NOTIFY-02**: Telegram remains the default builtin notification plugin, and custom notification plugins such as WeChat can be inserted later without changing core notification routing.
 
+## Attention Center And Session Controls
+
+- [x] **ATTN-01**: User can use the existing Task Board Tab as a focused attention center grouped into `需要你`, `正在运行`, and `最近结束`, with a selected Session detail pane and authority-safe actions.
+- [x] **SESS-CTRL-01**: User can interrupt a concrete provider-owned active turn and continue or recover the same real Session without fabricating local Session truth, replaying a prior message, or exposing controls for mirrored-only Sessions.
+
 ## Deferred Backlog
 
 These items were explicitly deferred from the archived v1.2.1 milestone and remain candidates for future release work:
@@ -26,3 +31,5 @@ These items were explicitly deferred from the archived v1.2.1 milestone and rema
 |-------------|-------|--------|
 | NOTIFY-01 | Phase 6 | Implemented |
 | NOTIFY-02 | Phase 6 | Implemented |
+| ATTN-01 | Phase 19 | Implemented; installed desktop UAT passed, narrow visual check pending |
+| SESS-CTRL-01 | Phase 19 | Implemented; installed interrupt, Continue, recovery, no-replay UAT passed |

@@ -31,6 +31,7 @@ from plugins.providers.builtin.codex.python import storage_runtime
 from plugins.providers.builtin.codex.python.transport import (
     is_default_unix_endpoint,
     is_unix_endpoint,
+    onlineworker_codex_unix_url,
     unix_socket_accepting,
 )
 from plugins.providers.builtin.codex.python.tui_host_protocol import (
@@ -1990,11 +1991,21 @@ async def start_runtime(manager, bot, tool_cfg) -> None:
     proc = None
     ws_url = await resolve_connection_target(tool_cfg)
     if ws_url is None:
+        managed_unix = (
+            tool_cfg.protocol == "unix"
+            and is_default_unix_endpoint(tool_cfg.app_server_url)
+        )
+        listen_url = (
+            onlineworker_codex_unix_url()
+            if managed_unix
+            else tool_cfg.app_server_url
+        )
         proc = AppServerProcess(
             codex_bin=tool_cfg.bin,
             port=tool_cfg.app_server_port,
             protocol=tool_cfg.protocol,
-            **({"listen_url": tool_cfg.app_server_url} if tool_cfg.protocol == "unix" else {}),
+            **({"listen_url": listen_url} if tool_cfg.protocol == "unix" else {}),
+            **({"owned_unix": True} if managed_unix else {}),
         )
         ws_url = await proc.start()
         manager.state.app_server_proc = proc

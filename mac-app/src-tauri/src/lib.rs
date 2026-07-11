@@ -45,9 +45,9 @@ use commands::service::{
     BotState, ServiceStatus,
 };
 use commands::task_board_state::{
-    get_task_board_session_activities, get_task_board_state, pin_task_board_session,
-    reply_task_board_approval, start_task_board_activity_stream, stop_task_board_activity_stream,
-    unpin_task_board_session,
+    control_task_board_session, get_task_board_session_activities, get_task_board_state,
+    pin_task_board_session, reply_task_board_approval, start_task_board_activity_stream,
+    stop_task_board_activity_stream, unpin_task_board_session,
 };
 use commands::telegram::{test_bot_permissions, test_bot_token, test_group_access};
 use commands::terminal::{open_finder, open_provider_tui_host_terminal, open_terminal};
@@ -420,6 +420,7 @@ pub fn run() {
             open_menubar_tab,
             get_task_board_session_activities,
             get_task_board_state,
+            control_task_board_session,
             pin_task_board_session,
             reply_task_board_approval,
             start_task_board_activity_stream,

@@ -24,11 +24,22 @@ export interface TaskBoardSessionActivity {
   requestId: string;
   approvalSource: string;
   mirroredOnly?: boolean;
+  canInterrupt?: boolean;
+  canRecover?: boolean;
+  controlReason?: string;
+  controlMode?: "owned" | "external" | string;
+  recentEvents?: TaskBoardRecentEvent[];
   lastUserMessage: string;
   lastAssistantMessage: string;
   lastFinalMessage: string;
   lastEventKind: string;
   updatedAt: number;
+}
+
+export interface TaskBoardRecentEvent {
+  kind: string;
+  createdAt: number;
+  summary: string;
 }
 
 export interface TaskBoardActivityStreamEvent {
@@ -52,10 +63,21 @@ export interface TaskBoardTask {
   preview: string | null;
   archived: boolean;
   needsAttention: boolean;
+  status: string;
   attentionKind: string;
   requestId: string;
   approvalSource: string;
   mirroredOnly: boolean;
+  canInterrupt: boolean;
+  canRecover: boolean;
+  controlReason: string;
+  controlMode: string;
+  recentEvents: TaskBoardRecentEvent[];
+  lastUserMessage: string;
+  lastAssistantMessage: string;
+  interrupted: boolean;
+  canContinue: boolean;
+  recentEnded: boolean;
   running: boolean;
   pinned: boolean;
   statusReason: string;
@@ -67,10 +89,12 @@ export interface TaskBoardModel {
   needsAttention: TaskBoardTask[];
   running: TaskBoardTask[];
   pinnedIdle: TaskBoardTask[];
+  recentEnded: TaskBoardTask[];
   counts: {
     needsAttention: number;
     running: number;
     pinnedIdle: number;
+    recentEnded: number;
     total: number;
   };
   generatedAtEpochMs: number;
@@ -92,6 +116,11 @@ export function removeTaskBoardActivity(
   providerId: string,
   sessionId: string,
 ): TaskBoardSessionActivity[];
+
+export function selectRecentConversationTurns(
+  turns: Array<{ role?: string; content?: string }> | null | undefined,
+  limit?: number,
+): Array<{ role: "user" | "assistant"; content: string }>;
 
 export function collectTaskBoardPreviewHydrationPlan(input?: {
   sessions?: UnifiedSession[];

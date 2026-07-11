@@ -27,6 +27,17 @@ const PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT: std::time::Duration =
 const PROVIDER_SESSION_BRIDGE_LIST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 const PROVIDER_SESSION_BRIDGE_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
+async fn run_owner_bridge_blocking<T, F>(label: &str, operation: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    let label = label.to_string();
+    tauri::async_runtime::spawn_blocking(operation)
+        .await
+        .map_err(|error| format!("{label} blocking task failed: {error}"))?
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ComposerAttachment {
@@ -636,6 +647,33 @@ fn owner_bridge_archive_error_allows_sidecar(error: &str) -> bool {
         || lowered.contains("parse provider owner bridge response failed")
 }
 
+fn owner_bridge_archive_error_allows_local_overlay(error: &str) -> bool {
+    let lowered = error.to_ascii_lowercase();
+    lowered.contains("does not expose a real source archive operation")
+        || error.contains("不支持真实归档")
+}
+
+fn local_overlay_archive_result(
+    provider_id: &str,
+    session_id: &str,
+    workspace_dir: Option<&str>,
+) -> Result<Value, String> {
+    let workspace_dir = workspace_dir
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(
+            "Provider 不支持真实归档，且缺少 workspace_dir，无法创建本地归档覆盖层".to_string(),
+        )?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "provider_id": provider_id,
+        "thread_id": session_id,
+        "workspace_id": format!("{provider_id}:{workspace_dir}"),
+        "workspace_dir": workspace_dir,
+        "archive_mode": "local_overlay",
+    }))
+}
+
 fn owner_bridge_list_error_allows_sidecar(error: &str) -> bool {
     let lowered = error.to_ascii_lowercase();
     lowered.contains("provider owner bridge not ready")
@@ -849,12 +887,18 @@ pub(crate) async fn load_provider_sessions_with_overlays(
     match provider_session_list_access(&provider).as_str() {
         "owner_bridge" | "sidecar" => {
             let data_dir = ensure_data_dir()?;
-            let sessions = match list_provider_sessions_via_owner_bridge(
-                &data_dir,
-                &provider.id,
-                100,
-                force_refresh,
-            ) {
+            let bridge_data_dir = data_dir.clone();
+            let bridge_provider_id = provider.id.clone();
+            let sessions = match run_owner_bridge_blocking("list provider sessions", move || {
+                list_provider_sessions_via_owner_bridge(
+                    &bridge_data_dir,
+                    &bridge_provider_id,
+                    100,
+                    force_refresh,
+                )
+            })
+            .await
+            {
                 Ok(value) => Ok(value),
                 Err(error) => {
                     if owner_bridge_list_error_allows_sidecar(&error) {
@@ -892,13 +936,21 @@ pub(crate) async fn load_provider_session(
     match provider_session_read_access(&provider).as_str() {
         "owner_bridge" | "sidecar" => {
             let data_dir = ensure_data_dir()?;
-            match read_provider_session_via_owner_bridge(
-                &data_dir,
-                &provider.id,
-                session_id,
-                workspace_dir,
-                limit,
-            ) {
+            let bridge_data_dir = data_dir.clone();
+            let bridge_provider_id = provider.id.clone();
+            let bridge_session_id = session_id.to_string();
+            let bridge_workspace_dir = workspace_dir.map(str::to_string);
+            match run_owner_bridge_blocking("read provider session", move || {
+                read_provider_session_via_owner_bridge(
+                    &bridge_data_dir,
+                    &bridge_provider_id,
+                    &bridge_session_id,
+                    bridge_workspace_dir.as_deref(),
+                    limit,
+                )
+            })
+            .await
+            {
                 Ok(value) => Ok(value),
                 Err(_) => {
                     run_provider_session_bridge(
@@ -951,7 +1003,47 @@ fn persist_provider_session_archived_state(
         .as_object_mut()
         .ok_or("onlineworker_state.workspaces must be an object".to_string())?;
 
-    let workspace_key = state_workspace_key(provider_id, workspace_dir);
+    let canonical_workspace_key = state_workspace_key(provider_id, workspace_dir);
+    let matches_provider = |key: &str, workspace: &Value| {
+        workspace.get("tool").and_then(Value::as_str) == Some(provider_id)
+            || key.starts_with(&format!("{provider_id}:"))
+    };
+    let contains_session = |workspace: &Value| {
+        workspace
+            .get("threads")
+            .and_then(Value::as_object)
+            .is_some_and(|threads| threads.contains_key(session_id))
+    };
+    let contains_real_session = |workspace: &Value| {
+        workspace
+            .get("threads")
+            .and_then(Value::as_object)
+            .and_then(|threads| threads.get(session_id))
+            .and_then(|thread| thread.get("source"))
+            .and_then(Value::as_str)
+            .is_some_and(|source| source != "app")
+    };
+    let matches_path =
+        |workspace: &Value| workspace.get("path").and_then(Value::as_str) == Some(workspace_dir);
+    let workspace_key = workspaces
+        .iter()
+        .find(|(key, workspace)| {
+            matches_provider(key, workspace)
+                && contains_session(workspace)
+                && contains_real_session(workspace)
+        })
+        .or_else(|| {
+            workspaces.iter().find(|(key, workspace)| {
+                matches_provider(key, workspace) && contains_session(workspace)
+            })
+        })
+        .or_else(|| {
+            workspaces.iter().find(|(key, workspace)| {
+                matches_provider(key, workspace) && matches_path(workspace)
+            })
+        })
+        .map(|(key, _)| key.clone())
+        .unwrap_or(canonical_workspace_key);
     let workspace = workspaces.entry(workspace_key.clone()).or_insert_with(|| {
         serde_json::json!({
             "name": workspace_name_from_path(workspace_dir),
@@ -1075,7 +1167,10 @@ pub async fn create_provider_session(
         return Err("workspace_dir is required".to_string());
     }
     let data_dir = ensure_data_dir()?;
-    create_provider_session_via_owner_bridge(&data_dir, &provider.id, &normalized_workspace_dir)
+    run_owner_bridge_blocking("create provider session", move || {
+        create_provider_session_via_owner_bridge(&data_dir, &provider.id, &normalized_workspace_dir)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1097,15 +1192,18 @@ pub async fn send_provider_session_message(
             if trimmed.is_empty() && attachments.is_empty() {
                 return Err("message is empty".to_string());
             }
-            send_provider_session_message_via_owner_bridge_with_retry(
-                &data_dir,
-                &provider.id,
-                &session_id,
-                &trimmed,
-                &attachments,
-                workspace_dir.as_deref(),
-                std::time::Duration::from_secs(8),
-            )
+            run_owner_bridge_blocking("send provider session message", move || {
+                send_provider_session_message_via_owner_bridge_with_retry(
+                    &data_dir,
+                    &provider.id,
+                    &session_id,
+                    &trimmed,
+                    &attachments,
+                    workspace_dir.as_deref(),
+                    std::time::Duration::from_secs(8),
+                )
+            })
+            .await
         }
         "none" | "unsupported" => Err(format!(
             "Provider '{}' has no session send implementation",
@@ -1139,13 +1237,16 @@ pub async fn start_provider_session_message(
     match provider_session_send_access(&provider).as_str() {
         "owner_bridge" => {
             let data_dir = ensure_data_dir()?;
-            start_provider_session_message_via_owner_bridge(
-                &data_dir,
-                &provider.id,
-                &normalized_workspace_dir,
-                &trimmed,
-                &attachments,
-            )
+            run_owner_bridge_blocking("start provider session message", move || {
+                start_provider_session_message_via_owner_bridge(
+                    &data_dir,
+                    &provider.id,
+                    &normalized_workspace_dir,
+                    &trimmed,
+                    &attachments,
+                )
+            })
+            .await
         }
         "none" | "unsupported" => Err(format!(
             "Provider '{}' has no session send implementation",
@@ -1179,13 +1280,30 @@ pub async fn archive_provider_session(
         .map(ToOwned::to_owned);
     let data_dir = ensure_data_dir()?;
 
-    let result = match archive_provider_session_via_owner_bridge(
-        &data_dir,
-        &provider.id,
-        &normalized_session_id,
-        normalized_workspace_dir.as_deref(),
-    ) {
-        Ok(value) => Ok(value),
+    let bridge_data_dir = data_dir.clone();
+    let bridge_provider_id = provider.id.clone();
+    let bridge_session_id = normalized_session_id.clone();
+    let bridge_workspace_dir = normalized_workspace_dir.clone();
+    let owner_archive = run_owner_bridge_blocking("archive provider session", move || {
+        archive_provider_session_via_owner_bridge(
+            &bridge_data_dir,
+            &bridge_provider_id,
+            &bridge_session_id,
+            bridge_workspace_dir.as_deref(),
+        )
+    })
+    .await;
+
+    let (result, archive_mode) = match owner_archive {
+        Ok(value) => Ok((value, "provider")),
+        Err(owner_error) if owner_bridge_archive_error_allows_local_overlay(&owner_error) => {
+            local_overlay_archive_result(
+                &provider.id,
+                &normalized_session_id,
+                normalized_workspace_dir.as_deref(),
+            )
+            .map(|value| (value, "local_overlay"))
+        }
         Err(owner_error) => {
             if !owner_bridge_archive_error_allows_sidecar(&owner_error) {
                 return Err(owner_error);
@@ -1198,7 +1316,17 @@ pub async fn archive_provider_session(
             )
             .await
             {
-                Ok(value) => Ok(value),
+                Ok(value) => Ok((value, "provider_sidecar")),
+                Err(sidecar_error)
+                    if owner_bridge_archive_error_allows_local_overlay(&sidecar_error) =>
+                {
+                    local_overlay_archive_result(
+                        &provider.id,
+                        &normalized_session_id,
+                        normalized_workspace_dir.as_deref(),
+                    )
+                    .map(|value| (value, "local_overlay"))
+                }
                 Err(sidecar_error) => Err(format!(
                     "真实归档失败: owner bridge: {owner_error}; sidecar: {sidecar_error}"
                 )),
@@ -1239,6 +1367,7 @@ pub async fn archive_provider_session(
         "providerId": provider.id,
         "sessionId": normalized_session_id,
         "workspaceDir": workspace_for_state,
+        "archiveMode": archive_mode,
     }))
 }
 
@@ -1340,9 +1469,9 @@ mod tests {
     use super::{
         archive_provider_session_via_owner_bridge, create_provider_session_via_owner_bridge,
         list_provider_sessions_via_owner_bridge_with_timeout,
-        owner_bridge_archive_error_allows_sidecar, owner_bridge_list_error_allows_sidecar,
-        persist_provider_session_archived_state, provider_session_list_access,
-        provider_session_read_access, provider_session_send_access,
+        owner_bridge_archive_error_allows_local_overlay, owner_bridge_archive_error_allows_sidecar,
+        owner_bridge_list_error_allows_sidecar, persist_provider_session_archived_state,
+        provider_session_list_access, provider_session_read_access, provider_session_send_access,
         send_provider_session_message_via_owner_bridge,
         send_provider_session_message_via_owner_bridge_with_retry,
         start_provider_session_message_via_owner_bridge, ComposerAttachment,
@@ -1970,6 +2099,23 @@ mod tests {
     }
 
     #[test]
+    fn explicit_unsupported_archive_errors_allow_reversible_local_overlay() {
+        assert!(owner_bridge_archive_error_allows_local_overlay(
+            "Claude provider does not expose a real source archive operation yet."
+        ));
+        assert!(owner_bridge_archive_error_allows_local_overlay(
+            "Provider 'secondary' 不支持真实归档"
+        ));
+
+        assert!(!owner_bridge_archive_error_allows_local_overlay(
+            "connect provider owner bridge failed: connection refused"
+        ));
+        assert!(!owner_bridge_archive_error_allows_local_overlay(
+            "source archive failed"
+        ));
+    }
+
+    #[test]
     fn persist_provider_session_archived_state_updates_state_file() {
         let temp_dir =
             std::env::temp_dir().join(format!("ow-state-archive-{}", std::process::id()));
@@ -1995,6 +2141,59 @@ mod tests {
         assert_eq!(thread["is_active"], false);
         assert_eq!(thread["preview"], "Archived title");
         assert_eq!(thread["source"], "app");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn persist_archive_reuses_existing_workspace_that_contains_the_session() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ow-state-existing-workspace-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        fs::write(
+            temp_dir.join("onlineworker_state.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "workspaces": {
+                    "claude:wxy": {
+                        "name": "wxy",
+                        "path": "/Users/wxy",
+                        "tool": "claude",
+                        "daemon_workspace_id": "claude:wxy",
+                        "threads": {
+                            "session-a": {
+                                "thread_id": "session-a",
+                                "archived": false,
+                                "is_active": true,
+                                "source": "provider"
+                            }
+                        }
+                    }
+                }
+            }))
+            .expect("serialize state"),
+        )
+        .expect("write state");
+
+        persist_provider_session_archived_state(
+            &temp_dir,
+            "claude",
+            "session-a",
+            "/Users/wxy",
+            Some("Archived title"),
+        )
+        .expect("persist archived state");
+
+        let raw = fs::read_to_string(temp_dir.join("onlineworker_state.json"))
+            .expect("read persisted state");
+        let state: serde_json::Value = serde_json::from_str(&raw).expect("parse persisted state");
+        assert_eq!(
+            state["workspaces"]["claude:wxy"]["threads"]["session-a"]["archived"],
+            true
+        );
+        assert!(state["workspaces"].get("claude:/Users/wxy").is_none());
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -2053,5 +2252,21 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn owner_bridge_blocking_work_does_not_starve_async_runtime() {
+        let slow_operation = super::run_owner_bridge_blocking("test", || {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            Ok::<_, String>("done")
+        });
+        tokio::pin!(slow_operation);
+
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_millis(20)) => {}
+            result = &mut slow_operation => panic!("blocking work completed unexpectedly early: {result:?}"),
+        }
+
+        assert_eq!(slow_operation.await.expect("blocking work"), "done");
     }
 }

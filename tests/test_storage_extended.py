@@ -12,6 +12,9 @@ from plugins.providers.builtin.codex.python.storage_runtime import scan_codex_se
 
 def write_jsonl(path: str, first_line: dict, extra: str = ""):
     """写一个 .jsonl 文件，首行为 JSON，后续可追加任意内容。"""
+    if first_line.get("type") == "session_meta" and isinstance(first_line.get("payload"), dict):
+        first_line = {**first_line, "payload": dict(first_line["payload"])}
+        first_line["payload"].setdefault("id", os.path.splitext(os.path.basename(path))[0])
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(json.dumps(first_line) + "\n")
@@ -182,7 +185,7 @@ class TestListCodexSessionMetaThreadsByCwd:
         assert [item["id"] for item in result] == ["tid-phase15"]
         assert result[0]["preview"] == "继续处理phase15"
         assert result[0]["createdAt"] == 1775813231147
-        assert result[0]["updatedAt"] == 1775813231147
+        assert result[0]["updatedAt"] == int(session_path.stat().st_mtime * 1000)
 
     def test_skips_subagent_sessions(self, tmp_path):
         cwd = "/Users/example/Projects/onlineWorker"

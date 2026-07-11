@@ -1,8 +1,27 @@
+---
+gsd_state_version: 1.0
+milestone: general-ai-capability-and-session-operations
+milestone_name: General AI Capability and Session Operations
+current_phase: 19
+current_phase_name: Attention Center And Session Interrupt/Resume
+current_plan: 19-02 installed UAT nearly complete
+status: Awaiting narrow-window visual UAT
+last_updated: "2026-07-11T08:21:38.000Z"
+progress:
+  total_phases: 14
+  completed_phases: 13
+  total_plans: 29
+  completed_plans: 17
+  percent: 59
+---
+
 # Project State
 
-**Updated:** 2026-07-05
+**Updated:** 2026-07-11
 **Current milestone:** General AI Capability and Session Operations
-**Current phase:** 18. Provider Session New Flow
+**Current phase:** 19 — Attention Center And Session Interrupt/Resume
+**Status:** Awaiting narrow-window visual UAT
+**Current plan:** 19-02 installed UAT nearly complete
 **Last archived milestone:** v1.2.1
 
 ## Current Status
@@ -24,18 +43,10 @@
 - Phase 14 is source verified through 14-04. It establishes a unified in-process OnlineWorker message/event bus so message lifecycle, TaskBoard, notifications, approvals, questions, status, and future first-party consumers share normalized events instead of each feature owning separate message-handling logic. The trigger was the TaskBoard/session-card discussion on 2026-06-04: cards were not intuitive, App/TG send/display paths were hard to explain as one chain, and notification summary had grown as a separate completion path. 14-01 is source verified: `core/messages/` now provides the in-process bus, canonical message events, redaction, session-event bridge, publish helpers, notification summary consumer, and session activity projection; TG sends, session-tab/App owner-bridge sends, provider session events, approval/question answers, and notification delivery activity publish to the bus; TaskBoard reads the projection and activity stream. 14-02 is source verified: TaskBoard activity stream startup no longer drops events, stream cleanup is keyed by stream id, and pinned idle preview hydration is bounded. 14-03 is source verified: completed notification summary local/AI fallback logic moved under the bus consumer boundary, old completed-summary helper names were removed, and TaskBoard hidden/remove-from-board state/action were removed so pin/unpin is the only card-management path. 14-04 is source verified: TaskBoard initial refresh includes activity projection, stream events clear loading, and running cards use user/activity/title preview fallback so running sessions do not disappear or render blank while full session metadata is still hydrating. Phase 14 excludes persistent event audit logs, public plugin event APIs, App Session detail live rendering migration, Telegram rendering migration, and approval/question command handling. Fast packaged build/install/restart verification passed after 14-04 on 2026-06-05 with `OnlineWorker_1.5.0_aarch64.dmg`, installed `/Applications/OnlineWorker.app`, launched app/bot processes, and verified distribution-bundled provider/notification plugins.
 - Phase 15 is source verified. It follows Phase 14 by moving heavy first-party renderers onto the bus after the event schema stabilizes: App Session detail live updates and Telegram send/edit/topic rendering become bus-driven consumers, and approval/question lifecycle events were re-evaluated for an explicit command boundary while preserving Phase 12 approval ownership. On 2026-06-08 the phase was decomposed into `15-02` App Session live-model migration, `15-03` Telegram edge migration, and `15-04` approval/question command-boundary work so implementation could proceed in smaller verified slices. All three slices reached source-verified status on 2026-06-09.
 - Phase 16 is complete and installed-app verified. It addresses the Phase 14 UAT finding that external provider sessions can run without entering the message bus. Phase 16 is strictly plugin-scoped: the Claude plugin owns global hook merge/lifecycle mapping through a lightweight non-blocking relay; distribution-provided provider plugins own their own external listener behavior; OpenCode-compatible listener behavior is reference-only and does not add an OpenCode provider; core/message bus only receives normalized events and TaskBoard only consumes bus projection. Source regression and installed-app validation covered Claude, Codex, and the distribution-provided provider flow, including TaskBoard attention/running/completed refresh, approval buttons, final message refresh, side-nav attention badge refresh, and stable title/content rendering. A Codex app-server raw approval request id fix was added and revalidated in the installed app. Computer Use verification on 2026-06-08 confirmed the test approval card cleared from `需要处理`, the Claude test card cleared from `执行中` after `SessionEnd`, and only the current Codex work session remained visible.
-- Phase 17 is in progress. It captures the follow-up architecture decision from the 2026-06-10 Claude workspace parity regression: provider-private session/workspace parsing and filtering must be fully isolated behind provider/plugin-owned capabilities. Tauri core should not read Claude project jsonl files or interpret private fields such as `entrypoint`; App Session Tab, TaskBoard/Dashboard recent activity, and Telegram `/workspace` should share one provider-owned source of truth.
-- Phase 18 is source-verified for behavior and now has a documented convergence follow-up. It captures the provider-backed new-session work from App Session `New` plus Telegram session-topic `/new` behavior. App `New` already creates a real provider-backed session with the first message in the v1.7.2 line; `/new <initial message>` inside a concrete Telegram session topic is now covered and fixed to create a separate provider-backed session/topic under the same workspace instead of sending to the current session. Feedback and Codex empty-message validation stay in the source session topic. The next planned slice is to converge the shared provider-backed new-session core while keeping App owner-bridge and Telegram topic-binding shells separate.
-- The current Phase 17 hotfix is source-verified for provider-neutral session preview parity: Session list and TaskBoard now prefer live summary fields over stale cached preview text, empty/low-signal rows do not overwrite a richer cached summary, explicit reload remains the full-refresh boundary, and summary previews continue to sanitize absolute local file paths.
-- Installed-app runtime evidence on 2026-06-18 refined the remaining bug: provider `list_sessions(force_refresh=true)` already exposes the live Codex session and latest preview, while owner-bridge `session_activities` can remain stale after startup. The remaining UI fix therefore targets hidden-tab preload and first-visible provider-list refresh behavior, not provider preview generation itself.
-- The latest Phase 17 hotfix is source-verified for the remaining TaskBoard gap: first-visible provider refresh is now serialized after the initial TaskBoard refresh so it cannot be skipped by an in-flight guard, active-session cards fall back from repeated dashboard preview text to richer provider session previews, and TaskBoard summary previews sanitize absolute local file paths before display. Installed-app verification is still required to confirm the running Codex card now shows preview text on first open without extra flicker.
-- The current Phase 17 follow-up is source-verified for running-card preview freshness: when `session_activities` still carries an older assistant preview for the same live session, TaskBoard now prefers the newer provider-owned session preview when the provider row timestamp is fresher, with focused frontend regression coverage. Installed-app verification is still required to confirm the stale `CODEX` preview lag and the orphaned `CODEMAKER / OK` card both disappear after refresh.
-- The current Phase 17 follow-up is also source-verified for stale dashboard active-session suppression: installed-app owner-bridge evidence now shows the orphaned `CODEMAKER / OK` card is not coming from live `session_activities`, and the matched Codemaker provider row already reports `providerActive=false`. TaskBoard therefore now treats dashboard `recentActivity` as fallback-only: low-signal stale dashboard summaries no longer override an explicitly inactive provider row, with focused frontend regression coverage. Installed-app verification is still required to confirm the false-running Codemaker card disappears in the packaged app.
-- The latest Phase 17 follow-up is installed-app verified for SessionBrowser first-visible list hydration: first-visible auto refresh now preserves the last cached provider rows when a forced provider snapshot is transiently empty, schedules one bounded retry instead of blanking the workspace/session columns, and still keeps explicit user `Refresh` as the only path that can accept an authoritative empty snapshot. Focused frontend regression coverage passed for cache preservation, bounded retry, and manual-refresh empty semantics. Fast packaged verification on 2026-06-20 confirmed the installed `会话` page no longer lands on `WORKSPACES 0 / 未找到会话` on the first tab switch; it now shows loading placeholders and then hydrates the real workspace/session columns.
-- The same 2026-06-20 installed-app verification also closed the stale running-card branch: `任务` now shows only the two real `CODEX` running cards with preview text, and the orphaned `CODEMAKER / OK` running card no longer appears in the packaged app after refresh. The remaining session-detail flicker was observed as low-severity only and was intentionally not expanded into a new cache layer in this hotfix round.
-- The current follow-up Codex runtime hardening is source-scoped: managed Codex sessions now recognize the known `Selected model is at capacity. Please try a different model.` abort reason at the provider runtime boundary and can auto-send one guarded `继续` follow-up through `thread/resume` plus `turn/start`, with focused runtime regression coverage instead of frontend retry logic.
-- The latest Phase 17 follow-up is source-verified for provider-owned Dashboard recent activity derivation: when provider session rows already expose a live workspace/session but `onlineworker_state.json` has not registered that workspace yet, Dashboard recent activity now derives the workspace directly from provider-owned session rows instead of returning empty or falling back to stale state-only summaries. Focused Rust `dashboard` regression coverage passed, but installed-app parity validation is still required before treating this as full Phase 17 closure.
-- The current Phase 17 cleanup follow-up is source-verified for summary-surface structure convergence: `config.py` now shares one config/env/document/provider-build loader skeleton between full app config and runtime-safe provider config loading while preserving the existing overlay merge order; SessionBrowser and TaskBoard now share one session-derived preview sanitization helper; TaskBoard pinned/low-signal preview hydration now de-duplicates per-session last-message reads within a refresh; and `provider_session_bridge.py` now uses one minimal runtime/archive stub builder instead of duplicated local adapter registries. Focused verification passed: Node `sessionBrowserState` `19 passed`, Node `taskBoard` `29 passed`, Node `appShell` `19 passed`, Python `test_config.py` `48 passed`, and Python `test_provider_session_bridge.py` `24 passed`. Installed-app parity validation is still required before treating Phase 17 as fully closed.
+- Phase 17 is complete. Provider-private session/workspace parsing stays behind provider/plugin boundaries; shared surfaces consume normalized provider facts. Full source gates, version `1.7.4` package/install/relaunch, IPC, binary identity, and installed owner-bridge provider-facts checks passed. Real Telegram visual UAT was explicitly waived and is not claimed as passed.
+- Phase 18 is complete. App and Telegram entry points share `core/provider_session_new.py` for provider validation, real-thread materialization, and first-message send while keeping App pending and Telegram topic-binding shells separate. Packaged App smoke materialized real Codex and Claude sessions with their first messages. Real Telegram `/new` UAT was explicitly waived and is not claimed as passed.
+- Phase 19 source and installed desktop/live-provider behavior are verified. The existing Task Board uses grouped attention/running/recent-ended rows with a selected detail pane and recent conversation excerpts; provider-owned interrupt/recovery and same-Session Continue focus passed installed UAT. A recovery-created Claude process used the exact same Session id through `--resume` without replay. Concurrent Session list requests are coalesced and blocking owner-bridge I/O is isolated from Tauri async workers, preventing the observed request storm, log-pipe stall, owner-bridge refusal, and white screen. Claude sessions without source archive support now use a reversible local archive overlay. Installed narrow-width visual UAT remains pending.
+- Phase 17's intermediate preview/cache/hydration fixes and their earlier installed evidence are consolidated in `17-01-SUMMARY.md`; `17-VERIFICATION.md` is the canonical closure result.
 
 ## Archived Milestone
 
@@ -58,8 +69,16 @@
 | 14. Unified Message Event Bus | Completed; source verified through 14-04, packaged verification passed, and Phase 16 closed the external provider ingress visibility gap | None |
 | 15. Bus-Driven Rendering And Approval Command Boundary | Source verified through `15-04` | Await packaged verification or next milestone step |
 | 16. Provider External Event Ingress | Completed and installed-app verified on branch `codex/phase-16-provider-event-ingress`; provider plugin ingress, lightweight Claude relay, TaskBoard refresh, and attention cleanup validation passed | None |
-| 17. Provider Session Core Isolation | In progress; summary-surface parity hotfix source-verified | Keep current work scoped to provider-owned session preview parity, cached list reuse, first-visible session-list hydration, and preview sanitization; do not treat it as full provider-session isolation completion |
-| 18. Provider Session New Flow | Source verified; App Session `New` real-session flow is implemented and v1.7.2 tagged, TG session-topic `/new <initial message>` now creates a separate provider-backed session/topic and keeps feedback in the source topic | Run installed-app/TG UAT before release/tag confidence |
+| 17. Provider Session Core Isolation | Completed; canonical verification passed and installed provider facts verified | None; live Telegram visual UAT was waived and remains unclaimed |
+| 18. Provider Session New Flow | Completed; canonical verification passed and packaged App real-session materialization verified | None; live Telegram `/new` UAT was waived and remains unclaimed |
+| 19. Attention Center And Session Interrupt/Resume | Source and installed desktop/live-provider UAT passed | Verify installed narrow-width list/detail replacement or explicitly waive it |
+
+## Project Reference
+
+See: `.planning/PROJECT.md` (updated 2026-07-11)
+
+**Core value:** Developers can reliably control local AI coding CLI workflows from an installed Mac app while receiving timely remote notifications and final results through supported notification channels.
+**Current focus:** Phase 19 — Attention Center And Session Interrupt/Resume
 
 ## Key Preserved Decisions
 
@@ -103,10 +122,15 @@
 
 ## Pending Todos
 
-- Phase 17 should isolate provider session/workspace logic from Tauri core so provider-private fields such as Claude `entrypoint` are interpreted only inside provider plugins.
-- Phase 17 should also keep provider-neutral summary surfaces safe: Session list and TaskBoard preview fallback must come from provider-owned summarized data, not raw provider-private files or unredacted absolute-path prompt text.
-- Phase 18 has source-verified Telegram session-topic `/new <initial message>` as a real new provider session plus new Telegram topic, while preserving the App Session `New` real-session behavior already validated in v1.7.2.
-- Phase 18 source flow is now converged enough for UAT: owner bridge and Telegram `/new` share provider-owned validation, real-thread start/materialization, and started-thread first-message send, while App `pending` semantics and Telegram topic bind/rollback remain as outer shells.
+- Phase 19 should provide one pending-action center for actionable approvals, questions, failures, and stalled sessions while keeping mirrored-only approval items observational.
+- Phase 19 should expose provider-owned interrupt/resume/recovery operations on real sessions, with clear unsupported/failure behavior and no local-only fake state.
+- Global search is intentionally not part of Phase 19.
+
+## Blockers/Concerns
+
+- Phase 19 input: the installed Codex new-session smoke materialized correctly, then its provider turn failed without an assistant reply.
+- Phase 19 input: the installed Claude new-session smoke materialized correctly, then remained running at `turn.started` without an assistant reply at closure time.
+- These runtime states do not reopen Phase 18 creation; they demonstrate the need for visible pending state and lifecycle controls.
 
 ## Roadmap Evolution
 
@@ -169,3 +193,13 @@
 - Phase 18 `18-01` source verified on 2026-07-05: Telegram session-topic `/new <initial message>` creates a new provider-backed Codex session/topic under the same workspace, does not send the command or initial message to the current session, and Codex empty `/new` rejects in the source session topic without creating a provider session or Telegram topic. Verification passed: `pytest -q tests/test_slash_router.py tests/test_workspace_thread_open.py tests/test_thread_helpers.py tests/test_im_route_store.py` -> `57 passed`; `node --test mac-app/tests/sessionNewComposer.test.mjs` -> `1 passed`; `git diff --check` -> passed. Installed-app/TG UAT remains before release confidence.
 - Phase 18 `18-02` planned on 2026-07-05: converge the shared provider-backed new-session core between owner bridge and Telegram `/new` without forcing both surfaces through one complete handler.
 - Phase 18 `18-02` source verified on 2026-07-05: owner bridge and Telegram `/new` now share `core/provider_session_new.py` for provider-owned validation, real-thread start/materialization, and started-thread first-message send, while App `pending` behavior and Telegram topic bind/rollback remain surface-specific shells. Verification passed: `pytest -q tests/test_provider_session_new.py tests/test_provider_owner_bridge.py tests/test_slash_router.py tests/test_workspace_thread_open.py tests/test_thread_helpers.py tests/test_im_route_store.py` -> `111 passed`; `node --test mac-app/tests/sessionNewComposer.test.mjs` -> `1 passed`; `git diff --check` -> passed.
+- Reliability follow-up on 2026-07-11 removed fabricated menubar token estimates, made `activeSessionCount` depend on active/running/needs-reply status, kept provider lanes empty when no active session exists, repaired stale regression contracts, removed the public repo's orphaned external-provider test, and restored the full source gates: `pytest -q` -> `996 passed`; `cargo test --manifest-path mac-app/src-tauri/Cargo.toml --quiet` -> `206 passed`; `node --test mac-app/tests/*.test.mjs` -> `159 passed`; `pnpm --dir mac-app build` -> passed with the existing large-chunk warning.
+- Phase 17 completed on 2026-07-11: canonical UAT/verification passed, full source gates passed, version `1.7.4` package/install/relaunch checks passed, and installed owner-bridge provider facts were verified. Real Telegram visual UAT was waived and remains unclaimed.
+- Phase 18 completed on 2026-07-11: canonical UAT/verification passed and packaged App requests materialized real Codex and Claude sessions with their first messages. Real Telegram `/new` UAT was waived and remains unclaimed.
+- Phase 19 added on 2026-07-11: Attention Center And Session Interrupt/Resume. Global search is explicitly excluded.
+
+## Session Continuity
+
+Last session: 2026-07-11
+Stopped at: Phase 19 installed desktop/live-provider UAT passed; narrow-window visual UAT pending
+Resume file: None

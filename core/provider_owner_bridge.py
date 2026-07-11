@@ -14,7 +14,6 @@ from typing import Optional
 from config import get_data_dir
 from core.provider_session_new import (
     build_provider_session_summary,
-    rollback_started_real_provider_thread,
     send_started_provider_thread_message,
     start_real_provider_thread,
     validate_new_provider_thread_request,
@@ -37,6 +36,7 @@ OWNER_BRIDGE_USAGE_TIMEOUT_SECONDS = 5.0
 OWNER_BRIDGE_SLOW_REQUEST_WARNING_SECONDS = 0.25
 OWNER_BRIDGE_PREVIEW_HYDRATION_LIMIT = 6
 OWNER_BRIDGE_PREVIEW_MAX_LENGTH = 220
+CONTROLLED_THREAD_SOURCES = {"app", "provider", "telegram_new_thread"}
 logger = logging.getLogger(__name__)
 ABSOLUTE_PATH_RE = re.compile(r"(?:^|[\s(])(/(?:Users|Applications|Volumes|private|tmp|var)/[^\s)]+)")
 
@@ -298,9 +298,149 @@ def _session_archived_in_storage(state, provider_id: str, session_id: str) -> bo
     return matched
 
 
-def _filter_visible_session_activities(state, activities: list[dict], limit: int) -> list[dict]:
+def _find_existing_session_binding(state, provider_id: str, session_id: str):
+    find_thread = getattr(state, "find_thread_by_id_global", None)
+    found = find_thread(session_id) if callable(find_thread) and session_id else None
+    if found is None:
+        return None, None
+    ws, thread = found
+    if str(getattr(ws, "tool", "") or "").strip() != provider_id:
+        return None, None
+    return ws, thread
+
+
+def _resolve_session_adapter(state, provider_id: str, ws):
+    workspace_id = str(getattr(ws, "daemon_workspace_id", "") or "").strip()
+    get_for_workspace = getattr(state, "get_adapter_for_workspace", None)
+    adapter = get_for_workspace(workspace_id) if callable(get_for_workspace) and workspace_id else None
+    if adapter is None:
+        get_adapter = getattr(state, "get_adapter", None)
+        adapter = get_adapter(provider_id) if callable(get_adapter) else None
+    return adapter
+
+
+def _active_session_turn_id(state, activity: dict, session_id: str) -> str:
+    projected_turn_id = str(activity.get("activeTurnId") or "").strip()
+    if projected_turn_id:
+        return projected_turn_id
+    streaming = (getattr(state, "streaming_turns", {}) or {}).get(session_id)
+    return str(getattr(streaming, "turn_id", "") or "").strip()
+
+
+def _session_control_facts(state, activity: dict) -> dict:
+    provider_id = str(activity.get("providerId") or "").strip()
+    session_id = str(activity.get("sessionId") or "").strip()
+    result = {
+        "canInterrupt": False,
+        "canRecover": False,
+        "controlReason": "",
+        "controlMode": "external",
+    }
+    if activity.get("mirroredOnly") is True:
+        result["controlReason"] = "此 Session 由外部客户端控制，请在原客户端处理。"
+        return result
+
+    ws, thread = _find_existing_session_binding(state, provider_id, session_id)
+    if ws is None or thread is None:
+        result["controlReason"] = "此 Session 没有 OnlineWorker 托管的控制通道。"
+        return result
+    source = str(getattr(thread, "source", "") or "unknown").strip().lower()
+    if source not in CONTROLLED_THREAD_SOURCES:
+        result["controlReason"] = "此 Session 由外部客户端控制，请在原客户端处理。"
+        return result
+    if bool(getattr(thread, "archived", False)):
+        result["controlReason"] = "此 Session 已归档。"
+        return result
+
+    provider = get_provider(provider_id, getattr(state, "config", None))
+    hooks = getattr(provider, "thread_hooks", None) if provider is not None else None
+    adapter = _resolve_session_adapter(state, provider_id, ws)
+    connected = adapter is not None and bool(getattr(adapter, "connected", False))
+    result["controlMode"] = "owned"
+
+    turn_id = _active_session_turn_id(state, activity, session_id)
+    interrupt = getattr(hooks, "interrupt_thread", None) if hooks is not None else None
+    interrupt_supported = getattr(hooks, "interrupt_supported", None) if hooks is not None else None
+    supported = False
+    if callable(interrupt) and callable(interrupt_supported):
+        try:
+            supported = bool(interrupt_supported(state, ws))
+        except Exception:
+            logger.debug(
+                "[provider-owner-bridge] 读取中断能力失败 provider=%s session=%s",
+                provider_id,
+                session_id[:12],
+                exc_info=True,
+            )
+    result["canInterrupt"] = bool(supported and connected and turn_id)
+
+    activity_status = str(activity.get("status") or "").strip()
+    attention_kind = str(activity.get("attentionKind") or "").strip()
+    recoverable_state = activity_status == "failed" or attention_kind in {"failure", "stalled", "recovery"}
+    message_hooks = getattr(provider, "message_hooks", None) if provider is not None else None
+    ensure_connected = getattr(message_hooks, "ensure_connected", None) if message_hooks is not None else None
+    result["canRecover"] = bool(
+        recoverable_state
+        and (
+            callable(getattr(adapter, "resume_thread", None))
+            or callable(ensure_connected)
+        )
+    )
+
+    if result["canInterrupt"] or result["canRecover"]:
+        return result
+    if not connected:
+        result["controlReason"] = f"{provider_id} adapter 未连接。"
+    elif activity_status == "running" and not turn_id:
+        result["controlReason"] = "当前 Session 没有可中断的活跃任务。"
+    elif recoverable_state:
+        result["controlReason"] = "当前 Provider 不支持恢复此 Session。"
+    return result
+
+
+def _recent_session_events(bus, provider_id: str, session_id: str, *, limit: int = 5) -> list[dict]:
+    recent_events = getattr(bus, "recent_events", None)
+    if not callable(recent_events):
+        return []
+    matches: list[dict] = []
+    for event in reversed(recent_events()):
+        if str(event.get("provider_id") or "").strip() != provider_id:
+            continue
+        if str(event.get("session_id") or "").strip() != session_id:
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        summary = ""
+        for key in ("text", "message", "reason", "error", "command", "status"):
+            summary = " ".join(str(payload.get(key) or "").split()).strip()
+            if summary:
+                break
+        matches.append(
+            {
+                "kind": str(event.get("kind") or ""),
+                "createdAt": float(event.get("created_at") or 0),
+                "summary": summary[:220],
+            }
+        )
+        if len(matches) >= limit:
+            break
+    return matches
+
+
+def _decorate_session_activity(state, activity: dict, bus=None) -> dict:
+    decorated = dict(activity)
+    decorated.update(_session_control_facts(state, decorated))
+    if bus is not None:
+        decorated["recentEvents"] = _recent_session_events(
+            bus,
+            str(decorated.get("providerId") or "").strip(),
+            str(decorated.get("sessionId") or "").strip(),
+        )
+    return decorated
+
+
+def _filter_visible_session_activities(state, activities: list[dict], limit: int, *, bus=None) -> list[dict]:
     visible = [
-        activity
+        _decorate_session_activity(state, activity, bus)
         for activity in activities
         if not _session_archived_in_storage(
             state,
@@ -601,6 +741,8 @@ class ProviderOwnerBridge:
                 return
             elif request_type == "reply_approval":
                 response = await self._handle_reply_approval(request)
+            elif request_type == "session_control":
+                response = await self._handle_session_control(request)
             elif request_type == "mirror_approval":
                 response = await self._handle_mirror_approval(request)
             else:
@@ -939,6 +1081,7 @@ class ProviderOwnerBridge:
                 self.state,
                 bus.session_activities(),
                 limit,
+                bus=bus,
             ),
         }
 
@@ -1024,7 +1167,7 @@ class ProviderOwnerBridge:
             payload = {
                 "ok": True,
                 "kind": "activity",
-                "activity": activity,
+                "activity": _decorate_session_activity(self.state, activity, bus),
                 "event": {
                     "kind": event.kind,
                     "eventId": event.event_id,
@@ -1045,6 +1188,7 @@ class ProviderOwnerBridge:
                         self.state,
                         bus.session_activities(),
                         limit,
+                        bus=bus,
                     ),
                 }
             )
@@ -1420,6 +1564,116 @@ class ProviderOwnerBridge:
             "health": _runtime_health_from_lines(lines, adapter),
             "detail": detail,
             "lines": lines,
+        }
+
+    async def _handle_session_control(self, request: dict) -> dict:
+        provider_id = str(request.get("provider_id") or "").strip()
+        session_id = str(request.get("session_id") or request.get("thread_id") or "").strip()
+        action = str(request.get("action") or "").strip().lower()
+        if not provider_id:
+            return {"ok": False, "code": "invalid_request", "error": "缺少 provider_id"}
+        if not session_id:
+            return {"ok": False, "code": "invalid_request", "error": "缺少 session_id"}
+        if action not in {"interrupt", "recover"}:
+            return {
+                "ok": False,
+                "code": "invalid_request",
+                "error": f"unsupported session action: {action}",
+            }
+
+        bus = getattr(self.state, "message_bus", None)
+        activity = (
+            bus.session_activity(provider_id, session_id)
+            if bus is not None and callable(getattr(bus, "session_activity", None))
+            else None
+        ) or {
+            "providerId": provider_id,
+            "sessionId": session_id,
+            "status": "running" if action == "interrupt" else "failed",
+        }
+        facts = _session_control_facts(self.state, activity)
+        if facts["controlMode"] != "owned":
+            return {
+                "ok": False,
+                "code": "not_owned",
+                "error": facts["controlReason"] or "此 Session 不由 OnlineWorker 控制。",
+            }
+
+        allowed = facts["canInterrupt"] if action == "interrupt" else facts["canRecover"]
+        if not allowed:
+            return {
+                "ok": False,
+                "code": "unsupported",
+                "error": facts["controlReason"] or f"当前 Session 不支持{action}。",
+            }
+
+        ws, thread = _find_existing_session_binding(self.state, provider_id, session_id)
+        provider = get_provider(provider_id, getattr(self.state, "config", None))
+        adapter = _resolve_session_adapter(self.state, provider_id, ws)
+        if ws is None or thread is None or provider is None or (action == "interrupt" and adapter is None):
+            return {"ok": False, "code": "unavailable", "error": "Session 控制通道不可用。"}
+
+        try:
+            if action == "interrupt":
+                hooks = getattr(provider, "thread_hooks", None)
+                interrupt = getattr(hooks, "interrupt_thread", None) if hooks is not None else None
+                turn_id = _active_session_turn_id(self.state, activity, session_id)
+                if not callable(interrupt) or not turn_id:
+                    return {
+                        "ok": False,
+                        "code": "unsupported",
+                        "error": "当前 Session 没有可中断的活跃任务。",
+                    }
+                result = interrupt(self.state, ws, thread, adapter, turn_id)
+                if inspect.isawaitable(result):
+                    await result
+            else:
+                if adapter is None or not bool(getattr(adapter, "connected", False)):
+                    message_hooks = getattr(provider, "message_hooks", None)
+                    ensure_connected = (
+                        getattr(message_hooks, "ensure_connected", None)
+                        if message_hooks is not None
+                        else None
+                    )
+                    if callable(ensure_connected):
+                        adapter = await ensure_connected(
+                            self.state,
+                            adapter,
+                            ws,
+                            update=None,
+                            context=None,
+                            group_chat_id=0,
+                            src_topic_id=None,
+                        )
+                        if adapter is not None:
+                            self.state.set_adapter(provider_id, adapter)
+                if adapter is None or not bool(getattr(adapter, "connected", False)):
+                    return {
+                        "ok": False,
+                        "code": "unavailable",
+                        "error": f"{provider_id} adapter 未连接。",
+                    }
+                resume_thread = getattr(adapter, "resume_thread", None)
+                if not callable(resume_thread):
+                    return {
+                        "ok": False,
+                        "code": "unsupported",
+                        "error": "当前 Provider 不支持恢复此 Session。",
+                    }
+                workspace_id = str(getattr(ws, "daemon_workspace_id", "") or "").strip()
+                result = resume_thread(workspace_id, session_id)
+                if inspect.isawaitable(result):
+                    await result
+        except Exception as exc:
+            return {"ok": False, "code": "provider_error", "error": str(exc)}
+
+        return {
+            "ok": True,
+            "accepted": True,
+            "action": action,
+            "provider_id": provider_id,
+            "session_id": session_id,
+            "awaiting_provider_event": action == "interrupt",
         }
 
     async def _handle_mirror_approval(self, request: dict) -> dict:
@@ -1805,8 +2059,25 @@ class ProviderOwnerBridge:
                 metadata={"bridge": "provider_owner"},
             )
         except Exception as exc:
-            rollback_started_real_provider_thread(ws_info, started)
-            return {"ok": False, "error": str(exc)}
+            thread_info.is_active = False
+            if getattr(self.state, "storage", None) is not None:
+                try:
+                    save_storage(self.state.storage)
+                except Exception as save_exc:
+                    return {
+                        "ok": False,
+                        "error": f"{exc}; 保存失败 Session 绑定失败: {save_exc}",
+                    }
+            self._list_sessions_cache.clear()
+            return {
+                "ok": False,
+                "error": str(exc),
+                "provider_id": provider_id,
+                "thread_id": thread_id,
+                "requested_thread_id": thread_id,
+                "workspace_id": workspace_id,
+                "created_new_thread": created_thread,
+            }
 
         if getattr(self.state, "storage", None) is not None:
             try:

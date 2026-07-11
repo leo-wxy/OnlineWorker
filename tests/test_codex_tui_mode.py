@@ -210,7 +210,7 @@ async def test_message_handler_in_app_stdio_mode_keeps_ordinary_messages_on_app_
         await handler(update, ctx)
 
     enqueue_mock.assert_not_awaited()
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
+    adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "你好")
     assert ws.threads["tid-1"].preview == "你好"
     save_storage_mock.assert_called_once()
@@ -275,7 +275,7 @@ async def test_message_handler_in_app_stdio_owner_bridge_mode_uses_app_adapter_f
         await handler(update, ctx)
 
     enqueue_mock.assert_not_awaited()
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
+    adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "你好")
     ctx.bot.send_message.assert_not_awaited()
 
@@ -342,7 +342,7 @@ async def test_message_handler_in_app_stdio_owner_bridge_mode_uses_app_adapter_w
         await handler(update, ctx)
 
     enqueue_mock.assert_not_awaited()
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
+    adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "你好")
     ctx.bot.send_message.assert_not_awaited()
 
@@ -1302,7 +1302,7 @@ async def test_message_handler_in_hybrid_mode_prefers_connected_codex_adapter():
         await handler(update, ctx)
 
     enqueue_mock.assert_not_awaited()
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
+    adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "你好")
     assert ws.threads["tid-1"].preview == "你好"
     save_storage_mock.assert_called_once()
@@ -1404,7 +1404,7 @@ async def test_message_handler_in_app_shared_unix_mode_uses_app_adapter_for_tg_m
         await handler(update, ctx)
 
     enqueue_mock.assert_not_awaited()
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
+    adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "你好")
     assert ws.threads["tid-1"].preview == "你好"
     save_storage_mock.assert_called_once()

@@ -56,7 +56,7 @@ def _build_state(
 
 
 @pytest.mark.asyncio
-async def test_thread_topic_slash_message_passthrough_to_codex():
+async def test_thread_topic_help_message_passthrough_to_codex():
     from bot.handlers.message import make_message_handler
 
     state = _build_state(tool="codex", control_mode="app")
@@ -84,7 +84,7 @@ async def test_thread_topic_slash_message_passthrough_to_codex():
     handler = make_message_handler(state, GROUP_CHAT_ID)
     await handler(update, ctx)
 
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
+    adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "/help")
 
 
@@ -117,7 +117,7 @@ async def test_thread_topic_slash_message_passthrough_to_codex():
     handler = make_message_handler(state, GROUP_CHAT_ID)
     await handler(update, ctx)
 
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
+    adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "/model")
 
 
@@ -161,7 +161,7 @@ async def test_thread_topic_message_revives_stale_archived_thread_when_source_ac
 
     assert ws.threads["tid-1"].archived is False
     assert ws.threads["tid-1"].is_active is True
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
+    adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "继续")
 
 
@@ -491,7 +491,7 @@ async def test_new_thread_handler_uses_provider_thread_hooks_for_custom_provider
     assert args[2] is ws
     assert args[3] == "custom:onlineWorker"
     assert args[4] == "custom-new"
-    assert args[5] is None
+    assert args[5] == ""
     adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_not_awaited()
 
@@ -976,7 +976,7 @@ async def test_review_wrapper_callback_applies_via_existing_thread_send_chain():
     handler = make_callback_handler(state, GROUP_CHAT_ID)
     await handler(update, ctx)
 
-    adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "tid-1")
+    adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_awaited_once_with(
         "codex:onlineWorker",
         "tid-1",

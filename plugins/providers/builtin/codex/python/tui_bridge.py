@@ -385,6 +385,11 @@ async def _resolve_codex_ws_url(
     state: AppState,
     tool_cfg: ToolConfig,
 ) -> tuple[str, Optional[AppServerProcess]]:
+    existing_proc = getattr(state, "app_server_proc", None)
+    existing_url = str(getattr(existing_proc, "ws_url", "") or "").strip()
+    if existing_url.startswith(("ws://", "unix://")):
+        return existing_url, None
+
     app_server_url = tool_cfg.app_server_url or ""
     if app_server_url:
         return app_server_url, None

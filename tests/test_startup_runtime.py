@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import signal
 import pytest
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
@@ -8,7 +9,11 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from config import Config, ToolConfig
 from core.lifecycle import LifecycleManager
 from core.providers.contracts import ProviderDescriptor, ProviderFactsHooks, ProviderSessionEventHooks
-from plugins.providers.builtin.codex.python.process import AppServerProcess
+from plugins.providers.builtin.codex.python.process import (
+    AppServerProcess,
+    _is_owned_unix_listener_command,
+)
+from plugins.providers.builtin.codex.python.transport import onlineworker_codex_unix_url
 from plugins.providers.builtin.codex.python import runtime as codex_runtime
 from plugins.providers.builtin.claude.python import runtime as claude_runtime
 from core.state import AppState, StreamingTurn
@@ -1273,7 +1278,12 @@ async def test_post_init_prefers_existing_codex_ws_service_without_spawning_proc
 
 
 @pytest.mark.asyncio
-async def test_post_init_shared_unix_starts_realtime_mirror_without_legacy_final_sync():
+async def test_post_init_shared_unix_uses_onlineworker_owned_socket(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    managed_url = onlineworker_codex_unix_url()
     storage = AppStorage()
     state = AppState(storage=storage)
     cfg = Config(
@@ -1302,7 +1312,7 @@ async def test_post_init_shared_unix_starts_realtime_mirror_without_legacy_final
     tui_mirror_task = MagicMock()
     proc = MagicMock()
     proc._proc = MagicMock()
-    proc.start = AsyncMock(return_value="unix://")
+    proc.start = AsyncMock(return_value=managed_url)
 
     with patch("plugins.providers.builtin.codex.python.runtime.AppServerProcess", return_value=proc) as proc_cls, patch(
         "core.lifecycle.save_storage"
@@ -1325,9 +1335,10 @@ async def test_post_init_shared_unix_starts_realtime_mirror_without_legacy_final
         codex_bin="codex",
         port=0,
         protocol="unix",
-        listen_url="unix://",
+        listen_url=managed_url,
+        owned_unix=True,
     )
-    connect_mock.assert_awaited_once_with(manager, bot, proc, "unix://")
+    connect_mock.assert_awaited_once_with(manager, bot, proc, managed_url)
     sync_mock.assert_not_called()
     mirror_mock.assert_called_once_with(state, bot, cfg.group_chat_id)
     assert manager.get_tui_sync_task("codex") is None
@@ -1707,6 +1718,178 @@ async def test_app_server_start_attaches_existing_unix_socket_without_spawning(t
 
 
 @pytest.mark.asyncio
+async def test_app_server_owned_unix_replaces_existing_listener_before_spawning(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-api-key")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    socket_url = f"unix://{tmp_path / 'onlineworker-app-server.sock'}"
+    proc = MagicMock(returncode=None)
+    proc.stdin = MagicMock()
+    proc.stdout = _FakeStream()
+    proc.stderr = None
+    create_subprocess = AsyncMock(return_value=proc)
+    stop_existing = AsyncMock()
+
+    with patch(
+        "plugins.providers.builtin.codex.python.process.asyncio.create_subprocess_exec",
+        new=create_subprocess,
+    ), patch(
+        "plugins.providers.builtin.codex.python.process.asyncio.create_task",
+        side_effect=_fake_create_task,
+    ), patch(
+        "plugins.providers.builtin.codex.python.process.unix_socket_accepting",
+        side_effect=[True, False, True],
+    ), patch.object(
+        AppServerProcess,
+        "_stop_existing_owned_unix_listener",
+        new=stop_existing,
+    ):
+        server = AppServerProcess(
+            codex_bin="codex",
+            protocol="unix",
+            listen_url=socket_url,
+            owned_unix=True,
+        )
+        assert await server.start() == socket_url
+
+    stop_existing.assert_awaited_once_with(socket_url)
+    assert create_subprocess.await_args.args == (
+        "codex",
+        "app-server",
+        "--disable",
+        "hooks",
+        "--listen",
+        socket_url,
+    )
+    child_env = create_subprocess.await_args.kwargs["env"]
+    assert child_env["OPENAI_API_KEY"] == "test-api-key"
+    assert child_env["CODEX_HOME"] == str(tmp_path / "codex-home")
+
+
+def test_owned_unix_listener_command_requires_exact_hooks_and_socket():
+    owned_url = "unix:///Users/test/.codex/app-server-control/onlineworker-app-server.sock"
+    identity = (
+        "123 1 Fri Jul 11 09:00:00 2026 "
+        "/opt/homebrew/bin/codex app-server --disable hooks "
+        f"--listen {owned_url}"
+    )
+
+    assert _is_owned_unix_listener_command(identity, owned_url) is True
+    assert _is_owned_unix_listener_command(identity, "unix://") is False
+    assert _is_owned_unix_listener_command(
+        f"codex app-server --listen {owned_url}",
+        owned_url,
+    ) is False
+
+
+@pytest.mark.asyncio
+async def test_stop_existing_owned_unix_listener_rechecks_pid_identity_before_terminate():
+    owned_url = "unix:///Users/test/.codex/app-server-control/onlineworker-app-server.sock"
+    identity = (
+        "123 1 Fri Jul 11 09:00:00 2026 "
+        "/opt/homebrew/bin/codex app-server --disable hooks "
+        f"--listen {owned_url}"
+    )
+    server = AppServerProcess(
+        codex_bin="codex",
+        protocol="unix",
+        listen_url=owned_url,
+        owned_unix=True,
+    )
+    capture = AsyncMock(
+        side_effect=[
+            (0, "123\n"),
+            (0, identity),
+            (0, identity),
+        ]
+    )
+
+    with patch(
+        "plugins.providers.builtin.codex.python.process._capture_command_output",
+        new=capture,
+    ), patch(
+        "plugins.providers.builtin.codex.python.process.os.kill",
+    ) as kill_mock, patch(
+        "plugins.providers.builtin.codex.python.process.unix_socket_accepting",
+        return_value=False,
+    ):
+        await server._stop_existing_owned_unix_listener(owned_url)
+
+    kill_mock.assert_called_once_with(123, signal.SIGTERM)
+    assert capture.await_args_list[0].args == (
+        "/usr/sbin/lsof",
+        "-t",
+        "/Users/test/.codex/app-server-control/onlineworker-app-server.sock",
+    )
+    assert capture.await_args_list[1].args[:2] == ("/bin/ps", "-ww")
+    assert capture.await_args_list[2].args[:2] == ("/bin/ps", "-ww")
+
+
+@pytest.mark.asyncio
+async def test_stop_existing_owned_unix_listener_refuses_unowned_process():
+    owned_url = "unix:///Users/test/.codex/app-server-control/onlineworker-app-server.sock"
+    server = AppServerProcess(
+        codex_bin="codex",
+        protocol="unix",
+        listen_url=owned_url,
+        owned_unix=True,
+    )
+
+    with patch(
+        "plugins.providers.builtin.codex.python.process._capture_command_output",
+        new=AsyncMock(
+            side_effect=[
+                (0, "123\n"),
+                (0, "123 1 Fri Jul 11 09:00:00 2026 codex app-server --listen unix://"),
+            ]
+        ),
+    ), patch(
+        "plugins.providers.builtin.codex.python.process.os.kill",
+    ) as kill_mock:
+        with pytest.raises(RuntimeError, match="非托管进程"):
+            await server._stop_existing_owned_unix_listener(owned_url)
+
+    kill_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_stop_existing_owned_unix_listener_refuses_active_owner():
+    owned_url = "unix:///Users/test/.codex/app-server-control/onlineworker-app-server.sock"
+    identity = (
+        "123 999 Fri Jul 11 09:00:00 2026 "
+        "/opt/homebrew/bin/codex app-server --disable hooks "
+        f"--listen {owned_url}"
+    )
+    server = AppServerProcess(
+        codex_bin="codex",
+        protocol="unix",
+        listen_url=owned_url,
+        owned_unix=True,
+    )
+
+    with patch(
+        "plugins.providers.builtin.codex.python.process._capture_command_output",
+        new=AsyncMock(side_effect=[(0, "123\n"), (0, identity)]),
+    ), patch(
+        "plugins.providers.builtin.codex.python.process.os.kill",
+    ) as kill_mock:
+        with pytest.raises(RuntimeError, match="活跃实例"):
+            await server._stop_existing_owned_unix_listener(owned_url)
+
+    kill_mock.assert_not_called()
+
+
+def test_onlineworker_codex_unix_url_uses_dedicated_codex_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+
+    assert onlineworker_codex_unix_url() == (
+        f"unix://{tmp_path / 'codex-home' / 'app-server-control' / 'onlineworker-app-server.sock'}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_post_init_passes_codex_unix_url_to_app_server_process(tmp_path):
     storage = AppStorage()
     state = AppState(storage=storage)
@@ -1773,6 +1956,30 @@ async def test_post_init_passes_codex_unix_url_to_app_server_process(tmp_path):
     assert manager.get_tui_sync_task("codex") is None
     assert manager.get_tui_mirror_task("codex") is mirror_task
     assert codex_state.get_runtime(state).mirror_task is mirror_task
+
+
+@pytest.mark.asyncio
+async def test_tui_bridge_prefers_running_onlineworker_app_server_url():
+    from plugins.providers.builtin.codex.python import tui_bridge
+
+    state = MagicMock()
+    state.app_server_proc = SimpleNamespace(
+        ws_url="unix:///Users/test/.codex/app-server-control/onlineworker-app-server.sock"
+    )
+    tool_cfg = ToolConfig(
+        name="codex",
+        enabled=True,
+        bin="codex",
+        protocol="unix",
+        app_server_url="unix://",
+    )
+
+    ws_url, temporary_proc = await tui_bridge._resolve_codex_ws_url(state, tool_cfg)
+
+    assert ws_url == (
+        "unix:///Users/test/.codex/app-server-control/onlineworker-app-server.sock"
+    )
+    assert temporary_proc is None
 
 
 @pytest.mark.asyncio

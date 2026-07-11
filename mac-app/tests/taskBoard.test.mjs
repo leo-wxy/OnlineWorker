@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildTaskBoardModel, collectTaskBoardPreviewHydrationPlan } from "../src/utils/taskBoard.js";
+import {
+  buildTaskBoardModel,
+  collectTaskBoardPreviewHydrationPlan,
+  selectRecentConversationTurns,
+} from "../src/utils/taskBoard.js";
 
 const nowEpochMs = 1_800_000_000_000;
 
@@ -16,6 +20,32 @@ function session(overrides) {
     ...overrides,
   };
 }
+
+test("selectRecentConversationTurns keeps the latest six user and assistant messages", () => {
+  const turns = [
+    { role: "user", content: "one" },
+    { role: "assistant", content: "two" },
+    { role: "tool", content: "hidden tool output" },
+    { role: "user", content: "three" },
+    { role: "assistant", content: "four" },
+    { role: "user", content: "   " },
+    { role: "user", content: "five" },
+    { role: "assistant", content: "six" },
+    { role: "assistant", content: "seven" },
+  ];
+
+  assert.deepEqual(
+    selectRecentConversationTurns(turns),
+    [
+      { role: "assistant", content: "two" },
+      { role: "user", content: "three" },
+      { role: "assistant", content: "four" },
+      { role: "user", content: "five" },
+      { role: "assistant", content: "six" },
+      { role: "assistant", content: "seven" },
+    ],
+  );
+});
 
 test("buildTaskBoardModel puts dashboard active session in running column", () => {
   const board = buildTaskBoardModel({
@@ -453,6 +483,115 @@ test("buildTaskBoardModel renders approval request above previous user prompt", 
   assert.equal(board.needsAttention[0].preview, "需要处理授权请求");
   assert.equal(board.needsAttention[0].statusReason, "需要处理授权请求");
   assert.equal(board.needsAttention[0].recentEvent, "approval.requested");
+});
+
+test("buildTaskBoardModel prioritizes owned actions then oldest waiting items", () => {
+  const activity = (overrides) => ({
+    providerId: "codex",
+    workspaceId: "codex:/tmp/project",
+    workspacePath: "/tmp/project",
+    sessionId: "thread-a",
+    title: "Task",
+    status: "needs_attention",
+    attentionReason: "需要处理",
+    attentionKind: "approval",
+    requestId: "req-1",
+    approvalSource: "app-server",
+    mirroredOnly: false,
+    canInterrupt: false,
+    canRecover: false,
+    controlReason: "",
+    controlMode: "owned",
+    recentEvents: [],
+    lastUserMessage: "prompt",
+    lastAssistantMessage: "",
+    lastFinalMessage: "",
+    lastEventKind: "approval.requested",
+    updatedAt: 10,
+    ...overrides,
+  });
+  const board = buildTaskBoardModel({
+    sessions: [],
+    sessionActivities: [
+      activity({ sessionId: "failure-old", status: "failed", attentionKind: "failure", requestId: "", updatedAt: 5 }),
+      activity({ sessionId: "approval-new", updatedAt: 30 }),
+      activity({ sessionId: "approval-old", requestId: "req-2", updatedAt: 20 }),
+      activity({ sessionId: "mirrored-oldest", mirroredOnly: true, updatedAt: 1 }),
+    ],
+    providerLabels: { codex: "Codex" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.deepEqual(
+    board.needsAttention.map((task) => task.sessionId),
+    ["approval-old", "approval-new", "failure-old", "mirrored-oldest"],
+  );
+});
+
+test("buildTaskBoardModel puts interrupted and completed activities in recent ended", () => {
+  const board = buildTaskBoardModel({
+    sessions: [],
+    sessionActivities: [
+      {
+        providerId: "codex",
+        workspaceId: "codex:/tmp/project",
+        workspacePath: "/tmp/project",
+        sessionId: "thread-interrupted",
+        title: "Interrupted task",
+        status: "completed",
+        attentionReason: "任务已由用户中断",
+        attentionKind: "interrupted",
+        requestId: "",
+        approvalSource: "",
+        mirroredOnly: false,
+        canInterrupt: false,
+        canRecover: false,
+        controlReason: "",
+        controlMode: "owned",
+        recentEvents: [{ kind: "turn.failed", createdAt: 20, summary: "interrupted" }],
+        lastUserMessage: "implement phase 19",
+        lastAssistantMessage: "",
+        lastFinalMessage: "",
+        lastEventKind: "turn.failed",
+        updatedAt: 20,
+      },
+      {
+        providerId: "claude",
+        workspaceId: "claude:/tmp/project",
+        workspacePath: "/tmp/project",
+        sessionId: "thread-completed",
+        title: "Completed task",
+        status: "completed",
+        attentionReason: "",
+        attentionKind: "",
+        requestId: "",
+        approvalSource: "",
+        mirroredOnly: false,
+        canInterrupt: false,
+        canRecover: false,
+        controlReason: "",
+        controlMode: "owned",
+        recentEvents: [],
+        lastUserMessage: "run tests",
+        lastAssistantMessage: "done",
+        lastFinalMessage: "done",
+        lastEventKind: "turn.completed",
+        updatedAt: 10,
+      },
+    ],
+    providerLabels: { codex: "Codex", claude: "Claude" },
+    dashboardState: null,
+    nowEpochMs,
+  });
+
+  assert.equal(board.counts.recentEnded, 2);
+  assert.deepEqual(board.recentEnded.map((task) => task.sessionId), ["thread-interrupted", "thread-completed"]);
+  assert.equal(board.recentEnded[0].interrupted, true);
+  assert.equal(board.recentEnded[0].canContinue, true);
+  assert.equal(board.recentEnded[0].recentEvents[0].kind, "turn.failed");
+  assert.equal(board.recentEnded[0].lastUserMessage, "implement phase 19");
+  assert.equal(board.recentEnded[1].lastAssistantMessage, "done");
 });
 
 test("buildTaskBoardModel shows Claude permission command as dynamic preview", () => {

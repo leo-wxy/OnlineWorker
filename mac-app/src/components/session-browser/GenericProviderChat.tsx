@@ -61,6 +61,7 @@ export function GenericProviderChat({
   onNewSessionStarted,
   onNewSessionPending,
   mode = "session",
+  focusComposerKey,
   active = true,
 }: {
   session: UnifiedSession;
@@ -69,6 +70,7 @@ export function GenericProviderChat({
   onNewSessionStarted?: (sendResult: ProviderSessionSendResult) => Promise<void> | void;
   onNewSessionPending?: (sendResult: ProviderSessionSendResult, text: string) => Promise<void> | void;
   mode?: "session" | "new-session";
+  focusComposerKey?: number;
   active?: boolean;
 }) {
   const { t } = useI18n();
@@ -512,6 +514,7 @@ export function GenericProviderChat({
 
       <SessionComposer
         resetKey={activeSession.id}
+        focusKey={focusComposerKey}
         sending={sending}
         placeholder={t.sessions.sendPlaceholder}
         sendLabel={t.sessions.send}

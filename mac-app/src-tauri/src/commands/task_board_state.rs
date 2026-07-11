@@ -13,6 +13,7 @@ use super::provider_bridge_common::provider_owner_bridge_socket_path;
 const TASK_BOARD_STATE_FILE: &str = "task_board_state.json";
 const TASK_BOARD_OWNER_BRIDGE_REQUEST_TIMEOUT: Duration = Duration::from_millis(1200);
 const TASK_BOARD_APPROVAL_REPLY_TIMEOUT: Duration = Duration::from_secs(3);
+const TASK_BOARD_SESSION_CONTROL_TIMEOUT: Duration = Duration::from_secs(3);
 static TASK_BOARD_ACTIVITY_STREAM_NEXT_ID: AtomicU64 = AtomicU64::new(0);
 static TASK_BOARD_ACTIVITY_STREAM_ACTIVE_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -49,11 +50,41 @@ pub struct TaskBoardSessionActivity {
     pub approval_source: String,
     #[serde(default)]
     pub mirrored_only: bool,
+    #[serde(default)]
+    pub can_interrupt: bool,
+    #[serde(default)]
+    pub can_recover: bool,
+    #[serde(default)]
+    pub control_reason: String,
+    #[serde(default)]
+    pub control_mode: String,
+    #[serde(default)]
+    pub recent_events: Vec<TaskBoardRecentEvent>,
     pub last_user_message: String,
     pub last_assistant_message: String,
     pub last_final_message: String,
     pub last_event_kind: String,
     pub updated_at: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskBoardRecentEvent {
+    pub kind: String,
+    #[serde(default)]
+    pub created_at: f64,
+    #[serde(default)]
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskBoardSessionControlResult {
+    pub accepted: bool,
+    pub action: String,
+    pub provider_id: String,
+    pub session_id: String,
+    pub awaiting_provider_event: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,6 +99,23 @@ struct SessionActivitiesResponse {
 #[derive(Debug, Deserialize)]
 struct ReplyApprovalResponse {
     ok: bool,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SessionControlResponse {
+    ok: bool,
+    #[serde(default)]
+    accepted: bool,
+    #[serde(default)]
+    action: String,
+    #[serde(default)]
+    provider_id: String,
+    #[serde(default)]
+    session_id: String,
+    #[serde(default)]
+    awaiting_provider_event: bool,
     #[serde(default)]
     error: Option<String>,
 }
@@ -256,10 +304,14 @@ pub async fn get_task_board_session_activities() -> Result<Vec<TaskBoardSessionA
     if !socket_path.exists() {
         return Ok(Vec::new());
     }
-    read_task_board_session_activities_from_socket_path_with_timeout(
-        &socket_path,
-        TASK_BOARD_OWNER_BRIDGE_REQUEST_TIMEOUT,
-    )
+    tauri::async_runtime::spawn_blocking(move || {
+        read_task_board_session_activities_from_socket_path_with_timeout(
+            &socket_path,
+            TASK_BOARD_OWNER_BRIDGE_REQUEST_TIMEOUT,
+        )
+    })
+    .await
+    .map_err(|error| format!("task board activity blocking task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -283,19 +335,71 @@ pub async fn reply_task_board_approval(
         ));
     }
 
-    let mut socket = connect_owner_bridge_socket(&socket_path, TASK_BOARD_APPROVAL_REPLY_TIMEOUT)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut socket =
+            connect_owner_bridge_socket(&socket_path, TASK_BOARD_APPROVAL_REPLY_TIMEOUT)?;
+        let payload = serde_json::json!({
+            "type": "reply_approval",
+            "provider_id": provider_id,
+            "workspace_id": workspace_id,
+            "workspace_dir": workspace_path,
+            "workspace_path": workspace_path,
+            "session_id": session_id,
+            "request_id": request_id,
+            "action": action,
+            "approval_source": approval_source.unwrap_or_default(),
+            "command": command.unwrap_or_default(),
+            "reason": reason.unwrap_or_default(),
+        });
+        let raw_request = format!("{}\n", payload);
+        socket
+            .write_all(raw_request.as_bytes())
+            .map_err(|e| format!("write provider owner bridge request failed: {e}"))?;
+        socket
+            .shutdown(Shutdown::Write)
+            .map_err(|e| format!("shutdown provider owner bridge write failed: {e}"))?;
+
+        let mut response_line = String::new();
+        let mut reader = BufReader::new(socket);
+        reader
+            .read_line(&mut response_line)
+            .map_err(|e| format!("read provider owner bridge response failed: {e}"))?;
+
+        let response = serde_json::from_str::<ReplyApprovalResponse>(response_line.trim())
+            .map_err(|e| format!("parse provider owner bridge response failed: {e}"))?;
+        if response.ok {
+            Ok(())
+        } else {
+            Err(response
+                .error
+                .unwrap_or_else(|| "provider owner bridge approval reply failed".to_string()))
+        }
+    })
+    .await
+    .map_err(|error| format!("approval reply blocking task failed: {error}"))?
+}
+
+fn control_task_board_session_at_socket_path(
+    socket_path: &Path,
+    provider_id: &str,
+    workspace_id: &str,
+    session_id: &str,
+    action: &str,
+    timeout: Duration,
+) -> Result<TaskBoardSessionControlResult, String> {
+    let (provider_id, session_id) = normalize_ref(provider_id, session_id)?;
+    let action = action.trim().to_lowercase();
+    if !matches!(action.as_str(), "interrupt" | "recover") {
+        return Err(format!("unsupported session action: {action}"));
+    }
+
+    let mut socket = connect_owner_bridge_socket(socket_path, timeout)?;
     let payload = serde_json::json!({
-        "type": "reply_approval",
+        "type": "session_control",
         "provider_id": provider_id,
-        "workspace_id": workspace_id,
-        "workspace_dir": workspace_path,
-        "workspace_path": workspace_path,
+        "workspace_id": workspace_id.trim(),
         "session_id": session_id,
-        "request_id": request_id,
         "action": action,
-        "approval_source": approval_source.unwrap_or_default(),
-        "command": command.unwrap_or_default(),
-        "reason": reason.unwrap_or_default(),
     });
     let raw_request = format!("{}\n", payload);
     socket
@@ -310,16 +414,49 @@ pub async fn reply_task_board_approval(
     reader
         .read_line(&mut response_line)
         .map_err(|e| format!("read provider owner bridge response failed: {e}"))?;
-
-    let response = serde_json::from_str::<ReplyApprovalResponse>(response_line.trim())
+    let response = serde_json::from_str::<SessionControlResponse>(response_line.trim())
         .map_err(|e| format!("parse provider owner bridge response failed: {e}"))?;
-    if response.ok {
-        Ok(())
-    } else {
-        Err(response
+    if !response.ok {
+        return Err(response
             .error
-            .unwrap_or_else(|| "provider owner bridge approval reply failed".to_string()))
+            .unwrap_or_else(|| "provider owner bridge session control failed".to_string()));
     }
+    Ok(TaskBoardSessionControlResult {
+        accepted: response.accepted,
+        action: response.action,
+        provider_id: response.provider_id,
+        session_id: response.session_id,
+        awaiting_provider_event: response.awaiting_provider_event,
+    })
+}
+
+#[tauri::command]
+pub async fn control_task_board_session(
+    provider_id: String,
+    workspace_id: String,
+    session_id: String,
+    action: String,
+) -> Result<TaskBoardSessionControlResult, String> {
+    let data_dir = ensure_data_dir()?;
+    let socket_path = provider_owner_bridge_socket_path(&data_dir);
+    if !socket_path.exists() {
+        return Err(format!(
+            "provider owner bridge not ready: {}",
+            socket_path.display()
+        ));
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        control_task_board_session_at_socket_path(
+            &socket_path,
+            &provider_id,
+            &workspace_id,
+            &session_id,
+            &action,
+            TASK_BOARD_SESSION_CONTROL_TIMEOUT,
+        )
+    })
+    .await
+    .map_err(|error| format!("session control blocking task failed: {error}"))?
 }
 
 fn begin_task_board_activity_stream() -> u64 {
@@ -589,6 +726,66 @@ mod tests {
             "item/commandExecution/requestApproval"
         );
         assert!(activity.mirrored_only);
+    }
+
+    #[test]
+    fn parses_task_board_activity_with_session_control_metadata() {
+        let event = parse_task_board_activity_stream_event(
+            r#"{"ok":true,"kind":"activity","activity":{"providerId":"codex","workspaceId":"codex:/tmp/project","workspacePath":"/tmp/project","sessionId":"thread-a","title":"Run tests","status":"running","attentionReason":"","attentionKind":"","requestId":"","approvalSource":"","mirroredOnly":false,"canInterrupt":true,"canRecover":false,"controlReason":"","controlMode":"owned","recentEvents":[{"kind":"turn.started","createdAt":20.0,"summary":""}],"lastUserMessage":"Run tests","lastAssistantMessage":"working","lastFinalMessage":"","lastEventKind":"message.assistant.delta","updatedAt":20.0}}"#,
+        )
+        .expect("event");
+
+        let activity = event.activity.expect("activity");
+        assert!(activity.can_interrupt);
+        assert!(!activity.can_recover);
+        assert_eq!(activity.control_mode, "owned");
+        assert_eq!(activity.recent_events.len(), 1);
+        assert_eq!(activity.recent_events[0].kind, "turn.started");
+    }
+
+    #[test]
+    fn session_control_forwards_normalized_request_and_response() {
+        let temp_dir =
+            std::path::PathBuf::from(format!("/tmp/owtb-control-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let socket_path = temp_dir.join("provider_owner_bridge.sock");
+        let listener = UnixListener::bind(&socket_path).expect("bind owner bridge socket");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept owner bridge socket");
+            let mut request = String::new();
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            reader.read_line(&mut request).expect("read request");
+            let payload: serde_json::Value =
+                serde_json::from_str(request.trim()).expect("parse request");
+            assert_eq!(payload["type"], "session_control");
+            assert_eq!(payload["provider_id"], "codex");
+            assert_eq!(payload["workspace_id"], "codex:/tmp/project");
+            assert_eq!(payload["session_id"], "thread-a");
+            assert_eq!(payload["action"], "interrupt");
+            stream
+                .write_all(
+                    b"{\"ok\":true,\"accepted\":true,\"action\":\"interrupt\",\"provider_id\":\"codex\",\"session_id\":\"thread-a\",\"awaiting_provider_event\":true}\n",
+                )
+                .expect("write response");
+        });
+
+        let result = control_task_board_session_at_socket_path(
+            &socket_path,
+            "codex",
+            "codex:/tmp/project",
+            "thread-a",
+            "interrupt",
+            Duration::from_secs(1),
+        )
+        .expect("control result");
+        assert!(result.accepted);
+        assert!(result.awaiting_provider_event);
+        assert_eq!(result.action, "interrupt");
+
+        server.join().expect("join owner bridge server");
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

@@ -57,8 +57,9 @@ def _contains_assistant_marker(session: list[dict[str, Any]], marker: str) -> bo
 def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
     socket_path = Path(args.socket).expanduser()
     workspace = os.path.abspath(os.path.expanduser(args.workspace))
-    session_id = str(uuid.uuid4())
-    marker = f"{args.marker_prefix}{session_id.split('-', 1)[0]}"
+    requested_thread_id = str(uuid.uuid4())
+    session_id = requested_thread_id
+    marker = f"{args.marker_prefix}{requested_thread_id.split('-', 1)[0]}"
     text = f"Reply exactly: {marker}"
     cleanup_preview = "onlineworker claude owner bridge smoke"
     cleanup_result: dict[str, Any] | None = None
@@ -68,13 +69,14 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
         send_payload = {
             "type": "send_message",
             "provider_id": args.provider,
-            "thread_id": session_id,
+            "thread_id": requested_thread_id,
             "workspace_dir": workspace,
             "text": text,
         }
         send_response = _request(socket_path, send_payload, args.timeout)
         if send_response.get("ok") is not True:
             raise RuntimeError(f"send_message failed: {json.dumps(send_response, ensure_ascii=False)}")
+        session_id = str(send_response.get("thread_id") or requested_thread_id).strip() or requested_thread_id
 
         deadline = time.monotonic() + args.read_timeout
         last_read: dict[str, Any] | None = None
@@ -94,6 +96,7 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
                     "ok": True,
                     "provider_id": args.provider,
                     "thread_id": session_id,
+                    "requested_thread_id": requested_thread_id,
                     "workspace": workspace,
                     "marker": marker,
                     "send_response": send_response,

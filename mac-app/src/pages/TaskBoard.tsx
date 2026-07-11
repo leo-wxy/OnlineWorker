@@ -19,6 +19,7 @@ import {
   collectTaskBoardPreviewHydrationPlan,
   isLowSignalTaskBoardText,
   removeTaskBoardActivity,
+  selectRecentConversationTurns,
   taskBoardSessionKey,
   type TaskBoardActivityStreamEvent,
   type TaskBoardSessionActivity,
@@ -36,6 +37,7 @@ export interface TaskBoardOpenSessionTarget {
   providerId: string;
   sessionId: string;
   workspace?: string;
+  focusComposerKey?: number;
 }
 
 interface Props {
@@ -53,6 +55,7 @@ const PINNED_PREVIEW_HYDRATION_LIMIT = 12;
 const LOW_SIGNAL_PREVIEW_HYDRATION_LIMIT = 16;
 const SESSION_PREVIEW_HYDRATION_TIMEOUT_MS = 1200;
 const TASK_BOARD_ACTIVITY_REFRESH_TIMEOUT_MS = 1500;
+const TASK_BOARD_DETAIL_TURN_LIMIT = 6;
 
 interface RefreshOptions {
   includeActivities?: boolean;
@@ -60,6 +63,13 @@ interface RefreshOptions {
 }
 
 type TaskBoardApprovalAction = "exec_allow" | "exec_deny";
+type TaskBoardControlAction = "interrupt" | "recover";
+
+interface PendingTaskBoardControl {
+  taskId: string;
+  action: TaskBoardControlAction;
+  startedAtEpochMs: number;
+}
 
 function formatRelativeTime(epochMs: number | null, nowMs: number, texts: ReturnType<typeof useI18n>["t"]) {
   if (!epochMs) {
@@ -262,6 +272,7 @@ function TaskCard({
   nowMs,
   onOpen,
   onTogglePin,
+  active,
   selected,
   selectable,
   approvalBusy,
@@ -273,6 +284,7 @@ function TaskCard({
   nowMs: number;
   onOpen: (task: TaskBoardTask) => void;
   onTogglePin: (task: TaskBoardTask) => void;
+  active: boolean;
   selected: boolean;
   selectable: boolean;
   approvalBusy: boolean;
@@ -296,7 +308,8 @@ function TaskCard({
           onOpen(task);
         }
       }}
-      className={`group flex min-h-[250px] flex-col rounded-md border p-3 text-left shadow-[0_2px_10px_rgba(15,23,42,0.035)] transition-colors focus:outline-none focus:ring-2 focus:ring-blue-300/70 ${toneClasses.card} ${accent.card}`}
+      aria-selected={active}
+      className={`group flex min-h-[132px] flex-col border-b border-[var(--ow-line-soft)] px-3 py-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-300/70 ${active ? "bg-blue-50/80 shadow-[inset_3px_0_0_var(--ow-blue)]" : `${toneClasses.card} ${accent.card}`}`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
@@ -350,7 +363,7 @@ function TaskCard({
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <span className={`inline-flex max-w-full items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] ${accent.chip}`}>
           <span className={`h-1.5 w-1.5 rounded-full ${accent.dot}`} />
           <span className="truncate">{task.providerLabel}</span>
@@ -361,14 +374,14 @@ function TaskCard({
       </div>
 
       {task.preview ? (
-        <div className="mt-3 overflow-hidden rounded bg-white/60 px-2.5 py-2">
+        <div className="mt-2 overflow-hidden">
           <p
             className="overflow-hidden text-xs font-medium leading-5 text-slate-600"
             style={{
               display: "-webkit-box",
               WebkitBoxOrient: "vertical",
-              WebkitLineClamp: 3,
-              maxHeight: "3.75rem",
+              WebkitLineClamp: 2,
+              maxHeight: "2.5rem",
             }}
           >
             {task.preview}
@@ -428,6 +441,7 @@ function BoardLane({
   nowMs,
   onOpen,
   onTogglePin,
+  activeTaskId,
   selectedApprovalTaskIds,
   busyApprovalTaskIds,
   onToggleSelect,
@@ -441,6 +455,7 @@ function BoardLane({
   nowMs: number;
   onOpen: (task: TaskBoardTask) => void;
   onTogglePin: (task: TaskBoardTask) => void;
+  activeTaskId: string | null;
   selectedApprovalTaskIds: Set<string>;
   busyApprovalTaskIds: Set<string>;
   onToggleSelect: (task: TaskBoardTask) => void;
@@ -449,8 +464,8 @@ function BoardLane({
   const toneClasses = laneTone(tone);
 
   return (
-    <section className={`flex min-h-0 flex-col border-r border-[var(--ow-line-soft)] last:border-r-0 ${toneClasses.lane}`}>
-      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[var(--ow-line-soft)] bg-slate-50/82 px-3">
+    <section className={`border-b border-[var(--ow-line-soft)] last:border-b-0 ${toneClasses.lane}`}>
+      <div className="flex h-10 items-center justify-between gap-2 border-b border-[var(--ow-line-soft)] bg-slate-50/82 px-3">
         <h2 className={`flex min-w-0 items-center gap-2 truncate text-sm font-extrabold ${toneClasses.header}`}>
           <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${toneClasses.dot}`} />
           <span className="truncate">{title}</span>
@@ -460,9 +475,9 @@ function BoardLane({
         </span>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
+      <div>
         {tasks.length === 0 ? (
-          <div className="flex min-h-[160px] items-center justify-center rounded-md border border-dashed border-slate-200 bg-white/58 px-4 text-center text-sm font-semibold text-slate-400">
+          <div className="flex min-h-[68px] items-center justify-center px-4 text-center text-xs font-semibold text-slate-400">
             {empty}
           </div>
         ) : (
@@ -474,6 +489,7 @@ function BoardLane({
               nowMs={nowMs}
               onOpen={onOpen}
               onTogglePin={onTogglePin}
+              active={activeTaskId === task.id}
               selected={selectedApprovalTaskIds.has(task.id)}
               selectable={isApprovalTask(task)}
               approvalBusy={busyApprovalTaskIds.has(task.id)}
@@ -505,6 +521,12 @@ export function TaskBoard({
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [selectedApprovalTaskIds, setSelectedApprovalTaskIds] = useState<string[]>([]);
   const [busyApprovalTaskIds, setBusyApprovalTaskIds] = useState<string[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedConversationTurns, setSelectedConversationTurns] = useState<SessionTurn[]>([]);
+  const [selectedConversationLoading, setSelectedConversationLoading] = useState(false);
+  const [selectedConversationError, setSelectedConversationError] = useState(false);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const [pendingControl, setPendingControl] = useState<PendingTaskBoardControl | null>(null);
   const hasHydratedProviderSessionsRef = useRef(false);
   const refreshSequenceRef = useRef(0);
   const refreshInFlightRef = useRef(false);
@@ -710,6 +732,20 @@ export function TaskBoard({
     });
   }, [onOpenSession]);
 
+  const handleContinue = useCallback((task: TaskBoardTask) => {
+    onOpenSession({
+      providerId: task.providerId,
+      sessionId: task.sessionId,
+      workspace: task.workspace,
+      focusComposerKey: Date.now(),
+    });
+  }, [onOpenSession]);
+
+  const handleSelectTask = useCallback((task: TaskBoardTask) => {
+    setSelectedTaskId(task.id);
+    setMobileDetailOpen(true);
+  }, []);
+
   const board = useMemo(
     () => buildTaskBoardModel({
       sessions,
@@ -721,6 +757,118 @@ export function TaskBoard({
     }),
     [dashboardState, nowMs, providerLabels, sharedSessionActivities, localSessionActivities, sessions, taskBoardState],
   );
+  const allTasks = useMemo(
+    () => [...board.needsAttention, ...board.running, ...board.recentEnded],
+    [board.needsAttention, board.recentEnded, board.running],
+  );
+  const selectedTask = useMemo(
+    () => allTasks.find((task) => task.id === selectedTaskId) ?? null,
+    [allTasks, selectedTaskId],
+  );
+
+  useEffect(() => {
+    if (selectedTask) {
+      return;
+    }
+    const initial = board.needsAttention.find((task) => !task.mirroredOnly)
+      ?? board.running[0]
+      ?? board.recentEnded[0]
+      ?? board.needsAttention[0]
+      ?? null;
+    setSelectedTaskId(initial?.id ?? null);
+  }, [board.needsAttention, board.recentEnded, board.running, selectedTask]);
+
+  useEffect(() => {
+    if (!selectedTask) {
+      setSelectedConversationTurns([]);
+      setSelectedConversationLoading(false);
+      setSelectedConversationError(false);
+      return;
+    }
+
+    let cancelled = false;
+    const fallbackTurns = selectRecentConversationTurns([
+      { role: "user", content: selectedTask.lastUserMessage },
+      { role: "assistant", content: selectedTask.lastAssistantMessage || selectedTask.preview || "" },
+    ], TASK_BOARD_DETAIL_TURN_LIMIT) as SessionTurn[];
+    setSelectedConversationTurns(fallbackTurns);
+    setSelectedConversationLoading(true);
+    setSelectedConversationError(false);
+
+    void fetchProviderSession(
+      selectedTask.providerId,
+      selectedTask.sessionId,
+      selectedTask.workspace || null,
+    ).then((turns) => {
+      if (cancelled) {
+        return;
+      }
+      const recentTurns = selectRecentConversationTurns(
+        turns,
+        TASK_BOARD_DETAIL_TURN_LIMIT,
+      ) as SessionTurn[];
+      setSelectedConversationTurns(recentTurns.length > 0 ? recentTurns : fallbackTurns);
+      setSelectedConversationLoading(false);
+    }).catch((conversationError) => {
+      if (cancelled) {
+        return;
+      }
+      console.warn(`Failed to load task board conversation for ${selectedTask.providerId}:${selectedTask.sessionId}`, conversationError);
+      setSelectedConversationError(fallbackTurns.length === 0);
+      setSelectedConversationLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTask?.id, selectedTask?.providerId, selectedTask?.sessionId, selectedTask?.workspace]);
+
+  useEffect(() => {
+    if (!pendingControl) {
+      return;
+    }
+    const task = allTasks.find((item) => item.id === pendingControl.taskId);
+    if (!task) {
+      setPendingControl(null);
+      return;
+    }
+    if (pendingControl.action === "interrupt" && (!task.running || !task.canInterrupt)) {
+      setPendingControl(null);
+      return;
+    }
+    if (
+      pendingControl.action === "recover"
+      && (task.running || (task.updatedAtEpochMs ?? 0) > pendingControl.startedAtEpochMs)
+    ) {
+      setPendingControl(null);
+    }
+  }, [allTasks, pendingControl]);
+
+  const handleControlAction = useCallback(async (
+    task: TaskBoardTask,
+    action: TaskBoardControlAction,
+  ) => {
+    setPendingControl({
+      taskId: task.id,
+      action,
+      startedAtEpochMs: task.updatedAtEpochMs ?? Date.now(),
+    });
+    setActionError(null);
+    try {
+      const result = await invoke<{ awaitingProviderEvent?: boolean }>("control_task_board_session", {
+        providerId: task.providerId,
+        workspaceId: task.workspaceId,
+        sessionId: task.sessionId,
+        action,
+      });
+      if (result.awaitingProviderEvent === false) {
+        setPendingControl(null);
+      }
+    } catch (controlError) {
+      setPendingControl(null);
+      setActionError(`${action === "interrupt" ? "中断" : "恢复"}失败：${String(controlError)}`);
+    }
+  }, []);
   const selectableApprovalTasks = useMemo(
     () => board.needsAttention.filter(isApprovalTask),
     [board.needsAttention],
@@ -815,20 +963,18 @@ export function TaskBoard({
     <div className="ow-page-frame flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[30px]">
       <div className="flex shrink-0 flex-col gap-4 border-b border-[var(--ow-line-soft)] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
-          <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-blue-600">
-            {t.taskBoard.eyebrow}
-          </p>
-          <h1 className="mt-1 truncate text-2xl font-extrabold text-gray-950">
+          <h1 className="truncate text-base font-bold text-gray-950">
             {t.taskBoard.title}
           </h1>
+          <p className="mt-1 text-xs font-medium text-slate-500">集中处理需要你介入的 Agent 工作，并查看真实 Session 状态。</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="ow-segment grid grid-cols-3 rounded-2xl p-1">
             {[
-              [t.taskBoard.needsAttentionColumn, board.counts.needsAttention],
-              [t.taskBoard.runningColumn, board.counts.running],
-              [t.taskBoard.pinnedColumn, board.counts.pinnedIdle],
+              ["需要你", board.counts.needsAttention],
+              ["正在运行", board.counts.running],
+              ["最近结束", board.counts.recentEnded],
             ].map(([label, count]) => (
               <div
                 key={label}
@@ -906,50 +1052,162 @@ export function TaskBoard({
           {t.common.loading}
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-x-auto p-4">
-          <div className="grid h-full min-w-[780px] grid-cols-3 overflow-hidden rounded-lg border border-[var(--ow-line-soft)] bg-white/70">
-            <BoardLane
-              title={t.taskBoard.needsAttentionColumn}
-              count={board.counts.needsAttention}
-              empty={t.taskBoard.noNeedsAttentionTasks}
-              tasks={board.needsAttention}
-              tone="needsAttention"
-              nowMs={nowMs}
-              onOpen={handleOpen}
-              onTogglePin={handleTogglePin}
-              selectedApprovalTaskIds={selectedApprovalTaskIdSet}
-              busyApprovalTaskIds={busyApprovalTaskIdSet}
-              onToggleSelect={handleToggleApprovalSelection}
-              onApprovalAction={handleSingleApprovalAction}
-            />
-            <BoardLane
-              title={t.taskBoard.runningColumn}
-              count={board.counts.running}
-              empty={t.taskBoard.noRunningTasks}
-              tasks={board.running}
-              tone="running"
-              nowMs={nowMs}
-              onOpen={handleOpen}
-              onTogglePin={handleTogglePin}
-              selectedApprovalTaskIds={selectedApprovalTaskIdSet}
-              busyApprovalTaskIds={busyApprovalTaskIdSet}
-              onToggleSelect={handleToggleApprovalSelection}
-              onApprovalAction={handleSingleApprovalAction}
-            />
-            <BoardLane
-              title={t.taskBoard.pinnedColumn}
-              count={board.counts.pinnedIdle}
-              empty={t.taskBoard.noPinnedTasks}
-              tasks={board.pinnedIdle}
-              tone="pinned"
-              nowMs={nowMs}
-              onOpen={handleOpen}
-              onTogglePin={handleTogglePin}
-              selectedApprovalTaskIds={selectedApprovalTaskIdSet}
-              busyApprovalTaskIds={busyApprovalTaskIdSet}
-              onToggleSelect={handleToggleApprovalSelection}
-              onApprovalAction={handleSingleApprovalAction}
-            />
+        <div className="min-h-0 flex-1 p-4">
+          <div className="grid h-full min-h-0 overflow-hidden rounded-lg border border-[var(--ow-line-soft)] bg-white/72 lg:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.25fr)]">
+            <div className={`${mobileDetailOpen ? "hidden lg:block" : "block"} min-h-0 overflow-y-auto border-b border-[var(--ow-line-soft)] lg:border-b-0 lg:border-r`}>
+              <BoardLane
+                title="需要你"
+                count={board.counts.needsAttention}
+                empty="当前没有需要你处理的 Session。"
+                tasks={board.needsAttention}
+                tone="needsAttention"
+                nowMs={nowMs}
+                onOpen={handleSelectTask}
+                onTogglePin={handleTogglePin}
+                activeTaskId={selectedTaskId}
+                selectedApprovalTaskIds={selectedApprovalTaskIdSet}
+                busyApprovalTaskIds={busyApprovalTaskIdSet}
+                onToggleSelect={handleToggleApprovalSelection}
+                onApprovalAction={handleSingleApprovalAction}
+              />
+              <BoardLane
+                title="正在运行"
+                count={board.counts.running}
+                empty="当前没有正在运行的 Session。"
+                tasks={board.running}
+                tone="running"
+                nowMs={nowMs}
+                onOpen={handleSelectTask}
+                onTogglePin={handleTogglePin}
+                activeTaskId={selectedTaskId}
+                selectedApprovalTaskIds={selectedApprovalTaskIdSet}
+                busyApprovalTaskIds={busyApprovalTaskIdSet}
+                onToggleSelect={handleToggleApprovalSelection}
+                onApprovalAction={handleSingleApprovalAction}
+              />
+              <BoardLane
+                title="最近结束"
+                count={board.counts.recentEnded}
+                empty="当前没有最近结束的 Session。"
+                tasks={board.recentEnded}
+                tone="pinned"
+                nowMs={nowMs}
+                onOpen={handleSelectTask}
+                onTogglePin={handleTogglePin}
+                activeTaskId={selectedTaskId}
+                selectedApprovalTaskIds={selectedApprovalTaskIdSet}
+                busyApprovalTaskIds={busyApprovalTaskIdSet}
+                onToggleSelect={handleToggleApprovalSelection}
+                onApprovalAction={handleSingleApprovalAction}
+              />
+            </div>
+
+            <aside className={`${mobileDetailOpen ? "block" : "hidden lg:block"} min-h-0 overflow-y-auto bg-[var(--ow-panel)] p-4`} aria-live="polite">
+              {selectedTask ? (
+                <div className="mx-auto max-w-3xl">
+                  <button type="button" onClick={() => setMobileDetailOpen(false)} className="ow-btn mb-3 h-9 rounded-lg px-3 text-sm font-semibold text-slate-700 lg:hidden">← 返回列表</button>
+                  <div className="flex items-start justify-between gap-4 border-b border-[var(--ow-line-soft)] pb-4">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-slate-500">{selectedTask.providerLabel} · {selectedTask.workspace || t.sessions.workspaceFallback}</p>
+                      <h2 className="mt-1 line-clamp-2 text-base font-bold text-slate-950">{selectedTask.title}</h2>
+                      <p className="mt-2 text-sm text-slate-600">
+                        {selectedTask.statusReason || selectedTask.preview || (selectedTask.running ? "正在执行" : "Session 最近已结束")}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">
+                      {selectedTask.interrupted ? "已中断" : selectedTask.needsAttention ? "需要你" : selectedTask.running ? "运行中" : "已结束"}
+                    </span>
+                  </div>
+
+                  <dl className="grid grid-cols-[92px_minmax(0,1fr)] gap-x-3 gap-y-2 border-b border-[var(--ow-line-soft)] py-4 text-xs">
+                    <dt className="font-semibold text-slate-400">Provider</dt><dd className="truncate text-slate-700">{selectedTask.providerLabel}</dd>
+                    <dt className="font-semibold text-slate-400">Workspace</dt><dd className="truncate text-slate-700">{selectedTask.workspace || "—"}</dd>
+                    <dt className="font-semibold text-slate-400">Session</dt><dd className="truncate font-mono text-slate-700">{selectedTask.sessionId}</dd>
+                    <dt className="font-semibold text-slate-400">控制模式</dt><dd className="text-slate-700">{selectedTask.controlMode === "owned" ? "OnlineWorker 托管" : "外部客户端"}</dd>
+                    <dt className="font-semibold text-slate-400">更新时间</dt><dd className="text-slate-700">{formatRelativeTime(selectedTask.updatedAtEpochMs, nowMs, t)}</dd>
+                  </dl>
+
+                  <section className="border-b border-[var(--ow-line-soft)] py-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-sm font-bold text-slate-900">会话片段</h3>
+                      <span className="text-xs text-slate-400">最近 {TASK_BOARD_DETAIL_TURN_LIMIT} 条</span>
+                    </div>
+                    {selectedConversationTurns.length > 0 ? (
+                      <ol className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+                        {selectedConversationTurns.map((turn, index) => (
+                          <li
+                            key={`${turn.role}:${turn.timestamp ?? ""}:${index}`}
+                            className={`grid grid-cols-[42px_minmax(0,1fr)] gap-3 rounded-md border px-3 py-2 text-sm ${
+                              turn.role === "user"
+                                ? "border-slate-200 bg-white"
+                                : "border-slate-200/80 bg-slate-50"
+                            }`}
+                          >
+                            <span className="pt-0.5 text-xs font-semibold text-slate-500">
+                              {turn.role === "user" ? "你" : "Agent"}
+                            </span>
+                            <p className="line-clamp-3 whitespace-pre-wrap break-words leading-5 text-slate-700">{turn.content}</p>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : selectedConversationLoading ? (
+                      <p className="mt-3 text-xs text-slate-400">正在读取会话内容…</p>
+                    ) : selectedConversationError ? (
+                      <p className="mt-3 text-xs text-slate-400">暂时无法读取会话内容。</p>
+                    ) : (
+                      <p className="mt-3 text-xs text-slate-400">暂无可显示的会话内容。</p>
+                    )}
+                  </section>
+
+                  <section className="border-b border-[var(--ow-line-soft)] py-4">
+                    <h3 className="text-sm font-bold text-slate-900">最近事件</h3>
+                    {selectedTask.recentEvents.length > 0 ? (
+                      <ol className="mt-3 space-y-3">
+                        {selectedTask.recentEvents.map((event, index) => (
+                          <li key={`${event.kind}:${event.createdAt}:${index}`} className="flex gap-3 text-xs">
+                            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" />
+                            <div className="min-w-0">
+                              <p className="font-semibold text-slate-700">{event.kind}</p>
+                              {event.summary ? <p className="mt-0.5 line-clamp-2 text-slate-500">{event.summary}</p> : null}
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <p className="mt-2 text-xs text-slate-400">暂无更多生命周期事件。</p>
+                    )}
+                  </section>
+
+                  {selectedTask.mirroredOnly ? (
+                    <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">请在原终端处理。</p>
+                  ) : selectedTask.controlReason && !selectedTask.canInterrupt && !selectedTask.canRecover ? (
+                    <p className="mt-4 text-sm text-slate-500">{selectedTask.controlReason}</p>
+                  ) : null}
+
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    {isApprovalTask(selectedTask) ? (
+                      <>
+                        <button type="button" disabled={busyApprovalTaskIdSet.has(selectedTask.id)} onClick={() => handleSingleApprovalAction(selectedTask, "exec_allow")} className="ow-btn-primary h-9 rounded-lg px-4 text-sm font-semibold disabled:opacity-50">{t.taskBoard.approve}</button>
+                        <button type="button" disabled={busyApprovalTaskIdSet.has(selectedTask.id)} onClick={() => handleSingleApprovalAction(selectedTask, "exec_deny")} className="ow-btn h-9 rounded-lg px-4 text-sm font-semibold text-rose-700 disabled:opacity-50">{t.taskBoard.deny}</button>
+                      </>
+                    ) : null}
+                    {selectedTask.canRecover ? (
+                      <button type="button" disabled={pendingControl?.taskId === selectedTask.id} onClick={() => void handleControlAction(selectedTask, "recover")} className="ow-btn-primary h-9 rounded-lg px-4 text-sm font-semibold disabled:opacity-50">{pendingControl?.taskId === selectedTask.id && pendingControl.action === "recover" ? "正在恢复…" : "恢复"}</button>
+                    ) : null}
+                    {selectedTask.canContinue ? (
+                      <button type="button" onClick={() => handleContinue(selectedTask)} className="ow-btn-primary h-9 rounded-lg px-4 text-sm font-semibold">继续</button>
+                    ) : null}
+                    {selectedTask.canInterrupt ? (
+                      <button type="button" disabled={pendingControl?.taskId === selectedTask.id} onClick={() => void handleControlAction(selectedTask, "interrupt")} className="ow-btn h-9 rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700 disabled:opacity-50">{pendingControl?.taskId === selectedTask.id && pendingControl.action === "interrupt" ? "正在中断…" : "中断"}</button>
+                    ) : null}
+                    <button type="button" onClick={() => handleOpen(selectedTask)} className="ow-btn h-9 rounded-lg px-4 text-sm font-semibold text-slate-700">打开 Session</button>
+                    <button type="button" onClick={() => handleTogglePin(selectedTask)} aria-pressed={selectedTask.pinned} className="ml-auto text-xs font-semibold text-slate-500 hover:text-slate-900">{selectedTask.pinned ? t.taskBoard.unpin : t.taskBoard.pin}</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-slate-400">选择一个 Session 查看详情。</div>
+              )}
+            </aside>
           </div>
         </div>
       )}

@@ -91,6 +91,25 @@ def _is_terminal(activity: SessionActivity) -> bool:
     return activity.status in {COMPLETED_STATUS, FAILED_STATUS}
 
 
+def _is_user_interruption(event: MessageEvent) -> bool:
+    payload = event.payload or {}
+    status = _compact(payload.get("status")).lower()
+    reason = _compact(payload.get("reason") or payload.get("error") or payload.get("message")).lower()
+    if status == "interrupted":
+        return True
+    if status and status not in {"aborted", "cancelled", "canceled"}:
+        return False
+    return reason in {
+        "interrupted",
+        "user interrupted",
+        "user_cancelled",
+        "user_canceled",
+        "任务已取消",
+        "用户已取消",
+        "用户中断",
+    } or "interrupted by user" in reason
+
+
 class SessionActivityProjection:
     def __init__(self) -> None:
         self._activities: dict[str, SessionActivity] = {}
@@ -152,6 +171,8 @@ class SessionActivityProjection:
             "item.completed",
             "shell.command.completed",
         }:
+            if event.turn_id:
+                activity.active_turn_id = event.turn_id
             if event.kind != "turn.started" and summary:
                 activity.last_assistant_message = summary
             activity.status = RUNNING_STATUS
@@ -161,15 +182,30 @@ class SessionActivityProjection:
                 activity.last_assistant_message = summary
                 activity.last_final_message = summary
             activity.status = COMPLETED_STATUS
+            activity.active_turn_id = ""
             _clear_attention(activity)
         elif event.kind == "turn.completed":
             if activity.status != NEEDS_ATTENTION_STATUS:
                 activity.status = COMPLETED_STATUS
-                _clear_attention(activity)
+                activity.active_turn_id = ""
+                if _is_user_interruption(event):
+                    activity.attention_reason = "任务已由用户中断"
+                    activity.attention_kind = "interrupted"
+                    activity.request_id = ""
+                    activity.approval_source = ""
+                    activity.mirrored_only = False
+                elif activity.attention_kind != "interrupted":
+                    _clear_attention(activity)
         elif event.kind == "turn.failed":
-            activity.status = FAILED_STATUS
-            activity.attention_reason = summary or "任务失败"
-            activity.attention_kind = "failure"
+            activity.active_turn_id = ""
+            if _is_user_interruption(event):
+                activity.status = COMPLETED_STATUS
+                activity.attention_reason = "任务已由用户中断"
+                activity.attention_kind = "interrupted"
+            else:
+                activity.status = FAILED_STATUS
+                activity.attention_reason = summary or "任务失败"
+                activity.attention_kind = "failure"
             activity.request_id = ""
             activity.approval_source = ""
             activity.mirrored_only = False

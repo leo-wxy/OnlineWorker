@@ -574,6 +574,268 @@ async def test_provider_owner_bridge_filters_archived_session_activities(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_exposes_and_dispatches_owned_active_interrupt(
+    monkeypatch,
+    tmp_path,
+):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    interrupt = AsyncMock()
+    provider = SimpleNamespace(
+        thread_hooks=SimpleNamespace(
+            interrupt_supported=lambda state, ws: True,
+            interrupt_thread=interrupt,
+        )
+    )
+    ws = WorkspaceInfo(
+        name="project",
+        path="/tmp/project",
+        tool="codex",
+        daemon_workspace_id="codex:/tmp/project",
+        threads={
+            "thread-active": ThreadInfo(
+                thread_id="thread-active",
+                source="app",
+                is_active=True,
+            )
+        },
+    )
+    state = AppState(storage=AppStorage(workspaces={"codex:/tmp/project": ws}))
+    adapter = SimpleNamespace(connected=True)
+    state.set_adapter("codex", adapter)
+    state.message_bus.publish(
+        create_message_event(
+            "turn.started",
+            provider_id="codex",
+            workspace_id="codex:/tmp/project",
+            workspace_path="/tmp/project",
+            session_id="thread-active",
+            turn_id="turn-1",
+            created_at=10,
+        )
+    )
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: provider if name == "codex" else None,
+    )
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+
+    activities = await bridge._handle_session_activities({"limit": 20})
+    assert activities["activities"][0]["canInterrupt"] is True
+    assert activities["activities"][0]["canRecover"] is False
+    assert activities["activities"][0]["controlReason"] == ""
+
+    response = await bridge._handle_session_control(
+        {
+            "provider_id": "codex",
+            "workspace_id": "codex:/tmp/project",
+            "session_id": "thread-active",
+            "action": "interrupt",
+        }
+    )
+
+    assert response == {
+        "ok": True,
+        "accepted": True,
+        "action": "interrupt",
+        "provider_id": "codex",
+        "session_id": "thread-active",
+        "awaiting_provider_event": True,
+    }
+    interrupt.assert_awaited_once_with(state, ws, ws.threads["thread-active"], adapter, "turn-1")
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_rejects_mirrored_session_control_without_dispatch(
+    monkeypatch,
+    tmp_path,
+):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    interrupt = AsyncMock()
+    provider = SimpleNamespace(
+        thread_hooks=SimpleNamespace(
+            interrupt_supported=lambda state, ws: True,
+            interrupt_thread=interrupt,
+        )
+    )
+    ws = WorkspaceInfo(
+        name="project",
+        path="/tmp/project",
+        tool="codex",
+        daemon_workspace_id="codex:/tmp/project",
+        threads={
+            "thread-imported": ThreadInfo(
+                thread_id="thread-imported",
+                source="imported",
+                is_active=True,
+            )
+        },
+    )
+    state = AppState(storage=AppStorage(workspaces={"codex:/tmp/project": ws}))
+    state.set_adapter("codex", SimpleNamespace(connected=True))
+    state.streaming_turns["thread-imported"] = SimpleNamespace(turn_id="turn-1")
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: provider if name == "codex" else None,
+    )
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+
+    response = await bridge._handle_session_control(
+        {
+            "provider_id": "codex",
+            "workspace_id": "codex:/tmp/project",
+            "session_id": "thread-imported",
+            "action": "interrupt",
+        }
+    )
+
+    assert response["ok"] is False
+    assert response["code"] == "not_owned"
+    assert "外部客户端" in response["error"]
+    interrupt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_recovers_owned_session_without_replaying_message(
+    monkeypatch,
+    tmp_path,
+):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    adapter = SimpleNamespace(
+        connected=True,
+        resume_thread=AsyncMock(return_value={"id": "thread-failed"}),
+        send_user_message=AsyncMock(),
+    )
+    provider = SimpleNamespace(thread_hooks=SimpleNamespace())
+    ws = WorkspaceInfo(
+        name="project",
+        path="/tmp/project",
+        tool="claude",
+        daemon_workspace_id="claude:/tmp/project",
+        threads={
+            "thread-failed": ThreadInfo(
+                thread_id="thread-failed",
+                source="app",
+                is_active=True,
+            )
+        },
+    )
+    state = AppState(storage=AppStorage(workspaces={"claude:/tmp/project": ws}))
+    state.set_adapter("claude", adapter)
+    state.message_bus.publish(
+        create_message_event(
+            "turn.failed",
+            provider_id="claude",
+            workspace_id="claude:/tmp/project",
+            workspace_path="/tmp/project",
+            session_id="thread-failed",
+            payload={"reason": "provider process exited"},
+            created_at=10,
+        )
+    )
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: provider if name == "claude" else None,
+    )
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+
+    response = await bridge._handle_session_control(
+        {
+            "provider_id": "claude",
+            "workspace_id": "claude:/tmp/project",
+            "session_id": "thread-failed",
+            "action": "recover",
+        }
+    )
+
+    assert response == {
+        "ok": True,
+        "accepted": True,
+        "action": "recover",
+        "provider_id": "claude",
+        "session_id": "thread-failed",
+        "awaiting_provider_event": False,
+    }
+    adapter.resume_thread.assert_awaited_once_with("claude:/tmp/project", "thread-failed")
+    adapter.send_user_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_reconnects_before_recovering_owned_session(
+    monkeypatch,
+    tmp_path,
+):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    disconnected = SimpleNamespace(connected=False, resume_thread=AsyncMock())
+    connected = SimpleNamespace(
+        connected=True,
+        resume_thread=AsyncMock(return_value={"id": "thread-failed"}),
+        send_user_message=AsyncMock(),
+    )
+    ensure_connected = AsyncMock(return_value=connected)
+    provider = SimpleNamespace(
+        thread_hooks=SimpleNamespace(),
+        message_hooks=SimpleNamespace(ensure_connected=ensure_connected),
+    )
+    ws = WorkspaceInfo(
+        name="project",
+        path="/tmp/project",
+        tool="codex",
+        daemon_workspace_id="codex:/tmp/project",
+        threads={
+            "thread-failed": ThreadInfo(
+                thread_id="thread-failed",
+                source="app",
+                is_active=True,
+            )
+        },
+    )
+    state = AppState(storage=AppStorage(workspaces={"codex:/tmp/project": ws}))
+    state.set_adapter("codex", disconnected)
+    state.message_bus.publish(
+        create_message_event(
+            "turn.failed",
+            provider_id="codex",
+            workspace_id="codex:/tmp/project",
+            session_id="thread-failed",
+            payload={"reason": "connection lost"},
+            created_at=10,
+        )
+    )
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: provider if name == "codex" else None,
+    )
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+
+    response = await bridge._handle_session_control(
+        {
+            "provider_id": "codex",
+            "workspace_id": "codex:/tmp/project",
+            "session_id": "thread-failed",
+            "action": "recover",
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["awaiting_provider_event"] is False
+    ensure_connected.assert_awaited_once_with(
+        state,
+        disconnected,
+        ws,
+        update=None,
+        context=None,
+        group_chat_id=0,
+        src_topic_id=None,
+    )
+    connected.resume_thread.assert_awaited_once_with("codex:/tmp/project", "thread-failed")
+    connected.send_user_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_activity_stream_emits_remove_for_archived_session(tmp_path):
     import asyncio
 
@@ -1143,6 +1405,102 @@ async def test_provider_owner_bridge_start_session_message_returns_before_thread
     activity = state.message_bus.session_activity("overlay-tool", "real-thread")
     assert activity["workspacePath"] == "/tmp/project-a"
     assert activity["lastUserMessage"] == "first message"
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_keeps_real_thread_binding_when_first_send_fails(
+    monkeypatch,
+    tmp_path,
+):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    release_send = asyncio.Event()
+
+    class _FakeAdapter:
+        connected = True
+
+        def __init__(self):
+            self.start_thread = AsyncMock(return_value={"id": "real-thread-failed"})
+            self.resume_thread = AsyncMock(return_value={"id": "real-thread-failed"})
+            self.send_user_message = AsyncMock()
+
+        def register_workspace_cwd(self, workspace_id: str, cwd: str) -> None:
+            return None
+
+    adapter = _FakeAdapter()
+    state = AppState(storage=AppStorage())
+    state.set_adapter("overlay-tool", adapter)
+
+    async def ensure_connected(state_obj, current_adapter, ws_info, **kwargs):
+        return current_adapter
+
+    async def send(state_obj, current_adapter, ws_info, thread_info, **kwargs):
+        await release_send.wait()
+        raise RuntimeError("first send failed")
+
+    provider = SimpleNamespace(
+        thread_hooks=SimpleNamespace(),
+        message_hooks=SimpleNamespace(
+            ensure_connected=ensure_connected,
+            send=send,
+        ),
+    )
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: provider if name == "overlay-tool" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_start_session_message(
+        {
+            "provider_id": "overlay-tool",
+            "workspace_dir": "/tmp/project-a",
+            "text": "first message",
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["pending"] is True
+    pending_tasks = tuple(bridge._pending_send_tasks)
+    release_send.set()
+    await asyncio.gather(*pending_tasks, return_exceptions=True)
+
+    ws = state.storage.workspaces["overlay-tool:/tmp/project-a"]
+    assert ws.threads["real-thread-failed"].source == "provider"
+    state.message_bus.publish(
+        create_message_event(
+            "turn.failed",
+            provider_id="overlay-tool",
+            workspace_id="overlay-tool:/tmp/project-a",
+            workspace_path="/tmp/project-a",
+            session_id="real-thread-failed",
+            payload={"reason": "provider process exited"},
+            created_at=10,
+        )
+    )
+
+    activities = await bridge._handle_session_activities({"limit": 20})
+    failed = next(
+        item for item in activities["activities"]
+        if item["sessionId"] == "real-thread-failed"
+    )
+    assert failed["controlMode"] == "owned"
+    assert failed["canRecover"] is True
+
+    recovered = await bridge._handle_session_control(
+        {
+            "provider_id": "overlay-tool",
+            "workspace_id": "overlay-tool:/tmp/project-a",
+            "session_id": "real-thread-failed",
+            "action": "recover",
+        }
+    )
+    assert recovered["ok"] is True
+    adapter.resume_thread.assert_awaited_once_with(
+        "overlay-tool:/tmp/project-a",
+        "real-thread-failed",
+    )
+    adapter.send_user_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio

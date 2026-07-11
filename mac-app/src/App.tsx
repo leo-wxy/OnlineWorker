@@ -118,6 +118,7 @@ export default function App() {
         providerId: event.payload.providerId,
         sessionId: event.payload.sessionId,
         workspace: event.payload.workspace,
+        focusComposerKey: event.payload.focusComposerKey,
       });
       setActiveTab("sessions");
       setShowLogs(false);
