@@ -44,6 +44,9 @@ use commands::service::{
     shutdown_managed_processes_for_app_exit, snapshot_service_status, start_service_internal,
     BotState, ServiceStatus,
 };
+use commands::support_bundle::{
+    export_support_bundle, reveal_support_bundle, run_support_diagnostics,
+};
 use commands::task_board_state::{
     control_task_board_session, get_task_board_session_activities, get_task_board_state,
     pin_task_board_session, reply_task_board_approval, start_task_board_activity_stream,
@@ -381,6 +384,9 @@ pub fn run() {
             check_cli,
             get_attachment_cache_stats,
             clear_attachment_cache,
+            run_support_diagnostics,
+            export_support_bundle,
+            reveal_support_bundle,
             get_log_file_path,
             start_log_tail,
             stop_log_tail,
