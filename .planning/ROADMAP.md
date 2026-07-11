@@ -784,3 +784,18 @@ Plans:
 - [x] 19-02 — B+A attention center UI and same-Session Continue focus (source verified)
 
 **Status:** Completed on 2026-07-11. Source and installed desktop/live-provider verification passed, including interruption, same-Session Continue/recovery, no replay, Session request-storm/white-screen hardening, reversible Claude local archive overlays, and the widened desktop detail content. Installed narrow-width visual UAT was explicitly waived and is not represented as passed.
+
+### Phase 20: One-Click Diagnostics And Support Bundle
+
+**Goal:** Let users run bounded local health checks and export a privacy-safe support bundle from Settings without requiring the bot process to be healthy.
+**Requirements**: DIAG-01, SUPPORT-01, PRIV-01
+**Depends on:** Phase 19
+**Scope Fence:** Reuse current Dashboard, Service, provider readiness, owner-bridge, and log truth. Do not add automatic repair, automatic restart, automatic upload, full transcripts, raw credentials, or a new top-level Tab.
+**Plans:** 2 plans
+
+Plans:
+
+- [x] 20-01 — Add bounded diagnostics, redaction, and support-bundle generation (source verified)
+- [x] 20-02 — Add Maintenance UI, export/reveal flow, and installed-app verification
+
+**Status:** Completed on 2026-07-11. Source regression and installed-app diagnostics, localized cancellation, strict privacy-safe ZIP export, real `.env` zero-match scan, and Finder reveal passed.

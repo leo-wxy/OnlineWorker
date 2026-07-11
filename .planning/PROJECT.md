@@ -15,7 +15,7 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 - Latest archived milestone: `v1.2.1`
 - Release tag: `1.8.0`
 - Active milestone: General AI Capability and Session Operations
-- Active roadmap phase: None; Phase 19 is complete and milestone archival remains separate
+- Latest completed roadmap phase: Phase 20 — One-Click Diagnostics And Support Bundle
 
 ## Requirements
 
@@ -36,9 +36,10 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 - ✓ The existing Task Board provides grouped attention/running/recent-ended work with selected Session detail and recent conversation context — v1.8.0 Phase 19
 - ✓ Provider-owned interrupt, same-Session Continue, and recovery operate without local terminal fabrication or message replay — v1.8.0 Phase 19
 
-### Active
+### Validated In Phase 20
 
-(No active phase requirements; define the next milestone before adding new scope.)
+- ✓ Run bounded local diagnostics from Settings without depending on a healthy bot process.
+- ✓ Export a privacy-safe support ZIP and reveal it in Finder without automatic upload.
 
 ### Out of Scope
 
@@ -87,6 +88,8 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 - 2026-07-11: Phase 17 and Phase 18 closed after canonical UAT/verification, full source gates, version `1.7.4` package/install/relaunch checks, and installed App provider-session materialization. Real Telegram UAT was explicitly waived and is not claimed as passed.
 - 2026-07-11: Phase 19 added for the pending-action center and Session interrupt/resume/recovery; global search is explicitly out of scope.
 - 2026-07-11: Phase 19 completed with source and installed core UAT, published as `v1.8.0`; installed narrow-width visual UAT was explicitly waived without claiming a pass.
+- 2026-07-11: Phase 20 added for one-click diagnostics and privacy-safe local support bundles; automatic repair and upload are explicitly excluded.
+- 2026-07-11: Phase 20 completed after source regression and installed-app diagnostics, localized cancellation, strict ZIP whitelist, real environment-value privacy scan, and Finder reveal passed.
 
 ---
-*Last updated: 2026-07-11 after Phase 19 closure*
+*Last updated: 2026-07-11 after Phase 20 completion*

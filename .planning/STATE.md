@@ -2,26 +2,26 @@
 gsd_state_version: 1.0
 milestone: general-ai-capability-and-session-operations
 milestone_name: General AI Capability and Session Operations
-current_phase: null
-current_phase_name: Milestone closeout
-current_plan: null
-status: Phase 19 complete; milestone archival remains separate
-last_updated: "2026-07-11T08:21:38.000Z"
+current_phase: 20
+current_phase_name: One-Click Diagnostics And Support Bundle
+current_plan: Phase 20 complete
+status: Phase 20 complete and installed-app verified
+last_updated: "2026-07-11T12:18:00.000Z"
 progress:
-  total_phases: 14
-  completed_phases: 14
-  total_plans: 29
-  completed_plans: 19
-  percent: 66
+  total_phases: 15
+  completed_phases: 15
+  total_plans: 31
+  completed_plans: 21
+  percent: 68
 ---
 
 # Project State
 
 **Updated:** 2026-07-11
 **Current milestone:** General AI Capability and Session Operations
-**Current phase:** None — Phase 19 is complete
-**Status:** Phase 19 complete; milestone archival remains separate
-**Current plan:** None
+**Current phase:** 20 — One-Click Diagnostics And Support Bundle
+**Status:** Phase 20 complete and installed-app verified
+**Current plan:** Phase 20 complete
 **Last archived milestone:** v1.2.1
 
 ## Current Status
@@ -46,6 +46,7 @@ progress:
 - Phase 17 is complete. Provider-private session/workspace parsing stays behind provider/plugin boundaries; shared surfaces consume normalized provider facts. Full source gates, version `1.7.4` package/install/relaunch, IPC, binary identity, and installed owner-bridge provider-facts checks passed. Real Telegram visual UAT was explicitly waived and is not claimed as passed.
 - Phase 18 is complete. App and Telegram entry points share `core/provider_session_new.py` for provider validation, real-thread materialization, and first-message send while keeping App pending and Telegram topic-binding shells separate. Packaged App smoke materialized real Codex and Claude sessions with their first messages. Real Telegram `/new` UAT was explicitly waived and is not claimed as passed.
 - Phase 19 is complete. Source and installed desktop/live-provider behavior are verified. The existing Task Board uses grouped attention/running/recent-ended rows with a selected detail pane and recent conversation excerpts; provider-owned interrupt/recovery and same-Session Continue focus passed installed UAT. A recovery-created Claude process used the exact same Session id through `--resume` without replay. Concurrent Session list requests are coalesced and blocking owner-bridge I/O is isolated from Tauri async workers, preventing the observed request storm, log-pipe stall, owner-bridge refusal, and white screen. Claude sessions without source archive support use a reversible local archive overlay. The installed narrow-width visual check was explicitly waived at closeout and is not claimed as passed.
+- Phase 20 is complete and installed-app verified. Settings > Maintenance provides bounded diagnostics, compact independent results, summary copy, privacy-safe local ZIP export, and Finder reveal. Installed UAT fixed foreground save behavior, localized cancellation, macOS metadata leakage, and real environment-value leakage before final closure. The final ZIP whitelist and installed `.env` zero-match scan passed.
 - Phase 17's intermediate preview/cache/hydration fixes and their earlier installed evidence are consolidated in `17-01-SUMMARY.md`; `17-VERIFICATION.md` is the canonical closure result.
 
 ## Archived Milestone
@@ -72,13 +73,14 @@ progress:
 | 17. Provider Session Core Isolation | Completed; canonical verification passed and installed provider facts verified | None; live Telegram visual UAT was waived and remains unclaimed |
 | 18. Provider Session New Flow | Completed; canonical verification passed and packaged App real-session materialization verified | None; live Telegram `/new` UAT was waived and remains unclaimed |
 | 19. Attention Center And Session Interrupt/Resume | Completed; source and installed core UAT passed | None; installed narrow-width visual check was explicitly waived and remains unclaimed |
+| 20. One-Click Diagnostics And Support Bundle | Completed and installed-app verified | None |
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 **Core value:** Developers can reliably control local AI coding CLI workflows from an installed Mac app while receiving timely remote notifications and final results through supported notification channels.
-**Current focus:** Milestone closeout or next-milestone definition
+**Current focus:** Phase 20 — One-Click Diagnostics And Support Bundle
 
 ## Key Preserved Decisions
 
@@ -198,9 +200,10 @@ See: `.planning/PROJECT.md` (updated 2026-07-11)
 - Phase 18 completed on 2026-07-11: canonical UAT/verification passed and packaged App requests materialized real Codex and Claude sessions with their first messages. Real Telegram `/new` UAT was waived and remains unclaimed.
 - Phase 19 added on 2026-07-11: Attention Center And Session Interrupt/Resume. Global search is explicitly excluded.
 - Phase 19 completed on 2026-07-11 with source and installed core UAT, version `1.8.0` package/install verification, and explicit waiver of the unexecuted installed narrow-width visual check.
+- Phase 20 added on 2026-07-11: bounded local diagnostics and privacy-safe support-bundle export in Maintenance; no automatic repair or upload.
 
 ## Session Continuity
 
 Last session: 2026-07-11
-Stopped at: Phase 19 complete; milestone archival remains separate
+Stopped at: Phase 20 complete and installed-app verified
 Resume file: None
