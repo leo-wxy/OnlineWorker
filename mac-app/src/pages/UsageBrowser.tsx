@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchProviderMetadata, fetchProviderUsageSummary } from "../components/session-browser/api";
+import { fetchUsageSourceCatalog, fetchUsageSourceSummary } from "../components/session-browser/api";
 import { StatePanel, getProviderUi } from "../components/session-browser/presentation";
 import { useI18n } from "../i18n";
-import type { ProviderMetadata, ProviderUsageQuery, ProviderUsageSummary } from "../types";
+import type { UsageQuery, UsageSourceCatalogEntry, UsageSourceSummary } from "../types";
 import { buildDefaultUsageQuery } from "../utils/usageDateRange";
-import { visibleUsageProviders } from "../utils/usageProviders";
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
@@ -47,11 +46,11 @@ function chartBackground(providerId: string) {
 
 export function UsageBrowser() {
   const { t } = useI18n();
-  const [providers, setProviders] = useState<ProviderMetadata[]>([]);
+  const [providers, setProviders] = useState<UsageSourceCatalogEntry[]>([]);
   const [activeProviderId, setActiveProviderId] = useState<string | null>(null);
-  const [query, setQuery] = useState<ProviderUsageQuery>(() => buildDefaultUsageQuery());
-  const [draftQuery, setDraftQuery] = useState<ProviderUsageQuery>(() => buildDefaultUsageQuery());
-  const [summary, setSummary] = useState<ProviderUsageSummary | null>(null);
+  const [query, setQuery] = useState<UsageQuery>(() => buildDefaultUsageQuery());
+  const [draftQuery, setDraftQuery] = useState<UsageQuery>(() => buildDefaultUsageQuery());
+  const [summary, setSummary] = useState<UsageSourceSummary | null>(null);
   const [providersLoading, setProvidersLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -59,25 +58,25 @@ export function UsageBrowser() {
   const hasLoadedRef = useRef(false);
   const autoRangeRef = useRef(true);
 
-  const usageProviders = useMemo(() => visibleUsageProviders(providers), [providers]);
+  const usageProviders = providers;
   const activeProvider = useMemo(() => {
-    return usageProviders.find((provider) => provider.id === activeProviderId) ?? usageProviders[0] ?? null;
+    return usageProviders.find((provider) => provider.sourceId === activeProviderId) ?? usageProviders[0] ?? null;
   }, [activeProviderId, usageProviders]);
 
   useEffect(() => {
     let cancelled = false;
     setProvidersLoading(true);
-    fetchProviderMetadata()
+    fetchUsageSourceCatalog()
       .then((metadata) => {
         if (cancelled) {
           return;
         }
-        const nextProviders = visibleUsageProviders(metadata);
+        const nextProviders = metadata.filter((source) => Boolean(source.providerId));
         setProviders(nextProviders);
         setActiveProviderId((current) => (
-          current && nextProviders.some((provider) => provider.id === current)
+          current && nextProviders.some((provider) => provider.sourceId === current)
             ? current
-            : nextProviders[0]?.id ?? null
+            : nextProviders[0]?.sourceId ?? null
         ));
         setError(null);
       })
@@ -100,12 +99,12 @@ export function UsageBrowser() {
     };
   }, []);
 
-  const loadSummary = useCallback(async (providerId: string, query: ProviderUsageQuery) => {
+  const loadSummary = useCallback(async (source: UsageSourceCatalogEntry, query: UsageQuery, forceRefresh = false) => {
     const hasLoadedBefore = hasLoadedRef.current;
     setLoading(!hasLoadedBefore);
     setRefreshing(hasLoadedBefore);
     try {
-      const next = await fetchProviderUsageSummary(providerId, query);
+      const next = await fetchUsageSourceSummary(source.pluginId, source.sourceId, query, forceRefresh);
       if (!next || typeof next !== "object") {
         throw new Error(t.usage.unavailable);
       }
@@ -122,7 +121,7 @@ export function UsageBrowser() {
   }, [t.usage.unavailable]);
 
   const refreshUsage = useCallback(() => {
-    if (!activeProvider?.id) {
+    if (!activeProvider?.sourceId) {
       return;
     }
     if (autoRangeRef.current) {
@@ -130,29 +129,29 @@ export function UsageBrowser() {
       setDraftQuery(next);
       setQuery(next);
       if (next.startDate === query.startDate && next.endDate === query.endDate) {
-        void loadSummary(activeProvider.id, next);
+        void loadSummary(activeProvider, next, true);
       }
       return;
     }
-    void loadSummary(activeProvider.id, query);
-  }, [activeProvider?.id, loadSummary, query]);
+    void loadSummary(activeProvider, query, true);
+  }, [activeProvider, loadSummary, query]);
 
   useEffect(() => {
-    if (!activeProvider?.id) {
+    if (!activeProvider?.sourceId) {
       setLoading(false);
       setRefreshing(false);
       setSummary(null);
       return;
     }
-    void loadSummary(activeProvider.id, query);
-  }, [activeProvider?.id, loadSummary, query]);
+    void loadSummary(activeProvider, query);
+  }, [activeProvider, loadSummary, query]);
 
   useEffect(() => {
     setDraftQuery(query);
   }, [query]);
 
   const providerUi = useMemo(() => {
-    return getProviderUi(activeProvider?.id ?? "provider", activeProvider?.label);
+    return getProviderUi(activeProvider?.sourceId ?? "usage", activeProvider?.label);
   }, [activeProvider, t]);
 
   const totals = useMemo(() => {
@@ -189,22 +188,19 @@ export function UsageBrowser() {
         </button>
       </div>
 
-      <div
-        className="ow-segment grid w-full rounded-2xl p-1"
-        style={{ gridTemplateColumns: `repeat(${Math.max(1, usageProviders.length)}, minmax(0, 1fr))` }}
-      >
+      <div className="ow-segment flex w-full gap-1 overflow-x-auto rounded-2xl p-1">
         {usageProviders.map((provider) => {
-          const ui = getProviderUi(provider.id, provider.label);
-          const selected = provider.id === activeProvider?.id;
+          const ui = getProviderUi(provider.sourceId, provider.label);
+          const selected = provider.sourceId === activeProvider?.sourceId;
           return (
             <button
-              key={provider.id}
+              key={`${provider.pluginId}:${provider.sourceId}`}
               type="button"
               onClick={() => {
                 hasLoadedRef.current = false;
-                setActiveProviderId(provider.id);
+                setActiveProviderId(provider.sourceId);
               }}
-              className={`rounded-xl px-3 py-2 text-sm font-bold transition-all ${
+              className={`shrink-0 rounded-xl px-3 py-2 text-sm font-bold transition-all ${
                 selected ? "ow-segment-button-active" : "ow-segment-button hover:text-gray-700"
               }`}
             >
@@ -311,7 +307,7 @@ export function UsageBrowser() {
                         className="w-full rounded-t-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.32)]"
                         style={{
                           height: `${height}px`,
-                          background: chartBackground(activeProvider?.id ?? ""),
+                          background: chartBackground(activeProvider?.sourceId ?? ""),
                         }}
                       />
                       <div className="text-[11px] font-medium text-slate-500">{day.date.slice(5)}</div>

@@ -48,7 +48,8 @@
       "icons/icon.icns"
     ],
     "externalBin": [
-      "binaries/onlineworker-bot"
+      "binaries/onlineworker-bot",
+      "binaries/ccusage"
     ]
   }
 }

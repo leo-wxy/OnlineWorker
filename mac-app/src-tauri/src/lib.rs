@@ -38,7 +38,7 @@ use commands::provider_sessions::{
     start_provider_session_event_stream, start_provider_session_message,
     stop_provider_session_event_stream,
 };
-use commands::provider_usage::get_provider_usage_summary;
+use commands::provider_usage::{get_usage_source_catalog, get_usage_source_summary};
 use commands::service::{
     check_cli, service_restart, service_start, service_status, service_stop,
     shutdown_managed_processes_for_app_exit, snapshot_service_status, start_service_internal,
@@ -420,7 +420,8 @@ pub fn run() {
             stage_session_composer_attachments,
             start_provider_session_event_stream,
             stop_provider_session_event_stream,
-            get_provider_usage_summary,
+            get_usage_source_catalog,
+            get_usage_source_summary,
             get_menubar_popover_snapshot,
             open_menubar_popover_session,
             open_menubar_tab,

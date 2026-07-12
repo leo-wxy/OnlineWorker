@@ -283,7 +283,7 @@ export interface DashboardState {
   generatedAtEpoch: number;
 }
 
-export interface ProviderUsageDay {
+export interface UsageSourceDay {
   date: string;
   inputTokens: number;
   outputTokens: number;
@@ -293,16 +293,27 @@ export interface ProviderUsageDay {
   totalCostUsd?: number | null;
 }
 
-export interface ProviderUsageQuery {
+export interface UsageQuery {
   startDate: string;
   endDate: string;
 }
 
-export interface ProviderUsageSummary {
-  providerId: string;
-  days: ProviderUsageDay[];
+export interface UsageSourceSummary {
+  pluginId: string;
+  sourceId: string;
+  days: UsageSourceDay[];
   updatedAtEpoch: number;
   unsupportedReason?: string | null;
+}
+
+export interface UsageSourceCatalogEntry {
+  pluginId: string;
+  sourceId: string;
+  label: string;
+  description: string;
+  order: number;
+  icon?: ProviderIconMetadata | null;
+  providerId?: string | null;
 }
 
 // Config file content

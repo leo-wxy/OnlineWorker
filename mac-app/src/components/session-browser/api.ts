@@ -3,8 +3,9 @@ import type {
   ComposerAttachment,
   ProviderMetadata,
   ProviderSessionSendResult,
-  ProviderUsageQuery,
-  ProviderUsageSummary,
+  UsageQuery,
+  UsageSourceCatalogEntry,
+  UsageSourceSummary,
   SessionTurn,
 } from "../../types";
 import { limitSessionTurns } from "./shared";
@@ -24,14 +25,23 @@ export async function fetchProviderMetadata(): Promise<ProviderMetadata[]> {
   return invoke<ProviderMetadata[]>("get_provider_metadata");
 }
 
-export async function fetchProviderUsageSummary(
-  providerId: string,
-  query: ProviderUsageQuery,
-): Promise<ProviderUsageSummary> {
-  return invoke<ProviderUsageSummary>("get_provider_usage_summary", {
-    providerId,
+export async function fetchUsageSourceCatalog(): Promise<UsageSourceCatalogEntry[]> {
+  return invoke<UsageSourceCatalogEntry[]>("get_usage_source_catalog");
+}
+
+export async function fetchUsageSourceSummary(
+  pluginId: string,
+  sourceId: string,
+  query: UsageQuery,
+  forceRefresh = false,
+): Promise<UsageSourceSummary> {
+  return invoke<UsageSourceSummary>("get_usage_source_summary", {
+    pluginId,
+    sourceId,
     startDate: query.startDate,
     endDate: query.endDate,
+    timezone: "local",
+    forceRefresh,
   });
 }
 

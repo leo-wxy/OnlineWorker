@@ -133,7 +133,7 @@ if ! command -v rustc &>/dev/null; then
 	echo "ERROR: rustc not found. Install Rust: https://rustup.rs"
 	exit 1
 fi
-TARGET_TRIPLE=$(rustc -vV | awk '/host:/{print $2}')
+TARGET_TRIPLE="${ONLINEWORKER_TARGET_TRIPLE:-$(rustc -vV | awk '/host:/{print $2}')}"
 if [ -z "$TARGET_TRIPLE" ]; then
 	echo "ERROR: Could not detect target triple from rustc"
 	exit 1
@@ -160,14 +160,14 @@ fi
 PYINSTALLER_CMD="$PYTHON_ARM64 -m PyInstaller"
 
 # Step 2: Build Python bot binary
-echo "=== Step 1/3: PyInstaller build ==="
+echo "=== Step 1/4: PyInstaller build ==="
 cd "$PROJECT_ROOT"
 $PYINSTALLER_CMD onlineworker.spec --clean --noconfirm
 echo "Binary: $(ls -lh dist/onlineworker-bot)"
 echo ""
 
 # Step 3: Copy binary with target-triple suffix for Tauri sidecar
-echo "=== Step 2/3: Copy sidecar binary ==="
+echo "=== Step 2/4: Copy bot sidecar ==="
 mkdir -p "$PROJECT_ROOT/mac-app/src-tauri/binaries"
 cp "$PROJECT_ROOT/dist/onlineworker-bot" \
 	"$PROJECT_ROOT/mac-app/src-tauri/binaries/onlineworker-bot-${TARGET_TRIPLE}"
@@ -175,8 +175,24 @@ chmod +x "$PROJECT_ROOT/mac-app/src-tauri/binaries/onlineworker-bot-${TARGET_TRI
 echo "Sidecar: mac-app/src-tauri/binaries/onlineworker-bot-${TARGET_TRIPLE}"
 echo ""
 
-# Step 4: Build Tauri app (produces .dmg)
-echo "=== Step 3/3: Tauri build ==="
+# Step 4: Build pinned ccusage sidecar
+echo "=== Step 3/4: Build ccusage sidecar ==="
+CCUSAGE_MANIFEST="$PROJECT_ROOT/third_party/ccusage/rust/crates/ccusage/Cargo.toml"
+CCUSAGE_TARGET_DIR="$PROJECT_ROOT/third_party/ccusage/rust/target"
+if [ ! -f "$CCUSAGE_MANIFEST" ]; then
+	echo "ERROR: ccusage submodule is not initialized. Run: git submodule update --init --recursive"
+	exit 1
+fi
+CCUSAGE_PRICING_JSON_PATH="$PROJECT_ROOT/third_party/ccusage-pricing.json" \
+	cargo build --manifest-path "$CCUSAGE_MANIFEST" --release --locked --target "$TARGET_TRIPLE"
+cp "$CCUSAGE_TARGET_DIR/$TARGET_TRIPLE/release/ccusage" \
+	"$PROJECT_ROOT/mac-app/src-tauri/binaries/ccusage-${TARGET_TRIPLE}"
+chmod +x "$PROJECT_ROOT/mac-app/src-tauri/binaries/ccusage-${TARGET_TRIPLE}"
+echo "Sidecar: mac-app/src-tauri/binaries/ccusage-${TARGET_TRIPLE}"
+echo ""
+
+# Step 5: Build Tauri app (produces .dmg)
+echo "=== Step 4/4: Tauri build ==="
 ensure_npm
 hash -r
 check_frontend_package_manager_state

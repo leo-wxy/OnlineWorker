@@ -12,6 +12,9 @@ icon:
   source: https://simpleicons.org/icons/claude.svg
 
 provider:
+  usage:
+    plugin_id: ccusage
+    source_id: claude
   visible: true
   managed: false
   autostart: false
@@ -34,7 +37,6 @@ provider:
     questions: true
     photos: true
     files: true
-    usage: true
     commands: true
     launch_methods: true
     command_wrappers: []

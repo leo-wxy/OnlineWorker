@@ -31,6 +31,11 @@ if [ ! -x "$APP_BUNDLE/Contents/MacOS/onlineworker-bot" ]; then
 	exit 1
 fi
 
+if [ ! -x "$APP_BUNDLE/Contents/MacOS/ccusage" ]; then
+	echo "ERROR: ccusage sidecar not found in app bundle" >&2
+	exit 1
+fi
+
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/onlineworker-dmg.XXXXXX")"
 cleanup() {
 	rm -rf "$STAGING_DIR"

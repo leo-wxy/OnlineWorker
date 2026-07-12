@@ -213,14 +213,16 @@ async def test_provider_owner_bridge_list_sessions_excludes_legacy_draft_threads
 
 
 @pytest.mark.asyncio
-async def test_provider_owner_bridge_serves_provider_usage_summary(monkeypatch, tmp_path):
+async def test_provider_owner_bridge_serves_usage_source_summary(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
     called = {}
 
-    def get_summary(start_date, end_date):
-        called["range"] = (start_date, end_date)
+    def get_summary(plugin_id, source_id, start_date, end_date, **kwargs):
+        called["request"] = (plugin_id, source_id, start_date, end_date, kwargs)
         return {
+            "pluginId": plugin_id,
+            "sourceId": source_id,
             "days": [
                 {
                     "date": "2026-05-21",
@@ -231,33 +233,29 @@ async def test_provider_owner_bridge_serves_provider_usage_summary(monkeypatch, 
                     "totalTokens": 15,
                     "totalCostUsd": None,
                 }
-            ]
+            ],
+            "updatedAtEpoch": 1770000000,
+            "unsupportedReason": None,
         }
 
-    monkeypatch.setattr(
-        "core.provider_owner_bridge.get_provider",
-        lambda name, *args, **kwargs: SimpleNamespace(
-            usage_hooks=SimpleNamespace(get_summary=get_summary)
-        )
-        if name == "overlay-tool"
-        else None,
-    )
-    monkeypatch.setattr("core.provider_session_bridge._unix_time_seconds", lambda: 1770000000)
+    monkeypatch.setattr("core.usage.runtime.get_usage_source_summary", get_summary)
 
     bridge = ProviderOwnerBridge(AppState(storage=AppStorage()), data_dir=str(tmp_path))
-    response = await bridge._handle_usage_summary(
+    response = await bridge._handle_usage_source_summary(
         {
-            "provider_id": "overlay-tool",
+            "plugin_id": "ccusage",
+            "source_id": "codex",
             "start_date": "2026-05-20",
             "end_date": "2026-05-21",
         }
     )
 
-    assert called["range"] == ("2026-05-20", "2026-05-21")
+    assert called["request"][:4] == ("ccusage", "codex", "2026-05-20", "2026-05-21")
     assert response == {
         "ok": True,
         "summary": {
-            "providerId": "overlay-tool",
+            "pluginId": "ccusage",
+            "sourceId": "codex",
             "days": [
                 {
                     "date": "2026-05-21",

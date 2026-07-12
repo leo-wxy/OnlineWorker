@@ -13,7 +13,8 @@ from typing import Any, Callable, Optional
 from telegram import Update
 from telegram.ext import ContextTypes
 from config import is_provider_exposed
-from core.provider_session_bridge import get_provider_usage_summary
+from core.usage.registry import get_provider_usage_source
+from core.usage.runtime import get_usage_source_summary
 from core.providers.facts import list_provider_threads, query_provider_active_thread_ids
 from core.providers.registry import get_provider
 from core.state import AppState
@@ -499,7 +500,12 @@ def make_token_usage_handler(state: AppState, group_chat_id: int) -> Callable:
         start_date, end_date = _default_token_usage_range()
 
         try:
-            summary = get_provider_usage_summary(provider_id, start_date, end_date)
+            association = get_provider_usage_source(provider_id)
+            if association is None:
+                raise ValueError(f"Provider '{provider_id}' 没有关联用量来源")
+            summary = get_usage_source_summary(
+                association[0], association[1], start_date, end_date
+            )
         except ValueError as exc:
             await _send_to_group(
                 context.bot,

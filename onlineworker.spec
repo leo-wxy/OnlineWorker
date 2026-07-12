@@ -13,6 +13,7 @@ provider_hiddenimports = (
     collect_submodules('plugins.providers.builtin.claude.python')
     + collect_submodules('plugins.providers.builtin.codex.python')
 )
+usage_hiddenimports = collect_submodules('plugins.usage.builtin.ccusage.python')
 
 a = Analysis(
     ['main.py'],
@@ -23,6 +24,8 @@ a = Analysis(
         ('plugins/providers/builtin/claude/plugin.yaml', 'plugins/providers/builtin/claude'),
         ('plugins/providers/builtin/claude/python/claude_hook_relay.py', 'plugins/providers/builtin/claude/python'),
         ('plugins/providers/builtin/codex/plugin.yaml', 'plugins/providers/builtin/codex'),
+        ('plugins/usage/builtin/ccusage/plugin.yaml', 'plugins/usage/builtin/ccusage'),
+        ('plugins/usage/builtin/ccusage/icon.svg', 'plugins/usage/builtin/ccusage'),
     ],
     hiddenimports=[
         'yaml',
@@ -36,7 +39,7 @@ a = Analysis(
         'websockets.legacy.client',
         'telegram',
         'telegram.ext',
-    ] + provider_hiddenimports,
+    ] + provider_hiddenimports + usage_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -12,6 +12,9 @@ icon:
   source: https://simpleicons.org/icons/openai.svg
 
 provider:
+  usage:
+    plugin_id: ccusage
+    source_id: codex
   visible: true
   managed: true
   autostart: true
@@ -34,7 +37,6 @@ provider:
     questions: false
     photos: true
     files: true
-    usage: true
     commands: true
     command_wrappers:
       - model

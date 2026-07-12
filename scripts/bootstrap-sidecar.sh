@@ -17,20 +17,19 @@ if [ -z "$TARGET_TRIPLE" ]; then
 fi
 
 BIN_DIR="$PROJECT_ROOT/mac-app/src-tauri/binaries"
-SIDEcar="$BIN_DIR/onlineworker-bot-${TARGET_TRIPLE}"
-
-if [ -x "$SIDEcar" ]; then
-	echo "Sidecar already exists: ${SIDEcar#$PROJECT_ROOT/}"
-	exit 0
-fi
-
 mkdir -p "$BIN_DIR"
-cat >"$SIDEcar" <<'EOF'
+for name in onlineworker-bot ccusage; do
+	SIDECAR="$BIN_DIR/${name}-${TARGET_TRIPLE}"
+	if [ -x "$SIDECAR" ]; then
+		echo "Sidecar already exists: ${SIDECAR#$PROJECT_ROOT/}"
+		continue
+	fi
+	cat >"$SIDECAR" <<EOF
 #!/bin/sh
-echo "onlineworker-bot sidecar is a local test placeholder." >&2
+echo "$name sidecar is a local test placeholder." >&2
 echo "Run scripts/build.sh to build the real PyInstaller sidecar before packaging or running the app service." >&2
 exit 64
 EOF
-chmod +x "$SIDEcar"
-
-echo "Created placeholder sidecar: ${SIDEcar#$PROJECT_ROOT/}"
+	chmod +x "$SIDECAR"
+	echo "Created placeholder sidecar: ${SIDECAR#$PROJECT_ROOT/}"
+done

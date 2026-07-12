@@ -9,31 +9,32 @@ import { buildDefaultUsageQuery } from "../src/utils/usageDateRange.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
 
-test("usage browser discovers provider usage tabs from metadata", () => {
+test("usage browser discovers all usage sources from the usage catalog", () => {
   const page = readFileSync(join(root, "src", "pages", "UsageBrowser.tsx"), "utf8");
   const api = readFileSync(join(root, "src", "components", "session-browser", "api.ts"), "utf8");
   const types = readFileSync(join(root, "src", "types.ts"), "utf8");
   const dateRange = readFileSync(join(root, "src", "utils", "usageDateRange.js"), "utf8");
 
-  assert.match(types, /export interface ProviderUsageDay/);
-  assert.match(types, /export interface ProviderUsageSummary/);
-  assert.match(types, /export interface ProviderUsageQuery/);
-  assert.match(types, /providerId: string;/);
-  assert.match(types, /days: ProviderUsageDay\[];/);
+  assert.match(types, /export interface UsageSourceDay/);
+  assert.match(types, /export interface UsageSourceSummary/);
+  assert.match(types, /export interface UsageQuery/);
+  assert.match(types, /sourceId: string;/);
+  assert.match(types, /days: UsageSourceDay\[];/);
   assert.match(types, /startDate: string;/);
   assert.match(types, /endDate: string;/);
   assert.match(types, /usage: boolean;/);
 
-  assert.match(api, /fetchProviderUsageSummary/);
-  assert.match(api, /fetchProviderMetadata/);
-  assert.match(api, /query: ProviderUsageQuery/);
-  assert.match(api, /invoke<ProviderUsageSummary>\("get_provider_usage_summary"/);
+  assert.match(api, /fetchUsageSourceSummary/);
+  assert.match(api, /fetchUsageSourceCatalog/);
+  assert.match(api, /query: UsageQuery/);
+  assert.match(api, /invoke<UsageSourceSummary>\("get_usage_source_summary"/);
   assert.match(api, /startDate: query\.startDate/);
   assert.match(api, /endDate: query\.endDate/);
 
   assert.doesNotMatch(page, /const PROVIDER_TABS = \["codex", "claude"\] as const;/);
-  assert.match(page, /fetchProviderMetadata/);
-  assert.match(page, /visibleUsageProviders/);
+  assert.match(page, /fetchUsageSourceCatalog/);
+  assert.match(page, /metadata\.filter\(\(source\) => Boolean\(source\.providerId\)\)/);
+  assert.doesNotMatch(page, /visibleUsageProviders/);
   assert.match(dateRange, /const DEFAULT_RANGE_DAYS = 7;/);
   assert.match(dateRange, /function localIsoDate\(date\)/);
   assert.match(dateRange, /export function buildDefaultUsageQuery/);
@@ -42,8 +43,8 @@ test("usage browser discovers provider usage tabs from metadata", () => {
   assert.match(page, /const refreshUsage = useCallback/);
   assert.match(page, /autoRangeRef\.current = false/);
   assert.match(page, /const \[draftQuery,\s*setDraftQuery\]/);
-  assert.match(page, /fetchProviderUsageSummary\(providerId,\s*query\)/);
-  assert.match(page, /activeProvider\?\.id/);
+  assert.match(page, /fetchUsageSourceSummary\(source\.pluginId, source\.sourceId, query, forceRefresh\)/);
+  assert.match(page, /activeProvider\?\.sourceId/);
   assert.match(page, /setQuery\(draftQuery\)/);
   assert.match(page, /type="date"/);
   assert.match(page, /t\.usage\.applyFilters/);

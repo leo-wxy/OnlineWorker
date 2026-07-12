@@ -24,6 +24,9 @@ def test_headless_dmg_fallback_packages_an_existing_app_bundle(tmp_path):
     sidecar = app_bundle / "Contents" / "MacOS" / "onlineworker-bot"
     sidecar.write_text("sidecar", encoding="utf-8")
     sidecar.chmod(0o755)
+    usage_sidecar = app_bundle / "Contents" / "MacOS" / "ccusage"
+    usage_sidecar.write_text("usage-sidecar", encoding="utf-8")
+    usage_sidecar.chmod(0o755)
 
     output_dir = tmp_path / "output"
     fake_ditto = tmp_path / "ditto"

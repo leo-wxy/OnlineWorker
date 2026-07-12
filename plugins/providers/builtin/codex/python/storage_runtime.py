@@ -56,73 +56,6 @@ def _parse_codex_timestamp_ms(value) -> int:
         return 0
 
 
-def _usage_date_from_timestamp(value: object) -> str:
-    text = str(value or "").strip()
-    if len(text) < 10:
-        return ""
-    candidate = text[:10]
-    if (
-        len(candidate) == 10
-        and candidate[4] == "-"
-        and candidate[7] == "-"
-        and candidate[:4].isdigit()
-        and candidate[5:7].isdigit()
-        and candidate[8:].isdigit()
-    ):
-        return candidate
-    return ""
-
-
-def _int_usage_value(value: object) -> int:
-    if isinstance(value, bool) or value is None:
-        return 0
-    try:
-        return max(0, int(value))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _codex_raw_usage(value: object) -> dict[str, int] | None:
-    if not isinstance(value, dict):
-        return None
-    input_tokens = _int_usage_value(value.get("input_tokens"))
-    cached_input_tokens = _int_usage_value(
-        value.get("cached_input_tokens") or value.get("cache_read_input_tokens")
-    )
-    output_tokens = _int_usage_value(value.get("output_tokens"))
-    total_tokens = _int_usage_value(value.get("total_tokens"))
-    if total_tokens == 0:
-        total_tokens = input_tokens + output_tokens
-    return {
-        "input": input_tokens,
-        "cache_read": cached_input_tokens,
-        "output": output_tokens,
-        "total": total_tokens,
-    }
-
-
-def _subtract_codex_usage(
-    current: dict[str, int],
-    previous: Optional[dict[str, int]],
-) -> dict[str, int]:
-    previous = previous or {}
-    return {
-        "input": max(0, current["input"] - int(previous.get("input", 0))),
-        "cache_read": max(0, current["cache_read"] - int(previous.get("cache_read", 0))),
-        "output": max(0, current["output"] - int(previous.get("output", 0))),
-        "total": max(0, current["total"] - int(previous.get("total", 0))),
-    }
-
-
-def _is_zero_codex_usage(raw: dict[str, int]) -> bool:
-    return (
-        raw["input"] == 0
-        and raw["cache_read"] == 0
-        and raw["output"] == 0
-        and raw["total"] == 0
-    )
-
-
 def _collect_jsonl_files(root: str) -> list[str]:
     if not os.path.isdir(root):
         return []
@@ -146,54 +79,26 @@ def _session_file_signature(fpath: str) -> tuple[int, int] | None:
 
 def _cached_scan_codex_session_file(
     fpath: str,
-) -> tuple[Optional[dict], bool, dict[str, dict[str, object]]]:
+) -> tuple[Optional[dict], bool]:
     signature = _session_file_signature(fpath)
     if signature is None:
         _CODEX_SESSION_FILE_CACHE.pop(fpath, None)
-        return None, False, {}
+        return None, False
 
     cached = _CODEX_SESSION_FILE_CACHE.get(fpath)
     if cached is not None and cached.get("signature") == signature:
-        return (
-            cached.get("meta"),  # type: ignore[return-value]
-            bool(cached.get("is_running", False)),
-            cached.get("usage_buckets") or {},  # type: ignore[return-value]
-        )
+        return cached.get("meta"), bool(cached.get("is_running", False))  # type: ignore[return-value]
 
-    meta, is_running, usage_buckets = _scan_codex_session_file(fpath)
+    meta, is_running = _scan_codex_session_file(fpath)
     _CODEX_SESSION_FILE_CACHE[fpath] = {
         "signature": signature,
         "meta": meta,
         "is_running": is_running,
-        "usage_buckets": usage_buckets,
     }
-    return meta, is_running, usage_buckets
+    return meta, is_running
 
 
-def _merge_codex_usage_bucket(
-    target: dict[str, dict[str, object]],
-    source: dict[str, dict[str, object]],
-) -> None:
-    for date, bucket in source.items():
-        current = target.setdefault(
-            date,
-            {
-                "date": date,
-                "inputTokens": 0,
-                "outputTokens": 0,
-                "cacheCreationTokens": 0,
-                "cacheReadTokens": 0,
-                "totalTokens": 0,
-                "totalCostUsd": None,
-            },
-        )
-        current["inputTokens"] = int(current["inputTokens"]) + int(bucket.get("inputTokens") or 0)
-        current["outputTokens"] = int(current["outputTokens"]) + int(bucket.get("outputTokens") or 0)
-        current["cacheReadTokens"] = int(current["cacheReadTokens"]) + int(bucket.get("cacheReadTokens") or 0)
-        current["totalTokens"] = int(current["totalTokens"]) + int(bucket.get("totalTokens") or 0)
-
-
-def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool, dict[str, dict[str, object]]]:
+def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
     try:
         file_mtime_ms = int(os.path.getmtime(fpath) * 1000)
     except OSError:
@@ -201,9 +106,6 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool, dict[str
 
     preview: Optional[str] = None
     current_turn_id: Optional[str] = None
-    usage_buckets: dict[str, dict[str, object]] = {}
-    previous_totals: Optional[dict[str, int]] = None
-    previous_seen_total_usage: Optional[dict[str, int]] = None
     meta_row: Optional[dict] = None
 
     try:
@@ -270,58 +172,12 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool, dict[str
                 elif payload_type in {"task_complete", "turn_aborted"} and turn_id and current_turn_id == turn_id:
                     current_turn_id = None
 
-                if payload_type != "token_count":
-                    continue
-                date = _usage_date_from_timestamp(row.get("timestamp"))
-                if not date:
-                    continue
-                info = payload.get("info")
-                if not isinstance(info, dict):
-                    continue
-
-                last_usage = _codex_raw_usage(info.get("last_token_usage"))
-                total_usage = _codex_raw_usage(info.get("total_token_usage"))
-                if total_usage is not None:
-                    if previous_seen_total_usage == total_usage:
-                        continue
-                    previous_seen_total_usage = dict(total_usage)
-
-                if last_usage is not None:
-                    raw = last_usage
-                elif total_usage is not None:
-                    raw = _subtract_codex_usage(total_usage, previous_totals)
-                else:
-                    continue
-
-                if total_usage is not None:
-                    previous_totals = dict(total_usage)
-                if _is_zero_codex_usage(raw):
-                    continue
-
-                bucket = usage_buckets.setdefault(
-                    date,
-                    {
-                        "date": date,
-                        "inputTokens": 0,
-                        "outputTokens": 0,
-                        "cacheCreationTokens": 0,
-                        "cacheReadTokens": 0,
-                        "totalTokens": 0,
-                        "totalCostUsd": None,
-                    },
-                )
-                bucket["inputTokens"] = int(bucket["inputTokens"]) + raw["input"]
-                bucket["outputTokens"] = int(bucket["outputTokens"]) + raw["output"]
-                bucket["cacheReadTokens"] = int(bucket["cacheReadTokens"]) + raw["cache_read"]
-                bucket["totalTokens"] = int(bucket["totalTokens"]) + (
-                    raw["total"] or raw["input"] + raw["output"]
-                )
     except Exception:
-        return None, False, {}
+        return None, False
 
     if meta_row is not None and preview:
         meta_row["preview"] = preview
-    return meta_row, current_turn_id is not None, usage_buckets
+    return meta_row, current_turn_id is not None
 
 
 def _query_codex_active_thread_rows_by_workspace() -> tuple[dict[str, set[str]], dict[str, list[dict]]]:
@@ -374,12 +230,11 @@ def _build_codex_session_index(
     workspace_counts: dict[str, int] = {}
     threads_by_workspace: dict[str, dict[str, dict]] = {}
     running_ids_by_workspace: dict[str, set[str]] = {}
-    usage_buckets: dict[str, dict[str, object]] = {}
     current_files: set[str] = set()
 
     for fpath in _collect_jsonl_files(sessions_root):
         current_files.add(fpath)
-        meta, is_running, file_usage_buckets = _cached_scan_codex_session_file(fpath)
+        meta, is_running = _cached_scan_codex_session_file(fpath)
         if meta is not None:
             workspace = str(meta["cwd"])
             workspace_counts[workspace] = workspace_counts.get(workspace, 0) + 1
@@ -400,7 +255,6 @@ def _build_codex_session_index(
                 existing["updatedAt"] = max(int(existing.get("updatedAt") or 0), item["updatedAt"])
             if is_running:
                 running_ids_by_workspace.setdefault(workspace, set()).add(meta["id"])
-        _merge_codex_usage_bucket(usage_buckets, file_usage_buckets)
 
     for cached_path in tuple(_CODEX_SESSION_FILE_CACHE.keys()):
         if cached_path not in current_files:
@@ -410,31 +264,6 @@ def _build_codex_session_index(
         "workspace_counts": workspace_counts,
         "threads_by_workspace": threads_by_workspace,
         "running_ids_by_workspace": running_ids_by_workspace,
-        "usage_buckets": usage_buckets,
-    }
-
-
-def summarize_codex_usage(
-    start_date: str,
-    end_date: str,
-    sessions_dir: Optional[str] = None,
-) -> dict:
-    start = str(start_date or "").strip()
-    end = str(end_date or "").strip()
-    buckets = dict(_build_codex_session_index(sessions_dir).get("usage_buckets", {}))
-
-    return {
-        "days": [
-            buckets[date]
-            for date in sorted(
-                (
-                    date
-                    for date in buckets.keys()
-                    if (not start or date >= start) and (not end or date <= end)
-                ),
-                reverse=True,
-            )
-        ]
     }
 
 

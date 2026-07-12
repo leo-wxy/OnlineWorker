@@ -102,20 +102,43 @@ def _run_provider_session_bridge(
     attachments: list[dict] | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
+    usage_plugin_id: str | None = None,
+    usage_source_id: str | None = None,
+    usage_timezone: str | None = None,
+    usage_force_refresh: bool = False,
 ) -> int:
     from core.provider_session_bridge import (
         archive_provider_session,
-        get_provider_usage_summary,
         list_provider_session_rows,
         read_provider_session_rows,
         send_provider_session_message,
     )
 
+    normalized_operation = str(operation or "").strip().lower()
+    if normalized_operation == "usage-source":
+        from core.usage.runtime import get_usage_source_summary
+
+        _print_provider_session_bridge_result(
+            get_usage_source_summary(
+                str(usage_plugin_id or "").strip(),
+                str(usage_source_id or "").strip(),
+                str(start_date or "").strip(),
+                str(end_date or "").strip(),
+                timezone=str(usage_timezone or "local"),
+                force_refresh=bool(usage_force_refresh),
+            )
+        )
+        return 0
+
+    if normalized_operation == "usage-catalog":
+        from core.usage.registry import get_usage_source_catalog
+        _print_provider_session_bridge_result(get_usage_source_catalog())
+        return 0
+
     normalized_provider = str(provider_id or "").strip()
     if not normalized_provider:
         raise ValueError("provider_id is required")
 
-    normalized_operation = str(operation or "").strip().lower()
     if normalized_operation == "list":
         _print_provider_session_bridge_result(
             list_provider_session_rows(normalized_provider, limit_per_workspace=limit)
@@ -167,16 +190,6 @@ def _run_provider_session_bridge(
             )
         )
         _print_provider_session_bridge_result({"ok": True})
-        return 0
-
-    if normalized_operation == "usage":
-        _print_provider_session_bridge_result(
-            get_provider_usage_summary(
-                normalized_provider,
-                str(start_date or "").strip(),
-                str(end_date or "").strip(),
-            )
-        )
         return 0
 
     raise ValueError(f"unsupported provider session bridge operation: {operation}")
@@ -279,6 +292,10 @@ def main() -> None:
     parser.add_argument("--provider-workspace-dir", default=None)
     parser.add_argument("--provider-start-date", default=None)
     parser.add_argument("--provider-end-date", default=None)
+    parser.add_argument("--usage-plugin-id", default=None)
+    parser.add_argument("--usage-source-id", default=None)
+    parser.add_argument("--usage-timezone", default="local")
+    parser.add_argument("--usage-force-refresh", action="store_true")
     parser.add_argument("--provider-limit", type=int, default=50)
     args, unknown_args = parser.parse_known_args()
 
@@ -347,6 +364,10 @@ def main() -> None:
                 limit=args.provider_limit,
                 start_date=args.provider_start_date,
                 end_date=args.provider_end_date,
+                usage_plugin_id=args.usage_plugin_id,
+                usage_source_id=args.usage_source_id,
+                usage_timezone=args.usage_timezone,
+                usage_force_refresh=args.usage_force_refresh,
             )
         )
 

@@ -152,9 +152,6 @@ def test_builtin_provider_descriptor_capabilities_match_plugin_manifests():
         if descriptor.message_hooks is not None:
             assert descriptor.message_hooks.supports_photo is bool(expected.get("photos", False))
             assert descriptor.message_hooks.supports_files is bool(expected.get("files", False))
-        if bool(expected.get("usage", False)):
-            assert descriptor.usage_hooks is not None
-            assert callable(descriptor.usage_hooks.get_summary)
         if descriptor.interactions is not None:
             assert bool(descriptor.interactions.build_approval_reply) is bool(
                 expected.get("approvals", False)

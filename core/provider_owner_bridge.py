@@ -729,8 +729,11 @@ class ProviderOwnerBridge:
                 response = await self._handle_archive_session(request)
             elif request_type == "runtime_status":
                 response = await self._handle_runtime_status(request)
-            elif request_type == "usage_summary":
-                response = await self._handle_usage_summary(request)
+            elif request_type == "usage_source_catalog":
+                from core.usage.registry import get_usage_source_catalog
+                response = {"ok": True, "sources": get_usage_source_catalog()}
+            elif request_type == "usage_source_summary":
+                response = await self._handle_usage_source_summary(request)
             elif request_type == "session_activities":
                 response = await self._handle_session_activities(request)
             elif request_type == "session_activity_stream":
@@ -1387,39 +1390,34 @@ class ProviderOwnerBridge:
             "workspace_dir": ws_info.path,
         }
 
-    async def _handle_usage_summary(self, request: dict) -> dict:
-        from core.provider_session_bridge import _normalize_usage_summary
+    async def _handle_usage_source_summary(self, request: dict) -> dict:
+        from core.usage.runtime import get_usage_source_summary
 
-        provider_id = str(request.get("provider_id") or "").strip()
+        plugin_id = str(request.get("plugin_id") or "").strip()
+        source_id = str(request.get("source_id") or "").strip()
         start_date = str(request.get("start_date") or "").strip()
         end_date = str(request.get("end_date") or "").strip()
-        if not provider_id:
-            return {"ok": False, "error": "缺少 provider_id"}
-
-        provider = get_provider(provider_id, getattr(self.state, "config", None))
-        if provider is None:
-            return {"ok": False, "error": f"Provider '{provider_id}' 未启用"}
-
-        usage_hooks = getattr(provider, "usage_hooks", None)
-        get_summary = getattr(usage_hooks, "get_summary", None)
-        if not callable(get_summary):
-            return {"ok": False, "error": f"Provider '{provider_id}' 不支持用量读取"}
+        timezone = str(request.get("timezone") or "local").strip() or "local"
+        force_refresh = bool(request.get("force_refresh", False))
+        if not plugin_id or not source_id:
+            return {"ok": False, "error": "缺少 usage plugin/source id"}
 
         try:
-            raw_summary = await _run_sync_with_timeout(
-                f"{provider_id}.get_summary",
-                get_summary,
+            summary = await _run_sync_with_timeout(
+                f"{plugin_id}/{source_id}.get_summary",
+                get_usage_source_summary,
+                plugin_id,
+                source_id,
                 start_date,
                 end_date,
-                timeout=OWNER_BRIDGE_USAGE_TIMEOUT_SECONDS,
+                timezone=timezone,
+                force_refresh=force_refresh,
+                timeout=35,
             )
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
-        return {
-            "ok": True,
-            "summary": _normalize_usage_summary(provider_id, raw_summary),
-        }
+        return {"ok": True, "summary": summary}
 
     async def _handle_create_session(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()

@@ -392,10 +392,11 @@ async def test_slash_router_handles_token_usage_locally_in_agent_topic(monkeypat
 
     calls = []
 
-    def fake_usage_summary(provider_id, start_date, end_date):
-        calls.append((provider_id, start_date, end_date))
+    def fake_usage_summary(plugin_id, source_id, start_date, end_date):
+        calls.append((plugin_id, source_id, start_date, end_date))
         return {
-            "providerId": provider_id,
+            "pluginId": plugin_id,
+            "sourceId": source_id,
             "startDate": start_date,
             "endDate": end_date,
             "days": [
@@ -411,10 +412,8 @@ async def test_slash_router_handles_token_usage_locally_in_agent_topic(monkeypat
             ],
         }
 
-    monkeypatch.setattr(
-        "bot.handlers.common.get_provider_usage_summary",
-        fake_usage_summary,
-    )
+    monkeypatch.setattr("bot.handlers.common.get_provider_usage_source", lambda provider_id: ("ccusage", provider_id))
+    monkeypatch.setattr("bot.handlers.common.get_usage_source_summary", fake_usage_summary)
     monkeypatch.setattr(
         "bot.handlers.common._token_usage_today",
         lambda: date(2026, 5, 28),
@@ -441,7 +440,7 @@ async def test_slash_router_handles_token_usage_locally_in_agent_topic(monkeypat
     handler = make_slash_command_handler(state, GROUP_CHAT_ID, state.config)
     await handler(update, ctx)
 
-    assert calls == [("custom", "2026-05-22", "2026-05-28")]
+    assert calls == [("ccusage", "custom", "2026-05-22", "2026-05-28")]
     adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_not_awaited()
     ctx.bot.send_message.assert_awaited_once()
@@ -475,10 +474,8 @@ async def test_slash_router_rejects_token_usage_in_thread_topic(monkeypatch):
     state.set_adapter("custom", adapter)
 
     usage_summary = MagicMock()
-    monkeypatch.setattr(
-        "bot.handlers.common.get_provider_usage_summary",
-        usage_summary,
-    )
+    monkeypatch.setattr("bot.handlers.common.get_provider_usage_source", lambda provider_id: ("ccusage", provider_id))
+    monkeypatch.setattr("bot.handlers.common.get_usage_source_summary", usage_summary)
     monkeypatch.setattr(
         "bot.handlers.slash.classify_provider",
         lambda name, cfg: "available" if name == "custom" else "unknown_provider",

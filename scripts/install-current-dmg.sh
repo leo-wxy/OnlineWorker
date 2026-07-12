@@ -87,7 +87,7 @@ echo "=== DMG app version ==="
 plutil -p "$APP_IN_DMG/Contents/Info.plist" | sed -n '/CFBundleShortVersionString/p;/CFBundleVersion/p'
 
 echo "=== DMG binary hashes ==="
-shasum -a 256 "$APP_IN_DMG/Contents/MacOS/onlineworker-bot" "$APP_IN_DMG/Contents/MacOS/onlineworker-app"
+shasum -a 256 "$APP_IN_DMG/Contents/MacOS/onlineworker-bot" "$APP_IN_DMG/Contents/MacOS/onlineworker-app" "$APP_IN_DMG/Contents/MacOS/ccusage"
 
 echo "=== Stopping current OnlineWorker processes ==="
 pids="$(runtime_pids || true)"
@@ -107,7 +107,7 @@ rm -rf "$APP_IN_APPLICATIONS"
 ditto "$APP_IN_DMG" "$APP_IN_APPLICATIONS"
 
 echo "=== Installed binary hashes ==="
-shasum -a 256 "$APP_IN_APPLICATIONS/Contents/MacOS/onlineworker-bot" "$APP_IN_APPLICATIONS/Contents/MacOS/onlineworker-app"
+shasum -a 256 "$APP_IN_APPLICATIONS/Contents/MacOS/onlineworker-bot" "$APP_IN_APPLICATIONS/Contents/MacOS/onlineworker-app" "$APP_IN_APPLICATIONS/Contents/MacOS/ccusage"
 
 echo "=== Launching installed app ==="
 open "$APP_IN_APPLICATIONS"

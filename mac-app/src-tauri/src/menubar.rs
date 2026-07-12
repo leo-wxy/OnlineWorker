@@ -18,7 +18,7 @@ use tokio::sync::Mutex;
 use crate::commands::config::{app_name, ensure_data_dir, read_provider_metadata_from_disk};
 use crate::commands::dashboard::{compute_dashboard_state, DashboardState, SystemHealth};
 use crate::commands::provider_sessions::load_provider_sessions_with_overlays;
-use crate::commands::provider_usage::get_provider_usage_summary;
+use crate::commands::provider_usage::get_usage_source_summary;
 use crate::commands::service::{ensure_service_running_if_needed, BotState};
 use crate::commands::task_board_state::{
     get_task_board_session_activities, TaskBoardSessionActivity,
@@ -607,11 +607,14 @@ async fn load_popover_usage_providers(
     let mut providers = Vec::new();
 
     for (provider_id, label) in popover_provider_specs() {
-        let usage = match get_provider_usage_summary(
+        let usage = match get_usage_source_summary(
             app.clone(),
+            "ccusage".to_string(),
             provider_id.clone(),
             today.clone(),
             today.clone(),
+            None,
+            Some(false),
         )
         .await
         {
@@ -825,7 +828,7 @@ fn provider_sort_key(provider_id: &str, index: usize) -> (u8, usize) {
 }
 
 fn usage_breakdown_from_usage_summary(
-    summary: &crate::commands::provider_usage::ProviderUsageSummary,
+    summary: &crate::commands::provider_usage::UsageSourceSummary,
     today: &str,
 ) -> MenubarPopoverUsageBreakdown {
     if summary.unsupported_reason.is_some() {
@@ -1265,7 +1268,7 @@ mod tests {
     use std::path::Path;
 
     use crate::commands::dashboard::SystemHealth;
-    use crate::commands::provider_usage::{ProviderUsageDay, ProviderUsageSummary};
+    use crate::commands::provider_usage::{UsageSourceDay, UsageSourceSummary};
     use crate::commands::task_board_state::TaskBoardSessionActivity;
     use serde_json::json;
 
@@ -1330,9 +1333,10 @@ mod tests {
 
     #[test]
     fn usage_breakdown_keeps_input_output_and_cache_tokens() {
-        let summary = ProviderUsageSummary {
-            provider_id: "claude".into(),
-            days: vec![ProviderUsageDay {
+        let summary = UsageSourceSummary {
+            plugin_id: "ccusage".into(),
+            source_id: "claude".into(),
+            days: vec![UsageSourceDay {
                 date: "2026-07-07".into(),
                 input_tokens: 1_200,
                 output_tokens: 340,

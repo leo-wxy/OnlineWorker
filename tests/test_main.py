@@ -279,6 +279,17 @@ def test_provider_session_bridge_read_keeps_workspace_dir_separate(monkeypatch):
     }
 
 
+def test_usage_catalog_bridge_does_not_require_provider_id(monkeypatch):
+    from core.usage import registry
+
+    observed = {}
+    monkeypatch.setattr(registry, "get_usage_source_catalog", lambda: [{"sourceId": "codex"}])
+    monkeypatch.setattr(main, "_print_provider_session_bridge_result", lambda payload: observed.setdefault("payload", payload))
+
+    assert main._run_provider_session_bridge(None, "usage-catalog") == 0
+    assert observed["payload"] == [{"sourceId": "codex"}]
+
+
 def test_main_uses_stable_default_data_dir_when_flag_missing(monkeypatch, tmp_path):
     run_polling_calls = []
     dummy_filter = _DummyFilter()

@@ -1,0 +1,28 @@
+schema_version: 1
+id: ccusage
+kind: usage
+visibility: public
+label: ccusage
+runtime:
+  type: sidecar
+  binary: ccusage
+icon:
+  path: icon.svg
+entrypoints:
+  python_descriptor: plugins.usage.builtin.ccusage.python.plugin:create_usage_plugin_descriptor
+sources:
+  - { id: codex, label: Codex, order: 10 }
+  - { id: claude, label: Claude, order: 20 }
+  - { id: opencode, label: OpenCode, order: 30 }
+  - { id: amp, label: Amp, order: 40 }
+  - { id: droid, label: Droid, order: 50 }
+  - { id: codebuff, label: Codebuff, order: 60 }
+  - { id: hermes, label: Hermes Agent, order: 70 }
+  - { id: pi, label: pi-agent, order: 80 }
+  - { id: goose, label: Goose, order: 90 }
+  - { id: openclaw, label: OpenClaw, order: 100 }
+  - { id: kilo, label: Kilo, order: 110 }
+  - { id: copilot, label: Copilot CLI, order: 120 }
+  - { id: gemini, label: Gemini CLI, order: 130 }
+  - { id: kimi, label: Kimi, order: 140 }
+  - { id: qwen, label: Qwen, order: 150 }
