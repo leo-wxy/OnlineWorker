@@ -1,4 +1,5 @@
 import importlib
+import sys
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -332,7 +333,40 @@ def create_provider_descriptor():
         provider_names = list(reloaded._load_provider_descriptors().keys())
         assert provider_names == ["claude", "codex", "overlay-tool"]
     finally:
-        monkeypatch.delenv("ONLINEWORKER_PROVIDER_OVERLAY", raising=False)
+        monkeypatch.undo()
+        importlib.reload(registry)
+
+
+def test_broken_overlay_provider_does_not_break_bundled_providers(monkeypatch, tmp_path, caplog):
+    overlay_dir = tmp_path / "provider-plugins" / "broken-tool"
+    overlay_dir.mkdir(parents=True)
+    (overlay_dir / "plugin.yaml").write_text(
+        """
+schema_version: 1
+id: broken-tool
+kind: provider
+entrypoints:
+  python_descriptor: broken_provider:create_provider_descriptor
+""".strip(),
+        encoding="utf-8",
+    )
+    (tmp_path / "provider-plugins" / "broken_provider.py").write_text(
+        "raise ImportError('removed provider contract')\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("ONLINEWORKER_PROVIDER_OVERLAY", str(tmp_path / "provider-plugins"))
+    registry = importlib.import_module("core.providers.registry")
+    try:
+        reloaded = importlib.reload(registry)
+
+        assert [provider.name for provider in reloaded.list_providers()] == ["claude", "codex"]
+        assert "broken-tool" not in {provider.name for provider in reloaded.list_providers()}
+        assert "Skipping provider plugin that failed to load" in caplog.text
+        assert "removed provider contract" in caplog.text
+    finally:
+        sys.modules.pop("broken_provider", None)
+        monkeypatch.undo()
         importlib.reload(registry)
 
 
@@ -482,5 +516,5 @@ entrypoints:
         assert overlay_tool is not None
         assert overlay_tool.metadata.visible is False
     finally:
-        monkeypatch.delenv("ONLINEWORKER_PROVIDER_OVERLAY", raising=False)
+        monkeypatch.undo()
         importlib.reload(registry)

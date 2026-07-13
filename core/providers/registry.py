@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import sys
 from pathlib import Path
 from typing import Literal, Optional
@@ -11,6 +12,7 @@ from core.providers.overlay import iter_overlay_manifest_paths, load_manifest
 
 PROVIDER_PLUGIN_ROOT = Path(__file__).resolve().parents[2] / "plugins" / "providers"
 PROVIDER_PLUGIN_GROUPS = ("builtin",)
+logger = logging.getLogger(__name__)
 
 
 def _iter_provider_plugin_manifests() -> list[Path]:
@@ -52,18 +54,26 @@ def _load_provider_descriptors() -> dict[str, ProviderDescriptor]:
         return providers
 
     for manifest_path in manifest_paths:
-        manifest = load_manifest(manifest_path)
-        entrypoint = (manifest.get("entrypoints") or {}).get("python_descriptor")
-        descriptor = _load_descriptor_from_entrypoint(entrypoint, manifest_path=manifest_path)
-        manifest_id = str(manifest.get("id") or "").strip()
-        if not manifest_id:
-            raise ValueError(f"Provider plugin manifest missing id: {manifest_path}")
-        if descriptor.name != manifest_id:
-            raise ValueError(
-                f"Provider plugin descriptor name mismatch for {manifest_path}: "
-                f"{descriptor.name!r} != {manifest_id!r}"
+        entrypoint = ""
+        try:
+            manifest = load_manifest(manifest_path)
+            entrypoint = (manifest.get("entrypoints") or {}).get("python_descriptor")
+            descriptor = _load_descriptor_from_entrypoint(entrypoint, manifest_path=manifest_path)
+            manifest_id = str(manifest.get("id") or "").strip()
+            if not manifest_id:
+                raise ValueError(f"Provider plugin manifest missing id: {manifest_path}")
+            if descriptor.name != manifest_id:
+                raise ValueError(
+                    f"Provider plugin descriptor name mismatch for {manifest_path}: "
+                    f"{descriptor.name!r} != {manifest_id!r}"
+                )
+            providers[descriptor.name] = descriptor
+        except Exception:
+            logger.exception(
+                "Skipping provider plugin that failed to load: manifest=%s entrypoint=%s",
+                manifest_path,
+                entrypoint or "<unavailable>",
             )
-        providers[descriptor.name] = descriptor
     return providers
 
 

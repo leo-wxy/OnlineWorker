@@ -5,7 +5,8 @@ from core.usage.registry import (
 )
 
 
-def test_ccusage_plugin_exposes_all_pinned_sources():
+def test_ccusage_plugin_exposes_all_pinned_sources(monkeypatch):
+    monkeypatch.delenv("ONLINEWORKER_PROVIDER_OVERLAY", raising=False)
     plugins = load_usage_plugins()
     assert set(plugins) == {"ccusage"}
     catalog = get_usage_source_catalog()
@@ -46,3 +47,25 @@ entrypoints:
     opencode = next(item for item in catalog if item["sourceId"] == "opencode")
     assert opencode["providerId"] == "opencode"
     assert get_provider_usage_source("opencode") == ("ccusage", "opencode")
+
+
+def test_usage_catalog_skips_broken_provider_manifest(monkeypatch, tmp_path, caplog):
+    overlay = tmp_path / "providers" / "broken"
+    overlay.mkdir(parents=True)
+    (overlay / "plugin.yaml").write_text(
+        """
+schema_version: 1
+id: broken
+kind: provider
+provider: invalid
+entrypoints:
+  python_descriptor: broken:create_provider_descriptor
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ONLINEWORKER_PROVIDER_OVERLAY", str(tmp_path / "providers"))
+
+    catalog = get_usage_source_catalog()
+
+    assert [item["sourceId"] for item in catalog[:3]] == ["codex", "claude", "opencode"]
+    assert "Skipping provider usage association that failed to load" in caplog.text

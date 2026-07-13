@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ from core.usage.contracts import UsagePluginDescriptor
 USAGE_PLUGIN_ROOT = Path(__file__).resolve().parents[2] / "plugins" / "usage"
 USAGE_OVERLAY_ENV = "ONLINEWORKER_USAGE_OVERLAY"
 PROVIDER_PLUGIN_ROOT = Path(__file__).resolve().parents[2] / "plugins" / "providers"
+logger = logging.getLogger(__name__)
 
 
 def _manifest_paths() -> list[Path]:
@@ -66,15 +68,21 @@ def _provider_usage_sources() -> dict[str, tuple[str, str]]:
     manifests = sorted((PROVIDER_PLUGIN_ROOT / "builtin").glob("*/plugin.yaml"))
     manifests.extend(iter_overlay_manifest_paths())
     for provider_manifest in manifests:
-        provider_raw = load_provider_manifest(provider_manifest)
-        provider_id = str(provider_raw.get("id") or "").strip()
-        usage = (provider_raw.get("provider") or {}).get("usage") or {}
-        plugin_id = str(usage.get("plugin_id") or "").strip()
-        source_id = str(usage.get("source_id") or "").strip()
-        if provider_id and plugin_id and source_id:
-            sources[provider_id] = (plugin_id, source_id)
-        elif provider_id:
-            sources.pop(provider_id, None)
+        try:
+            provider_raw = load_provider_manifest(provider_manifest)
+            provider_id = str(provider_raw.get("id") or "").strip()
+            usage = (provider_raw.get("provider") or {}).get("usage") or {}
+            plugin_id = str(usage.get("plugin_id") or "").strip()
+            source_id = str(usage.get("source_id") or "").strip()
+            if provider_id and plugin_id and source_id:
+                sources[provider_id] = (plugin_id, source_id)
+            elif provider_id:
+                sources.pop(provider_id, None)
+        except Exception:
+            logger.exception(
+                "Skipping provider usage association that failed to load: manifest=%s",
+                provider_manifest,
+            )
     return sources
 
 
