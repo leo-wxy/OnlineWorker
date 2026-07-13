@@ -1,25 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { lazy, Suspense, useState, useEffect, useCallback } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  AiSettingsPanel,
-  ConfigEditor,
-  LogWindow,
-  MaintenanceSettingsPanel,
-  MenubarPopover,
-  NotificationSettingsPanel,
-  ProviderSettingsPanel,
-} from "./components";
-import {
-  CommandRegistry,
-  Dashboard,
-  SessionBrowser,
-  SetupWizard,
-  TaskBoard,
-  UsageBrowser,
-} from "./pages";
-import type { TaskBoardOpenSessionTarget } from "./pages";
+import type { TaskBoardOpenSessionTarget } from "./pages/TaskBoard";
 import {
   upsertTaskBoardActivity,
   removeTaskBoardActivity,
@@ -35,25 +18,58 @@ import {
 
 const APP_NAVIGATE_TAB_EVENT = "app:navigate-tab";
 const APP_OPEN_SESSION_EVENT = "app:open-session";
-const MENUBAR_POPOVER_WINDOW_LABEL = "menubar-popover";
 
-function detectCurrentWindowLabel() {
-  try {
-    return getCurrentWindow().label;
-  } catch {
-    return "main";
-  }
-}
+const AiSettingsPanel = lazy(() =>
+  import("./components/AiSettingsPanel").then((module) => ({ default: module.AiSettingsPanel })),
+);
+const ConfigEditor = lazy(() =>
+  import("./components/ConfigEditor").then((module) => ({ default: module.ConfigEditor })),
+);
+const LogWindow = lazy(() =>
+  import("./components/LogWindow").then((module) => ({ default: module.LogWindow })),
+);
+const MaintenanceSettingsPanel = lazy(() =>
+  import("./components/MaintenanceSettingsPanel").then((module) => ({
+    default: module.MaintenanceSettingsPanel,
+  })),
+);
+const NotificationSettingsPanel = lazy(() =>
+  import("./components/NotificationSettingsPanel").then((module) => ({
+    default: module.NotificationSettingsPanel,
+  })),
+);
+const ProviderSettingsPanel = lazy(() =>
+  import("./components/ProviderSettingsPanel").then((module) => ({
+    default: module.ProviderSettingsPanel,
+  })),
+);
+const CommandRegistry = lazy(() =>
+  import("./pages/CommandRegistry").then((module) => ({ default: module.CommandRegistry })),
+);
+const Dashboard = lazy(() =>
+  import("./pages/Dashboard").then((module) => ({ default: module.Dashboard })),
+);
+const SessionBrowser = lazy(() =>
+  import("./pages/SessionBrowser").then((module) => ({ default: module.SessionBrowser })),
+);
+const SetupWizard = lazy(() =>
+  import("./pages/SetupWizard").then((module) => ({ default: module.SetupWizard })),
+);
+const TaskBoard = lazy(() =>
+  import("./pages/TaskBoard").then((module) => ({ default: module.TaskBoard })),
+);
+const UsageBrowser = lazy(() =>
+  import("./pages/UsageBrowser").then((module) => ({ default: module.UsageBrowser })),
+);
 
 export default function App() {
   const { locale, setLocale, t } = useI18n();
-  const windowLabel = useMemo(detectCurrentWindowLabel, []);
-  const isMenubarPopover = windowLabel === MENUBAR_POPOVER_WINDOW_LABEL;
   const [activeTab, setActiveTab] = useState<AppTab>("dashboard");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsSection, setSettingsSection] = useState<"onlineworker" | "agents" | "extensions" | "maintenance" | "advanced">("onlineworker");
   const [showLogs, setShowLogs] = useState(false);
   const [isFirstRun, setIsFirstRun] = useState(false);
+  const [sessionsMounted, setSessionsMounted] = useState(false);
   const [sessionOpenTarget, setSessionOpenTarget] = useState<TaskBoardOpenSessionTarget | null>(null);
   const [taskBoardActivities, setTaskBoardActivities] = useState<TaskBoardSessionActivity[]>([]);
   const taskAttentionCount = taskBoardActivities.filter((activity) => {
@@ -63,9 +79,6 @@ export default function App() {
 
   // First-run detection: auto-switch to Guide tab on first launch
   useEffect(() => {
-    if (isMenubarPopover) {
-      return;
-    }
     (async () => {
       try {
         const firstRun = await invoke<boolean>("check_first_run");
@@ -78,12 +91,15 @@ export default function App() {
         // If the command fails (e.g., dev mode without Tauri), just continue normally
       }
     })();
-  }, [isMenubarPopover]);
+  }, []);
 
   useEffect(() => {
-    if (isMenubarPopover) {
-      return;
+    if (activeTab === "sessions") {
+      setSessionsMounted(true);
     }
+  }, [activeTab]);
+
+  useEffect(() => {
     let unlisten: (() => void) | null = null;
 
     void listen<string>(APP_NAVIGATE_TAB_EVENT, (event) => {
@@ -105,12 +121,9 @@ export default function App() {
         unlisten();
       }
     };
-  }, [isMenubarPopover]);
+  }, []);
 
   useEffect(() => {
-    if (isMenubarPopover) {
-      return;
-    }
     let unlisten: (() => void) | null = null;
 
     void listen<TaskBoardOpenSessionTarget>(APP_OPEN_SESSION_EVENT, (event) => {
@@ -135,12 +148,9 @@ export default function App() {
         unlisten();
       }
     };
-  }, [isMenubarPopover]);
+  }, []);
 
   useEffect(() => {
-    if (isMenubarPopover) {
-      return;
-    }
     let activeStreamId: number | null = null;
     let disposed = false;
     const channel = new Channel<TaskBoardActivityStreamEvent>();
@@ -192,7 +202,7 @@ export default function App() {
         console.warn("Failed to stop task board activity badge stream", error);
       });
     };
-  }, [isMenubarPopover]);
+  }, []);
 
   const getTabIcon = (tab: AppTab) => {
     switch (tab) {
@@ -227,10 +237,6 @@ export default function App() {
     setActiveTab("sessions");
     setShowLogs(false);
   }, []);
-
-  if (isMenubarPopover) {
-    return <MenubarPopover />;
-  }
 
   return (
     <div className="relative flex h-screen w-screen overflow-hidden ow-app-shell text-[var(--ow-text)]">
@@ -401,6 +407,7 @@ export default function App() {
               : "overflow-y-auto"
           }`}
         >
+          <Suspense fallback={<PageLoadingState />}>
           {activeTab === "dashboard" && (
             <div className="h-full p-5 sm:p-6">
               <Dashboard
@@ -487,18 +494,33 @@ export default function App() {
               <UsageBrowser />
             </div>
           )}
-          <div className={`min-h-0 flex-1 flex-col p-5 sm:p-6 ${activeTab === "sessions" ? "" : "hidden"}`}>
-            <SessionBrowser
-              openTarget={sessionOpenTarget}
-              taskBoardActivities={taskBoardActivities}
-              active={activeTab === "sessions"}
-            />
-          </div>
+          {sessionsMounted && (
+            <div className={`min-h-0 flex-1 flex-col p-5 sm:p-6 ${activeTab === "sessions" ? "" : "hidden"}`}>
+              <SessionBrowser
+                openTarget={sessionOpenTarget}
+                taskBoardActivities={taskBoardActivities}
+                active={activeTab === "sessions"}
+              />
+            </div>
+          )}
+          </Suspense>
         </main>
       </div>
 
       {/* Log Window modal */}
-      {showLogs && <LogWindow onClose={() => setShowLogs(false)} />}
+      {showLogs && (
+        <Suspense fallback={null}>
+          <LogWindow onClose={() => setShowLogs(false)} />
+        </Suspense>
+      )}
+    </div>
+  );
+}
+
+function PageLoadingState() {
+  return (
+    <div className="grid min-h-0 flex-1 place-items-center">
+      <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-200 border-t-blue-500" />
     </div>
   );
 }

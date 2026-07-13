@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 test("renderSessionMarkdownToStaticMarkup renders list and code block structure", async () => {
-  const markdownModule = await import("../src/utils/sessionMarkdown.js").catch(() => null);
+  const markdownModule = await import("../src/utils/sessionMarkdownStatic.js").catch(() => null);
 
   assert.ok(
     markdownModule && typeof markdownModule.renderSessionMarkdownToStaticMarkup === "function",
@@ -31,7 +31,7 @@ test("renderSessionMarkdownToStaticMarkup renders list and code block structure"
 });
 
 test("renderSessionMarkdownToStaticMarkup keeps inline code inline", async () => {
-  const markdownModule = await import("../src/utils/sessionMarkdown.js").catch(() => null);
+  const markdownModule = await import("../src/utils/sessionMarkdownStatic.js").catch(() => null);
 
   assert.ok(
     markdownModule && typeof markdownModule.renderSessionMarkdownToStaticMarkup === "function",
@@ -49,7 +49,7 @@ test("renderSessionMarkdownToStaticMarkup keeps inline code inline", async () =>
 });
 
 test("renderSessionMarkdownToStaticMarkup applies readable session markdown styles", async () => {
-  const markdownModule = await import("../src/utils/sessionMarkdown.js").catch(() => null);
+  const markdownModule = await import("../src/utils/sessionMarkdownStatic.js").catch(() => null);
 
   assert.ok(
     markdownModule && typeof markdownModule.renderSessionMarkdownToStaticMarkup === "function",
@@ -84,7 +84,7 @@ test("renderSessionMarkdownToStaticMarkup applies readable session markdown styl
 });
 
 test("renderSessionMarkdownToStaticMarkup exposes P0 markdown usability affordances", async () => {
-  const markdownModule = await import("../src/utils/sessionMarkdown.js").catch(() => null);
+  const markdownModule = await import("../src/utils/sessionMarkdownStatic.js").catch(() => null);
 
   assert.ok(
     markdownModule && typeof markdownModule.renderSessionMarkdownToStaticMarkup === "function",
