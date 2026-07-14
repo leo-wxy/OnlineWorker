@@ -7,12 +7,18 @@ use std::time::Duration;
 use std::time::Instant;
 use tauri::AppHandle;
 use tokio::sync::Mutex;
+use tokio::task::JoinSet;
 
 use super::config::{data_dir, read_provider_metadata_from_disk};
 use super::dashboard::{compute_dashboard_state, ServiceHealth};
+use super::provider_usage::{
+    get_provider_plugin_load_failures, get_usage_source_catalog, get_usage_source_summary,
+    ProviderPluginLoadFailure, UsageSourceCatalogEntry, UsageSourceSummary,
+};
 use super::service::{snapshot_service_status, BotState};
 
 const SUPPORT_LOG_MAX_BYTES: usize = 2 * 1024 * 1024;
+const DIAGNOSTIC_PROBE_TIMEOUT: Duration = Duration::from_secs(6);
 const REDACTED: &str = "[REDACTED]";
 const CONFIG_VALUE: &str = "[VALUE]";
 
@@ -63,6 +69,140 @@ fn diagnostic_check(
         detail,
         remediation,
         duration_ms: started_at.elapsed().as_millis() as u64,
+    }
+}
+
+fn provider_plugin_load_check(
+    result: Result<Vec<ProviderPluginLoadFailure>, String>,
+    started_at: Instant,
+) -> DiagnosticCheck {
+    match result {
+        Ok(failures) if failures.is_empty() => diagnostic_check(
+            "provider_plugin_load",
+            "Provider plugin loading",
+            "pass",
+            "All provider plugins loaded",
+            None,
+            None,
+            started_at,
+        ),
+        Ok(failures) => {
+            let detail = failures
+                .iter()
+                .map(|failure| {
+                    format!(
+                        "{} | {} | {} | {}",
+                        if failure.provider_id.is_empty() {
+                            "unknown"
+                        } else {
+                            &failure.provider_id
+                        },
+                        if failure.entrypoint.is_empty() {
+                            "<unavailable>"
+                        } else {
+                            &failure.entrypoint
+                        },
+                        failure.error,
+                        failure.manifest_path,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            diagnostic_check(
+                "provider_plugin_load",
+                "Provider plugin loading",
+                "fail",
+                format!("{} provider plugin(s) failed to load", failures.len()),
+                Some(detail),
+                Some("Update or disable the incompatible provider plugin.".into()),
+                started_at,
+            )
+        }
+        Err(error) => diagnostic_check(
+            "provider_plugin_load",
+            "Provider plugin loading",
+            "warning",
+            "Provider plugin load failures could not be queried",
+            Some(error),
+            Some("Review the runtime log and owner bridge state.".into()),
+            started_at,
+        ),
+    }
+}
+
+fn usage_catalog_check(
+    result: &Result<Vec<UsageSourceCatalogEntry>, String>,
+    started_at: Instant,
+) -> DiagnosticCheck {
+    match result {
+        Ok(sources) if sources.is_empty() => diagnostic_check(
+            "usage_catalog",
+            "Usage catalog",
+            "warning",
+            "Usage catalog returned no sources",
+            None,
+            Some("Check packaged usage plugins and their manifests.".into()),
+            started_at,
+        ),
+        Ok(sources) => diagnostic_check(
+            "usage_catalog",
+            "Usage catalog",
+            "pass",
+            format!("{} usage source(s) discovered", sources.len()),
+            None,
+            None,
+            started_at,
+        ),
+        Err(error) => diagnostic_check(
+            "usage_catalog",
+            "Usage catalog",
+            "fail",
+            "Usage catalog request failed",
+            Some(error.clone()),
+            Some("Review usage plugin loading and owner bridge logs.".into()),
+            started_at,
+        ),
+    }
+}
+
+fn usage_summary_check(
+    source: &UsageSourceCatalogEntry,
+    result: Result<UsageSourceSummary, String>,
+    started_at: Instant,
+) -> DiagnosticCheck {
+    let label = format!("{} usage", source.label);
+    let id = format!("usage:{}:{}", source.plugin_id, source.source_id);
+    match result {
+        Ok(summary) if summary.unsupported_reason.is_some() => diagnostic_check(
+            &id,
+            &label,
+            "warning",
+            "Usage source is unsupported",
+            summary.unsupported_reason,
+            None,
+            started_at,
+        ),
+        Ok(summary) => diagnostic_check(
+            &id,
+            &label,
+            "pass",
+            format!("Usage query returned {} day(s)", summary.days.len()),
+            source
+                .provider_id
+                .as_ref()
+                .map(|provider_id| format!("Provider: {provider_id}")),
+            None,
+            started_at,
+        ),
+        Err(error) => diagnostic_check(
+            &id,
+            &label,
+            "fail",
+            "Usage query failed",
+            Some(error),
+            Some("Review the usage plugin, sidecar, and owner bridge logs.".into()),
+            started_at,
+        ),
     }
 }
 
@@ -611,6 +751,108 @@ async fn collect_runtime_diagnostics(
             started_at,
         )),
     }
+
+    let started_at = Instant::now();
+    let plugin_load_result = match tokio::time::timeout(
+        DIAGNOSTIC_PROBE_TIMEOUT,
+        get_provider_plugin_load_failures(),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err("Provider plugin load query timed out".into()),
+    };
+    report
+        .checks
+        .push(provider_plugin_load_check(plugin_load_result, started_at));
+
+    let started_at = Instant::now();
+    let catalog_result = match tokio::time::timeout(
+        DIAGNOSTIC_PROBE_TIMEOUT,
+        get_usage_source_catalog(app.clone()),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err("Usage catalog request timed out".into()),
+    };
+    report
+        .checks
+        .push(usage_catalog_check(&catalog_result, started_at));
+
+    if let Ok(catalog) = catalog_result {
+        let associated_sources = catalog
+            .into_iter()
+            .filter(|source| source.provider_id.is_some())
+            .collect::<Vec<_>>();
+        if associated_sources.is_empty() {
+            report.checks.push(diagnostic_check(
+                "usage_provider_sources",
+                "Provider usage sources",
+                "warning",
+                "No provider-associated usage sources were found",
+                None,
+                Some("Check provider usage plugin/source associations.".into()),
+                Instant::now(),
+            ));
+        } else {
+            let end_date = chrono::Local::now().date_naive();
+            let start_date = end_date - chrono::Duration::days(6);
+            let start_date = start_date.format("%Y-%m-%d").to_string();
+            let end_date = end_date.format("%Y-%m-%d").to_string();
+            let mut tasks = JoinSet::new();
+            for source in associated_sources {
+                let app = app.clone();
+                let start_date = start_date.clone();
+                let end_date = end_date.clone();
+                tasks.spawn(async move {
+                    let started_at = Instant::now();
+                    let result = match tokio::time::timeout(
+                        DIAGNOSTIC_PROBE_TIMEOUT,
+                        get_usage_source_summary(
+                            app,
+                            source.plugin_id.clone(),
+                            source.source_id.clone(),
+                            start_date,
+                            end_date,
+                            Some("local".into()),
+                            Some(true),
+                        ),
+                    )
+                    .await
+                    {
+                        Ok(result) => result,
+                        Err(_) => Err("Usage summary request timed out".into()),
+                    };
+                    (
+                        source.order,
+                        usage_summary_check(&source, result, started_at),
+                    )
+                });
+            }
+
+            let mut usage_checks = Vec::new();
+            while let Some(result) = tasks.join_next().await {
+                match result {
+                    Ok(check) => usage_checks.push(check),
+                    Err(error) => report.checks.push(diagnostic_check(
+                        "usage_runtime",
+                        "Usage runtime",
+                        "fail",
+                        "Usage diagnostic task failed",
+                        Some(error.to_string()),
+                        Some("Review the runtime log and retry diagnostics.".into()),
+                        Instant::now(),
+                    )),
+                }
+            }
+            usage_checks.sort_by_key(|(order, _)| *order);
+            report
+                .checks
+                .extend(usage_checks.into_iter().map(|(_, check)| check));
+        }
+    }
+
     refresh_overall(&mut report);
     report
 }
@@ -751,12 +993,80 @@ pub async fn reveal_support_bundle(path: String) -> Result<(), String> {
 mod tests {
     use super::{
         archive_support_artifacts, build_support_artifacts, collect_diagnostic_report,
-        is_user_cancelled_osascript, normalize_export_path, redact_text, redact_text_with_env,
-        support_bundle_save_script, write_support_artifacts, DiagnosticCheck, DiagnosticInputs,
+        is_user_cancelled_osascript, normalize_export_path, provider_plugin_load_check,
+        redact_text, redact_text_with_env, support_bundle_save_script, usage_catalog_check,
+        usage_summary_check, write_support_artifacts, DiagnosticCheck, DiagnosticInputs,
         DiagnosticReport, SupportArtifact,
+    };
+    use crate::commands::provider_usage::{
+        ProviderPluginLoadFailure, UsageSourceCatalogEntry, UsageSourceSummary,
     };
     use std::path::PathBuf;
     use std::process::Command;
+    use std::time::Instant;
+
+    fn usage_source() -> UsageSourceCatalogEntry {
+        UsageSourceCatalogEntry {
+            plugin_id: "ccusage".into(),
+            source_id: "codex".into(),
+            provider_id: Some("codex".into()),
+            label: "Codex".into(),
+            description: String::new(),
+            order: 1,
+            icon: serde_json::Value::Null,
+        }
+    }
+
+    #[test]
+    fn plugin_load_diagnostic_reports_failure_context() {
+        let check = provider_plugin_load_check(
+            Ok(vec![ProviderPluginLoadFailure {
+                provider_id: "codemaker".into(),
+                manifest_path: "/tmp/codemaker/plugin.yaml".into(),
+                entrypoint: "codemaker.python.provider:create_provider_descriptor".into(),
+                error: "ImportError: removed contract".into(),
+            }]),
+            Instant::now(),
+        );
+
+        assert_eq!(check.status, "fail");
+        assert!(check
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("ImportError"));
+        assert!(check
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("codemaker"));
+    }
+
+    #[test]
+    fn usage_diagnostics_distinguish_empty_data_from_query_failure() {
+        let source = usage_source();
+        let catalog = Ok(vec![source.clone()]);
+        let catalog_check = usage_catalog_check(&catalog, Instant::now());
+        let empty_check = usage_summary_check(
+            &source,
+            Ok(UsageSourceSummary {
+                plugin_id: "ccusage".into(),
+                source_id: "codex".into(),
+                days: vec![],
+                updated_at_epoch: 0,
+                unsupported_reason: None,
+            }),
+            Instant::now(),
+        );
+        let failed_check =
+            usage_summary_check(&source, Err("source unavailable".into()), Instant::now());
+
+        assert_eq!(catalog_check.status, "pass");
+        assert_eq!(empty_check.status, "pass");
+        assert_eq!(empty_check.summary, "Usage query returned 0 day(s)");
+        assert_eq!(failed_check.status, "fail");
+        assert_eq!(failed_check.detail.as_deref(), Some("source unavailable"));
+    }
 
     #[test]
     fn support_bundle_save_dialog_activates_before_opening() {

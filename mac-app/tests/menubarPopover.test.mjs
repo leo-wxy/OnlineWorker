@@ -30,7 +30,9 @@ test("menubar overview combines precision usage with provider session rails", ()
   assert.match(source, /style=\{\{ width: `\$\{\(\(provider\.tokensToday/);
   assert.match(source, /function SessionRailRow/);
   assert.match(source, /grid-cols-\[3px_minmax\(0,1fr\)_30px\]/);
+  assert.match(source, />Sessions<\/h3>/);
   assert.match(source, /Latest from each provider/);
+  assert.match(source, /const status = lane\?\.status \|\| "Idle"/);
 });
 
 test("menubar provider tab uses the provider rail detail layout", () => {
@@ -48,9 +50,52 @@ test("menubar provider tab uses the provider rail detail layout", () => {
 test("menubar refreshes provider sessions without overlapping snapshot loads", () => {
   assert.match(
     rustSource,
-    /load_provider_sessions_with_overlays\(app, &provider\.provider_id, true\)/,
+    /load_provider_sessions_with_overlays\(&app, &provider_id, force_refresh\)/,
+  );
+  assert.match(rustSource, /tokio::join!\(/);
+  assert.match(rustSource, /let mut tasks = JoinSet::new\(\)/);
+  assert.match(rustSource, /get_usage_source_catalog\(app\.clone\(\)\)/);
+  assert.match(rustSource, /source\.provider_id\.as_deref\(\) == Some\(provider_id\)/);
+  assert.match(source, /forceRefresh = false/);
+  assert.match(source, /forceRefresh,\s*\}\);/);
+  assert.match(source, /loadSnapshot\(false\)/);
+  assert.match(source, /loadSnapshot\(true\)/);
+  assert.match(source, /listen<MenubarPopoverSnapshot>\(SNAPSHOT_UPDATED_EVENT/);
+  assert.doesNotMatch(
+    source,
+    /onFocusChanged[\s\S]*if \(!focused\)[\s\S]*loadSnapshot\(false\)/,
   );
   assert.match(source, /const snapshotLoadInFlight = useRef\(false\)/);
   assert.match(source, /if \(snapshotLoadInFlight\.current\) \{\s*return;\s*\}/);
   assert.match(source, /snapshotLoadInFlight\.current = false/);
+  assert.match(rustSource, /MENUBAR_PROVIDER_LOAD_TIMEOUT: Duration = Duration::from_secs\(3\)/);
+  assert.match(rustSource, /tokio::time::timeout\(/);
+  assert.match(rustSource, /MenubarPopoverSnapshotStore/);
+  assert.match(
+    rustSource,
+    /if !force_refresh\.unwrap_or\(false\)[\s\S]*state::<MenubarPopoverSnapshotStore>\(\)[\s\S]*\.read\(\)/,
+  );
+  assert.match(
+    rustSource,
+    /start_menubar_snapshot_refresh_loop\(app\.clone\(\)\)/,
+  );
+  assert.match(rustSource, /SNAPSHOT_REFRESH_INTERVAL_SECONDS: u64 = 10/);
+  assert.match(rustSource, /ticker\.set_missed_tick_behavior\(MissedTickBehavior::Skip\)/);
+  assert.match(rustSource, /refresh_menubar_popover_snapshot\(&app, false\)\.await/);
+  assert.match(rustSource, /MENUBAR_POPOVER_SNAPSHOT_EVENT/);
+});
+
+test("menubar preloads the popover offscreen before the first tray click", () => {
+  assert.match(
+    rustSource,
+    /pub\(crate\) fn setup_menubar[\s\S]*ensure_popover_window\(app\)[\s\S]*let tray = build_tray\(app\)/,
+  );
+  assert.match(rustSource, /MENUBAR_POPOVER_WARMUP_POSITION/);
+  assert.match(rustSource, /\.visible\(true\)/);
+  assert.match(rustSource, /\.focused\(false\)/);
+  assert.match(rustSource, /\.on_page_load\(/);
+  assert.match(rustSource, /PageLoadEvent::Finished/);
+  assert.match(rustSource, /refresh_menubar_popover_snapshot\(&app, false\)\.await/);
+  assert.match(rustSource, /popover_window_is_warming\(&window\)/);
+  assert.match(rustSource, /window\.hide\(\)/);
 });

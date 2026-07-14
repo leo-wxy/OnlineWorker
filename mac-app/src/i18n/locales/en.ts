@@ -155,7 +155,7 @@ export const enTexts: AppTexts = {
       diagnosticsDescription:
         "Check the app, service, providers, configuration, plugins, sockets, and recent logs. One failed check does not stop the rest.",
       supportBundlePrivacy:
-        "The bundle stays at the location you choose, is never uploaded automatically, and does not include credentials or Session content.",
+        "The bundle stays at the location you choose and is never uploaded automatically. It does not read the Session database or full conversations, but recent logs may contain session titles, message summaries, file paths, and error context. Review the bundle before sharing.",
       runDiagnostics: "Run Diagnostics",
       diagnosticsRunning: "Running diagnostics...",
       diagnosticsNeverRun: "Diagnostics have not been run yet.",

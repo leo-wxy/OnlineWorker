@@ -17,7 +17,7 @@ export function formatTokenCount(value: number | null, withUnit = false) {
 
 export function formatRelativeAge(updatedAtEpoch: number | null, nowMs: number) {
   if (!updatedAtEpoch) {
-    return "just now";
+    return "--";
   }
   const updatedAtMs = updatedAtEpoch < 1_000_000_000_000 ? updatedAtEpoch * 1000 : updatedAtEpoch;
   const deltaSeconds = Math.max(0, Math.floor((nowMs - updatedAtMs) / 1000));

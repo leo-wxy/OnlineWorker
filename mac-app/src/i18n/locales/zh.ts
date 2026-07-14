@@ -153,7 +153,7 @@ export const zhTexts: AppTexts = {
       diagnosticsDescription:
         "检查应用、服务、Provider、配置、插件、Socket 和最近日志。单项失败不会阻止其他检查。",
       supportBundlePrivacy:
-        "支持包只保存在你选择的位置，不会自动上传，也不会包含凭据或 Session 会话内容。",
+        "支持包只保存在你选择的位置，不会自动上传，也不会读取 Session 数据库或完整会话记录。最近运行日志可能包含会话标题、消息摘要、文件路径和错误上下文，分享前请检查内容。",
       runDiagnostics: "运行诊断",
       diagnosticsRunning: "正在诊断...",
       diagnosticsNeverRun: "尚未运行诊断。",

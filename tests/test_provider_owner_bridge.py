@@ -274,6 +274,38 @@ async def test_provider_owner_bridge_serves_usage_source_summary(monkeypatch, tm
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_exposes_provider_plugin_load_failures(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+    from core.providers import registry
+
+    failures = [
+        {
+            "providerId": "broken",
+            "manifestPath": "/tmp/broken/plugin.yaml",
+            "entrypoint": "broken.provider:create_provider_descriptor",
+            "error": "ImportError: removed contract",
+        }
+    ]
+    monkeypatch.setattr(registry, "_PROVIDER_LOAD_FAILURES", failures)
+
+    bridge = ProviderOwnerBridge(AppState(storage=AppStorage()), data_dir=str(tmp_path))
+    socket_path = f"/tmp/ow-owner-{os.getpid()}-{time.time_ns()}.sock"
+    server = await asyncio.start_unix_server(bridge._handle_client, path=socket_path)
+    try:
+        reader, writer = await asyncio.open_unix_connection(socket_path)
+        writer.write(b'{"type":"provider_plugin_load_failures"}\n')
+        await writer.drain()
+        response = json.loads((await reader.readline()).decode("utf-8"))
+        writer.close()
+        await writer.wait_closed()
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert response == {"ok": True, "failures": failures}
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_streams_session_activity_from_message_bus(tmp_path):
     import asyncio
 
@@ -989,6 +1021,52 @@ async def test_provider_owner_bridge_session_activities_not_blocked_by_slow_list
         list_writer.close()
         await activity_writer.wait_closed()
         await list_writer.wait_closed()
+    finally:
+        server.close()
+        await server.wait_closed()
+        try:
+            os.remove(socket_path)
+        except FileNotFoundError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_returns_error_when_request_handler_times_out(
+    monkeypatch,
+    tmp_path,
+):
+    import asyncio
+
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(storage=AppStorage())
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+
+    async def fail_list_sessions(request):
+        raise TimeoutError("codex.list_sessions timed out after 5000ms")
+
+    monkeypatch.setattr(bridge, "_handle_list_sessions", fail_list_sessions)
+
+    socket_path = f"/tmp/ow-bridge-handler-error-{os.getpid()}.sock"
+    try:
+        os.remove(socket_path)
+    except FileNotFoundError:
+        pass
+    server = await asyncio.start_unix_server(bridge._handle_client, path=socket_path)
+    try:
+        reader, writer = await asyncio.open_unix_connection(socket_path)
+        writer.write(b'{"type":"list_sessions","provider_id":"codex"}\n')
+        await writer.drain()
+
+        response = json.loads((await reader.readline()).decode("utf-8"))
+
+        assert response == {
+            "ok": False,
+            "error": "codex.list_sessions timed out after 5000ms",
+        }
+
+        writer.close()
+        await writer.wait_closed()
     finally:
         server.close()
         await server.wait_closed()
@@ -2579,6 +2657,116 @@ async def test_provider_owner_bridge_hydrates_missing_preview_from_history_and_c
     assert second == first
     assert observed["list_calls"] == 1
     assert observed["read_calls"] == 1
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_hydrates_only_latest_idle_low_signal_preview(
+    monkeypatch,
+    tmp_path,
+):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(storage=AppStorage())
+    observed = []
+
+    class Facts:
+        @staticmethod
+        def list_sessions(*, limit=100, sessions_dir=None):
+            return [
+                {
+                    "id": "older-idle",
+                    "title": "Older",
+                    "preview": "Older",
+                    "workspace": "/tmp/older",
+                    "providerActive": False,
+                    "updatedAt": 10,
+                },
+                {
+                    "id": "latest-idle",
+                    "title": "Latest",
+                    "preview": "Latest",
+                    "workspace": "/tmp/latest",
+                    "providerActive": False,
+                    "updatedAt": 20,
+                },
+            ]
+
+        @staticmethod
+        def read_thread_history(session_id, limit=20, sessions_dir=None):
+            observed.append(session_id)
+            return [{"role": "assistant", "text": f"{session_id} assistant preview"}]
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(facts=Facts) if name == "overlay-tool" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_list_sessions(
+        {
+            "provider_id": "overlay-tool",
+            "limit": 20,
+        }
+    )
+
+    assert observed == ["latest-idle"]
+    assert response["sessions"][0]["id"] == "latest-idle"
+    assert response["sessions"][0]["preview"] == "latest-idle assistant preview"
+    assert response["sessions"][1]["preview"] == "Older"
+
+
+@pytest.mark.asyncio
+async def test_provider_owner_bridge_hydrates_idle_preview_for_workspace_fallback(
+    monkeypatch,
+    tmp_path,
+):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(storage=AppStorage())
+    observed = []
+
+    class Facts:
+        thread_list_is_authoritative = True
+
+        @staticmethod
+        def scan_workspaces(sessions_dir=None):
+            return [{"path": "/tmp/project"}]
+
+        @staticmethod
+        def list_threads(workspace_path, limit=100):
+            return [
+                {
+                    "id": "idle-thread",
+                    "preview": "Session title",
+                    "updatedAt": 20,
+                }
+            ]
+
+        @staticmethod
+        def query_active_thread_ids(workspace_path):
+            return set()
+
+        @staticmethod
+        def read_thread_history(session_id, limit=20, sessions_dir=None):
+            observed.append(session_id)
+            return [{"role": "assistant", "text": "Latest assistant preview"}]
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(facts=Facts) if name == "overlay-tool" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_list_sessions(
+        {
+            "provider_id": "overlay-tool",
+            "limit": 20,
+        }
+    )
+
+    assert observed == ["idle-thread"]
+    assert response["sessions"][0]["title"] == "Session title"
+    assert response["sessions"][0]["preview"] == "Latest assistant preview"
 
 
 @pytest.mark.asyncio

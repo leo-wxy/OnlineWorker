@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use chrono::Local;
@@ -9,16 +9,20 @@ use serde_json::Value;
 use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::utils::config::Color;
+use tauri::webview::PageLoadEvent;
 use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Rect, Size, WebviewUrl,
     WebviewWindowBuilder, Wry,
 };
-use tokio::sync::Mutex;
+use tokio::time::MissedTickBehavior;
+use tokio::{sync::Mutex, task::JoinSet};
 
 use crate::commands::config::{app_name, ensure_data_dir, read_provider_metadata_from_disk};
 use crate::commands::dashboard::{compute_dashboard_state, DashboardState, SystemHealth};
 use crate::commands::provider_sessions::load_provider_sessions_with_overlays;
-use crate::commands::provider_usage::get_usage_source_summary;
+use crate::commands::provider_usage::{
+    get_usage_source_catalog, get_usage_source_summary, UsageSourceCatalogEntry,
+};
 use crate::commands::service::{ensure_service_running_if_needed, BotState};
 use crate::commands::task_board_state::{
     get_task_board_session_activities, TaskBoardSessionActivity,
@@ -29,12 +33,17 @@ const MAIN_WINDOW_LABEL: &str = "main";
 const MENUBAR_POPOVER_WINDOW_LABEL: &str = "menubar-popover";
 const APP_NAVIGATE_TAB_EVENT: &str = "app:navigate-tab";
 const APP_OPEN_SESSION_EVENT: &str = "app:open-session";
+const MENUBAR_POPOVER_SNAPSHOT_EVENT: &str = "menubar:snapshot-updated";
 const REFRESH_INTERVAL_SECONDS: u64 = 4;
+const SNAPSHOT_REFRESH_INTERVAL_SECONDS: u64 = 10;
+const MENUBAR_PROVIDER_LOAD_TIMEOUT: Duration = Duration::from_secs(3);
 const MENUBAR_POPOVER_WIDTH: f64 = 420.0;
 const MENUBAR_POPOVER_HEIGHT: f64 = 410.0;
 const MENUBAR_POPOVER_TARGET_HEIGHT: f64 = 560.0;
 const MENUBAR_POPOVER_MARGIN: i32 = 8;
 const MENUBAR_POPOVER_VERTICAL_OFFSET: i32 = 6;
+const MENUBAR_POPOVER_WARMUP_POSITION: f64 = -10_000.0;
+const MENUBAR_POPOVER_WARMUP_THRESHOLD: i32 = -9_000;
 const CUSTOM_TRAY_ICON_RELATIVE_PATH: &str = "icons/tray-template.png";
 const CUSTOM_TRAY_ICON_2X_RELATIVE_PATH: &str = "icons/tray-template@2x.png";
 
@@ -61,6 +70,24 @@ pub struct MenubarPopoverSnapshot {
     pub generated_at_epoch: u64,
     pub usage: MenubarPopoverUsage,
     pub latest_sessions: Vec<MenubarPopoverSessionLane>,
+}
+
+#[derive(Default)]
+pub struct MenubarPopoverSnapshotStore {
+    snapshot: RwLock<Option<MenubarPopoverSnapshot>>,
+    refresh_lock: Mutex<()>,
+}
+
+impl MenubarPopoverSnapshotStore {
+    fn read(&self) -> Option<MenubarPopoverSnapshot> {
+        self.snapshot.read().ok()?.clone()
+    }
+
+    fn replace(&self, snapshot: MenubarPopoverSnapshot) {
+        if let Ok(mut cached) = self.snapshot.write() {
+            *cached = Some(snapshot);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -176,26 +203,63 @@ fn ensure_popover_window(app: &AppHandle) -> Result<(), String> {
         WebviewUrl::App("index.html".into()),
     )
     .title(app_name())
-    .position(0.0, 0.0)
+    .position(
+        MENUBAR_POPOVER_WARMUP_POSITION,
+        MENUBAR_POPOVER_WARMUP_POSITION,
+    )
     .inner_size(MENUBAR_POPOVER_WIDTH, MENUBAR_POPOVER_HEIGHT)
     .resizable(false)
     .maximizable(false)
     .minimizable(false)
     .focused(false)
-    .visible(false)
+    .visible(true)
     .decorations(false)
     .transparent(true)
     .background_color(Color(0, 0, 0, 0))
     .always_on_top(true)
     .skip_taskbar(true)
     .shadow(false)
+    .on_page_load(|window, payload| {
+        if !matches!(payload.event(), PageLoadEvent::Finished)
+            || !popover_window_is_warming(&window)
+        {
+            return;
+        }
+        let app = window.app_handle().clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            if let Err(error) = refresh_menubar_popover_snapshot(&app, false).await {
+                eprintln!("[menubar] popover warmup snapshot failed: {error}");
+            }
+            if popover_window_is_warming(&window) {
+                let _ = window.hide();
+            }
+        });
+    })
     .build()
     .map(|_| ())
     .map_err(|error| format!("create menubar popover window failed: {error}"))
 }
 
+fn popover_window_is_warming(window: &tauri::WebviewWindow) -> bool {
+    window
+        .outer_position()
+        .map(is_popover_warmup_position)
+        .unwrap_or(false)
+}
+
+fn is_popover_warmup_position(position: PhysicalPosition<i32>) -> bool {
+    position.x <= MENUBAR_POPOVER_WARMUP_THRESHOLD && position.y <= MENUBAR_POPOVER_WARMUP_THRESHOLD
+}
+
 pub(crate) fn setup_menubar(app: &AppHandle, state: Arc<Mutex<BotState>>) -> tauri::Result<()> {
+    app.state::<MenubarPopoverSnapshotStore>()
+        .replace(empty_popover_snapshot());
+    if let Err(error) = ensure_popover_window(app) {
+        eprintln!("[menubar] popover warmup failed: {error}");
+    }
     let tray = build_tray(app)?;
+    start_menubar_snapshot_refresh_loop(app.clone());
     start_menubar_refresh_loop(app.clone(), state, tray);
 
     Ok(())
@@ -242,7 +306,9 @@ fn toggle_menubar_popover(
         .get_webview_window(MENUBAR_POPOVER_WINDOW_LABEL)
         .ok_or_else(|| "Cannot find menubar popover window".to_string())?;
 
-    if window.is_visible().map_err(|error| error.to_string())? {
+    if window.is_visible().map_err(|error| error.to_string())?
+        && !popover_window_is_warming(&window)
+    {
         window.hide().map_err(|error| error.to_string())?;
         return Ok(());
     }
@@ -451,10 +517,30 @@ fn clamp_i32(value: i32, min: i32, max: i32) -> i32 {
 fn start_menubar_refresh_loop(app: AppHandle, state: Arc<Mutex<BotState>>, tray: TrayIcon<Wry>) {
     tauri::async_runtime::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_secs(REFRESH_INTERVAL_SECONDS));
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
             if let Err(error) = update_menubar_state(&app, &state, Some(&tray)).await {
                 eprintln!("[menubar] tray state refresh failed: {}", error);
+            }
+
+            if app.tray_by_id(APP_TRAY_ID).is_none() {
+                break;
+            }
+        }
+    });
+}
+
+fn start_menubar_snapshot_refresh_loop(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut ticker =
+            tokio::time::interval(Duration::from_secs(SNAPSHOT_REFRESH_INTERVAL_SECONDS));
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        ticker.tick().await;
+        loop {
+            ticker.tick().await;
+            if let Err(error) = refresh_menubar_popover_snapshot(&app, false).await {
+                eprintln!("[menubar] popover snapshot refresh failed: {error}");
             }
 
             if app.tray_by_id(APP_TRAY_ID).is_none() {
@@ -558,19 +644,46 @@ fn navigate_to_tab(app: &AppHandle, tab: &str) -> Result<(), String> {
 #[tauri::command]
 pub async fn get_menubar_popover_snapshot(
     app: AppHandle,
+    force_refresh: Option<bool>,
 ) -> Result<MenubarPopoverSnapshot, String> {
-    let usage_providers = load_popover_usage_providers(&app).await?;
-    let activities = get_task_board_session_activities()
-        .await
-        .unwrap_or_default();
-    let session_candidates = load_popover_session_candidates(&app, &usage_providers).await;
+    if !force_refresh.unwrap_or(false) {
+        return app
+            .state::<MenubarPopoverSnapshotStore>()
+            .read()
+            .ok_or_else(|| "menubar popover snapshot is not ready".to_string());
+    }
 
-    Ok(build_popover_snapshot(
+    refresh_menubar_popover_snapshot(&app, true).await
+}
+
+async fn refresh_menubar_popover_snapshot(
+    app: &AppHandle,
+    force_refresh: bool,
+) -> Result<MenubarPopoverSnapshot, String> {
+    let store = app.state::<MenubarPopoverSnapshotStore>();
+    let _refresh_guard = store.refresh_lock.lock().await;
+    let providers = popover_provider_specs();
+    let (usage_providers, activities, session_candidates) = tokio::join!(
+        load_popover_usage_providers(&app, &providers),
+        get_task_board_session_activities(),
+        load_popover_session_candidates(&app, &providers, force_refresh),
+    );
+
+    let snapshot = build_popover_snapshot(
         current_epoch_seconds(),
-        usage_providers,
-        activities,
+        usage_providers?,
+        activities.unwrap_or_default(),
         session_candidates,
-    ))
+    );
+    store.replace(snapshot.clone());
+    if let Err(error) = app.emit_to(
+        MENUBAR_POPOVER_WINDOW_LABEL,
+        MENUBAR_POPOVER_SNAPSHOT_EVENT,
+        snapshot.clone(),
+    ) {
+        eprintln!("[menubar] popover snapshot event failed: {error}");
+    }
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -602,68 +715,145 @@ pub async fn open_menubar_tab(app: AppHandle, tab: String) -> Result<(), String>
 
 async fn load_popover_usage_providers(
     app: &AppHandle,
+    specs: &[(String, String)],
 ) -> Result<Vec<MenubarPopoverUsageProvider>, String> {
     let today = Local::now().format("%Y-%m-%d").to_string();
-    let mut providers = Vec::new();
-
-    for (provider_id, label) in popover_provider_specs() {
-        let usage = match get_usage_source_summary(
-            app.clone(),
-            "ccusage".to_string(),
-            provider_id.clone(),
-            today.clone(),
-            today.clone(),
-            None,
-            Some(false),
-        )
+    let usage_catalog = get_usage_source_catalog(app.clone())
         .await
-        {
-            Ok(summary) => usage_breakdown_from_usage_summary(&summary, &today),
-            Err(error) => {
-                eprintln!(
-                    "[menubar] popover usage refresh failed for {}: {}",
-                    provider_id, error
-                );
-                MenubarPopoverUsageBreakdown::default()
-            }
-        };
-
-        providers.push(MenubarPopoverUsageProvider {
-            provider_id,
-            label,
-            tokens_today: usage.total_tokens,
-            input_tokens: usage.input_tokens,
-            output_tokens: usage.output_tokens,
-            cache_creation_tokens: usage.cache_creation_tokens,
-            cache_read_tokens: usage.cache_read_tokens,
-            total_cost_usd: usage.total_cost_usd,
+        .unwrap_or_default();
+    let mut providers = specs
+        .iter()
+        .map(|(provider_id, label)| MenubarPopoverUsageProvider {
+            provider_id: provider_id.clone(),
+            label: label.clone(),
+            tokens_today: None,
+            input_tokens: None,
+            output_tokens: None,
+            cache_creation_tokens: None,
+            cache_read_tokens: None,
+            total_cost_usd: None,
             estimated: false,
+        })
+        .collect::<Vec<_>>();
+    let mut tasks = JoinSet::new();
+
+    for (index, (provider_id, _)) in specs.iter().enumerate() {
+        let app = app.clone();
+        let provider_id = provider_id.clone();
+        let today = today.clone();
+        let (plugin_id, source_id) =
+            popover_usage_source_for_provider(&provider_id, &usage_catalog);
+        tasks.spawn(async move {
+            let usage = match get_usage_source_summary(
+                app,
+                plugin_id.clone(),
+                source_id.clone(),
+                today.clone(),
+                today.clone(),
+                None,
+                Some(false),
+            )
+            .await
+            {
+                Ok(summary) => usage_breakdown_from_usage_summary(&summary, &today),
+                Err(error) => {
+                    eprintln!(
+                        "[menubar] popover usage refresh failed for {} via {}/{}: {}",
+                        provider_id, plugin_id, source_id, error
+                    );
+                    MenubarPopoverUsageBreakdown::default()
+                }
+            };
+            (index, usage)
         });
+    }
+
+    while let Some(result) = tasks.join_next().await {
+        let Ok((index, usage)) = result else {
+            continue;
+        };
+        if let Some(provider) = providers.get_mut(index) {
+            provider.tokens_today = usage.total_tokens;
+            provider.input_tokens = usage.input_tokens;
+            provider.output_tokens = usage.output_tokens;
+            provider.cache_creation_tokens = usage.cache_creation_tokens;
+            provider.cache_read_tokens = usage.cache_read_tokens;
+            provider.total_cost_usd = usage.total_cost_usd;
+        }
     }
 
     Ok(providers)
 }
 
+fn empty_popover_snapshot() -> MenubarPopoverSnapshot {
+    let providers = popover_provider_specs()
+        .into_iter()
+        .map(|(provider_id, label)| MenubarPopoverUsageProvider {
+            provider_id,
+            label,
+            tokens_today: None,
+            input_tokens: None,
+            output_tokens: None,
+            cache_creation_tokens: None,
+            cache_read_tokens: None,
+            total_cost_usd: None,
+            estimated: false,
+        })
+        .collect();
+    build_popover_snapshot(current_epoch_seconds(), providers, Vec::new(), Vec::new())
+}
+
+fn popover_usage_source_for_provider(
+    provider_id: &str,
+    catalog: &[UsageSourceCatalogEntry],
+) -> (String, String) {
+    catalog
+        .iter()
+        .find(|source| source.provider_id.as_deref() == Some(provider_id))
+        .map(|source| (source.plugin_id.clone(), source.source_id.clone()))
+        .unwrap_or_else(|| ("ccusage".to_string(), provider_id.to_string()))
+}
+
 async fn load_popover_session_candidates(
     app: &AppHandle,
-    providers: &[MenubarPopoverUsageProvider],
+    providers: &[(String, String)],
+    force_refresh: bool,
 ) -> Vec<MenubarPopoverSessionCandidate> {
     let mut candidates = Vec::new();
+    let mut tasks = JoinSet::new();
 
-    for provider in providers {
-        match load_provider_sessions_with_overlays(app, &provider.provider_id, true).await {
-            Ok(sessions) => {
-                candidates.extend(parse_provider_session_candidates(
-                    &provider.provider_id,
-                    &sessions,
-                ));
+    for (provider_id, _) in providers {
+        let app = app.clone();
+        let provider_id = provider_id.clone();
+        tasks.spawn(async move {
+            match tokio::time::timeout(
+                MENUBAR_PROVIDER_LOAD_TIMEOUT,
+                load_provider_sessions_with_overlays(&app, &provider_id, force_refresh),
+            )
+            .await
+            {
+                Ok(Ok(sessions)) => parse_provider_session_candidates(&provider_id, &sessions),
+                Ok(Err(error)) => {
+                    eprintln!(
+                        "[menubar] popover session refresh failed for {}: {}",
+                        provider_id, error
+                    );
+                    Vec::new()
+                }
+                Err(_) => {
+                    eprintln!(
+                        "[menubar] popover session refresh timed out for {}",
+                        provider_id
+                    );
+                    Vec::new()
+                }
             }
-            Err(error) => {
-                eprintln!(
-                    "[menubar] popover session refresh failed for {}: {}",
-                    provider.provider_id, error
-                );
-            }
+        });
+    }
+
+    while let Some(result) = tasks.join_next().await {
+        if let Ok(provider_candidates) = result {
+            candidates.extend(provider_candidates);
         }
     }
 
@@ -673,11 +863,11 @@ async fn load_popover_session_candidates(
 }
 
 fn load_local_state_session_candidates(
-    providers: &[MenubarPopoverUsageProvider],
+    providers: &[(String, String)],
 ) -> Vec<MenubarPopoverSessionCandidate> {
     let provider_ids = providers
         .iter()
-        .map(|provider| provider.provider_id.as_str())
+        .map(|(provider_id, _)| provider_id.as_str())
         .collect::<std::collections::BTreeSet<_>>();
     let Ok(data_dir) = ensure_data_dir() else {
         return Vec::new();
@@ -910,15 +1100,6 @@ fn build_popover_session_lane(
                 && candidate.active
         })
         .max_by_key(|candidate| candidate.sort_rank);
-    let latest_active_local_candidate = candidates
-        .iter()
-        .filter(|candidate| {
-            candidate.provider_id == provider.provider_id
-                && candidate.source == MenubarPopoverSessionCandidateSource::LocalState
-                && candidate.active
-        })
-        .max_by_key(|candidate| candidate.sort_rank);
-
     if let Some(candidate) = latest_active_provider_candidate {
         if let Some(activity) = latest_active_activity {
             if activity_rank_epoch(activity) > candidate_rank_epoch(candidate) {
@@ -935,7 +1116,14 @@ fn build_popover_session_lane(
         return build_activity_session_lane(provider, activity, matching_candidate);
     }
 
-    if let Some(candidate) = latest_active_local_candidate {
+    if let Some(candidate) = candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.provider_id == provider.provider_id
+                && candidate.source == MenubarPopoverSessionCandidateSource::Provider
+        })
+        .max_by_key(|candidate| candidate.sort_rank)
+    {
         return build_candidate_session_lane(provider, candidate, None);
     }
 
@@ -1001,9 +1189,12 @@ fn build_activity_session_lane(
         session_id: Some(activity.session_id.clone()),
         workspace: workspace.clone(),
         workspace_name: workspace.as_deref().map(workspace_display_name),
-        title: session_lane_title(activity).or_else(|| candidate.and_then(|row| row.title.clone())),
-        latest_preview: session_lane_preview(activity)
-            .or_else(|| candidate.and_then(|row| row.latest_preview.clone())),
+        title: candidate
+            .and_then(|row| row.title.clone())
+            .or_else(|| session_lane_title(activity)),
+        latest_preview: session_lane_primary_preview(activity)
+            .or_else(|| candidate.and_then(|row| row.latest_preview.clone()))
+            .or_else(|| session_lane_user_preview(activity)),
         status: session_lane_status(activity)
             .or_else(|| candidate.and_then(|row| row.status.clone())),
         updated_at_epoch: Some(activity.updated_at.max(0.0) as u64)
@@ -1027,13 +1218,15 @@ fn build_candidate_session_lane(
         session_id: Some(candidate.session_id.clone()),
         workspace: workspace.clone(),
         workspace_name: workspace.as_deref().map(workspace_display_name),
-        title: activity
-            .and_then(session_lane_title)
-            .or_else(|| candidate.title.clone())
+        title: candidate
+            .title
+            .clone()
+            .or_else(|| activity.and_then(session_lane_title))
             .or_else(|| Some(candidate.session_id.clone())),
         latest_preview: activity
-            .and_then(session_lane_preview)
-            .or_else(|| candidate.latest_preview.clone()),
+            .and_then(session_lane_primary_preview)
+            .or_else(|| candidate.latest_preview.clone())
+            .or_else(|| activity.and_then(session_lane_user_preview)),
         status: activity
             .and_then(session_lane_status)
             .or_else(|| candidate.status.clone()),
@@ -1128,11 +1321,14 @@ fn session_lane_title(activity: &TaskBoardSessionActivity) -> Option<String> {
     non_empty_text(&activity.title).or_else(|| non_empty_text(&activity.session_id))
 }
 
-fn session_lane_preview(activity: &TaskBoardSessionActivity) -> Option<String> {
+fn session_lane_primary_preview(activity: &TaskBoardSessionActivity) -> Option<String> {
     normalize_preview_text(&activity.last_final_message)
         .or_else(|| normalize_preview_text(&activity.last_assistant_message))
-        .or_else(|| normalize_preview_text(&activity.last_user_message))
         .or_else(|| normalize_preview_text(&activity.attention_reason))
+}
+
+fn session_lane_user_preview(activity: &TaskBoardSessionActivity) -> Option<String> {
+    normalize_preview_text(&activity.last_user_message)
 }
 
 fn session_lane_status(activity: &TaskBoardSessionActivity) -> Option<String> {
@@ -1268,7 +1464,9 @@ mod tests {
     use std::path::Path;
 
     use crate::commands::dashboard::SystemHealth;
-    use crate::commands::provider_usage::{UsageSourceDay, UsageSourceSummary};
+    use crate::commands::provider_usage::{
+        UsageSourceCatalogEntry, UsageSourceDay, UsageSourceSummary,
+    };
     use crate::commands::task_board_state::TaskBoardSessionActivity;
     use serde_json::json;
 
@@ -1276,9 +1474,10 @@ mod tests {
         anchored_popover_position, build_popover_snapshot, compute_tray_status,
         count_needs_attention, menubar_popover_height_for_available_height,
         parse_provider_session_candidate, popover_provider_specs_from_metadata,
-        resolve_custom_tray_icon_paths, usage_breakdown_from_usage_summary,
-        MenubarPopoverOpenSessionTarget, MenubarPopoverSessionCandidate,
-        MenubarPopoverSessionCandidateSource, MenubarPopoverUsageProvider, TrayStatus,
+        popover_usage_source_for_provider, resolve_custom_tray_icon_paths,
+        usage_breakdown_from_usage_summary, MenubarPopoverOpenSessionTarget,
+        MenubarPopoverSessionCandidate, MenubarPopoverSessionCandidateSource,
+        MenubarPopoverUsageProvider, TrayStatus,
     };
 
     fn usage_provider(
@@ -1357,6 +1556,28 @@ mod tests {
         assert_eq!(breakdown.cache_creation_tokens, Some(560));
         assert_eq!(breakdown.cache_read_tokens, Some(7_800));
         assert_eq!(breakdown.total_cost_usd, Some(0.42));
+    }
+
+    #[test]
+    fn popover_usage_source_uses_catalog_provider_association() {
+        let catalog = vec![UsageSourceCatalogEntry {
+            plugin_id: "ccusage".into(),
+            source_id: "opencode".into(),
+            provider_id: Some("codemaker".into()),
+            label: "OpenCode".into(),
+            description: String::new(),
+            order: 30,
+            icon: serde_json::Value::Null,
+        }];
+
+        assert_eq!(
+            popover_usage_source_for_provider("codemaker", &catalog),
+            ("ccusage".into(), "opencode".into())
+        );
+        assert_eq!(
+            popover_usage_source_for_provider("codex", &catalog),
+            ("ccusage".into(), "codex".into())
+        );
     }
 
     #[test]
@@ -1510,7 +1731,7 @@ mod tests {
     }
 
     #[test]
-    fn popover_snapshot_keeps_provider_lanes_empty_without_active_sessions() {
+    fn popover_snapshot_uses_latest_provider_sessions_when_idle() {
         let snapshot = build_popover_snapshot(
             1_720_000_000,
             vec![
@@ -1552,10 +1773,44 @@ mod tests {
         assert!(!snapshot.usage.providers[0].estimated);
         assert_eq!(snapshot.usage.providers[1].tokens_today, None);
         assert!(!snapshot.usage.providers[1].estimated);
-        assert_eq!(snapshot.latest_sessions[0].session_id, None);
-        assert_eq!(snapshot.latest_sessions[0].workspace_name, None);
-        assert_eq!(snapshot.latest_sessions[0].latest_preview, None);
+        assert_eq!(
+            snapshot.latest_sessions[0].session_id.as_deref(),
+            Some("codex-latest")
+        );
+        assert_eq!(
+            snapshot.latest_sessions[0].workspace_name.as_deref(),
+            Some("onlineworker-combined")
+        );
+        assert_eq!(
+            snapshot.latest_sessions[0].latest_preview.as_deref(),
+            Some("实现 provider session fallback")
+        );
+        assert_eq!(snapshot.latest_sessions[0].status, None);
         assert_eq!(snapshot.latest_sessions[1].session_id, None);
+    }
+
+    #[test]
+    fn popover_snapshot_does_not_treat_unarchived_local_state_as_active() {
+        let snapshot = build_popover_snapshot(
+            1_720_000_000,
+            vec![usage_provider("codex", "Codex", None)],
+            Vec::new(),
+            vec![MenubarPopoverSessionCandidate {
+                provider_id: "codex".into(),
+                session_id: "stale-local-session".into(),
+                workspace: Some("/tmp/onlineworker-combined".into()),
+                title: Some("旧会话".into()),
+                latest_preview: Some("旧状态残留".into()),
+                status: Some("Active".into()),
+                updated_at_epoch: None,
+                sort_rank: 1_000_000_000_000,
+                active: true,
+                source: MenubarPopoverSessionCandidateSource::LocalState,
+            }],
+        );
+
+        assert_eq!(snapshot.usage.active_session_count, 0);
+        assert_eq!(snapshot.latest_sessions[0].session_id, None);
     }
 
     #[test]
@@ -1614,6 +1869,60 @@ mod tests {
         assert_eq!(
             snapshot.latest_sessions[0].latest_preview.as_deref(),
             Some("等待授权")
+        );
+    }
+
+    #[test]
+    fn popover_snapshot_keeps_provider_title_and_preview_when_new_turn_has_only_user_message() {
+        let activities = vec![TaskBoardSessionActivity {
+            provider_id: "claude".into(),
+            workspace_id: "claude:/tmp/music_biz_player".into(),
+            workspace_path: "/tmp/music_biz_player".into(),
+            session_id: "claude-session".into(),
+            title: "现在又换了新的想法".into(),
+            status: "running".into(),
+            attention_reason: String::new(),
+            attention_kind: String::new(),
+            request_id: String::new(),
+            approval_source: String::new(),
+            mirrored_only: false,
+            can_interrupt: false,
+            can_recover: false,
+            control_reason: String::new(),
+            control_mode: String::new(),
+            recent_events: Vec::new(),
+            last_user_message: "现在又换了新的想法".into(),
+            last_assistant_message: String::new(),
+            last_final_message: String::new(),
+            last_event_kind: "turn.started".into(),
+            updated_at: 200.0,
+        }];
+
+        let snapshot = build_popover_snapshot(
+            1_720_000_000,
+            vec![usage_provider("claude", "Claude", None)],
+            activities,
+            vec![MenubarPopoverSessionCandidate {
+                provider_id: "claude".into(),
+                session_id: "claude-session".into(),
+                workspace: Some("/tmp/music_biz_player".into()),
+                title: Some("分轨 multitrackfile 不生效".into()),
+                latest_preview: Some("上一条 assistant 回复".into()),
+                status: Some("Active".into()),
+                updated_at_epoch: Some(100),
+                sort_rank: 100,
+                active: true,
+                source: MenubarPopoverSessionCandidateSource::Provider,
+            }],
+        );
+
+        assert_eq!(
+            snapshot.latest_sessions[0].title.as_deref(),
+            Some("分轨 multitrackfile 不生效")
+        );
+        assert_eq!(
+            snapshot.latest_sessions[0].latest_preview.as_deref(),
+            Some("上一条 assistant 回复")
         );
     }
 

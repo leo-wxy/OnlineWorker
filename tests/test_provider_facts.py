@@ -362,6 +362,14 @@ entrypoints:
 
         assert [provider.name for provider in reloaded.list_providers()] == ["claude", "codex"]
         assert "broken-tool" not in {provider.name for provider in reloaded.list_providers()}
+        assert reloaded.provider_load_failures() == [
+            {
+                "providerId": "broken-tool",
+                "manifestPath": str(overlay_dir / "plugin.yaml"),
+                "entrypoint": "broken_provider:create_provider_descriptor",
+                "error": "ImportError: removed provider contract",
+            }
+        ]
         assert "Skipping provider plugin that failed to load" in caplog.text
         assert "removed provider contract" in caplog.text
     finally:

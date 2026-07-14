@@ -556,6 +556,71 @@ def _preview_from_turns(turns: list[dict], *, title: str) -> str:
     return ""
 
 
+async def _hydrate_low_signal_session_previews(
+    provider_id: str,
+    facts,
+    sessions: list[dict],
+) -> None:
+    read_thread_history = getattr(facts, "read_thread_history", None)
+    if not callable(read_thread_history):
+        return
+
+    hydration_candidates = [
+        session
+        for session in sessions
+        if bool(session.get("providerActive"))
+        and _preview_is_low_signal(
+            str(session.get("preview") or ""),
+            str(session.get("title") or ""),
+        )
+    ][:OWNER_BRIDGE_PREVIEW_HYDRATION_LIMIT]
+    if len(hydration_candidates) < OWNER_BRIDGE_PREVIEW_HYDRATION_LIMIT:
+        latest_idle = next(
+            (
+                session
+                for session in sessions
+                if not bool(session.get("providerActive"))
+                and _preview_is_low_signal(
+                    str(session.get("preview") or ""),
+                    str(session.get("title") or ""),
+                )
+            ),
+            None,
+        )
+        if latest_idle is not None:
+            hydration_candidates.append(latest_idle)
+
+    async def hydrate_preview(session: dict) -> None:
+        session_id = str(session.get("id") or "").strip()
+        if not session_id:
+            return
+        turns = await _run_sync_with_timeout(
+            f"{provider_id}.read_thread_history({session_id})",
+            read_thread_history,
+            session_id,
+            limit=20,
+            timeout=OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS,
+        ) or []
+        preview = _preview_from_turns(
+            turns,
+            title=str(session.get("title") or ""),
+        )
+        if preview:
+            session["preview"] = preview
+
+    results = await asyncio.gather(
+        *(hydrate_preview(session) for session in hydration_candidates),
+        return_exceptions=True,
+    )
+    for result in results:
+        if isinstance(result, Exception):
+            logger.debug(
+                "[provider-owner-bridge] list preview hydration skipped provider=%s error=%s",
+                provider_id,
+                result,
+            )
+
+
 def _event_payload_text(payload: dict, *keys: str) -> str:
     for key in keys:
         value = str(payload.get(key) or "").strip()
@@ -729,6 +794,9 @@ class ProviderOwnerBridge:
                 response = await self._handle_archive_session(request)
             elif request_type == "runtime_status":
                 response = await self._handle_runtime_status(request)
+            elif request_type == "provider_plugin_load_failures":
+                from core.providers.registry import provider_load_failures
+                response = {"ok": True, "failures": provider_load_failures()}
             elif request_type == "usage_source_catalog":
                 from core.usage.registry import get_usage_source_catalog
                 response = {"ok": True, "sources": get_usage_source_catalog()}
@@ -758,6 +826,25 @@ class ProviderOwnerBridge:
                 await writer.drain()
             except (BrokenPipeError, ConnectionResetError):
                 logger.debug("[provider-owner-bridge] 客户端已断开，跳过响应写入")
+        except Exception as exc:
+            logger.warning(
+                "[provider-owner-bridge] 请求失败 type=%s error=%s",
+                request_type,
+                exc,
+            )
+            try:
+                writer.write(
+                    (
+                        json.dumps(
+                            {"ok": False, "error": str(exc)},
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    ).encode("utf-8")
+                )
+                await writer.drain()
+            except (OSError, RuntimeError):
+                logger.debug("[provider-owner-bridge] 客户端已断开，跳过错误响应")
         finally:
             writer.close()
             try:
@@ -869,48 +956,6 @@ class ProviderOwnerBridge:
                             row["source"] = source
                         sessions.append(row)
                     sessions.extend(_state_only_session_rows(self.state, provider_id, facts, seen))
-                    read_thread_history = getattr(facts, "read_thread_history", None)
-                    if callable(read_thread_history):
-                        hydration_candidates = [
-                            session
-                            for session in sessions
-                            if bool(session.get("providerActive"))
-                            and _preview_is_low_signal(
-                                str(session.get("preview") or ""),
-                                str(session.get("title") or ""),
-                            )
-                        ][:OWNER_BRIDGE_PREVIEW_HYDRATION_LIMIT]
-
-                        async def hydrate_preview(session: dict) -> None:
-                            session_id = str(session.get("id") or "").strip()
-                            if not session_id:
-                                return
-                            turns = await _run_sync_with_timeout(
-                                f"{provider_id}.read_thread_history({session_id})",
-                                read_thread_history,
-                                session_id,
-                                limit=20,
-                                timeout=OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS,
-                            ) or []
-                            preview = _preview_from_turns(
-                                turns,
-                                title=str(session.get("title") or ""),
-                            )
-                            if preview:
-                                session["preview"] = preview
-
-                        if hydration_candidates:
-                            results = await asyncio.gather(
-                                *(hydrate_preview(session) for session in hydration_candidates),
-                                return_exceptions=True,
-                            )
-                            for result in results:
-                                if isinstance(result, Exception):
-                                    logger.debug(
-                                        "[provider-owner-bridge] list preview hydration skipped provider=%s error=%s",
-                                        provider_id,
-                                        result,
-                                    )
                     sessions.sort(
                         key=lambda item: (
                             -_safe_int(item.get("updatedAt")),
@@ -918,6 +963,7 @@ class ProviderOwnerBridge:
                             str(item.get("id") or ""),
                         )
                     )
+                    await _hydrate_low_signal_session_previews(provider_id, facts, sessions)
                     response = {"ok": True, "sessions": sessions}
                     self._list_sessions_cache[cache_key] = response
                     return response
@@ -1065,6 +1111,7 @@ class ProviderOwnerBridge:
                 str(item.get("id") or ""),
             )
         )
+        await _hydrate_low_signal_session_previews(provider_id, facts, sessions)
         return {"ok": True, "sessions": sessions}
 
     async def _handle_session_activities(self, request: dict) -> dict:

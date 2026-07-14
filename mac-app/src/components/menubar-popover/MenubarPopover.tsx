@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
   MenubarPopoverSessionLane,
@@ -15,6 +16,7 @@ import {
 } from "../../utils/menubarPopover";
 
 const OVERVIEW_TAB_ID = "overview";
+const SNAPSHOT_UPDATED_EVENT = "menubar:snapshot-updated";
 
 async function hideCurrentWindow() {
   try {
@@ -43,7 +45,7 @@ function formatUsd(value: number | null) {
 
 export function MenubarPopover() {
   const [snapshot, setSnapshot] = useState<MenubarPopoverSnapshot | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -69,14 +71,18 @@ export function MenubarPopover() {
     };
   }, []);
 
-  const loadSnapshot = useCallback(async () => {
+  const loadSnapshot = useCallback(async (forceRefresh = false) => {
     if (snapshotLoadInFlight.current) {
       return;
     }
     snapshotLoadInFlight.current = true;
-    setLoading(true);
+    if (forceRefresh) {
+      setLoading(true);
+    }
     try {
-      const next = await invoke<MenubarPopoverSnapshot>("get_menubar_popover_snapshot");
+      const next = await invoke<MenubarPopoverSnapshot>("get_menubar_popover_snapshot", {
+        forceRefresh,
+      });
       setSnapshot(next);
       setError(null);
     } catch (loadError) {
@@ -84,12 +90,34 @@ export function MenubarPopover() {
       setError(loadError instanceof Error ? loadError.message : "Failed to load popover data");
     } finally {
       snapshotLoadInFlight.current = false;
-      setLoading(false);
+      if (forceRefresh) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    void loadSnapshot();
+    let disposed = false;
+    let unsubscribe: (() => void) | null = null;
+
+    void listen<MenubarPopoverSnapshot>(SNAPSHOT_UPDATED_EVENT, ({ payload }) => {
+      if (!disposed) {
+        setSnapshot(payload);
+        setError(null);
+      }
+    }).then((unlisten) => {
+      unsubscribe = unlisten;
+      return loadSnapshot(false);
+    }).catch(() => {
+      // Ignore non-Tauri environments.
+    });
+
+    return () => {
+      disposed = true;
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
   }, [loadSnapshot]);
 
   useEffect(() => {
@@ -123,9 +151,7 @@ export function MenubarPopover() {
       }
       if (!focused) {
         void hideCurrentWindow();
-        return;
       }
-      void loadSnapshot();
     }).then((unlisten) => {
       unsubscribe = unlisten;
     }).catch(() => {
@@ -138,7 +164,7 @@ export function MenubarPopover() {
         unsubscribe();
       }
     };
-  }, [loadSnapshot]);
+  }, []);
 
   const providers = useMemo(() => snapshot?.usage.providers ?? [], [snapshot]);
   const lanes = useMemo(() => snapshot?.latestSessions ?? [], [snapshot]);
@@ -207,7 +233,7 @@ export function MenubarPopover() {
           </div>
           <button
             type="button"
-            onClick={() => void loadSnapshot()}
+            onClick={() => void loadSnapshot(true)}
             className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[7px] text-slate-500 transition hover:bg-slate-100 hover:text-gray-950 disabled:cursor-wait disabled:opacity-60"
             disabled={loading}
             title="Refresh"
@@ -222,7 +248,7 @@ export function MenubarPopover() {
               <span className="min-w-0 truncate">{error}</span>
               <button
                 type="button"
-                onClick={() => void loadSnapshot()}
+                onClick={() => void loadSnapshot(true)}
                 className="rounded-[6px] border border-rose-200 bg-white px-2 py-1 text-[10px] font-bold text-rose-700"
               >
                 Retry
@@ -328,7 +354,7 @@ function OverviewRailPanel({
 
       <section className="px-3.5 pb-3.5">
         <div className="flex h-11 items-center justify-between gap-3">
-          <h3 className="text-[12px] font-bold text-gray-950">Active sessions</h3>
+          <h3 className="text-[12px] font-bold text-gray-950">Sessions</h3>
           <p className="text-[10px] font-medium text-slate-500">
             Latest from each provider
           </p>
@@ -368,7 +394,7 @@ function ProviderRailPanel({
 }) {
   const accent = providerAccent(provider.providerId);
   const workspaceText = lane?.workspaceName || lane?.workspace || "No active workspace";
-  const status = lane?.status || (lane?.sessionId ? "Active" : "Idle");
+  const status = lane?.status || "Idle";
   const breakdown = [
     { label: "Input", value: formatPopoverTokenCount(provider.inputTokens) },
     { label: "Output", value: formatPopoverTokenCount(provider.outputTokens) },

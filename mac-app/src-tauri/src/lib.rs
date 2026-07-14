@@ -56,7 +56,7 @@ use commands::telegram::{test_bot_permissions, test_bot_token, test_group_access
 use commands::terminal::{open_finder, open_provider_tui_host_terminal, open_terminal};
 use menubar::{
     get_menubar_popover_snapshot, open_menubar_popover_session, open_menubar_tab, setup_menubar,
-    show_main_window,
+    show_main_window, MenubarPopoverSnapshotStore,
 };
 
 #[derive(Default)]
@@ -356,6 +356,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(Arc::new(Mutex::new(BotState::new())))
+        .manage(MenubarPopoverSnapshotStore::default())
         .manage(AppExitState::default())
         .setup(|app| {
             apply_default_provider_overlay_env(&app.handle());

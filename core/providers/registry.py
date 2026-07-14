@@ -13,6 +13,7 @@ from core.providers.overlay import iter_overlay_manifest_paths, load_manifest
 PROVIDER_PLUGIN_ROOT = Path(__file__).resolve().parents[2] / "plugins" / "providers"
 PROVIDER_PLUGIN_GROUPS = ("builtin",)
 logger = logging.getLogger(__name__)
+_PROVIDER_LOAD_FAILURES: list[dict[str, str]] = []
 
 
 def _iter_provider_plugin_manifests() -> list[Path]:
@@ -48,6 +49,7 @@ def _load_descriptor_from_entrypoint(entrypoint: str, *, manifest_path: Path) ->
 
 
 def _load_provider_descriptors() -> dict[str, ProviderDescriptor]:
+    _PROVIDER_LOAD_FAILURES.clear()
     providers: dict[str, ProviderDescriptor] = _load_bundled_provider_descriptors()
     manifest_paths = _iter_provider_plugin_manifests()
     if not manifest_paths:
@@ -55,11 +57,12 @@ def _load_provider_descriptors() -> dict[str, ProviderDescriptor]:
 
     for manifest_path in manifest_paths:
         entrypoint = ""
+        manifest_id = ""
         try:
             manifest = load_manifest(manifest_path)
             entrypoint = (manifest.get("entrypoints") or {}).get("python_descriptor")
-            descriptor = _load_descriptor_from_entrypoint(entrypoint, manifest_path=manifest_path)
             manifest_id = str(manifest.get("id") or "").strip()
+            descriptor = _load_descriptor_from_entrypoint(entrypoint, manifest_path=manifest_path)
             if not manifest_id:
                 raise ValueError(f"Provider plugin manifest missing id: {manifest_path}")
             if descriptor.name != manifest_id:
@@ -68,13 +71,23 @@ def _load_provider_descriptors() -> dict[str, ProviderDescriptor]:
                     f"{descriptor.name!r} != {manifest_id!r}"
                 )
             providers[descriptor.name] = descriptor
-        except Exception:
+        except Exception as exc:
+            _PROVIDER_LOAD_FAILURES.append({
+                "providerId": manifest_id,
+                "manifestPath": str(manifest_path),
+                "entrypoint": str(entrypoint or ""),
+                "error": f"{type(exc).__name__}: {exc}",
+            })
             logger.exception(
                 "Skipping provider plugin that failed to load: manifest=%s entrypoint=%s",
                 manifest_path,
                 entrypoint or "<unavailable>",
             )
     return providers
+
+
+def provider_load_failures() -> list[dict[str, str]]:
+    return [dict(failure) for failure in _PROVIDER_LOAD_FAILURES]
 
 
 def _load_bundled_provider_descriptors() -> dict[str, ProviderDescriptor]:

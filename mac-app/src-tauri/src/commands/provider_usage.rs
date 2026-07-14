@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tauri::AppHandle;
 
@@ -32,7 +32,7 @@ pub struct UsageSourceCatalogEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::UsageSourceCatalogEntry;
+    use super::{ProviderPluginLoadFailure, UsageSourceCatalogEntry};
 
     #[test]
     fn usage_source_catalog_preserves_provider_association() {
@@ -49,6 +49,20 @@ mod tests {
             serde_json::to_value(entry).expect("catalog entry should serialize")["providerId"],
             "codex"
         );
+    }
+
+    #[test]
+    fn provider_plugin_load_failure_preserves_diagnostic_context() {
+        let failure: ProviderPluginLoadFailure = serde_json::from_value(serde_json::json!({
+            "providerId": "codemaker",
+            "manifestPath": "/tmp/codemaker/plugin.yaml",
+            "entrypoint": "codemaker.python.provider:create_provider_descriptor",
+            "error": "ImportError: removed contract"
+        }))
+        .expect("plugin failure should deserialize");
+
+        assert_eq!(failure.provider_id, "codemaker");
+        assert!(failure.error.contains("ImportError"));
     }
 }
 
@@ -74,49 +88,112 @@ pub struct UsageSourceSummary {
     pub unsupported_reason: Option<String>,
 }
 
-fn owner_bridge_request(data_dir: &Path, payload: Value) -> Result<Value, String> {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderPluginLoadFailure {
+    #[serde(default)]
+    pub provider_id: String,
+    pub manifest_path: String,
+    #[serde(default)]
+    pub entrypoint: String,
+    pub error: String,
+}
+
+fn owner_bridge_request_sync(
+    data_dir: &Path,
+    payload: Value,
+    timeout: Duration,
+) -> Result<Value, String> {
     let socket_path = provider_owner_bridge_socket_path(data_dir);
     if !socket_path.exists() {
-        return Err(format!("provider owner bridge not ready: {}", socket_path.display()));
+        return Err(format!(
+            "provider owner bridge not ready: {}",
+            socket_path.display()
+        ));
     }
     let mut socket = UnixStream::connect(&socket_path)
         .map_err(|error| format!("connect provider owner bridge failed: {error}"))?;
-    socket.set_read_timeout(Some(USAGE_BRIDGE_TIMEOUT)).map_err(|e| e.to_string())?;
-    socket.set_write_timeout(Some(USAGE_BRIDGE_TIMEOUT)).map_err(|e| e.to_string())?;
-    socket.write_all(format!("{payload}\n").as_bytes()).map_err(|e| e.to_string())?;
-    socket.shutdown(Shutdown::Write).map_err(|e| e.to_string())?;
+    socket
+        .set_read_timeout(Some(timeout))
+        .map_err(|e| e.to_string())?;
+    socket
+        .set_write_timeout(Some(timeout))
+        .map_err(|e| e.to_string())?;
+    socket
+        .write_all(format!("{payload}\n").as_bytes())
+        .map_err(|e| e.to_string())?;
+    socket
+        .shutdown(Shutdown::Write)
+        .map_err(|e| e.to_string())?;
     let mut line = String::new();
-    BufReader::new(socket).read_line(&mut line).map_err(|e| e.to_string())?;
+    BufReader::new(socket)
+        .read_line(&mut line)
+        .map_err(|e| e.to_string())?;
     let response: Value = serde_json::from_str(line.trim()).map_err(|e| e.to_string())?;
     if response.get("ok").and_then(Value::as_bool) != Some(true) {
-        return Err(response.get("error").and_then(Value::as_str).unwrap_or("usage bridge failed").to_string());
+        return Err(response
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("usage bridge failed")
+            .to_string());
     }
     Ok(response)
 }
 
-async fn run_usage_sidecar(app: &AppHandle, operation: &str, extra_args: Vec<String>) -> Result<Value, String> {
+async fn owner_bridge_request(data_dir: PathBuf, payload: Value) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        owner_bridge_request_sync(&data_dir, payload, USAGE_BRIDGE_TIMEOUT)
+    })
+    .await
+    .map_err(|error| format!("join provider owner bridge request: {error}"))?
+}
+
+async fn run_usage_sidecar(
+    app: &AppHandle,
+    operation: &str,
+    extra_args: Vec<String>,
+) -> Result<Value, String> {
     let data_dir = ensure_data_dir()?;
     let mut args = vec![
-        "--data-dir".to_string(), data_dir.to_string_lossy().to_string(),
+        "--data-dir".to_string(),
+        data_dir.to_string_lossy().to_string(),
         "--provider-session-bridge".to_string(),
-        "--provider-id".to_string(), "usage".to_string(),
-        "--provider-session-op".to_string(), operation.to_string(),
+        "--provider-id".to_string(),
+        "usage".to_string(),
+        "--provider-session-op".to_string(),
+        operation.to_string(),
     ];
     args.extend(extra_args);
     let output = run_provider_bridge_sidecar(
-        app, args, provider_bridge_env(&data_dir), Some(USAGE_BRIDGE_TIMEOUT), "usage bridge",
-    ).await?;
+        app,
+        args,
+        provider_bridge_env(&data_dir),
+        Some(USAGE_BRIDGE_TIMEOUT),
+        "usage bridge",
+    )
+    .await?;
     if !output.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
-    serde_json::from_slice(&output.stdout).map_err(|e| format!("usage bridge returned invalid JSON: {e}"))
+    serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("usage bridge returned invalid JSON: {e}"))
 }
 
 #[tauri::command]
-pub async fn get_usage_source_catalog(app: AppHandle) -> Result<Vec<UsageSourceCatalogEntry>, String> {
+pub async fn get_usage_source_catalog(
+    app: AppHandle,
+) -> Result<Vec<UsageSourceCatalogEntry>, String> {
     let data_dir = ensure_data_dir()?;
-    let payload = match owner_bridge_request(&data_dir, serde_json::json!({"type": "usage_source_catalog"})) {
-        Ok(response) => response.get("sources").cloned().unwrap_or(Value::Array(vec![])),
+    let payload = match owner_bridge_request(
+        data_dir,
+        serde_json::json!({"type": "usage_source_catalog"}),
+    )
+    .await
+    {
+        Ok(response) => response
+            .get("sources")
+            .cloned()
+            .unwrap_or(Value::Array(vec![])),
         Err(_) => run_usage_sidecar(&app, "usage-catalog", vec![]).await?,
     };
     serde_json::from_value(payload).map_err(|e| format!("parse usage source catalog failed: {e}"))
@@ -140,16 +217,52 @@ pub async fn get_usage_source_summary(
         "start_date": start_date, "end_date": end_date, "timezone": timezone,
         "force_refresh": force_refresh,
     });
-    let payload = match owner_bridge_request(&data_dir, request) {
+    let payload = match owner_bridge_request(data_dir, request).await {
         Ok(response) => response.get("summary").cloned().unwrap_or(Value::Null),
-        Err(_) => run_usage_sidecar(&app, "usage-source", vec![
-            "--usage-plugin-id".to_string(), plugin_id,
-            "--usage-source-id".to_string(), source_id,
-            "--provider-start-date".to_string(), start_date,
-            "--provider-end-date".to_string(), end_date,
-            "--usage-timezone".to_string(), timezone,
-            if force_refresh { "--usage-force-refresh".to_string() } else { String::new() },
-        ].into_iter().filter(|value| !value.is_empty()).collect()).await?,
+        Err(_) => {
+            run_usage_sidecar(
+                &app,
+                "usage-source",
+                vec![
+                    "--usage-plugin-id".to_string(),
+                    plugin_id,
+                    "--usage-source-id".to_string(),
+                    source_id,
+                    "--provider-start-date".to_string(),
+                    start_date,
+                    "--provider-end-date".to_string(),
+                    end_date,
+                    "--usage-timezone".to_string(),
+                    timezone,
+                    if force_refresh {
+                        "--usage-force-refresh".to_string()
+                    } else {
+                        String::new()
+                    },
+                ]
+                .into_iter()
+                .filter(|value| !value.is_empty())
+                .collect(),
+            )
+            .await?
+        }
     };
     serde_json::from_value(payload).map_err(|e| format!("parse usage source summary failed: {e}"))
+}
+
+pub(crate) async fn get_provider_plugin_load_failures(
+) -> Result<Vec<ProviderPluginLoadFailure>, String> {
+    let data_dir = ensure_data_dir()?;
+    let response = owner_bridge_request(
+        data_dir,
+        serde_json::json!({"type": "provider_plugin_load_failures"}),
+    )
+    .await?;
+    serde_json::from_value(
+        response
+            .get("failures")
+            .cloned()
+            .unwrap_or(Value::Array(vec![])),
+    )
+    .map_err(|error| format!("parse provider plugin load failures: {error}"))
 }

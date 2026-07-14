@@ -20,6 +20,11 @@ test("maintenance exposes bounded diagnostics and local support bundle actions",
   assert.match(source, /diagnosticsBusy \|\| exportBusy/);
   assert.match(source, /aria-live="polite"/);
   assert.match(source, /aria-expanded=/);
+
+  const backend = read("src-tauri/src/commands/support_bundle.rs");
+  assert.match(backend, /get_provider_plugin_load_failures/);
+  assert.match(backend, /get_usage_source_catalog/);
+  assert.match(backend, /get_usage_source_summary/);
 });
 
 test("support bundle copy exists in both locales and states privacy boundaries", () => {
@@ -32,6 +37,8 @@ test("support bundle copy exists in both locales and states privacy boundaries",
     assert.match(source, /revealSupportBundle:/);
     assert.match(source, /supportBundlePrivacy:/);
   }
-  assert.match(zh, /不会包含凭据或 Session 会话内容/);
-  assert.match(en, /does not include credentials or Session content/i);
+  assert.match(zh, /不会读取 Session 数据库或完整会话记录/);
+  assert.match(zh, /最近运行日志可能包含/);
+  assert.match(en, /does not read the Session database or full conversations/i);
+  assert.match(en, /recent logs may contain/i);
 });
