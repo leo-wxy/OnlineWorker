@@ -56,7 +56,7 @@ use commands::telegram::{test_bot_permissions, test_bot_token, test_group_access
 use commands::terminal::{open_finder, open_provider_tui_host_terminal, open_terminal};
 use menubar::{
     get_menubar_popover_snapshot, open_menubar_popover_session, open_menubar_tab, setup_menubar,
-    show_main_window, MenubarPopoverSnapshotStore,
+    show_main_window, tray_interaction_is_recent, MenubarPopoverSnapshotStore,
 };
 
 #[derive(Default)]
@@ -128,8 +128,33 @@ pub(crate) fn cleanup_managed_processes_for_exit_once(app: &tauri::AppHandle) {
     });
 }
 
-fn should_restore_main_window_on_reopen(has_visible_windows: bool) -> bool {
-    !has_visible_windows
+fn should_restore_main_window_on_reopen(
+    has_visible_windows: bool,
+    recent_tray_interaction: bool,
+) -> bool {
+    !has_visible_windows && !recent_tray_interaction
+}
+
+fn macos_reopen_debounce_delay() -> Duration {
+    Duration::from_millis(250)
+}
+
+fn schedule_main_window_restore_after_reopen(app_handle: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(macos_reopen_debounce_delay()).await;
+        let has_visible_windows = app_handle
+            .webview_windows()
+            .values()
+            .any(|window| window.is_visible().unwrap_or(false));
+        if !should_restore_main_window_on_reopen(has_visible_windows, tray_interaction_is_recent())
+        {
+            return;
+        }
+        let focus_handle = app_handle.clone();
+        let _ = app_handle.run_on_main_thread(move || {
+            let _ = show_main_window(&focus_handle);
+        });
+    });
 }
 
 fn single_instance_socket_path(data_dir: &Path) -> PathBuf {
@@ -486,12 +511,8 @@ pub fn run() {
             has_visible_windows,
             ..
         } => {
-            if should_restore_main_window_on_reopen(has_visible_windows) {
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    let _ = window.unminimize();
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+            if !has_visible_windows {
+                schedule_main_window_restore_after_reopen(app_handle.clone());
             }
         }
         _ => {}
@@ -501,7 +522,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_provider_overlay_env, launch_service_self_check_delay,
+        default_provider_overlay_env, launch_service_self_check_delay, macos_reopen_debounce_delay,
         prepare_single_instance_startup, probe_existing_instance, service_guard_check_interval,
         should_auto_start_service_after_launch, should_auto_start_service_in_session,
         should_cleanup_on_destroy, should_hide_window_on_close, should_hide_window_on_focus_loss,
@@ -564,12 +585,22 @@ mod tests {
 
     #[test]
     fn macos_reopen_restores_main_window_when_all_windows_are_hidden() {
-        assert!(should_restore_main_window_on_reopen(false));
+        assert!(should_restore_main_window_on_reopen(false, false));
+    }
+
+    #[test]
+    fn macos_reopen_does_not_restore_main_window_after_tray_click() {
+        assert!(!should_restore_main_window_on_reopen(false, true));
     }
 
     #[test]
     fn macos_reopen_does_not_force_restore_when_window_is_already_visible() {
-        assert!(!should_restore_main_window_on_reopen(true));
+        assert!(!should_restore_main_window_on_reopen(true, false));
+    }
+
+    #[test]
+    fn macos_reopen_waits_for_tray_event_before_restoring_main_window() {
+        assert_eq!(macos_reopen_debounce_delay(), Duration::from_millis(250));
     }
 
     #[test]

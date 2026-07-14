@@ -1,6 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, RwLock,
+};
 use std::time::Duration;
 
 use chrono::Local;
@@ -44,8 +47,10 @@ const MENUBAR_POPOVER_MARGIN: i32 = 8;
 const MENUBAR_POPOVER_VERTICAL_OFFSET: i32 = 6;
 const MENUBAR_POPOVER_WARMUP_POSITION: f64 = -10_000.0;
 const MENUBAR_POPOVER_WARMUP_THRESHOLD: i32 = -9_000;
+const TRAY_REOPEN_SUPPRESSION_MS: u64 = 1_000;
 const CUSTOM_TRAY_ICON_RELATIVE_PATH: &str = "icons/tray-template.png";
 const CUSTOM_TRAY_ICON_2X_RELATIVE_PATH: &str = "icons/tray-template@2x.png";
+static LAST_TRAY_INTERACTION_EPOCH_MS: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TrayStatus {
@@ -284,16 +289,36 @@ fn build_tray(app: &AppHandle) -> tauri::Result<TrayIcon<Wry>> {
 fn handle_tray_icon_event(tray: &TrayIcon<Wry>, event: TrayIconEvent) {
     if let TrayIconEvent::Click {
         button: MouseButton::Left,
-        button_state: MouseButtonState::Up,
+        button_state,
         position,
         ..
     } = event
     {
+        mark_tray_interaction();
+        if !matches!(button_state, MouseButtonState::Up) {
+            return;
+        }
         let icon_rect = tray.rect().ok().flatten();
         if let Err(error) = toggle_menubar_popover(tray.app_handle(), icon_rect, Some(position)) {
             eprintln!("[menubar] tray click popover toggle failed: {}", error);
         }
     }
+}
+
+fn mark_tray_interaction() {
+    LAST_TRAY_INTERACTION_EPOCH_MS.store(current_epoch_millis(), Ordering::SeqCst);
+}
+
+pub(crate) fn tray_interaction_is_recent() -> bool {
+    tray_interaction_is_recent_at(
+        LAST_TRAY_INTERACTION_EPOCH_MS.load(Ordering::SeqCst),
+        current_epoch_millis(),
+    )
+}
+
+fn tray_interaction_is_recent_at(last_interaction_ms: u64, now_ms: u64) -> bool {
+    last_interaction_ms > 0
+        && now_ms.saturating_sub(last_interaction_ms) <= TRAY_REOPEN_SUPPRESSION_MS
 }
 
 fn toggle_menubar_popover(
@@ -1046,6 +1071,10 @@ fn usage_breakdown_from_usage_summary(
 
 fn current_epoch_seconds() -> u64 {
     Local::now().timestamp().max(0) as u64
+}
+
+fn current_epoch_millis() -> u64 {
+    Local::now().timestamp_millis().max(0) as u64
 }
 
 fn build_popover_snapshot(
