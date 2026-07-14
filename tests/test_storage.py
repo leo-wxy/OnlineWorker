@@ -159,12 +159,12 @@ def test_infer_claude_thread_source_from_logs_detects_imported_thread(tmp_path):
     log_path = tmp_path / "onlineworker.log"
     log_path.write_text(
         "2026-04-12 21:37:00,839 [INFO] bot.handlers.workspace: "
-        "[on-demand] thread 80564e62… → Topic 5457\n",
+        "[on-demand] thread 00000000… → Topic 5457\n",
         encoding="utf-8",
     )
 
     result = infer_claude_thread_source_from_logs(
-        "80564e62-1bc8-4ca6-ad3d-3284be3a25e7",
+        "00000000-0000-4000-8000-000000000006",
         5457,
         log_paths=[str(log_path)],
     )

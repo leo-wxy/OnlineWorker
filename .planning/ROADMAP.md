@@ -315,7 +315,7 @@ Latest verification:
   - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml dashboard --quiet` -> `21 passed`.
   - `git diff --check` -> passed.
 - 10-03 focused Python verification passed:
-  - `/Users/wxy/.pyenv/shims/python3.13 -m pytest -q tests/test_workspace_helpers.py tests/test_workspace_thread_open.py tests/test_thread_controls.py` -> `48 passed`.
+  - `/Users/example/.pyenv/shims/python3.13 -m pytest -q tests/test_workspace_helpers.py tests/test_workspace_thread_open.py tests/test_thread_controls.py` -> `48 passed`.
   - `git diff --check` -> passed.
 - 10-04 focused frontend verification passed:
   - `node --test mac-app/tests/appShell.test.mjs mac-app/tests/dashboardProviderStatus.test.mjs` -> passed.
@@ -324,7 +324,7 @@ Latest verification:
 - Phase 10 full source verification passed:
   - `node --test mac-app/tests/*.test.mjs` -> `90 passed`.
   - `cd mac-app && npm run build` -> passed.
-  - `/Users/wxy/.pyenv/shims/python3.13 -m pytest -q` -> `760 passed`.
+  - `/Users/example/.pyenv/shims/python3.13 -m pytest -q` -> `760 passed`.
   - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml --quiet` -> `197 passed`.
 - GSD consistency passed: `node ~/.codex/get-shit-done/bin/gsd-tools.cjs validate consistency` -> `passed: true` with existing warnings for older phase artifacts.
 
@@ -355,7 +355,7 @@ Plans:
 Latest verification:
 
 - Full verification passed on 2026-06-03 after explicit user approval:
-  - `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest` -> `811 passed`.
+  - `/Users/example/.pyenv/versions/3.13.1/bin/python3 -m pytest` -> `811 passed`.
   - `cargo test dashboard --lib` -> `26 passed`.
   - `/Applications/Codex.app/Contents/Resources/node node_modules/typescript/bin/tsc --noEmit` -> passed.
   - `git -C OnlineWorker diff --check` -> passed.
@@ -433,15 +433,15 @@ Real installed-app app-server/TG approval chain:
 - Verified on 2026-06-01 through the running installed app, without packaging or restart.
 - Existing installed runtime was active:
   - `/Applications/OnlineWorker.app/Contents/MacOS/onlineworker-app`
-  - `/Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/wxy/Library/Application Support/OnlineWorker`
+  - `/Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker`
   - OnlineWorker-managed `codex app-server --disable hooks --listen stdio://`
 - App-server approval request reached Telegram:
-  - `item/commandExecution/requestApproval` `id=1` for thread `019e832b-e486-77a2-8826-4f87b33591d6`.
-  - `[approval_request] id=1 ... topic=8634`.
-  - `[approval_request] 已推送 tool=codex msg_id=8673`.
+  - `item/commandExecution/requestApproval` `id=1` for thread `<session-id>`.
+  - `[approval_request] id=1 ... topic=<topic-id>`.
+  - `[approval_request] 已推送 tool=codex msg_id=<message-id>`.
 - Telegram callback resolved the same app-server request id:
-  - `[callback] 收到 callback data='exec_allow:8673:1780322294'`.
-  - `reply_server_request sent request_id=1 workspace_id=codex:onlineworker-combined decision=accept payload={"decision": "accept"}`.
+  - `[callback] 收到 callback data='exec_allow:<message-id>:<nonce>'`.
+  - `reply_server_request sent request_id=1 workspace_id=codex:onlineworker-workspace decision=accept payload={"decision": "accept"}`.
   - `[approval] request_id=1 tool=codex reply={'decision': 'accept'}`.
 
 Real transport smoke:
@@ -471,26 +471,26 @@ Latest Phase 12 verification:
 - User UAT accepted fixed-session visible CLI + Telegram authorization convergence on 2026-06-03 using the installed OnlineWorker Unix proxy socket and a resumed Codex session.
 - App-server-first resolution cleanup is covered by focused proxy/event tests and the implemented `serverRequest/resolved` cleanup path.
 - Installed fixed OnlineWorker Unix remote proxy validation completed on 2026-06-02:
-  - alias/command target: `unix:///Users/wxy/Library/Application Support/OnlineWorker/codex_remote_proxy.sock`.
+  - alias/command target: `unix:///Users/example/Library/Application Support/OnlineWorker/codex_remote_proxy.sock`.
   - bare `--remote unix://` is documented as direct Codex default-socket access and must not be used to validate OnlineWorker approval mirroring.
   - `/resume` filtering is scoped through the proxy by injecting the client cwd for `thread/list`.
   - `serverRequest/resolved` is forwarded to the CLI and also clears TG mirror pending state.
   - expected relay close/reset exceptions are consumed so normal restart/disconnect does not leave `Task exception was never retrieved`.
-  - target tests passed: `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest OnlineWorker/tests/test_codex_remote_proxy.py OnlineWorker/tests/test_codex_runtime.py -q` -> `25 passed`.
+  - target tests passed: `/Users/example/.pyenv/versions/3.13.1/bin/python3 -m pytest OnlineWorker/tests/test_codex_remote_proxy.py OnlineWorker/tests/test_codex_runtime.py -q` -> `25 passed`.
   - packaged build/install/restart completed with DMG `OnlineWorker_1.4.0_aarch64.dmg`.
   - installed hashes:
     - `onlineworker-bot`: `50c8d9a63ce61f340193ab0887aae322ae4ace41ffb296366fde33013811945e`
     - `onlineworker-app`: `2a80c905228608eb268ed665ea751bb36e61d214c043b22f0c7b9cad9488cbd0`
-  - installed runtime logs confirmed `codex 使用托管默认 unix app-server：unix://`, `已启动 Codex remote Unix proxy：unix:///Users/wxy/Library/Application Support/OnlineWorker/codex_remote_proxy.sock`, `app-server 第 1 次重连成功`, `workspace cwd 已注册：codex:onlineworker-combined`, and `codex-owner-bridge` startup after app restart.
+  - installed runtime logs confirmed `codex 使用托管默认 unix app-server：unix://`, `已启动 Codex remote Unix proxy：unix:///Users/example/Library/Application Support/OnlineWorker/codex_remote_proxy.sock`, `app-server 第 1 次重连成功`, `workspace cwd 已注册：codex:onlineworker-workspace`, and `codex-owner-bridge` startup after app restart.
 - Merge-main verification completed on 2026-06-02 after rebasing this work onto upstream main commit `e333403` and renumbering the local Codex phase to Phase 12:
-  - `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest -q tests/test_config.py tests/test_codex_adapter.py tests/test_codex_runtime.py tests/test_codex_remote_proxy.py tests/test_codex_tui_mode.py tests/test_codex_tui_realtime_mirror.py tests/test_question_enhanced.py tests/test_startup_runtime.py tests/test_codex_hook_bridge.py tests/test_provider_owner_bridge.py` -> `291 passed`.
+  - `/Users/example/.pyenv/versions/3.13.1/bin/python3 -m pytest -q tests/test_config.py tests/test_codex_adapter.py tests/test_codex_runtime.py tests/test_codex_remote_proxy.py tests/test_codex_tui_mode.py tests/test_codex_tui_realtime_mirror.py tests/test_question_enhanced.py tests/test_startup_runtime.py tests/test_codex_hook_bridge.py tests/test_provider_owner_bridge.py` -> `291 passed`.
   - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml dashboard --quiet` -> `21 passed`.
   - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml config_provider --quiet` -> `33 passed`.
   - `node --test mac-app/tests/dashboardProviderStatus.test.mjs mac-app/tests/appShell.test.mjs` -> `13 passed`.
   - `cd mac-app && ./node_modules/.bin/tsc --noEmit` -> passed.
   - `git -C OnlineWorker diff --check` -> passed.
 - Fixed-session visible CLI + Telegram convergence validation command used for real approval behavior:
-  - `codexR resume 019e6c5a-dafa-7153-ab14-c17f16b890c4`
+  - `codexR resume <session-id>`
   - trigger an approval-producing command from the resumed CLI session.
   - verify CLI native approval prompt and TG mirror appear for the same request.
   - verify approving from either surface converges without duplicate active TG controls or CLI reset/hang.
@@ -534,7 +534,7 @@ Success Criteria (what must be TRUE):
 
 Known failure evidence from 2026-06-03:
 
-- Installed app received Telegram message in Claude topic `7431`, started a Claude turn, and sent the eventual provider error back through Telegram.
+- Installed app received Telegram message in Claude topic `<topic-id>`, started a Claude turn, and sent the eventual provider error back through Telegram.
 - Runtime log showed `Claude 执行失败 ... error=Not logged in · Please run /login`.
 - Local `claude auth status` returned `{"loggedIn": false, "authMethod": "none", "apiProvider": "firstParty"}`.
 - Current process list had no active `claude` process, so the existing active-process env fallback had no usable runtime env to reuse.
@@ -542,14 +542,14 @@ Known failure evidence from 2026-06-03:
 
 Latest source and live diagnostic verification:
 
-- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest -q tests/test_claude_adapter.py` -> `38 passed`.
-- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest -q tests/test_config.py tests/test_claude_readiness_smoke.py tests/test_claude_adapter.py tests/test_claude_runtime.py tests/test_handlers.py tests/test_startup_runtime.py tests/test_provider_owner_bridge.py` -> `193 passed`.
+- `/Users/example/.pyenv/versions/3.13.1/bin/python3 -m pytest -q tests/test_claude_adapter.py` -> `38 passed`.
+- `/Users/example/.pyenv/versions/3.13.1/bin/python3 -m pytest -q tests/test_config.py tests/test_claude_readiness_smoke.py tests/test_claude_adapter.py tests/test_claude_runtime.py tests/test_handlers.py tests/test_startup_runtime.py tests/test_provider_owner_bridge.py` -> `193 passed`.
 - `cd mac-app && ./node_modules/.bin/tsc` -> passed.
 - `node --test mac-app/tests/settingsProviders.test.mjs mac-app/tests/configProviders.test.mjs` -> `7 passed`.
 - `cd mac-app/src-tauri && cargo test config_provider --lib` -> `35 passed`.
 - `git -C OnlineWorker diff --check` -> passed.
-- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --claude-bin claude` -> sanitized live readiness reported `ready=false`, `reason=loggedOut`, `authMethod=none`, `source=cliAuth`; `configured_cli` was selected and unavailable, while `ow_claude_wrapper` was detected but not considered available for provider send.
-- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --config /tmp/onlineworker-claude-launch-methods-smoke.yaml` -> with explicit native and configured fallback candidates, smoke selected the configured fallback, reported `readiness.ready=true`, and kept `path_claude` logged out.
+- `/Users/example/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --claude-bin claude` -> sanitized live readiness reported `ready=false`, `reason=loggedOut`, `authMethod=none`, `source=cliAuth`; `configured_cli` was selected and unavailable, while `ow_claude_wrapper` was detected but not considered available for provider send.
+- `/Users/example/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --config /tmp/onlineworker-claude-launch-methods-smoke.yaml` -> with explicit native and configured fallback candidates, smoke selected the configured fallback, reported `readiness.ready=true`, and kept `path_claude` logged out.
 - `cd mac-app && ./node_modules/.bin/vite build` was attempted but blocked by a local Rollup native optional dependency code-signature failure for `@rollup/rollup-darwin-arm64`; this was not a TypeScript/code failure.
 - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml dashboard --quiet` -> `26 passed`.
 - `node --test mac-app/tests/dashboardProviderStatus.test.mjs mac-app/tests/appShell.test.mjs` -> `13 passed`.
@@ -566,7 +566,7 @@ Packaged verification:
 Final Phase 13 packaged and user verification:
 
 - `bash verify-packaged-fast.sh` -> `Combined fast packaged verification complete (97s)`, DMG sha256 `2b28968e55530ce616ea5545ddcdb9591811cb2e25d16cb15d8f3414ddf17d2f`, installed `/Applications/OnlineWorker.app`, launched app/bot processes, and verified distribution-bundled provider and notification plugins.
-- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --owner-bridge-status --data-dir "$HOME/Library/Application Support/OnlineWorker" --timeout 12` -> configured launch command ready, `readiness.ready=true`, `authMethod=oauth_token`, `apiProvider=firstParty`, `launchMethod.id=primary`, owner bridge `health=healthy`, detail `• claude CLI：✅ 已连接`.
+- `/Users/example/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --owner-bridge-status --data-dir "$HOME/Library/Application Support/OnlineWorker" --timeout 12` -> configured launch command ready, `readiness.ready=true`, `authMethod=oauth_token`, `apiProvider=firstParty`, `launchMethod.id=primary`, owner bridge `health=healthy`, detail `• claude CLI：✅ 已连接`.
 - User accepted installed-app UAT on 2026-06-04.
 
 ### Phase 14: Unified Message Event Bus
@@ -632,7 +632,7 @@ Design reference for future development:
 Fast verification path:
 
 - Python bus/session-event tests:
-  - `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest -q tests/test_session_events.py tests/test_events_streaming.py tests/test_notifications.py tests/test_provider_owner_bridge.py`
+  - `/Users/example/.pyenv/versions/3.13.1/bin/python3 -m pytest -q tests/test_session_events.py tests/test_events_streaming.py tests/test_notifications.py tests/test_provider_owner_bridge.py`
 - Frontend TaskBoard/App projection tests:
   - `node --test mac-app/tests/taskBoard.test.mjs mac-app/tests/appTabs.test.mjs mac-app/tests/sessionStreamLifecycle.test.mjs`
   - `cd mac-app && ./node_modules/.bin/tsc --noEmit`

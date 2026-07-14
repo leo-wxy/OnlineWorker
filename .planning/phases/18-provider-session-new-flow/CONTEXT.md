@@ -91,8 +91,8 @@ Real installed-app Codex validation evidence from 2026-07-04:
 
 ```text
 provider: codex
-workspace: /Users/wxy/Projects/FrciblyK12
-session: 019f2dda-bb82-79d3-86af-cbf29e730df9
+workspace: /Users/example/Projects/sample-project
+session: <session-id>
 message: 这个工程的主要作用是什么？
 status: completed
 lastEventKind: turn.completed
@@ -102,8 +102,8 @@ mirroredOnly: false
 Relevant log evidence:
 
 ```text
-thread/start RPC 超时，但 notification 已返回 thread=019f2dda-bb8 workspace=codex:/Users/wxy/Projects/FrciblyK12
-start_session_message 跳过 prepare_send provider=codex thread=019f2dda-bb8
+thread/start RPC 超时，但 notification 已返回 thread=<thread-id> workspace=codex:/Users/example/Projects/sample-project
+start_session_message 跳过 prepare_send provider=codex thread=<thread-id>
 ```
 
 This proves the App flow created and used a real provider session, even when

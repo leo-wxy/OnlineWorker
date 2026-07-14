@@ -30,7 +30,7 @@
 ## Verification
 
 ```bash
-/Users/wxy/.pyenv/shims/python3.13 -m pytest -q tests/test_workspace_helpers.py tests/test_workspace_thread_open.py tests/test_thread_controls.py
+/Users/example/.pyenv/shims/python3.13 -m pytest -q tests/test_workspace_helpers.py tests/test_workspace_thread_open.py tests/test_thread_controls.py
 ```
 
 Result: `48 passed`.

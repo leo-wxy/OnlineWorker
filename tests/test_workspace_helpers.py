@@ -34,7 +34,7 @@ def test_make_thread_topic_name_collapses_preview_and_limits_length():
 
 def test_make_thread_open_token_and_callback_data_are_stable():
     ws_id = "codex:/Users/example/Projects/sample-workspace"
-    thread_id = "019e64b9-d732-7002-9d3a-f07329d41649"
+    thread_id = "00000000-0000-7000-8000-000000000005"
 
     assert make_thread_open_token(thread_id) == make_thread_open_token(thread_id)
     assert len(make_thread_open_token(thread_id)) == 16

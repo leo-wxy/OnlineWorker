@@ -323,12 +323,12 @@ mod tests {
                 description: "查看当前活跃 workspace/thread".to_string(),
             }],
             &TelegramCommandScope::Chat {
-                chat_id: -1003766519352,
+                chat_id: -1001234567890,
             },
         );
 
         assert_eq!(payload["scope"]["type"], "chat");
-        assert_eq!(payload["scope"]["chat_id"], -1003766519352i64);
+        assert_eq!(payload["scope"]["chat_id"], -1001234567890i64);
         assert_eq!(payload["commands"][0]["command"], "active");
     }
 

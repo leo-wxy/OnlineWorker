@@ -685,7 +685,7 @@ async def test_list_threads_excludes_inactive_codex_state_only_placeholders(monk
 
     state = _build_state(tool="codex")
     ws = state.storage.workspaces["codex:onlineWorker"]
-    ws.path = "/Users/wxy/Projects/FrciblyK12"
+    ws.path = "/Users/example/Projects/sample-project"
     ws.threads["app:codex:placeholder"] = ThreadInfo(
         thread_id="app:codex:placeholder",
         topic_id=None,
@@ -760,7 +760,7 @@ async def test_list_threads_excludes_inactive_claude_state_only_placeholders(mon
 
     state = _build_state(tool="claude")
     ws = state.storage.workspaces["claude:onlineWorker"]
-    ws.path = "/Users/wxy/Projects/FrciblyK12"
+    ws.path = "/Users/example/Projects/sample-project"
     ws.threads["app:claude:placeholder"] = ThreadInfo(
         thread_id="app:claude:placeholder",
         topic_id=None,

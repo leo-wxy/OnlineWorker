@@ -2,7 +2,7 @@
 name = "onlineworker-app"
 version = "1.8.1"
 description = "OnlineWorker Mac App"
-authors = ["wxy"]
+authors = ["OnlineWorker Contributors"]
 license = "MIT"
 repository = ""
 default-run = "onlineworker-app"

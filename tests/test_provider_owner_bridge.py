@@ -2612,11 +2612,11 @@ async def test_provider_owner_bridge_hydrates_missing_preview_from_history_and_c
             return [
                 {
                     "role": "user",
-                    "text": "继续phase17 的实现。工作区在 /Users/wxy/Projects/onlineworker-combined。",
+                    "text": "继续phase17 的实现。工作区在 /Users/example/Projects/onlineworker-workspace。",
                 },
                 {
                     "role": "assistant",
-                    "text": "我现在继续修 Session 列表预览，并检查 /Users/wxy/Projects/onlineworker-combined 里的 owner bridge 数据链。",
+                    "text": "我现在继续修 Session 列表预览，并检查 /Users/example/Projects/onlineworker-workspace 里的 owner bridge 数据链。",
                 },
             ]
 

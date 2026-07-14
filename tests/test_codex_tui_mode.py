@@ -870,14 +870,14 @@ async def test_message_handler_keeps_active_claude_turn_without_preemptive_inter
 
     storage = AppStorage()
     ws = WorkspaceInfo(
-        name="ncmplayerengine",
+        name="sample_engine",
         path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
-        daemon_workspace_id="claude:ncmplayerengine",
+        daemon_workspace_id="claude:sample_engine",
     )
     ws.threads["ses-1"] = ThreadInfo(thread_id="ses-1", topic_id=5457, archived=False)
-    storage.workspaces["claude:ncmplayerengine"] = ws
+    storage.workspaces["claude:sample_engine"] = ws
 
     cfg = Config(
         telegram_token="token",
@@ -932,8 +932,8 @@ async def test_message_handler_keeps_active_claude_turn_without_preemptive_inter
 
     adapter.turn_interrupt.assert_not_awaited()
     adapter.inspect_thread_activity.assert_not_awaited()
-    adapter.resume_thread.assert_awaited_once_with("claude:ncmplayerengine", "ses-1")
-    adapter.send_user_message.assert_awaited_once_with("claude:ncmplayerengine", "ses-1", "你好")
+    adapter.resume_thread.assert_awaited_once_with("claude:sample_engine", "ses-1")
+    adapter.send_user_message.assert_awaited_once_with("claude:sample_engine", "ses-1", "你好")
     save_storage_mock.assert_called_once()
 
 
@@ -943,14 +943,14 @@ async def test_message_handler_blocks_external_busy_claude_thread():
 
     storage = AppStorage()
     ws = WorkspaceInfo(
-        name="ncmplayerengine",
+        name="sample_engine",
         path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
-        daemon_workspace_id="claude:ncmplayerengine",
+        daemon_workspace_id="claude:sample_engine",
     )
     ws.threads["ses-1"] = ThreadInfo(thread_id="ses-1", topic_id=5457, archived=False)
-    storage.workspaces["claude:ncmplayerengine"] = ws
+    storage.workspaces["claude:sample_engine"] = ws
 
     cfg = Config(
         telegram_token="token",
@@ -1013,11 +1013,11 @@ async def test_message_handler_resumes_imported_claude_thread_without_remapping(
 
     storage = AppStorage()
     ws = WorkspaceInfo(
-        name="ncmplayerengine",
+        name="sample_engine",
         path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
-        daemon_workspace_id="claude:ncmplayerengine",
+        daemon_workspace_id="claude:sample_engine",
     )
     ws.threads["ses-imported"] = ThreadInfo(
         thread_id="ses-imported",
@@ -1027,7 +1027,7 @@ async def test_message_handler_resumes_imported_claude_thread_without_remapping(
         is_active=True,
         source="imported",
     )
-    storage.workspaces["claude:ncmplayerengine"] = ws
+    storage.workspaces["claude:sample_engine"] = ws
 
     cfg = Config(
         telegram_token="token",
@@ -1075,9 +1075,9 @@ async def test_message_handler_resumes_imported_claude_thread_without_remapping(
 
     adapter.inspect_thread_activity.assert_awaited_once_with("ses-imported")
     adapter.start_thread.assert_not_awaited()
-    adapter.resume_thread.assert_awaited_once_with("claude:ncmplayerengine", "ses-imported")
+    adapter.resume_thread.assert_awaited_once_with("claude:sample_engine", "ses-imported")
     adapter.send_user_message.assert_awaited_once_with(
-        "claude:ncmplayerengine",
+        "claude:sample_engine",
         "ses-imported",
         "你好",
     )
@@ -1094,11 +1094,11 @@ async def test_message_handler_keeps_unknown_claude_thread_when_logs_mark_app_ow
 
     storage = AppStorage()
     ws = WorkspaceInfo(
-        name="ncmplayerengine",
+        name="sample_engine",
         path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
-        daemon_workspace_id="claude:ncmplayerengine",
+        daemon_workspace_id="claude:sample_engine",
     )
     ws.threads["ses-app"] = ThreadInfo(
         thread_id="ses-app",
@@ -1108,7 +1108,7 @@ async def test_message_handler_keeps_unknown_claude_thread_when_logs_mark_app_ow
         is_active=True,
         source="unknown",
     )
-    storage.workspaces["claude:ncmplayerengine"] = ws
+    storage.workspaces["claude:sample_engine"] = ws
 
     cfg = Config(
         telegram_token="token",
@@ -1156,8 +1156,8 @@ async def test_message_handler_keeps_unknown_claude_thread_when_logs_mark_app_ow
 
     adapter.inspect_thread_activity.assert_awaited_once_with("ses-app")
     adapter.start_thread.assert_not_awaited()
-    adapter.resume_thread.assert_awaited_once_with("claude:ncmplayerengine", "ses-app")
-    adapter.send_user_message.assert_awaited_once_with("claude:ncmplayerengine", "ses-app", "你好")
+    adapter.resume_thread.assert_awaited_once_with("claude:sample_engine", "ses-app")
+    adapter.send_user_message.assert_awaited_once_with("claude:sample_engine", "ses-app", "你好")
     assert ws.threads["ses-app"].source == "app"
     save_storage_mock.assert_called_once()
 
@@ -1168,11 +1168,11 @@ async def test_message_handler_keeps_imported_claude_thread_when_send_fails():
 
     storage = AppStorage()
     ws = WorkspaceInfo(
-        name="ncmplayerengine",
+        name="sample_engine",
         path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
-        daemon_workspace_id="claude:ncmplayerengine",
+        daemon_workspace_id="claude:sample_engine",
     )
     ws.threads["ses-imported"] = ThreadInfo(
         thread_id="ses-imported",
@@ -1183,7 +1183,7 @@ async def test_message_handler_keeps_imported_claude_thread_when_send_fails():
         is_active=True,
         source="imported",
     )
-    storage.workspaces["claude:ncmplayerengine"] = ws
+    storage.workspaces["claude:sample_engine"] = ws
 
     cfg = Config(
         telegram_token="token",
@@ -1228,9 +1228,9 @@ async def test_message_handler_keeps_imported_claude_thread_when_send_fails():
 
     adapter.inspect_thread_activity.assert_awaited_once_with("ses-imported")
     adapter.start_thread.assert_not_awaited()
-    adapter.resume_thread.assert_awaited_once_with("claude:ncmplayerengine", "ses-imported")
+    adapter.resume_thread.assert_awaited_once_with("claude:sample_engine", "ses-imported")
     adapter.send_user_message.assert_awaited_once_with(
-        "claude:ncmplayerengine",
+        "claude:sample_engine",
         "ses-imported",
         "你好",
     )

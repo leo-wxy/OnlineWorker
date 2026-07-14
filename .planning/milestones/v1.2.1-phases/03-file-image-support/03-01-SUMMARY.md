@@ -20,7 +20,7 @@ Plan 03-01 upgraded the message path from text-only delivery toward an attachmen
 
 The latest TG image failure was not a Telegram download failure. The real sequence observed in the installed app log was:
 
-- Telegram photo update received on topic `7431` with caption `图片里什么内容`.
+- Telegram photo update received on topic `<topic-id>` with caption `图片里什么内容`.
 - Telegram `getFile` succeeded.
 - Telegram file download succeeded.
 - OnlineWorker sent the "thinking" message successfully.

@@ -163,7 +163,7 @@ def test_projection_replaces_session_id_title_placeholder_with_user_message():
         create_message_event(
             "turn.started",
             provider_id="codex",
-            session_id="019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+            session_id="00000000-0000-7000-8000-000000000001",
             created_at=10,
         )
     )
@@ -171,20 +171,20 @@ def test_projection_replaces_session_id_title_placeholder_with_user_message():
         create_message_event(
             "message.user.accepted",
             provider_id="codex",
-            session_id="019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+            session_id="00000000-0000-7000-8000-000000000001",
             payload={"text": "修复 TaskBoard 卡片标题"},
             created_at=20,
         )
     )
 
-    activity = bus.session_activity("codex", "019e92cb-9559-7eb0-be3e-ab23f37f7b27")
+    activity = bus.session_activity("codex", "00000000-0000-7000-8000-000000000001")
     assert activity["title"] == "修复 TaskBoard 卡片标题"
     assert activity["lastUserMessage"] == "修复 TaskBoard 卡片标题"
 
 
 def test_projection_keeps_assistant_delta_out_of_title():
     bus = MessageEventBus()
-    session_id = "019e92cb-9559-7eb0-be3e-ab23f37f7b27"
+    session_id = "00000000-0000-7000-8000-000000000001"
 
     bus.publish(
         create_message_event(

@@ -381,7 +381,7 @@ async def test_codex_owner_bridge_persists_workspace_for_successful_external_sen
 @pytest.mark.asyncio
 async def test_codex_owner_bridge_remaps_external_thread_when_send_hits_unmaterialized_error(tmp_path):
     ws = WorkspaceInfo(
-        name="wxy",
+        name="example-user",
         path="/Users/example",
         tool="codex",
         daemon_workspace_id="codex:/Users/example",

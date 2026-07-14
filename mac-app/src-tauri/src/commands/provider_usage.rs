@@ -54,14 +54,14 @@ mod tests {
     #[test]
     fn provider_plugin_load_failure_preserves_diagnostic_context() {
         let failure: ProviderPluginLoadFailure = serde_json::from_value(serde_json::json!({
-            "providerId": "codemaker",
-            "manifestPath": "/tmp/codemaker/plugin.yaml",
-            "entrypoint": "codemaker.python.provider:create_provider_descriptor",
+            "providerId": "overlay-tool",
+            "manifestPath": "/tmp/overlay-tool/plugin.yaml",
+            "entrypoint": "overlay_tool.python.provider:create_provider_descriptor",
             "error": "ImportError: removed contract"
         }))
         .expect("plugin failure should deserialize");
 
-        assert_eq!(failure.provider_id, "codemaker");
+        assert_eq!(failure.provider_id, "overlay-tool");
         assert!(failure.error.contains("ImportError"));
     }
 }

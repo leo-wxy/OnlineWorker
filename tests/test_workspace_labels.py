@@ -82,46 +82,46 @@ class HeaderBot:
 
 
 def test_workspace_button_label_prefers_path_hint_before_duplicate_name():
-    hotpatch_item = {
+    worktree_item = {
         "tool": "claude",
-        "name": "music_biz_player",
-        "path": "/Users/wxy/Projects/hotpatch/music_app/module_source/music_biz_player",
+        "name": "sample_audio_module",
+        "path": "/Users/example/Projects/worktree/sample_app/module_source/sample_audio_module",
         "thread_count": 1,
     }
     main_item = {
         "tool": "claude",
-        "name": "music_biz_player",
-        "path": "/Users/wxy/Projects/music_app/module_source/music_biz_player",
+        "name": "sample_audio_module",
+        "path": "/Users/example/Projects/sample_app/module_source/sample_audio_module",
         "thread_count": 10,
     }
 
-    assert _workspace_button_label(hotpatch_item, "📂") == "📂 [claude] · hotpatch/music_app · music_biz_player (1)"
-    assert _workspace_button_label(main_item, "📂") == "📂 [claude] · music_app/module_source · music_biz_player (10)"
-    assert "\n" not in _workspace_button_label(hotpatch_item, "📂")
+    assert _workspace_button_label(worktree_item, "📂") == "📂 [claude] · worktree/sample_app · sample_audio_module (1)"
+    assert _workspace_button_label(main_item, "📂") == "📂 [claude] · sample_app/module_source · sample_audio_module (10)"
+    assert "\n" not in _workspace_button_label(worktree_item, "📂")
 
 
 def test_workspace_topic_names_use_readable_path_hints_without_hashes():
-    main_path = "/Users/wxy/Projects/music_app/module_source/music_biz_player"
-    hotpatch_path = "/Users/wxy/Projects/hotpatch/music_app/module_source/music_biz_player"
+    main_path = "/Users/example/Projects/sample_app/module_source/sample_audio_module"
+    worktree_path = "/Users/example/Projects/worktree/sample_app/module_source/sample_audio_module"
 
-    assert workspace_path_topic_hint(main_path) == "music_app/module_source"
-    assert workspace_path_topic_hint(hotpatch_path) == "hotpatch/music_app"
+    assert workspace_path_topic_hint(main_path) == "sample_app/module_source"
+    assert workspace_path_topic_hint(worktree_path) == "worktree/sample_app"
 
-    main_name = make_workspace_topic_name("claude", "music_biz_player", main_path)
-    hotpatch_name = make_workspace_topic_name("claude", "music_biz_player", hotpatch_path)
+    main_name = make_workspace_topic_name("claude", "sample_audio_module", main_path)
+    worktree_name = make_workspace_topic_name("claude", "sample_audio_module", worktree_path)
     thread_name = make_thread_topic_name(
         "claude",
-        "music_biz_player",
+        "sample_audio_module",
         "继续",
-        "ffa8f949-3b2d-42e8-8f11-fc57cd587ea9",
-        workspace_path=hotpatch_path,
+        "00000000-0000-4000-8000-000000000007",
+        workspace_path=worktree_path,
     )
 
-    assert main_name == "[claude] music_biz_player @ music_app/module_source"
-    assert hotpatch_name == "[claude] music_biz_player @ hotpatch/music_app"
-    assert thread_name == "[claude/music_biz_player @ hotpatch/music_app] 继续"
+    assert main_name == "[claude] sample_audio_module @ sample_app/module_source"
+    assert worktree_name == "[claude] sample_audio_module @ worktree/sample_app"
+    assert thread_name == "[claude/sample_audio_module @ worktree/sample_app] 继续"
     assert "#" not in main_name
-    assert "#" not in hotpatch_name
+    assert "#" not in worktree_name
     assert "#" not in thread_name
 
 
@@ -135,15 +135,15 @@ async def test_open_workspace_uses_path_based_storage_key_for_duplicate_names(mo
     monkeypatch.setattr(workspace_module, "query_provider_active_thread_ids", lambda *args, **kwargs: set())
     monkeypatch.setattr(workspace_module, "save_storage", lambda storage: None)
 
-    main_path = "/Users/wxy/Projects/music_app/module_source/music_biz_player"
-    hotpatch_path = "/Users/wxy/Projects/hotpatch/music_app/module_source/music_biz_player"
+    main_path = "/Users/example/Projects/sample_app/module_source/sample_audio_module"
+    worktree_path = "/Users/example/Projects/worktree/sample_app/module_source/sample_audio_module"
     storage = AppStorage(
         workspaces={
-            "claude:music_biz_player": WorkspaceInfo(
-                name="music_biz_player",
+            "claude:sample_audio_module": WorkspaceInfo(
+                name="sample_audio_module",
                 path=main_path,
                 tool="claude",
-                daemon_workspace_id="claude:music_biz_player",
+                daemon_workspace_id="claude:sample_audio_module",
             )
         }
     )
@@ -155,16 +155,16 @@ async def test_open_workspace_uses_path_based_storage_key_for_duplicate_names(mo
         storage=storage,
         group_chat_id=GROUP_CHAT_ID,
         tool_cfg=SimpleNamespace(name="claude"),
-        name="music_biz_player",
-        path=hotpatch_path,
+        name="sample_audio_module",
+        path=worktree_path,
     )
 
-    hotpatch_key = make_workspace_storage_key("claude", hotpatch_path, "music_biz_player")
-    assert hotpatch_key in storage.workspaces
-    assert storage.workspaces[hotpatch_key] is ws
-    assert ws.path == hotpatch_path
-    assert ws.daemon_workspace_id == hotpatch_key
-    assert storage.workspaces["claude:music_biz_player"].path == main_path
+    worktree_key = make_workspace_storage_key("claude", worktree_path, "sample_audio_module")
+    assert worktree_key in storage.workspaces
+    assert storage.workspaces[worktree_key] is ws
+    assert ws.path == worktree_path
+    assert ws.daemon_workspace_id == worktree_key
+    assert storage.workspaces["claude:sample_audio_module"].path == main_path
 
 
 @pytest.mark.asyncio
@@ -177,14 +177,14 @@ async def test_open_workspace_migrates_matching_legacy_name_key_to_path_key(monk
     monkeypatch.setattr(workspace_module, "query_provider_active_thread_ids", lambda *args, **kwargs: set())
     monkeypatch.setattr(workspace_module, "save_storage", lambda storage: None)
 
-    path = "/Users/wxy/Projects/hotpatch/music_app/module_source/music_biz_player"
+    path = "/Users/example/Projects/worktree/sample_app/module_source/sample_audio_module"
     legacy_ws = WorkspaceInfo(
-        name="music_biz_player",
+        name="sample_audio_module",
         path=path,
         tool="claude",
-        daemon_workspace_id="claude:music_biz_player",
+        daemon_workspace_id="claude:sample_audio_module",
     )
-    storage = AppStorage(workspaces={"claude:music_biz_player": legacy_ws})
+    storage = AppStorage(workspaces={"claude:sample_audio_module": legacy_ws})
     state = AppState(storage=storage)
 
     ws = await _open_workspace(
@@ -193,12 +193,12 @@ async def test_open_workspace_migrates_matching_legacy_name_key_to_path_key(monk
         storage=storage,
         group_chat_id=GROUP_CHAT_ID,
         tool_cfg=SimpleNamespace(name="claude"),
-        name="music_biz_player",
+        name="sample_audio_module",
         path=path,
     )
 
-    path_key = make_workspace_storage_key("claude", path, "music_biz_player")
-    assert "claude:music_biz_player" not in storage.workspaces
+    path_key = make_workspace_storage_key("claude", path, "sample_audio_module")
+    assert "claude:sample_audio_module" not in storage.workspaces
     assert storage.workspaces[path_key] is legacy_ws
     assert ws is legacy_ws
     assert ws.daemon_workspace_id == path_key
@@ -211,8 +211,8 @@ async def test_workspace_topic_header_pins_full_path(monkeypatch):
     bot = HeaderBot()
     storage = AppStorage()
     ws = WorkspaceInfo(
-        name="music_biz_player",
-        path="/Users/wxy/Projects/hotpatch/music_app/module_source/music_biz_player",
+        name="sample_audio_module",
+        path="/Users/example/Projects/worktree/sample_app/module_source/sample_audio_module",
         tool="claude",
         header_message_id=None,
     )
@@ -227,7 +227,7 @@ async def test_workspace_topic_header_pins_full_path(monkeypatch):
 
     assert ws.header_message_id == 2001
     assert bot.sent_messages[0]["message_thread_id"] == 11858
-    assert bot.sent_messages[0]["text"] == "路径: /Users/wxy/Projects/hotpatch/music_app/module_source/music_biz_player"
+    assert bot.sent_messages[0]["text"] == "路径: /Users/example/Projects/worktree/sample_app/module_source/sample_audio_module"
     assert bot.unpinned_topics == [
         {
             "chat_id": GROUP_CHAT_ID,
@@ -250,13 +250,13 @@ async def test_thread_topic_header_edits_existing_message_with_preview_and_path(
     bot = HeaderBot()
     storage = AppStorage()
     ws = WorkspaceInfo(
-        name="music_biz_player",
-        path="/Users/wxy/Projects/hotpatch/music_app/module_source/music_biz_player",
+        name="sample_audio_module",
+        path="/Users/example/Projects/worktree/sample_app/module_source/sample_audio_module",
         tool="claude",
     )
     thread = ThreadInfo(
-        thread_id="ffa8f949-3b2d-42e8-8f11-fc57cd587ea9",
-        preview="继续处理 hotpatch",
+        thread_id="00000000-0000-4000-8000-000000000007",
+        preview="继续处理 worktree",
         header_message_id=3456,
     )
 
@@ -288,6 +288,6 @@ async def test_thread_topic_header_edits_existing_message_with_preview_and_path(
         {
             "chat_id": GROUP_CHAT_ID,
             "message_id": 3456,
-            "text": "路径: /Users/wxy/Projects/hotpatch/music_app/module_source/music_biz_player",
+            "text": "路径: /Users/example/Projects/worktree/sample_app/module_source/sample_audio_module",
         }
     ]

@@ -771,9 +771,9 @@ async def test_shared_live_imported_thread_bootstraps_bus_activity_without_live_
 
     state, ws, session_file, sessions_dir = _make_state(tmp_path)
     state.config = _make_shared_live_app_mode_config()
-    ws.path = "/Users/example/Projects/onlineworker-combined"
-    ws.name = "onlineworker-combined"
-    ws.daemon_workspace_id = "codex:onlineworker-combined"
+    ws.path = "/Users/example/Projects/onlineworker-workspace"
+    ws.name = "onlineworker-workspace"
+    ws.daemon_workspace_id = "codex:onlineworker-workspace"
     imported_thread = ws.threads.pop("tid-1")
     imported_thread.thread_id = "tid-imported"
     imported_thread.preview = "继续查 codex 通知"

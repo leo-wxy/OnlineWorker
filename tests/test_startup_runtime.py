@@ -1769,7 +1769,7 @@ async def test_app_server_owned_unix_replaces_existing_listener_before_spawning(
 
 
 def test_owned_unix_listener_command_requires_exact_hooks_and_socket():
-    owned_url = "unix:///Users/test/.codex/app-server-control/onlineworker-app-server.sock"
+    owned_url = "unix:///Users/example/.codex/app-server-control/onlineworker-app-server.sock"
     identity = (
         "123 1 Fri Jul 11 09:00:00 2026 "
         "/opt/homebrew/bin/codex app-server --disable hooks "
@@ -1786,7 +1786,7 @@ def test_owned_unix_listener_command_requires_exact_hooks_and_socket():
 
 @pytest.mark.asyncio
 async def test_stop_existing_owned_unix_listener_rechecks_pid_identity_before_terminate():
-    owned_url = "unix:///Users/test/.codex/app-server-control/onlineworker-app-server.sock"
+    owned_url = "unix:///Users/example/.codex/app-server-control/onlineworker-app-server.sock"
     identity = (
         "123 1 Fri Jul 11 09:00:00 2026 "
         "/opt/homebrew/bin/codex app-server --disable hooks "
@@ -1821,7 +1821,7 @@ async def test_stop_existing_owned_unix_listener_rechecks_pid_identity_before_te
     assert capture.await_args_list[0].args == (
         "/usr/sbin/lsof",
         "-t",
-        "/Users/test/.codex/app-server-control/onlineworker-app-server.sock",
+        "/Users/example/.codex/app-server-control/onlineworker-app-server.sock",
     )
     assert capture.await_args_list[1].args[:2] == ("/bin/ps", "-ww")
     assert capture.await_args_list[2].args[:2] == ("/bin/ps", "-ww")
@@ -1829,7 +1829,7 @@ async def test_stop_existing_owned_unix_listener_rechecks_pid_identity_before_te
 
 @pytest.mark.asyncio
 async def test_stop_existing_owned_unix_listener_refuses_unowned_process():
-    owned_url = "unix:///Users/test/.codex/app-server-control/onlineworker-app-server.sock"
+    owned_url = "unix:///Users/example/.codex/app-server-control/onlineworker-app-server.sock"
     server = AppServerProcess(
         codex_bin="codex",
         protocol="unix",
@@ -1856,7 +1856,7 @@ async def test_stop_existing_owned_unix_listener_refuses_unowned_process():
 
 @pytest.mark.asyncio
 async def test_stop_existing_owned_unix_listener_refuses_active_owner():
-    owned_url = "unix:///Users/test/.codex/app-server-control/onlineworker-app-server.sock"
+    owned_url = "unix:///Users/example/.codex/app-server-control/onlineworker-app-server.sock"
     identity = (
         "123 999 Fri Jul 11 09:00:00 2026 "
         "/opt/homebrew/bin/codex app-server --disable hooks "
@@ -1964,7 +1964,7 @@ async def test_tui_bridge_prefers_running_onlineworker_app_server_url():
 
     state = MagicMock()
     state.app_server_proc = SimpleNamespace(
-        ws_url="unix:///Users/test/.codex/app-server-control/onlineworker-app-server.sock"
+        ws_url="unix:///Users/example/.codex/app-server-control/onlineworker-app-server.sock"
     )
     tool_cfg = ToolConfig(
         name="codex",
@@ -1977,7 +1977,7 @@ async def test_tui_bridge_prefers_running_onlineworker_app_server_url():
     ws_url, temporary_proc = await tui_bridge._resolve_codex_ws_url(state, tool_cfg)
 
     assert ws_url == (
-        "unix:///Users/test/.codex/app-server-control/onlineworker-app-server.sock"
+        "unix:///Users/example/.codex/app-server-control/onlineworker-app-server.sock"
     )
     assert temporary_proc is None
 
@@ -2880,10 +2880,10 @@ async def test_ensure_thread_topics_respects_unbound_topic_policy(
 async def test_sync_existing_claude_topics_syncs_active_threads_with_topic(monkeypatch):
     storage = AppStorage()
     ws = WorkspaceInfo(
-        name="ncmplayerengine",
+        name="sample_engine",
         path="/Users/example/Projects/sample-project",
         tool="claude",
-        daemon_workspace_id="claude:ncmplayerengine",
+        daemon_workspace_id="claude:sample_engine",
     )
     ws.threads["ses-1"] = ThreadInfo(
         thread_id="ses-1",
@@ -2909,7 +2909,7 @@ async def test_sync_existing_claude_topics_syncs_active_threads_with_topic(monke
         is_active=False,
         source="imported",
     )
-    storage.workspaces["claude:ncmplayerengine"] = ws
+    storage.workspaces["claude:sample_engine"] = ws
 
     state = AppState(storage=storage)
     cfg = Config(

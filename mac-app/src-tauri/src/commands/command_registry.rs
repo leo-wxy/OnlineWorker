@@ -1441,14 +1441,14 @@ mod tests {
 
     #[test]
     fn build_publish_scopes_includes_default_group_and_chat() {
-        let scopes = build_publish_scopes(Some(-1003766519352));
+        let scopes = build_publish_scopes(Some(-1001234567890));
         assert_eq!(scopes.len(), 3);
         assert_eq!(scopes[0], TelegramCommandScope::Default);
         assert_eq!(scopes[1], TelegramCommandScope::AllGroupChats);
         assert_eq!(
             scopes[2],
             TelegramCommandScope::Chat {
-                chat_id: -1003766519352,
+                chat_id: -1001234567890,
             }
         );
     }

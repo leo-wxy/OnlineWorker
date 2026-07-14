@@ -374,11 +374,11 @@ def test_reconcile_workspace_threads_with_source_prunes_stale_unknown_claude_thr
     state = AppState()
     state.storage = AppStorage()
     ws = WorkspaceInfo(
-        name="ncmplayerengine",
+        name="sample_engine",
         path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
-        daemon_workspace_id="claude:ncmplayerengine",
+        daemon_workspace_id="claude:sample_engine",
     )
     ws.threads["tid-unknown-stale"] = ThreadInfo(
         thread_id="tid-unknown-stale",
@@ -402,7 +402,7 @@ def test_reconcile_workspace_threads_with_source_prunes_stale_unknown_claude_thr
         is_active=False,
         source="imported",
     )
-    state.storage.workspaces["claude:ncmplayerengine"] = ws
+    state.storage.workspaces["claude:sample_engine"] = ws
 
     save_calls: list[bool] = []
     monkeypatch.setattr(
@@ -433,11 +433,11 @@ def test_reconcile_workspace_threads_with_source_keeps_stale_claude_thread_with_
     store = ImRouteStore(tmp_path / "im-routes.sqlite3")
     state.set_im_route_store(store, GROUP_CHAT_ID)
     ws = WorkspaceInfo(
-        name="ncmplayerengine",
+        name="sample_engine",
         path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=None,
-        daemon_workspace_id="claude:ncmplayerengine",
+        daemon_workspace_id="claude:sample_engine",
     )
     thread = ThreadInfo(
         thread_id="tid-unknown-routed",
@@ -448,9 +448,9 @@ def test_reconcile_workspace_threads_with_source_keeps_stale_claude_thread_with_
         source="unknown",
     )
     ws.threads[thread.thread_id] = thread
-    state.storage.workspaces["claude:ncmplayerengine"] = ws
+    state.storage.workspaces["claude:sample_engine"] = ws
     state.bind_telegram_session_topic(
-        "claude:ncmplayerengine",
+        "claude:sample_engine",
         ws,
         thread,
         5457,
@@ -475,7 +475,7 @@ def test_reconcile_workspace_threads_with_source_keeps_stale_claude_thread_with_
     assert ws.threads[thread.thread_id] is thread
     assert thread.archived is True
     assert thread.is_active is False
-    assert state.get_thread_topic_id("claude:ncmplayerengine", ws, thread) == 5457
+    assert state.get_thread_topic_id("claude:sample_engine", ws, thread) == 5457
     assert save_calls == [True]
 
 
@@ -524,11 +524,11 @@ async def test_list_handler_for_claude_ignores_state_only_threads(monkeypatch, s
     from bot.handlers.thread import make_list_thread_handler
 
     ws = WorkspaceInfo(
-        name="ncmplayerengine",
+        name="sample_engine",
         path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
-        daemon_workspace_id="claude:ncmplayerengine",
+        daemon_workspace_id="claude:sample_engine",
     )
     ws.threads["ses-state-only"] = ThreadInfo(
         thread_id="ses-state-only",
@@ -537,7 +537,7 @@ async def test_list_handler_for_claude_ignores_state_only_threads(monkeypatch, s
         is_active=True,
         source="unknown",
     )
-    state.storage.workspaces["claude:ncmplayerengine"] = ws
+    state.storage.workspaces["claude:sample_engine"] = ws
     mock_update.effective_message.message_thread_id = 5454
 
     sent: list[dict] = []

@@ -14,13 +14,13 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_THREAD_ID = "019dbcd9-8d2b-7dc1-85ad-75dff569617e"
+DEFAULT_THREAD_ID = "00000000-0000-7000-8000-000000000003"
 DEFAULT_CWD = "/Users/example"
 DEFAULT_TEXT = "图片里面主要是什么内容"
 DEFAULT_LOG_PATH = os.path.expanduser("~/Library/Application Support/OnlineWorker/onlineworker.log")
 DEFAULT_SOCKET_PATH = os.path.expanduser("~/Library/Application Support/OnlineWorker/codex_owner_bridge.sock")
 DEFAULT_ROLLOUT_PATH = os.path.expanduser(
-    "~/.codex/sessions/2026/04/24/rollout-2026-04-24T08-17-47-019dbcd9-8d2b-7dc1-85ad-75dff569617e.jsonl"
+    "~/.codex/sessions/2026/04/24/rollout-2026-04-24T08-17-47-00000000-0000-7000-8000-000000000003.jsonl"
 )
 DEFAULT_TIMEOUT_SECONDS = 90.0
 DEFAULT_POLL_SECONDS = 1.0

@@ -20,11 +20,11 @@ result: waived at Phase 19 closeout by explicit user choice. Automated responsiv
 
 ### 3. Real provider Session lifecycle
 expected: Owned active turn exposes Interrupt; success appears only after provider abort/cancel evidence; user interruption moves to recent-ended with Continue; recovery reconnects/resumes the same Session without replay.
-result: passed. Installed Codex interruption moved the same Session to recent-ended and Continue focused an empty composer. Installed Claude recovery returned `accepted=true` for Session `a824b4d4-469d-4f15-82a5-c18b480cd5de`; the next process used `--resume` with that exact id, `remapped=false`, and old/new markers each appeared once in the transcript.
+result: passed. Installed Codex interruption moved the same Session to recent-ended and Continue focused an empty composer. Installed Claude recovery returned `accepted=true` for Session `<session-id>`; the next process used `--resume` with that exact id, `remapped=false`, and old/new markers each appeared once in the transcript.
 
 ### 4. Session load resilience and reversible test cleanup
 expected: Rapid Session refresh cannot starve the owner bridge or white-screen the app; providers without source archive support use a reversible local archive overlay without deleting transcripts.
-result: passed. Five rapid refresh clicks kept the page responsive, socket descriptors stable, owner bridge healthy, and logs advancing. Claude test Sessions `a824b4d4-469d-4f15-82a5-c18b480cd5de` and `e712b8a0-67e5-40ce-bcde-c4381a9e4ad0` disappeared from Active and appeared in Archived; source JSONL files were not deleted.
+result: passed. Five rapid refresh clicks kept the page responsive, socket descriptors stable, owner bridge healthy, and logs advancing. Claude test Sessions `<session-id>` and `<session-id>` disappeared from Active and appeared in Archived; source JSONL files were not deleted.
 
 ## Summary
 

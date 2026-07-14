@@ -44,6 +44,28 @@ rules needed to work safely in this codebase.
     thread binding, or failed outbound routing must never block provider CLI
     execution, app-server live events, session projections, or Task Board
     updates. Only the outbound IM leg may fail.
+11. This is a public repository. Never commit personal or non-public
+    environment data, including real usernames, machine-specific absolute
+    paths, internal project names, private provider/plugin/codename names,
+    employee or contact information, account/chat/bot identifiers,
+    session/thread identifiers, internal domains or IP addresses, credentials,
+    tokens, private keys, or raw runtime logs.
+12. Tests, fixtures, documentation, screenshots, generated examples, and
+    `.planning` files follow the same privacy rules as production code. Use
+    unmistakably synthetic values such as `/Users/example`,
+    `/tmp/sample-workspace`, `example.test`, `overlay-tool`,
+    `1234567890`, and `<session-id>`.
+13. Before every commit or push, inspect the staged diff and scan tracked files
+    for privacy leaks. Any unexplained local path, real identifier, private
+    name, credential-shaped value, or raw log excerpt blocks the commit until
+    it is removed or explicitly approved by the repository owner.
+14. Stable package identifiers and signing identities may only change through
+    an explicit migration because changing them can affect app identity,
+    permissions, updates, and installed user state. Do not use this exception
+    to introduce new personal identifiers.
+15. If sensitive data is found in Git history, stop and report the affected
+    commits. History rewriting and force-pushing require explicit approval and
+    a backup plan.
 
 ## Provider Approval Control
 

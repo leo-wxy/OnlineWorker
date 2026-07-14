@@ -14,7 +14,7 @@ from core.storage import AppStorage, ThreadInfo, WorkspaceInfo, load_storage, sa
 def test_build_codex_resume_command_targets_local_thread_and_cwd_by_default():
     cmd = build_codex_resume_command(
         codex_bin="codex",
-        thread_id="019d6220-489a-7050-bf98-8fcf6e5bdfea",
+        thread_id="00000000-0000-7000-8000-000000000002",
         cwd="/Users/example/Projects/onlineWorker",
         extra_args=["--no-alt-screen"],
     )
@@ -22,7 +22,7 @@ def test_build_codex_resume_command_targets_local_thread_and_cwd_by_default():
     assert cmd == [
         "codex",
         "resume",
-        "019d6220-489a-7050-bf98-8fcf6e5bdfea",
+        "00000000-0000-7000-8000-000000000002",
         "--cd",
         "/Users/example/Projects/onlineWorker",
         "--no-alt-screen",
@@ -32,7 +32,7 @@ def test_build_codex_resume_command_targets_local_thread_and_cwd_by_default():
 def test_build_codex_resume_command_still_supports_optional_remote_url():
     cmd = build_codex_resume_command(
         codex_bin="codex",
-        thread_id="019d6220-489a-7050-bf98-8fcf6e5bdfea",
+        thread_id="00000000-0000-7000-8000-000000000002",
         cwd="/Users/example/Projects/onlineWorker",
         remote_url="ws://127.0.0.1:4722",
     )
@@ -40,7 +40,7 @@ def test_build_codex_resume_command_still_supports_optional_remote_url():
     assert cmd == [
         "codex",
         "resume",
-        "019d6220-489a-7050-bf98-8fcf6e5bdfea",
+        "00000000-0000-7000-8000-000000000002",
         "--remote",
         "ws://127.0.0.1:4722",
         "--cd",

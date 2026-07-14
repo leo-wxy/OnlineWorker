@@ -62,7 +62,7 @@ def test_run_smoke_follows_remapped_thread_for_read_and_cleanup(monkeypatch, tmp
     requested_thread_ids: list[str] = []
     read_session_ids: list[str] = []
     cleanup_calls: list[dict] = []
-    remapped_thread_id = "019f4f05-23f6-7c52-8ffc-a7dbc04904e9"
+    remapped_thread_id = "00000000-0000-7000-8000-000000000004"
 
     def fake_request(_socket_path, payload, _timeout):
         if payload["type"] == "send_message":

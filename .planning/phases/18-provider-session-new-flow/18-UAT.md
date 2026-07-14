@@ -35,9 +35,9 @@ result: pass
 
 ## Runtime Follow-Up For Phase 19
 
-- Codex session `019f4ebc-1ec3-7a23-be1f-86ddaeaf4c6f` materialized correctly, then its provider turn failed with OpenAI 401 because OnlineWorker reused a global app-server started before the current ChatGPT login. The global server reported `apiKey` while `codex login status` reported ChatGPT.
+- Codex session `<session-id>` materialized correctly, then its provider turn failed with OpenAI 401 because OnlineWorker reused a global app-server started before the current ChatGPT login. The global server reported `apiKey` while `codex login status` reported ChatGPT.
 - The follow-up gives OnlineWorker its own `onlineworker-app-server.sock`, starts a fresh direct child with the current Codex auth state, preserves both stored/API-key environments, and refuses to terminate an active or non-owned listener. Source regressions, an isolated real-process socket smoke, and the repackaged installed `1.7.4` runtime all pass. The installed Codex run reached `completed` without 401 while the pre-existing global daemon remained running.
-- Claude session `0afc0734-97b0-4f54-949b-791afb5c65d5` materialized correctly and remained running at `turn.started` without an assistant reply at closure time.
+- Claude session `<session-id>` materialized correctly and remained running at `turn.started` without an assistant reply at closure time.
 - No destructive cleanup or external-history deletion was performed. These real states motivate pending-center visibility and Session interrupt/resume controls.
 
 ## Summary

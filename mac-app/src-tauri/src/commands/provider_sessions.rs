@@ -1549,10 +1549,10 @@ mod tests {
 
     #[test]
     fn provider_session_bridge_path_prefers_local_bins() {
-        let path = provider_bridge_path("/Users/test");
+        let path = provider_bridge_path("/Users/example");
         assert_eq!(
             path,
-            "/Users/test/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+            "/Users/example/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         );
     }
 
@@ -2157,11 +2157,11 @@ mod tests {
             temp_dir.join("onlineworker_state.json"),
             serde_json::to_string_pretty(&serde_json::json!({
                 "workspaces": {
-                    "claude:wxy": {
-                        "name": "wxy",
-                        "path": "/Users/wxy",
+                    "claude:example-user": {
+                        "name": "example-user",
+                        "path": "/Users/example",
                         "tool": "claude",
-                        "daemon_workspace_id": "claude:wxy",
+                        "daemon_workspace_id": "claude:example-user",
                         "threads": {
                             "session-a": {
                                 "thread_id": "session-a",
@@ -2181,7 +2181,7 @@ mod tests {
             &temp_dir,
             "claude",
             "session-a",
-            "/Users/wxy",
+            "/Users/example",
             Some("Archived title"),
         )
         .expect("persist archived state");
@@ -2190,10 +2190,10 @@ mod tests {
             .expect("read persisted state");
         let state: serde_json::Value = serde_json::from_str(&raw).expect("parse persisted state");
         assert_eq!(
-            state["workspaces"]["claude:wxy"]["threads"]["session-a"]["archived"],
+            state["workspaces"]["claude:example-user"]["threads"]["session-a"]["archived"],
             true
         );
-        assert!(state["workspaces"].get("claude:/Users/wxy").is_none());
+        assert!(state["workspaces"].get("claude:/Users/example").is_none());
 
         let _ = fs::remove_dir_all(&temp_dir);
     }

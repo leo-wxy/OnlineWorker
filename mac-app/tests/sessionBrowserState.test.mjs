@@ -58,7 +58,7 @@ test("sessionPreviewText sanitizes absolute paths from summary previews", () => 
   const preview = sessionPreviewText(session({
     title: "继续phase17 的实现",
     raw: {
-      preview: "我现在继续读 /Users/wxy/Projects/onlineworker-combined/OnlineWorker/mac-app/src/pages/TaskBoard.tsx 这条链路。",
+      preview: "我现在继续读 /Users/example/Projects/onlineworker-workspace/OnlineWorker/mac-app/src/pages/TaskBoard.tsx 这条链路。",
       providerActive: true,
     },
   }));

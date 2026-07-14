@@ -60,14 +60,14 @@ Claude provider unavailable: Claude CLI is not logged in.
 Passed:
 
 ```bash
-/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest -q tests/test_claude_adapter.py
+/Users/example/.pyenv/versions/3.13.1/bin/python3 -m pytest -q tests/test_claude_adapter.py
 # 38 passed
 ```
 
 Passed:
 
 ```bash
-/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest -q \
+/Users/example/.pyenv/versions/3.13.1/bin/python3 -m pytest -q \
   tests/test_config.py \
   tests/test_claude_readiness_smoke.py \
   tests/test_claude_adapter.py \
@@ -98,7 +98,7 @@ Live diagnostic for the default single-command path passed against the current
 machine:
 
 ```bash
-/Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --claude-bin claude
+/Users/example/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --claude-bin claude
 # readiness.ready=false
 # readiness.reason=loggedOut
 # readiness.authMethod=none
@@ -114,7 +114,7 @@ Live diagnostic for explicit multi-launch-method config passed against the
 current machine using a temporary config file under `/tmp`:
 
 ```bash
-/Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --config /tmp/onlineworker-claude-launch-methods-smoke.yaml
+/Users/example/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --config /tmp/onlineworker-claude-launch-methods-smoke.yaml
 # configured_launch_methods=[native, fallback]
 # methods.native.ready=false
 # methods.native.reason=loggedOut
@@ -160,7 +160,7 @@ Installed runtime log check:
 Installed Claude readiness/status smoke passed:
 
 ```bash
-/Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --owner-bridge-status
+/Users/example/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --owner-bridge-status
 # owner_bridge_status.ok=true
 # owner_bridge_status.health=degraded
 # owner_bridge_status.detail="Claude CLI is not logged in."
@@ -186,7 +186,7 @@ Installed readiness smoke after the final package confirmed the configured
 launch method and owner bridge status:
 
 ```bash
-/Users/wxy/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --owner-bridge-status --data-dir "$HOME/Library/Application Support/OnlineWorker" --timeout 12
+/Users/example/.pyenv/versions/3.13.1/bin/python3 scripts/claude_readiness_smoke.py --owner-bridge-status --data-dir "$HOME/Library/Application Support/OnlineWorker" --timeout 12
 # configured_bin=<user-configured launch command>
 # readiness.ready=true
 # readiness.authMethod=oauth_token

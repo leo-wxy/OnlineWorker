@@ -1165,11 +1165,11 @@ async def test_turn_started_does_not_materialize_missing_topic_for_external_app_
 @pytest.mark.asyncio
 async def test_final_answer_without_topic_still_emits_notification_for_imported_codex_thread():
     ws = WorkspaceInfo(
-        name="onlineworker-combined",
-        path="/Users/example/Projects/onlineworker-combined",
+        name="onlineworker-workspace",
+        path="/Users/example/Projects/onlineworker-workspace",
         tool="codex",
         topic_id=None,
-        daemon_workspace_id="codex:/Users/example/Projects/onlineworker-combined",
+        daemon_workspace_id="codex:/Users/example/Projects/onlineworker-workspace",
     )
     ws.threads["tid-imported-no-topic"] = ThreadInfo(
         thread_id="tid-imported-no-topic",

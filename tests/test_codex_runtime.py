@@ -832,10 +832,10 @@ async def test_prepare_send_materializes_state_only_app_thread(monkeypatch):
 async def test_sync_existing_codex_topics_after_startup_repairs_active_threads(monkeypatch):
     storage = AppStorage()
     ws = WorkspaceInfo(
-        name="onlineworker-combined",
-        path="/Users/example/Projects/onlineworker-combined",
+        name="onlineworker-workspace",
+        path="/Users/example/Projects/onlineworker-workspace",
         tool="codex",
-        daemon_workspace_id="codex:onlineworker-combined",
+        daemon_workspace_id="codex:onlineworker-workspace",
     )
     ws.threads["tid-imported"] = ThreadInfo(
         thread_id="tid-imported",

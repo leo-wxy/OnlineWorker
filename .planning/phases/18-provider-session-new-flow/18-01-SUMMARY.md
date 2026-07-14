@@ -41,8 +41,8 @@ status: complete
 
 - Phase-focused source checks were retained and the restored full gates passed: Python `996`, Rust `206`, frontend Node `159`, production frontend build passed.
 - Packaged version `1.7.4` built, installed, relaunched, and exposed the expected owner-bridge IPC.
-- Installed Codex App smoke returned `pending`, then materialized real session `019f4ebc-1ec3-7a23-be1f-86ddaeaf4c6f`; the unique first-message marker was present exactly once in provider history.
-- Installed Claude App smoke returned `pending`, then materialized real session `0afc0734-97b0-4f54-949b-791afb5c65d5`; the unique first-message marker was present in provider history.
+- Installed Codex App smoke returned `pending`, then materialized real session `<session-id>`; the unique first-message marker was present exactly once in provider history.
+- Installed Claude App smoke returned `pending`, then materialized real session `<session-id>`; the unique first-message marker was present in provider history.
 - Real Telegram `/new` UAT was not run by explicit user instruction.
 
 ## Runtime Observation

@@ -1592,7 +1592,7 @@ mod tests {
         let catalog = vec![UsageSourceCatalogEntry {
             plugin_id: "ccusage".into(),
             source_id: "opencode".into(),
-            provider_id: Some("codemaker".into()),
+            provider_id: Some("overlay-tool".into()),
             label: "OpenCode".into(),
             description: String::new(),
             order: 30,
@@ -1600,7 +1600,7 @@ mod tests {
         }];
 
         assert_eq!(
-            popover_usage_source_for_provider("codemaker", &catalog),
+            popover_usage_source_for_provider("overlay-tool", &catalog),
             ("ccusage".into(), "opencode".into())
         );
         assert_eq!(
@@ -1718,8 +1718,8 @@ mod tests {
     fn popover_snapshot_keeps_provider_lanes_and_sums_usage() {
         let activities = vec![TaskBoardSessionActivity {
             provider_id: "codex".into(),
-            workspace_id: "codex:/tmp/onlineworker-combined".into(),
-            workspace_path: "/tmp/onlineworker-combined".into(),
+            workspace_id: "codex:/tmp/onlineworker-workspace".into(),
+            workspace_path: "/tmp/onlineworker-workspace".into(),
             session_id: "session-1".into(),
             title: "menubar polish".into(),
             status: "needs_attention".into(),
@@ -1772,7 +1772,7 @@ mod tests {
                 MenubarPopoverSessionCandidate {
                     provider_id: "codex".into(),
                     session_id: "codex-latest".into(),
-                    workspace: Some("/tmp/onlineworker-combined".into()),
+                    workspace: Some("/tmp/onlineworker-workspace".into()),
                     title: Some("Menubar popover".into()),
                     latest_preview: Some("实现 provider session fallback".into()),
                     status: None,
@@ -1808,7 +1808,7 @@ mod tests {
         );
         assert_eq!(
             snapshot.latest_sessions[0].workspace_name.as_deref(),
-            Some("onlineworker-combined")
+            Some("onlineworker-workspace")
         );
         assert_eq!(
             snapshot.latest_sessions[0].latest_preview.as_deref(),
@@ -1827,7 +1827,7 @@ mod tests {
             vec![MenubarPopoverSessionCandidate {
                 provider_id: "codex".into(),
                 session_id: "stale-local-session".into(),
-                workspace: Some("/tmp/onlineworker-combined".into()),
+                workspace: Some("/tmp/onlineworker-workspace".into()),
                 title: Some("旧会话".into()),
                 latest_preview: Some("旧状态残留".into()),
                 status: Some("Active".into()),
@@ -1846,8 +1846,8 @@ mod tests {
     fn popover_snapshot_overlays_task_board_status_for_matching_session() {
         let activities = vec![TaskBoardSessionActivity {
             provider_id: "codex".into(),
-            workspace_id: "codex:/tmp/onlineworker-combined".into(),
-            workspace_path: "/tmp/onlineworker-combined".into(),
+            workspace_id: "codex:/tmp/onlineworker-workspace".into(),
+            workspace_path: "/tmp/onlineworker-workspace".into(),
             session_id: "codex-latest".into(),
             title: String::new(),
             status: "needs_attention".into(),
@@ -1875,7 +1875,7 @@ mod tests {
             vec![MenubarPopoverSessionCandidate {
                 provider_id: "codex".into(),
                 session_id: "codex-latest".into(),
-                workspace: Some("/tmp/onlineworker-combined".into()),
+                workspace: Some("/tmp/onlineworker-workspace".into()),
                 title: Some("Provider title".into()),
                 latest_preview: Some("Provider preview".into()),
                 status: None,
@@ -1905,8 +1905,8 @@ mod tests {
     fn popover_snapshot_keeps_provider_title_and_preview_when_new_turn_has_only_user_message() {
         let activities = vec![TaskBoardSessionActivity {
             provider_id: "claude".into(),
-            workspace_id: "claude:/tmp/music_biz_player".into(),
-            workspace_path: "/tmp/music_biz_player".into(),
+            workspace_id: "claude:/tmp/sample_audio_module".into(),
+            workspace_path: "/tmp/sample_audio_module".into(),
             session_id: "claude-session".into(),
             title: "现在又换了新的想法".into(),
             status: "running".into(),
@@ -1934,7 +1934,7 @@ mod tests {
             vec![MenubarPopoverSessionCandidate {
                 provider_id: "claude".into(),
                 session_id: "claude-session".into(),
-                workspace: Some("/tmp/music_biz_player".into()),
+                workspace: Some("/tmp/sample_audio_module".into()),
                 title: Some("分轨 multitrackfile 不生效".into()),
                 latest_preview: Some("上一条 assistant 回复".into()),
                 status: Some("Active".into()),
@@ -1959,8 +1959,8 @@ mod tests {
     fn popover_snapshot_prefers_current_provider_session_over_stale_local_state() {
         let activities = vec![TaskBoardSessionActivity {
             provider_id: "codex".into(),
-            workspace_id: "codex:/tmp/onlineworker-combined".into(),
-            workspace_path: "/tmp/onlineworker-combined".into(),
+            workspace_id: "codex:/tmp/onlineworker-workspace".into(),
+            workspace_path: "/tmp/onlineworker-workspace".into(),
             session_id: "old-session".into(),
             title: "今天是几号？".into(),
             status: "completed".into(),
@@ -1989,7 +1989,7 @@ mod tests {
                 MenubarPopoverSessionCandidate {
                     provider_id: "codex".into(),
                     session_id: "current-session".into(),
-                    workspace: Some("/tmp/onlineworker-combined".into()),
+                    workspace: Some("/tmp/onlineworker-workspace".into()),
                     title: Some("当前 menubar 调试".into()),
                     latest_preview: Some("正在处理 latest session".into()),
                     status: Some("Active".into()),
@@ -2001,7 +2001,7 @@ mod tests {
                 MenubarPopoverSessionCandidate {
                     provider_id: "codex".into(),
                     session_id: "old-session".into(),
-                    workspace: Some("/tmp/onlineworker-combined".into()),
+                    workspace: Some("/tmp/onlineworker-workspace".into()),
                     title: Some("今天是几号？".into()),
                     latest_preview: Some("旧 state 残留".into()),
                     status: Some("Active".into()),
@@ -2031,8 +2031,8 @@ mod tests {
     fn popover_snapshot_uses_newer_task_board_activity_when_provider_session_is_older() {
         let activities = vec![TaskBoardSessionActivity {
             provider_id: "codex".into(),
-            workspace_id: "codex:/tmp/onlineworker-combined".into(),
-            workspace_path: "/tmp/onlineworker-combined".into(),
+            workspace_id: "codex:/tmp/onlineworker-workspace".into(),
+            workspace_path: "/tmp/onlineworker-workspace".into(),
             session_id: "new-activity".into(),
             title: "Task Board newer".into(),
             status: "running".into(),

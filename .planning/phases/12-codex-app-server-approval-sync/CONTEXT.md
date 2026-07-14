@@ -9,7 +9,7 @@ In follow-up discussion, the user clarified a second requirement for the local s
 After the 2026-06-02 debugging round, the concrete visible CLI entry point is the fixed OnlineWorker proxy socket:
 
 ```bash
-alias codexR='/opt/homebrew/bin/codex --remote "unix:///Users/wxy/Library/Application Support/OnlineWorker/codex_remote_proxy.sock" --cd "$(pwd)"'
+alias codexR='/opt/homebrew/bin/codex --remote "unix:///Users/example/Library/Application Support/OnlineWorker/codex_remote_proxy.sock" --cd "$(pwd)"'
 ```
 
 Bare `--remote unix://` is not the OnlineWorker validation path. It connects directly to Codex's default app-server control socket and bypasses OnlineWorker's remote proxy, so it cannot validate Telegram approval mirroring/control.
@@ -107,7 +107,7 @@ Codex app-server owns:
 ```text
 OnlineWorker starts or connects to one Codex app-server over unix://PATH
   -> OnlineWorker exposes a fixed unix proxy socket
-  -> visible Codex CLI attaches with codex --remote unix:///Users/wxy/Library/Application Support/OnlineWorker/codex_remote_proxy.sock --cd <cwd>
+  -> visible Codex CLI attaches with codex --remote unix:///Users/example/Library/Application Support/OnlineWorker/codex_remote_proxy.sock --cd <cwd>
   -> Codex app-server emits one approval request id
   -> Telegram and the visible CLI both render that same approval state
   -> Telegram allow/deny replies to the same app-server request id

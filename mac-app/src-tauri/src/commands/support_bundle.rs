@@ -1021,9 +1021,9 @@ mod tests {
     fn plugin_load_diagnostic_reports_failure_context() {
         let check = provider_plugin_load_check(
             Ok(vec![ProviderPluginLoadFailure {
-                provider_id: "codemaker".into(),
-                manifest_path: "/tmp/codemaker/plugin.yaml".into(),
-                entrypoint: "codemaker.python.provider:create_provider_descriptor".into(),
+                provider_id: "overlay-tool".into(),
+                manifest_path: "/tmp/overlay-tool/plugin.yaml".into(),
+                entrypoint: "overlay_tool.python.provider:create_provider_descriptor".into(),
                 error: "ImportError: removed contract".into(),
             }]),
             Instant::now(),
@@ -1039,7 +1039,7 @@ mod tests {
             .detail
             .as_deref()
             .unwrap_or_default()
-            .contains("codemaker"));
+            .contains("overlay-tool"));
     }
 
     #[test]
@@ -1202,16 +1202,16 @@ mod tests {
             "Authorization: Bearer bearer-secret\n",
             "https://api.telegram.org/bot123456:ABC-SECRET/getMe\n",
             "request failed with sk-live-1234567890\n",
-            "/Users/alice/Projects/private\n",
+            "/Users/example/Projects/private\n",
         );
 
-        let redacted = redact_text(raw, Some("/Users/alice"));
+        let redacted = redact_text(raw, Some("/Users/example"));
 
         assert!(!redacted.contains("sk-secret-value"));
         assert!(!redacted.contains("bearer-secret"));
         assert!(!redacted.contains("123456:ABC-SECRET"));
         assert!(!redacted.contains("sk-live-1234567890"));
-        assert!(!redacted.contains("/Users/alice"));
+        assert!(!redacted.contains("/Users/example"));
         assert!(redacted.contains("[REDACTED]"));
         assert!(redacted.contains("~"));
     }
@@ -1244,7 +1244,7 @@ mod tests {
             &report,
             config,
             &log,
-            Some("/Users/alice"),
+            Some("/Users/example"),
             "ALLOWED_USER_ID=123456\n",
         )
         .expect("build generated support artifacts");

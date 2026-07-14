@@ -545,7 +545,7 @@ mod tests {
         let now = SystemTime::now();
         let raw = format!(
             "{} [ERROR] __main__: [ptb-error] update_type=None error=httpx.ConnectError: All connection attempts failed\n\
-             {} [INFO] httpx: HTTP Request: POST https://api.telegram.org/bot8533277450:SECRET/getUpdates \"HTTP/1.1 500 ERROR\"",
+             {} [INFO] httpx: HTTP Request: POST https://api.telegram.org/bot1234567890:SECRET/getUpdates \"HTTP/1.1 500 ERROR\"",
             local_log_time(now, Duration::from_secs(10)),
             local_log_time(now, Duration::from_secs(10))
         );
@@ -554,7 +554,7 @@ mod tests {
         assert_eq!(diagnostic.connected, Some(false));
         let detail = diagnostic.detail.unwrap_or_default();
         assert!(detail.contains("Recent Telegram polling error"));
-        assert!(!detail.contains("8533277450:SECRET"));
+        assert!(!detail.contains("1234567890:SECRET"));
         assert!(detail.contains("/bot[redacted]/getUpdates"));
     }
 
@@ -1420,9 +1420,9 @@ providers:
 
         let candidate = read_provider_workspace_activity(
             &WorkspaceSnapshot {
-                id: "codemaker:onlineWorker".into(),
+                id: "overlay-tool:onlineWorker".into(),
                 name: Some("onlineWorker".into()),
-                tool: "codemaker".into(),
+                tool: "overlay-tool".into(),
                 path: workspace_path.into(),
             },
             &provider_rows,
@@ -1443,12 +1443,12 @@ providers:
         std::fs::create_dir_all(&dir).unwrap();
         let state_path = dir.join("onlineworker_state.json");
         let payload = json!({
-            "active_workspace": "codemaker:onlineWorker",
+            "active_workspace": "overlay-tool:onlineWorker",
             "workspaces": {
-                "codemaker:onlineWorker": {
+                "overlay-tool:onlineWorker": {
                     "name": "onlineWorker",
                     "path": "/Users/example/Projects/onlineWorker",
-                    "tool": "codemaker",
+                    "tool": "overlay-tool",
                     "threads": {
                         "ses-old-ok": {"preview": "OK", "archived": false, "is_active": true}
                     }
@@ -1461,7 +1461,7 @@ providers:
             &dir,
             None,
             &HashMap::from([(
-                "codemaker".to_string(),
+                "overlay-tool".to_string(),
                 vec![ProviderSessionRow {
                     id: "ses-old-ok".into(),
                     workspace: "/Users/example/Projects/onlineWorker".into(),

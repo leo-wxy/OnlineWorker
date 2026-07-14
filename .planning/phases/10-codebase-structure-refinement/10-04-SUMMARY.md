@@ -58,7 +58,7 @@ cd mac-app && ./node_modules/.bin/tsc --noEmit
 ```
 
 Result: passed. The shell printed `pyenv: cannot rehash:
-/Users/wxy/.pyenv/shims isn't writable`, but the TypeScript command exited 0.
+/Users/example/.pyenv/shims isn't writable`, but the TypeScript command exited 0.
 
 ```bash
 git diff --check
@@ -81,7 +81,7 @@ cd mac-app && npm run build
 Result: passed.
 
 ```bash
-/Users/wxy/.pyenv/shims/python3.13 -m pytest -q
+/Users/example/.pyenv/shims/python3.13 -m pytest -q
 ```
 
 Result: `760 passed`.
@@ -93,7 +93,7 @@ cargo test --manifest-path mac-app/src-tauri/Cargo.toml --quiet
 Result: `197 passed`.
 
 ```bash
-node /Users/wxy/.codex/get-shit-done/bin/gsd-tools.cjs validate consistency
+node /Users/example/.codex/get-shit-done/bin/gsd-tools.cjs validate consistency
 ```
 
 Result: passed with existing warnings for older phase artifacts.

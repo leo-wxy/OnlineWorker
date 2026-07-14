@@ -169,11 +169,11 @@ async def test_workspace_overview_for_claude_only_shows_provider_local_threads(m
 
     storage = AppStorage()
     ws = WorkspaceInfo(
-        name="ncmplayerengine",
+        name="sample_engine",
         path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
-        daemon_workspace_id="claude:ncmplayerengine",
+        daemon_workspace_id="claude:sample_engine",
     )
     ws.threads["ses-state-topic"] = ThreadInfo(
         thread_id="ses-state-topic",
@@ -198,7 +198,7 @@ async def test_workspace_overview_for_claude_only_shows_provider_local_threads(m
         source="imported",
     )
     state = AppState(storage=storage)
-    storage.workspaces["claude:ncmplayerengine"] = ws
+    storage.workspaces["claude:sample_engine"] = ws
 
     send_mock = AsyncMock()
     monkeypatch.setattr(
@@ -581,11 +581,11 @@ async def test_thread_open_renames_existing_topic_when_codex_title_changed(monke
 async def test_thread_open_existing_claude_topic_without_cursor_sends_history_snapshot(monkeypatch):
     storage = AppStorage()
     ws = WorkspaceInfo(
-        name="ncmplayerengine",
+        name="sample_engine",
         path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
-        daemon_workspace_id="claude:ncmplayerengine",
+        daemon_workspace_id="claude:sample_engine",
     )
     ws.threads["ses-phase16"] = ThreadInfo(
         thread_id="ses-phase16",
@@ -595,7 +595,7 @@ async def test_thread_open_existing_claude_topic_without_cursor_sends_history_sn
         is_active=True,
         source="imported",
     )
-    storage.workspaces["claude:ncmplayerengine"] = ws
+    storage.workspaces["claude:sample_engine"] = ws
     state = AppState(storage=storage)
 
     handler = make_thread_open_callback_handler(state, GROUP_CHAT_ID)
@@ -605,7 +605,7 @@ async def test_thread_open_existing_claude_topic_without_cursor_sends_history_sn
     bot.edit_forum_topic = AsyncMock(return_value=True)
 
     query = MagicMock()
-    query.data = "thread_open:claude:ncmplayerengine:ses-phase16"
+    query.data = "thread_open:claude:sample_engine:ses-phase16"
     query.answer = AsyncMock()
     query.get_bot.return_value = bot
 
@@ -676,11 +676,11 @@ async def test_thread_open_existing_claude_topic_only_syncs_turns_after_cursor(m
 
     storage = AppStorage()
     ws = WorkspaceInfo(
-        name="ncmplayerengine",
+        name="sample_engine",
         path="/Users/example/Projects/sample-project",
         tool="claude",
         topic_id=5454,
-        daemon_workspace_id="claude:ncmplayerengine",
+        daemon_workspace_id="claude:sample_engine",
     )
     old_turns = [
         {"role": "user", "text": "旧问题", "timestamp": 1000},
@@ -695,7 +695,7 @@ async def test_thread_open_existing_claude_topic_only_syncs_turns_after_cursor(m
         source="imported",
         history_sync_cursor=_history_turn_signature(old_turns[-1]),
     )
-    storage.workspaces["claude:ncmplayerengine"] = ws
+    storage.workspaces["claude:sample_engine"] = ws
     state = AppState(storage=storage)
 
     handler = make_thread_open_callback_handler(state, GROUP_CHAT_ID)
@@ -705,7 +705,7 @@ async def test_thread_open_existing_claude_topic_only_syncs_turns_after_cursor(m
     bot.edit_forum_topic = AsyncMock(return_value=True)
 
     query = MagicMock()
-    query.data = "thread_open:claude:ncmplayerengine:ses-phase16"
+    query.data = "thread_open:claude:sample_engine:ses-phase16"
     query.answer = AsyncMock()
     query.get_bot.return_value = bot
 

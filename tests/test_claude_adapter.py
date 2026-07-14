@@ -593,7 +593,7 @@ async def test_claude_adapter_resumes_existing_session_with_resume_flag(monkeypa
     )
     adapter = ClaudeAdapter(claude_bin="claude")
     await adapter.connect()
-    register_existing_workspace(adapter, "claude:ncmplayerengine", tmp_path, "sample-project")
+    register_existing_workspace(adapter, "claude:sample_engine", tmp_path, "sample-project")
 
     create_process = AsyncMock(
         side_effect=[
@@ -610,7 +610,7 @@ async def test_claude_adapter_resumes_existing_session_with_resume_flag(monkeypa
     )
 
     result = await adapter.send_user_message(
-        "claude:ncmplayerengine",
+        "claude:sample_engine",
         "ses-existing",
         "继续",
     )

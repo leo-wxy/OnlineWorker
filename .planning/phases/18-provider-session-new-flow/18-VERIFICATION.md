@@ -27,8 +27,8 @@ deferred:
 | 1 | App and Telegram share provider-owned new-session validation, real-thread materialization, and first-message send. | ✓ VERIFIED | `core/provider_session_new.py` is wired into owner bridge and Telegram handler; full Python regression passed. |
 | 2 | App preserves short-timeout pending behavior while a real session materializes. | ✓ VERIFIED | Automated slow-start coverage passes and both installed Codex/Claude requests returned `accepted=true, pending=true`. |
 | 3 | App never exposes a local `app:*` placeholder as the real session. | ✓ VERIFIED | Installed smokes materialized real provider ids `019f4ebc-...` and `0afc0734-...`; source tests reject placeholder ids. |
-| 4 | The initial user message is delivered to the new real Codex session exactly once. | ✓ VERIFIED | Installed Codex history contained the unique marker once in session `019f4ebc-1ec3-7a23-be1f-86ddaeaf4c6f`. |
-| 5 | The initial user message is delivered to the new real Claude session. | ✓ VERIFIED | Installed Claude history contained the unique marker in session `0afc0734-97b0-4f54-949b-791afb5c65d5`. |
+| 4 | The initial user message is delivered to the new real Codex session exactly once. | ✓ VERIFIED | Installed Codex history contained the unique marker once in session `<session-id>`. |
+| 5 | The initial user message is delivered to the new real Claude session. | ✓ VERIFIED | Installed Claude history contained the unique marker in session `<session-id>`. |
 | 6 | Telegram `/new` route binding, no-current-session passthrough, and provider-specific empty validation are regression-locked. | ✓ VERIFIED | Slash/router/thread/route tests are part of the full `996 passed` source gate; live Telegram acceptance is explicitly waived and not claimed. |
 | 7 | The shared new-session path is present and usable in the packaged app. | ✓ VERIFIED | Version `1.7.4` built, installed, relaunched, exposed owner-bridge IPC, and accepted real App new-session requests for both builtin providers. |
 
@@ -77,8 +77,8 @@ deferred:
 - `node --test mac-app/tests/*.test.mjs` -> `159 passed`.
 - `pnpm --dir mac-app build` -> passed.
 - Version `1.7.4` package/install/relaunch/IPC checks passed with DMG SHA256 `f63758344625bf5bafe8505fed47f36f0e1d6485028828c1da747383eee6402b`.
-- Codex installed App marker: `OW_PHASE18_APP_UAT_20260711_0914`; real session `019f4ebc-1ec3-7a23-be1f-86ddaeaf4c6f`.
-- Claude installed App marker: `OW_PHASE18_CLAUDE_UAT_20260711_1018`; real session `0afc0734-97b0-4f54-949b-791afb5c65d5`.
+- Codex installed App marker: `OW_PHASE18_APP_UAT_20260711_0914`; real session `<session-id>`.
+- Claude installed App marker: `OW_PHASE18_CLAUDE_UAT_20260711_1018`; real session `<session-id>`.
 
 ## Accepted Scope Waiver
 
@@ -96,7 +96,7 @@ Follow-up verification:
 - Isolated real-process smoke under temporary `CODEX_HOME` -> dedicated socket accepted connections, `owned=True`, and stopped cleanly.
 - `bash scripts/verify-packaged-fast.sh` -> passed in 81s; DMG SHA256 `3a86b777c80d6beb661d1962b562df8da4b9f83fb6835ed1d769102aa252049e`; installed app PID `40743`, bot PID `40843`.
 - The installed runtime started owned app-server PID `41882` on `CODEX_HOME/app-server-control/onlineworker-app-server.sock`; pre-existing global app-server PID `33354` remained running and untouched.
-- Installed Codex marker run remapped the requested UUID to real thread `019f4f05-23f6-7c52-8ffc-a7dbc04904e9`, then progressed from `send_started` through `turn/started`, final reply, and `completed` in about 7 seconds with no 401. The test thread was archived through the real provider archive path.
+- Installed Codex marker run remapped the requested UUID to real thread `<session-id>`, then progressed from `send_started` through `turn/started`, final reply, and `completed` in about 7 seconds with no 401. The test thread was archived through the real provider archive path.
 - The legacy Claude-named smoke helper originally returned nonzero after the successful Codex run because it polled the pre-remap UUID instead of the `thread_id` returned by `send_message`. The helper now follows the returned thread for polling, result reporting, and cleanup; the remap regression and cleanup suite pass (`4 passed`).
 
 The Claude provider turn remained running at `turn.started` without an assistant response at closure time. These observations do not break the verified Phase 18 creation and first-message contract. Generic pending visibility and Session interrupt/resume remain Phase 19 work.

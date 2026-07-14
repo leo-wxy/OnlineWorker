@@ -100,7 +100,7 @@
 ## Verification
 
 ```bash
-/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest -q \
+/Users/example/.pyenv/versions/3.13.1/bin/python3 -m pytest -q \
   tests/test_im_route_store.py \
   tests/test_storage.py \
   tests/test_thread_controls.py \
@@ -123,7 +123,7 @@ Result: `354 passed`.
 Post-close regression verification:
 
 ```bash
-/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest -q \
+/Users/example/.pyenv/versions/3.13.1/bin/python3 -m pytest -q \
   tests/test_topic_route_access.py \
   tests/test_im_route_store.py \
   tests/test_thread_controls.py \

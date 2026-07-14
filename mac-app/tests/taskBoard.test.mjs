@@ -601,15 +601,15 @@ test("buildTaskBoardModel shows Claude permission command as dynamic preview", (
         id: "fe8cfb27-d4b2-4df7-9b03-000000000001",
         type: "claude",
         title: "fe8cfb27-d4b",
-        workspace: "ncmplayerengine",
+        workspace: "sample_engine",
         raw: { status: "running", updatedAt: nowEpochMs - 1_000 },
       }),
     ],
     sessionActivities: [
       {
         providerId: "claude",
-        workspaceId: "claude:/Users/example/Projects/ncmplayerengine",
-        workspacePath: "/Users/example/Projects/ncmplayerengine",
+        workspaceId: "claude:/Users/example/Projects/sample_engine",
+        workspacePath: "/Users/example/Projects/sample_engine",
         sessionId: "fe8cfb27-d4b2-4df7-9b03-000000000001",
         title: "fe8cfb27-d4b2-4df7-9b03-000000000001",
         status: "needs_attention",
@@ -770,7 +770,7 @@ test("buildTaskBoardModel ignores stale low-signal dashboard active session with
     sessions: [
       session({
         id: "ses-old-ok",
-        type: "codemaker",
+        type: "overlay-tool",
         title: "OK",
         workspace: "/Users/example/Projects/onlineWorker",
         raw: {
@@ -779,11 +779,11 @@ test("buildTaskBoardModel ignores stale low-signal dashboard active session with
         },
       }),
     ],
-    providerLabels: { codemaker: "CodeMaker" },
+    providerLabels: { "overlay-tool": "Overlay Tool" },
     dashboardState: {
       recentActivity: {
         activeSessionId: "ses-old-ok",
-        activeSessionTool: "codemaker",
+        activeSessionTool: "overlay-tool",
         highlightedThreadPreview: "OK",
       },
       generatedAtEpoch: Math.floor(nowEpochMs / 1000),
@@ -800,7 +800,7 @@ test("buildTaskBoardModel ignores stale dashboard active workspace when matching
     sessions: [
       session({
         id: "ses-old-ok",
-        type: "codemaker",
+        type: "overlay-tool",
         title: "OK",
         workspace: "/Users/example/Projects/onlineWorker",
         raw: {
@@ -813,7 +813,7 @@ test("buildTaskBoardModel ignores stale dashboard active workspace when matching
         id: "thread-live",
         type: "codex",
         title: "继续phase17 的实现",
-        workspace: "/Users/example/Projects/onlineworker-combined",
+        workspace: "/Users/example/Projects/onlineworker-workspace",
         raw: {
           preview: "继续phase17 的实现",
           updatedAt: nowEpochMs - 5_000,
@@ -821,15 +821,15 @@ test("buildTaskBoardModel ignores stale dashboard active workspace when matching
         },
       }),
     ],
-    providerLabels: { codemaker: "CodeMaker", codex: "Codex" },
+    providerLabels: { "overlay-tool": "Overlay Tool", codex: "Codex" },
     dashboardState: {
       recentActivity: {
-        activeWorkspaceId: "codemaker:onlineWorker",
+        activeWorkspaceId: "overlay-tool:onlineWorker",
         activeWorkspaceName: "onlineWorker",
         activeWorkspacePath: "/Users/example/Projects/onlineWorker",
-        activeTool: "codemaker",
+        activeTool: "overlay-tool",
         activeSessionId: "ses-old-ok",
-        activeSessionTool: "codemaker",
+        activeSessionTool: "overlay-tool",
         highlightedThreadPreview: "OK",
         activeThreadCount: 5,
       },
@@ -853,7 +853,7 @@ test("buildTaskBoardModel sanitizes absolute local paths in provider session pre
         title: "继续phase17 的实现",
         raw: {
           providerActive: true,
-          preview: "我现在继续读 /Users/wxy/Projects/onlineworker-combined/OnlineWorker/mac-app/src/pages/TaskBoard.tsx 这条链路。",
+          preview: "我现在继续读 /Users/example/Projects/onlineworker-workspace/OnlineWorker/mac-app/src/pages/TaskBoard.tsx 这条链路。",
           updatedAt: nowEpochMs - 5_000,
         },
       }),
@@ -871,7 +871,7 @@ test("buildTaskBoardModel replaces uuid activity title with session title", () =
   const board = buildTaskBoardModel({
     sessions: [
       session({
-        id: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        id: "00000000-0000-7000-8000-000000000001",
         title: "修复 TaskBoard 卡片标题",
         raw: { updatedAt: nowEpochMs - 30_000 },
       }),
@@ -881,8 +881,8 @@ test("buildTaskBoardModel replaces uuid activity title with session title", () =
         providerId: "codex",
         workspaceId: "codex:/Users/example/Projects/sample-workspace",
         workspacePath: "/Users/example/Projects/sample-workspace",
-        sessionId: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
-        title: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        sessionId: "00000000-0000-7000-8000-000000000001",
+        title: "00000000-0000-7000-8000-000000000001",
         status: "running",
         attentionReason: "",
         lastUserMessage: "",
@@ -905,7 +905,7 @@ test("buildTaskBoardModel renders session title above live assistant summary", (
   const board = buildTaskBoardModel({
     sessions: [
       session({
-        id: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        id: "00000000-0000-7000-8000-000000000001",
         title: "切换 codex/phase-14-message-event-bus 这个分支",
         raw: { updatedAt: nowEpochMs - 30_000 },
       }),
@@ -915,7 +915,7 @@ test("buildTaskBoardModel renders session title above live assistant summary", (
         providerId: "codex",
         workspaceId: "codex:/Users/example/Projects/sample-workspace",
         workspacePath: "/Users/example/Projects/sample-workspace",
-        sessionId: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        sessionId: "00000000-0000-7000-8000-000000000001",
         title: "我正在通过事件流更新 TaskBoard。",
         status: "running",
         attentionReason: "",
@@ -939,7 +939,7 @@ test("buildTaskBoardModel trims assistant process preface from live preview", ()
   const board = buildTaskBoardModel({
     sessions: [
       session({
-        id: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        id: "00000000-0000-7000-8000-000000000001",
         title: "切换 codex/phase-14-message-event-bus 这个分支",
         raw: { updatedAt: nowEpochMs - 30_000 },
       }),
@@ -949,7 +949,7 @@ test("buildTaskBoardModel trims assistant process preface from live preview", ()
         providerId: "codex",
         workspaceId: "codex:/Users/example/Projects/sample-workspace",
         workspacePath: "/Users/example/Projects/sample-workspace",
-        sessionId: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        sessionId: "00000000-0000-7000-8000-000000000001",
         title: "",
         status: "running",
         attentionReason: "",
@@ -976,7 +976,7 @@ test("buildTaskBoardModel trims hook discussion preface from live preview", () =
   const board = buildTaskBoardModel({
     sessions: [
       session({
-        id: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        id: "00000000-0000-7000-8000-000000000001",
         title: "切换 codex/phase-14-message-event-bus 这个分支",
         raw: { updatedAt: nowEpochMs - 30_000 },
       }),
@@ -986,7 +986,7 @@ test("buildTaskBoardModel trims hook discussion preface from live preview", () =
         providerId: "codex",
         workspaceId: "codex:/Users/example/Projects/sample-workspace",
         workspacePath: "/Users/example/Projects/sample-workspace",
-        sessionId: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        sessionId: "00000000-0000-7000-8000-000000000001",
         title: "",
         status: "running",
         attentionReason: "",
@@ -1017,7 +1017,7 @@ test("buildTaskBoardModel does not use assistant text as title without session m
         providerId: "codex",
         workspaceId: "codex:/Users/example/Projects/sample-workspace",
         workspacePath: "/Users/example/Projects/sample-workspace",
-        sessionId: "019e92cb-9559-7eb0-be3e-ab23f37f7b27",
+        sessionId: "00000000-0000-7000-8000-000000000001",
         title: "",
         status: "running",
         attentionReason: "",
@@ -1033,7 +1033,7 @@ test("buildTaskBoardModel does not use assistant text as title without session m
     nowEpochMs,
   });
 
-  assert.equal(board.running[0].title, "019e92cb-955");
+  assert.equal(board.running[0].title, "00000000-000");
   assert.equal(board.running[0].preview, "通过事件流更新 TaskBoard。");
 });
 
