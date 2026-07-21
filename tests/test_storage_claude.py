@@ -447,6 +447,49 @@ def test_list_claude_threads_by_cwd_reads_project_jsonl_store(tmp_path):
     assert result[1]["preview"] == "旧会话第一条消息"
 
 
+def test_list_claude_threads_by_cwd_uses_latest_project_event_time(tmp_path):
+    projects_dir = tmp_path / "projects"
+    history_path = tmp_path / "empty-history.jsonl"
+    cwd = "/Users/example/Projects/onlineWorker"
+    project_dir = projects_dir / "-Users-example-Projects-onlineWorker"
+
+    _write_claude_project_rows(
+        project_dir / "ses-recently-used.jsonl",
+        [
+            {
+                "type": "user",
+                "timestamp": "2026-04-07T09:00:00.000Z",
+                "cwd": cwd,
+                "sessionId": "ses-recently-used",
+                "message": {"role": "user", "content": "继续旧会话"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2026-04-07T12:00:00.000Z",
+                "cwd": cwd,
+                "sessionId": "ses-recently-used",
+                "message": {"role": "assistant", "content": "已完成"},
+            },
+        ],
+    )
+    _write_claude_project_session(
+        project_dir / "ses-newer-created.jsonl",
+        session_id="ses-newer-created",
+        cwd=cwd,
+        timestamp="2026-04-07T10:00:00.000Z",
+    )
+
+    result = storage_module.list_claude_threads_by_cwd(
+        cwd,
+        sessions_dir=str(projects_dir),
+        history_path=str(history_path),
+        limit=20,
+    )
+
+    assert [item["id"] for item in result] == ["ses-recently-used", "ses-newer-created"]
+    assert result[0]["updatedAt"] == 1775563200000
+
+
 def test_list_claude_threads_by_cwd_prefers_session_file_matching_workspace_slug_when_duplicate_session_ids_exist(
     tmp_path,
 ):

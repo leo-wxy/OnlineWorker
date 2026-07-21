@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 from config import load_config
-from core.ai.config import builtin_ai_service_raws, load_ai_config
+from core.ai.config import builtin_ai_service_raws, clear_ai_manifest_cache, load_ai_config
 from core.ai.contracts import AiScenarioConfig, AiServiceConfig
 
 
@@ -83,6 +83,20 @@ def test_builtin_ai_service_defaults_come_from_provider_manifests():
     assert services["openai_default"]["default_for_scenarios"] is True
     assert services["anthropic_default"]["owner_provider_id"] == "claude"
     assert services["anthropic_default"]["api_key_env"] == "ANTHROPIC_API_KEY"
+
+
+def test_builtin_ai_services_survive_manifest_disappearance(monkeypatch):
+    clear_ai_manifest_cache()
+    try:
+        first = builtin_ai_service_raws()
+        monkeypatch.setattr(
+            "core.ai.config.iter_overlay_manifest_paths",
+            lambda: (_ for _ in ()).throw(AssertionError("manifest scan should be cached")),
+        )
+
+        assert builtin_ai_service_raws() == first
+    finally:
+        clear_ai_manifest_cache()
 
 
 def test_ai_config_migrates_legacy_notification_summary_prompt():

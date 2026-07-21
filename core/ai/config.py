@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -78,19 +80,28 @@ def build_ai_service_config(service_id: str, raw: dict[str, Any] | None) -> AiSe
     )
 
 
-def builtin_ai_service_raws() -> list[dict[str, Any]]:
+@lru_cache(maxsize=1)
+def _builtin_ai_service_snapshot() -> tuple[dict[str, Any], ...]:
     plugin_root = Path(__file__).resolve().parents[2] / "plugins" / "providers" / "builtin"
     services: list[dict[str, Any]] = []
     manifest_paths = sorted(plugin_root.glob("*/plugin.yaml")) if plugin_root.exists() else []
     manifest_paths.extend(iter_overlay_manifest_paths())
     if not manifest_paths:
-        return services
+        return ()
     for manifest_path in manifest_paths:
         manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
         if not isinstance(manifest, dict) or manifest.get("kind") != "provider":
             continue
         services.extend(ai_services_from_manifest(manifest))
-    return services
+    return tuple(services)
+
+
+def builtin_ai_service_raws() -> list[dict[str, Any]]:
+    return deepcopy(list(_builtin_ai_service_snapshot()))
+
+
+def clear_ai_manifest_cache() -> None:
+    _builtin_ai_service_snapshot.cache_clear()
 
 
 def build_ai_scenario_config(

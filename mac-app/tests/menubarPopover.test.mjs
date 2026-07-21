@@ -13,6 +13,10 @@ const rustSource = readFileSync(
   join(__dirname, "..", "src-tauri", "src", "menubar.rs"),
   "utf8",
 );
+const tauriLibSource = readFileSync(
+  join(__dirname, "..", "src-tauri", "src", "lib.rs"),
+  "utf8",
+);
 
 test("menubar popover keeps dynamic provider tabs and existing navigation actions", () => {
   assert.match(source, /providers\.map\(\(provider\) => \(/);
@@ -81,21 +85,26 @@ test("menubar refreshes provider sessions without overlapping snapshot loads", (
   );
   assert.match(rustSource, /SNAPSHOT_REFRESH_INTERVAL_SECONDS: u64 = 10/);
   assert.match(rustSource, /ticker\.set_missed_tick_behavior\(MissedTickBehavior::Skip\)/);
-  assert.match(rustSource, /refresh_menubar_popover_snapshot\(&app, false\)\.await/);
+  assert.match(rustSource, /refresh_menubar_popover_snapshot\(&app, true\)\.await/);
   assert.match(rustSource, /MENUBAR_POPOVER_SNAPSHOT_EVENT/);
 });
 
-test("menubar preloads the popover offscreen before the first tray click", () => {
+test("menubar preloads the popover hidden before the first tray click", () => {
   assert.match(
     rustSource,
     /pub\(crate\) fn setup_menubar[\s\S]*ensure_popover_window\(app\)[\s\S]*let tray = build_tray\(app\)/,
   );
   assert.match(rustSource, /MENUBAR_POPOVER_WARMUP_POSITION/);
-  assert.match(rustSource, /\.visible\(true\)/);
+  assert.match(rustSource, /\.visible\(false\)/);
+  assert.doesNotMatch(rustSource, /\.visible\(true\)/);
   assert.match(rustSource, /\.focused\(false\)/);
   assert.match(rustSource, /\.on_page_load\(/);
   assert.match(rustSource, /PageLoadEvent::Finished/);
-  assert.match(rustSource, /refresh_menubar_popover_snapshot\(&app, false\)\.await/);
+  assert.match(rustSource, /refresh_menubar_popover_snapshot\(&app, true\)\.await/);
   assert.match(rustSource, /popover_window_is_warming\(&window\)/);
   assert.match(rustSource, /window\.hide\(\)/);
+  assert.match(
+    tauriLibSource,
+    /tauri_plugin_window_state::Builder::default\(\)[\s\S]*\.with_denylist\(&\[MENUBAR_POPOVER_WINDOW_LABEL\]\)/,
+  );
 });

@@ -57,6 +57,8 @@ export function UsageBrowser() {
   const [error, setError] = useState<string | null>(null);
   const hasLoadedRef = useRef(false);
   const autoRangeRef = useRef(true);
+  const summaryRequestIdRef = useRef(0);
+  const forceNextLoadRef = useRef(false);
 
   const usageProviders = providers;
   const activeProvider = useMemo(() => {
@@ -100,6 +102,7 @@ export function UsageBrowser() {
   }, []);
 
   const loadSummary = useCallback(async (source: UsageSourceCatalogEntry, query: UsageQuery, forceRefresh = false) => {
+    const requestId = ++summaryRequestIdRef.current;
     const hasLoadedBefore = hasLoadedRef.current;
     setLoading(!hasLoadedBefore);
     setRefreshing(hasLoadedBefore);
@@ -108,15 +111,23 @@ export function UsageBrowser() {
       if (!next || typeof next !== "object") {
         throw new Error(t.usage.unavailable);
       }
+      if (requestId !== summaryRequestIdRef.current) {
+        return;
+      }
       setSummary(next);
       setError(null);
       hasLoadedRef.current = true;
     } catch (loadError) {
+      if (requestId !== summaryRequestIdRef.current) {
+        return;
+      }
       setSummary(null);
       setError(describeUnknownError(loadError, t.usage.unavailable));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === summaryRequestIdRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [t.usage.unavailable]);
 
@@ -124,26 +135,28 @@ export function UsageBrowser() {
     if (!activeProvider?.sourceId) {
       return;
     }
+    forceNextLoadRef.current = true;
+    const next = autoRangeRef.current ? buildDefaultUsageQuery() : { ...query };
     if (autoRangeRef.current) {
-      const next = buildDefaultUsageQuery();
       setDraftQuery(next);
-      setQuery(next);
-      if (next.startDate === query.startDate && next.endDate === query.endDate) {
-        void loadSummary(activeProvider, next, true);
-      }
-      return;
     }
-    void loadSummary(activeProvider, query, true);
-  }, [activeProvider, loadSummary, query]);
+    setQuery(next);
+  }, [activeProvider, query]);
 
   useEffect(() => {
     if (!activeProvider?.sourceId) {
+      summaryRequestIdRef.current += 1;
       setLoading(false);
       setRefreshing(false);
       setSummary(null);
       return;
     }
-    void loadSummary(activeProvider, query);
+    const forceRefresh = forceNextLoadRef.current;
+    forceNextLoadRef.current = false;
+    void loadSummary(activeProvider, query, forceRefresh);
+    return () => {
+      summaryRequestIdRef.current += 1;
+    };
   }, [activeProvider, loadSummary, query]);
 
   useEffect(() => {

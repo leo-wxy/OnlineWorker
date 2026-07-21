@@ -2823,6 +2823,48 @@ async def test_provider_owner_bridge_list_sessions_uses_cached_snapshot_on_timeo
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_list_sessions_preserves_cache_on_empty_refresh(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(storage=AppStorage())
+    calls = {"count": 0}
+
+    class Facts:
+        @staticmethod
+        def list_sessions(*, limit=100, sessions_dir=None):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return [
+                    {
+                        "id": "tid-cached",
+                        "title": "Cached",
+                        "workspace": "/tmp/sample-workspace",
+                        "archived": False,
+                        "providerActive": True,
+                        "updatedAt": 20,
+                        "createdAt": 19,
+                    }
+                ]
+            return []
+
+    monkeypatch.setattr(
+        "core.provider_owner_bridge.get_provider",
+        lambda name, *args, **kwargs: SimpleNamespace(facts=Facts) if name == "overlay-tool" else None,
+    )
+
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    first = await bridge._handle_list_sessions(
+        {"provider_id": "overlay-tool", "limit": 20}
+    )
+    second = await bridge._handle_list_sessions(
+        {"provider_id": "overlay-tool", "limit": 20, "force_refresh": True}
+    )
+
+    assert second == first
+    assert calls["count"] == 2
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_list_sessions_returns_cached_snapshot_without_reloading(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 

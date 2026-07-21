@@ -9,6 +9,7 @@ from core.notifications.events import NotificationEvent, format_notification_tex
 from core.notifications.registry import (
     NotificationPluginDescriptor,
     _load_bundled_notification_descriptors,
+    clear_notification_registry_cache,
     iter_overlay_notification_manifest_paths,
     load_notification_plugins,
 )
@@ -22,6 +23,13 @@ from plugins.notifications.builtin.telegram.python.channel import (
     TelegramNotificationChannel,
     create_notification_descriptor,
 )
+
+
+@pytest.fixture(autouse=True)
+def reset_notification_registry_cache():
+    clear_notification_registry_cache()
+    yield
+    clear_notification_registry_cache()
 
 
 class RecordingChannel:
@@ -130,6 +138,28 @@ def test_default_notification_summary_rules_generate_packaging_guard_title():
         )
         == "无许可打包规则"
     )
+
+
+def test_default_notification_summary_rules_survive_resource_disappearance(monkeypatch):
+    first = load_notification_summary_rules()
+    monkeypatch.setattr(
+        "core.notifications.summary_rules._load_rules_file",
+        lambda path: (_ for _ in ()).throw(AssertionError("default rules should be cached")),
+    )
+
+    assert load_notification_summary_rules() is first
+
+
+def test_default_notification_summary_rules_retry_until_first_success(monkeypatch):
+    from core.notifications import summary_rules
+
+    expected = summary_rules.NotificationSummaryRules(title_limit=42)
+    responses = iter((None, expected))
+    monkeypatch.setattr(summary_rules, "_DEFAULT_NOTIFICATION_SUMMARY_RULES", None)
+    monkeypatch.setattr(summary_rules, "_load_rules_file", lambda path: next(responses))
+
+    assert load_notification_summary_rules().title_limit == 16
+    assert load_notification_summary_rules() is expected
 
 
 def test_notification_runtime_builds_router_from_enabled_config(monkeypatch):
@@ -290,6 +320,32 @@ def test_bundled_notification_catalog_has_telegram_descriptor():
     descriptors = _load_bundled_notification_descriptors()
 
     assert list(descriptors) == ["telegram"]
+
+
+def test_notification_registry_survives_manifest_disappearance(monkeypatch):
+    clear_notification_registry_cache()
+    try:
+        first = load_notification_plugins()
+        monkeypatch.setattr(
+            "core.notifications.registry.iter_builtin_notification_manifest_paths",
+            lambda: (_ for _ in ()).throw(AssertionError("manifest scan should be cached")),
+        )
+
+        assert load_notification_plugins() == first
+    finally:
+        clear_notification_registry_cache()
+
+
+def test_notification_registry_returns_isolated_descriptor_metadata():
+    clear_notification_registry_cache()
+    try:
+        first = load_notification_plugins()
+        first["telegram"].settings_fields[0]["label"] = "Changed"
+
+        second = load_notification_plugins()
+        assert second["telegram"].settings_fields[0]["label"] != "Changed"
+    finally:
+        clear_notification_registry_cache()
 
 
 @pytest.mark.asyncio

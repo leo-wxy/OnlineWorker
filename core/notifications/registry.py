@@ -4,7 +4,9 @@ import importlib
 import os
 import sys
 from collections.abc import Callable, Iterable
+from copy import deepcopy
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -69,7 +71,9 @@ def iter_overlay_notification_manifest_paths(overlay_spec: str | None = None) ->
     return iter_notification_manifest_paths(roots)
 
 
-def load_notification_plugins(root_dirs: Iterable[str | Path] | None = None) -> dict[str, NotificationPluginDescriptor]:
+def _load_notification_plugins(
+    root_dirs: Iterable[str | Path] | None = None,
+) -> dict[str, NotificationPluginDescriptor]:
     descriptors = _load_bundled_notification_descriptors()
     manifest_paths = list(iter_builtin_notification_manifest_paths())
     manifest_paths.extend(
@@ -92,6 +96,23 @@ def load_notification_plugins(root_dirs: Iterable[str | Path] | None = None) -> 
         descriptor = _merge_manifest_settings(descriptor, manifest)
         descriptors[descriptor.name] = descriptor
     return descriptors
+
+
+@lru_cache(maxsize=1)
+def _notification_plugin_snapshot() -> dict[str, NotificationPluginDescriptor]:
+    return _load_notification_plugins()
+
+
+def load_notification_plugins(
+    root_dirs: Iterable[str | Path] | None = None,
+) -> dict[str, NotificationPluginDescriptor]:
+    if root_dirs is not None:
+        return _load_notification_plugins(root_dirs)
+    return deepcopy(_notification_plugin_snapshot())
+
+
+def clear_notification_registry_cache() -> None:
+    _notification_plugin_snapshot.cache_clear()
 
 
 def _load_bundled_notification_descriptors() -> dict[str, NotificationPluginDescriptor]:

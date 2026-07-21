@@ -164,7 +164,11 @@ def _build_claude_thread_snapshot(
             continue
 
         created_at = int((row or {}).get("createdAt") or 0) or int(history_info.get("updatedAt") or 0)
-        updated_at = int(history_info.get("updatedAt") or 0) or created_at
+        updated_at = max(
+            int((row or {}).get("updatedAt") or 0),
+            int(history_info.get("updatedAt") or 0),
+            created_at,
+        )
         by_workspace.setdefault(logical_cwd, []).append(
             {
                 "id": session_id,
@@ -177,8 +181,8 @@ def _build_claude_thread_snapshot(
     for threads in by_workspace.values():
         threads.sort(
             key=lambda item: (
-                int(item.get("createdAt") or 0),
                 int(item.get("updatedAt") or 0),
+                int(item.get("createdAt") or 0),
                 str(item.get("id") or ""),
             ),
             reverse=True,
@@ -391,6 +395,7 @@ def _load_claude_project_sessions_from_dir(projects_dir: str) -> list[dict]:
             session_id = os.path.splitext(entry)[0]
             cwd = ""
             created_at = 0
+            updated_at = 0
             preview = None
             entrypoints: set[str] = set()
             first_user_text = ""
@@ -418,6 +423,7 @@ def _load_claude_project_sessions_from_dir(projects_dir: str) -> list[dict]:
                         row_timestamp = _parse_claude_timestamp(row.get("timestamp"))
                         if row_timestamp and (created_at == 0 or row_timestamp < created_at):
                             created_at = row_timestamp
+                        updated_at = max(updated_at, row_timestamp)
                         entrypoint = str(row.get("entrypoint") or "").strip()
                         if entrypoint:
                             entrypoints.add(entrypoint)
@@ -452,11 +458,14 @@ def _load_claude_project_sessions_from_dir(projects_dir: str) -> list[dict]:
                 continue
             if created_at == 0:
                 created_at = int(os.path.getmtime(fpath) * 1000)
+            if updated_at == 0:
+                updated_at = created_at
             result.append(
                 {
                     "id": session_id,
                     "cwd": cwd,
                     "createdAt": created_at,
+                    "updatedAt": updated_at,
                     "sessionFile": fpath,
                     "preview": preview,
                     "entrypoints": entrypoints,
@@ -498,6 +507,10 @@ def _load_claude_sessions(sessions_dir: Optional[str] = None) -> list[dict]:
                 existing["createdAt"] = min(existing_created_at, row_created_at)
             else:
                 existing["createdAt"] = existing_created_at or row_created_at
+            existing["updatedAt"] = max(
+                int(existing.get("updatedAt") or 0),
+                int(row.get("updatedAt") or 0),
+            )
             if not existing.get("cwd") and row.get("cwd"):
                 existing["cwd"] = row["cwd"]
             if row.get("sessionFile") and (

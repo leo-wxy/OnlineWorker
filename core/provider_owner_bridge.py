@@ -740,6 +740,16 @@ class ProviderOwnerBridge:
         if not self.socket_path:
             raise RuntimeError("缺少 data_dir，无法启动 provider owner bridge")
 
+        try:
+            from core.usage.registry import get_usage_source_catalog
+            await _run_sync_with_timeout(
+                "usage_registry_warmup",
+                get_usage_source_catalog,
+                timeout=OWNER_BRIDGE_USAGE_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            logger.exception("[provider-owner-bridge] usage registry 预热失败")
+
         os.makedirs(self.data_dir, exist_ok=True)
         if os.path.exists(self.socket_path):
             os.remove(self.socket_path)
@@ -799,7 +809,15 @@ class ProviderOwnerBridge:
                 response = {"ok": True, "failures": provider_load_failures()}
             elif request_type == "usage_source_catalog":
                 from core.usage.registry import get_usage_source_catalog
-                response = {"ok": True, "sources": get_usage_source_catalog()}
+                try:
+                    sources = await _run_sync_with_timeout(
+                        "usage_source_catalog",
+                        get_usage_source_catalog,
+                        timeout=OWNER_BRIDGE_USAGE_TIMEOUT_SECONDS,
+                    )
+                    response = {"ok": True, "sources": sources}
+                except Exception as exc:
+                    response = {"ok": False, "error": str(exc)}
             elif request_type == "usage_source_summary":
                 response = await self._handle_usage_source_summary(request)
             elif request_type == "session_activities":
@@ -965,6 +983,9 @@ class ProviderOwnerBridge:
                     )
                     await _hydrate_low_signal_session_previews(provider_id, facts, sessions)
                     response = {"ok": True, "sessions": sessions}
+                    cached = self._list_sessions_cache.get(cache_key)
+                    if not sessions and cached and cached.get("sessions"):
+                        return cached
                     self._list_sessions_cache[cache_key] = response
                     return response
 

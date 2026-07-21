@@ -1,8 +1,19 @@
+import pytest
+
 from core.usage.registry import (
+    clear_usage_registry_cache,
     get_provider_usage_source,
     get_usage_source_catalog,
     load_usage_plugins,
 )
+from core.usage import registry
+
+
+@pytest.fixture(autouse=True)
+def reset_usage_registry_cache():
+    clear_usage_registry_cache()
+    yield
+    clear_usage_registry_cache()
 
 
 def test_ccusage_plugin_exposes_all_pinned_sources(monkeypatch):
@@ -69,3 +80,29 @@ entrypoints:
 
     assert [item["sourceId"] for item in catalog[:3]] == ["codex", "claude", "opencode"]
     assert "Skipping provider usage association that failed to load" in caplog.text
+
+
+def test_usage_registry_keeps_last_successful_snapshot_when_manifests_disappear(monkeypatch):
+    plugins = load_usage_plugins()
+    catalog = get_usage_source_catalog()
+
+    monkeypatch.setattr(registry, "_manifest_paths", lambda: [])
+
+    assert load_usage_plugins() == plugins
+    assert get_usage_source_catalog() == catalog
+
+
+def test_usage_catalog_returns_isolated_nested_metadata():
+    catalog = get_usage_source_catalog()
+    assert catalog
+
+    catalog[0]["icon"]["path"] = "changed.svg"
+
+    assert get_usage_source_catalog()[0]["icon"].get("path") != "changed.svg"
+
+
+def test_usage_plugins_return_isolated_manifests():
+    plugins = load_usage_plugins()
+    plugins["ccusage"][0]["sources"][0]["label"] = "Changed"
+
+    assert load_usage_plugins()["ccusage"][0]["sources"][0]["label"] != "Changed"

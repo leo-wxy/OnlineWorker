@@ -159,16 +159,30 @@ def _load_rules_file(path: Path) -> NotificationSummaryRules | None:
     return _rules_from_raw(raw)
 
 
+_DEFAULT_NOTIFICATION_SUMMARY_RULES: NotificationSummaryRules | None = None
+
+
+def _default_notification_summary_rules() -> NotificationSummaryRules:
+    global _DEFAULT_NOTIFICATION_SUMMARY_RULES
+    if _DEFAULT_NOTIFICATION_SUMMARY_RULES is not None:
+        return _DEFAULT_NOTIFICATION_SUMMARY_RULES
+    loaded = _load_rules_file(DEFAULT_RULES_PATH)
+    if loaded is not None:
+        _DEFAULT_NOTIFICATION_SUMMARY_RULES = loaded
+        return loaded
+    return NotificationSummaryRules()
+
+
+_default_notification_summary_rules()
+
+
 def load_notification_summary_rules(data_dir: str | None = None) -> NotificationSummaryRules:
     if data_dir:
         custom_rules = _load_rules_file(Path(data_dir).expanduser() / RULES_FILENAME)
         if custom_rules is not None:
             return custom_rules
 
-    default_rules = _load_rules_file(DEFAULT_RULES_PATH)
-    if default_rules is not None:
-        return default_rules
-    return NotificationSummaryRules()
+    return _default_notification_summary_rules()
 
 
 def limit_text(value: str | None, limit: int) -> str:

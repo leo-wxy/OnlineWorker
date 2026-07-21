@@ -33,7 +33,7 @@ use crate::commands::task_board_state::{
 
 const APP_TRAY_ID: &str = "main-tray";
 const MAIN_WINDOW_LABEL: &str = "main";
-const MENUBAR_POPOVER_WINDOW_LABEL: &str = "menubar-popover";
+pub(crate) const MENUBAR_POPOVER_WINDOW_LABEL: &str = "menubar-popover";
 const APP_NAVIGATE_TAB_EVENT: &str = "app:navigate-tab";
 const APP_OPEN_SESSION_EVENT: &str = "app:open-session";
 const MENUBAR_POPOVER_SNAPSHOT_EVENT: &str = "menubar:snapshot-updated";
@@ -217,7 +217,7 @@ fn ensure_popover_window(app: &AppHandle) -> Result<(), String> {
     .maximizable(false)
     .minimizable(false)
     .focused(false)
-    .visible(true)
+    .visible(false)
     .decorations(false)
     .transparent(true)
     .background_color(Color(0, 0, 0, 0))
@@ -233,7 +233,7 @@ fn ensure_popover_window(app: &AppHandle) -> Result<(), String> {
         let app = window.app_handle().clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
-            if let Err(error) = refresh_menubar_popover_snapshot(&app, false).await {
+            if let Err(error) = refresh_menubar_popover_snapshot(&app, true).await {
                 eprintln!("[menubar] popover warmup snapshot failed: {error}");
             }
             if popover_window_is_warming(&window) {
@@ -564,7 +564,7 @@ fn start_menubar_snapshot_refresh_loop(app: AppHandle) {
         ticker.tick().await;
         loop {
             ticker.tick().await;
-            if let Err(error) = refresh_menubar_popover_snapshot(&app, false).await {
+            if let Err(error) = refresh_menubar_popover_snapshot(&app, true).await {
                 eprintln!("[menubar] popover snapshot refresh failed: {error}");
             }
 
@@ -1435,7 +1435,7 @@ fn value_bool(row: &Value, keys: &[&str]) -> Option<bool> {
 fn value_epoch(row: &Value, keys: &[&str]) -> Option<u64> {
     keys.iter()
         .filter_map(|key| row.get(*key))
-        .find_map(value_as_epoch_seconds)
+        .find_map(|value| value_as_epoch_seconds(value).filter(|epoch| *epoch > 0))
 }
 
 fn value_as_epoch_seconds(value: &Value) -> Option<u64> {
@@ -2100,6 +2100,20 @@ mod tests {
             candidate.source,
             MenubarPopoverSessionCandidateSource::Provider
         );
+    }
+
+    #[test]
+    fn provider_session_candidate_falls_back_from_zero_updated_at() {
+        let row = json!({
+            "id": "codex-idle",
+            "updatedAt": 0,
+            "createdAt": 1_783_665_734_921_u64
+        });
+
+        let candidate = parse_provider_session_candidate("codex", &row).unwrap();
+
+        assert_eq!(candidate.updated_at_epoch, Some(1_783_665_734));
+        assert_eq!(candidate.sort_rank, 1_783_665_734);
     }
 
     #[test]

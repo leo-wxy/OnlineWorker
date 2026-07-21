@@ -4,6 +4,7 @@ import sys
 import yaml
 import importlib
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 from dotenv import dotenv_values
@@ -468,19 +469,26 @@ def _ensure_manifest_import_path(manifest_path: Path) -> None:
         sys.path.insert(0, overlay_root_str)
 
 
-def _provider_manifest_paths() -> dict[str, Path]:
-    manifests: dict[str, Path] = {}
+@lru_cache(maxsize=1)
+def _builtin_provider_manifest_snapshot() -> tuple[tuple[str, Path, dict[str, Any]], ...]:
+    manifests: list[tuple[str, Path, dict[str, Any]]] = []
     for plugin_path in sorted(BUILTIN_PROVIDER_PLUGIN_DIR.glob("*/plugin.yaml")):
-        try:
-            with plugin_path.open("r", encoding="utf-8") as f:
-                plugin_data = yaml.safe_load(f) or {}
-        except Exception:
-            continue
+        with plugin_path.open("r", encoding="utf-8") as f:
+            plugin_data = yaml.safe_load(f) or {}
         if not isinstance(plugin_data, dict) or plugin_data.get("kind") != "provider":
             continue
         provider_id = str(plugin_data.get("id") or "").strip()
         if provider_id:
-            manifests[provider_id] = plugin_path
+            manifests.append((provider_id, plugin_path, plugin_data))
+    return tuple(manifests)
+
+
+@lru_cache(maxsize=1)
+def _provider_manifest_snapshot() -> tuple[tuple[str, Path, dict[str, Any]], ...]:
+    manifests = {
+        provider_id: (plugin_path, plugin_data)
+        for provider_id, plugin_path, plugin_data in _builtin_provider_manifest_snapshot()
+    }
     for plugin_path in iter_overlay_manifest_paths():
         try:
             with plugin_path.open("r", encoding="utf-8") as f:
@@ -491,8 +499,31 @@ def _provider_manifest_paths() -> dict[str, Path]:
             continue
         provider_id = str(plugin_data.get("id") or "").strip()
         if provider_id:
-            manifests[provider_id] = plugin_path
-    return manifests
+            manifests[provider_id] = (plugin_path, plugin_data)
+    return tuple(
+        (provider_id, plugin_path, plugin_data)
+        for provider_id, (plugin_path, plugin_data) in manifests.items()
+    )
+
+
+def _provider_manifest_paths() -> dict[str, Path]:
+    return {
+        provider_id: plugin_path
+        for provider_id, plugin_path, _ in _provider_manifest_snapshot()
+    }
+
+
+def _provider_manifest_entry(provider_id: str) -> tuple[Path, dict[str, Any]] | None:
+    normalized_provider_id = str(provider_id or "").strip()
+    for candidate_id, plugin_path, plugin_data in _provider_manifest_snapshot():
+        if candidate_id == normalized_provider_id:
+            return plugin_path, plugin_data
+    return None
+
+
+def clear_provider_manifest_cache() -> None:
+    _provider_manifest_snapshot.cache_clear()
+    _builtin_provider_manifest_snapshot.cache_clear()
 
 
 def _load_provider_config_normalizer(provider_id: str):
@@ -503,11 +534,10 @@ def _load_provider_manifest_entrypoint(provider_id: str, entrypoint_key: str):
     normalized_provider_id = str(provider_id or "").strip()
     if not normalized_provider_id:
         return None
-    manifest_path = _provider_manifest_paths().get(normalized_provider_id)
-    if manifest_path is None:
+    manifest_entry = _provider_manifest_entry(normalized_provider_id)
+    if manifest_entry is None:
         return None
-    with manifest_path.open("r", encoding="utf-8") as f:
-        manifest = yaml.safe_load(f) or {}
+    manifest_path, manifest = manifest_entry
     entrypoint = ((manifest.get("entrypoints") or {}).get(entrypoint_key) or "").strip()
     if not entrypoint:
         return None
@@ -570,13 +600,15 @@ def _load_builtin_provider_plugin_blueprint(name: str) -> dict[str, Any] | None:
     if not provider_id:
         return None
 
-    plugin_path = BUILTIN_PROVIDER_PLUGIN_DIR / provider_id / "plugin.yaml"
-    if not plugin_path.exists():
-        return None
-
-    with plugin_path.open("r", encoding="utf-8") as f:
-        plugin_data = yaml.safe_load(f) or {}
-    if not isinstance(plugin_data, dict):
+    plugin_data = next(
+        (
+            manifest
+            for candidate_id, _, manifest in _builtin_provider_manifest_snapshot()
+            if candidate_id == provider_id
+        ),
+        None,
+    )
+    if plugin_data is None:
         return None
 
     metadata = metadata_from_provider_manifest(plugin_data)
@@ -628,19 +660,7 @@ def _load_builtin_provider_plugin_blueprint(name: str) -> dict[str, Any] | None:
 
 def _builtin_provider_plugin_defaults() -> list[tuple[int, str, str, dict[str, Any]]]:
     defaults: list[tuple[int, str, str, dict[str, Any]]] = []
-    if not BUILTIN_PROVIDER_PLUGIN_DIR.exists():
-        return defaults
-
-    for plugin_path in sorted(BUILTIN_PROVIDER_PLUGIN_DIR.glob("*/plugin.yaml")):
-        with plugin_path.open("r", encoding="utf-8") as f:
-            plugin_data = yaml.safe_load(f) or {}
-        if not isinstance(plugin_data, dict) or plugin_data.get("kind") != "provider":
-            continue
-
-        provider_id = str(plugin_data.get("id") or "").strip()
-        if not provider_id:
-            continue
-
+    for provider_id, _, plugin_data in _builtin_provider_manifest_snapshot():
         blueprint = _load_builtin_provider_plugin_blueprint(provider_id)
         if blueprint is None:
             continue

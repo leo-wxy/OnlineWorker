@@ -107,6 +107,7 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
     preview: Optional[str] = None
     current_turn_id: Optional[str] = None
     meta_row: Optional[dict] = None
+    latest_event_at = 0
 
     try:
         with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
@@ -120,6 +121,10 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
                     payload = candidate.get("payload", {})
                     if not isinstance(payload, dict):
                         payload = {}
+                    latest_event_at = max(
+                        _parse_codex_timestamp_ms(candidate.get("timestamp")),
+                        _parse_codex_timestamp_ms(payload.get("timestamp")),
+                    )
                     if not _is_codex_subagent_source(payload.get("source")):
                         cwd = payload.get("cwd") or candidate.get("cwd")
                         if isinstance(cwd, str) and cwd and os.path.isabs(cwd):
@@ -139,7 +144,7 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
                                     "cwd": cwd,
                                     "preview": None,
                                     "createdAt": created_at,
-                                    "updatedAt": max(created_at, file_mtime_ms),
+                                    "updatedAt": created_at,
                                     "sessionFile": fpath,
                                 }
 
@@ -151,6 +156,10 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
                     row = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                latest_event_at = max(
+                    latest_event_at,
+                    _parse_codex_timestamp_ms(row.get("timestamp")),
+                )
 
                 if preview is None and row.get("type") == "response_item":
                     payload = row.get("payload", {})
@@ -175,8 +184,13 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
     except Exception:
         return None, False
 
-    if meta_row is not None and preview:
-        meta_row["preview"] = preview
+    if meta_row is not None:
+        meta_row["updatedAt"] = max(
+            int(meta_row.get("createdAt") or 0),
+            latest_event_at or file_mtime_ms,
+        )
+        if preview:
+            meta_row["preview"] = preview
     return meta_row, current_turn_id is not None
 
 

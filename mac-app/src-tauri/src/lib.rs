@@ -57,6 +57,7 @@ use commands::terminal::{open_finder, open_provider_tui_host_terminal, open_term
 use menubar::{
     get_menubar_popover_snapshot, open_menubar_popover_session, open_menubar_tab, setup_menubar,
     show_main_window, tray_interaction_is_recent, MenubarPopoverSnapshotStore,
+    MENUBAR_POPOVER_WINDOW_LABEL,
 };
 
 #[derive(Default)]
@@ -379,7 +380,11 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_denylist(&[MENUBAR_POPOVER_WINDOW_LABEL])
+                .build(),
+        )
         .manage(Arc::new(Mutex::new(BotState::new())))
         .manage(MenubarPopoverSnapshotStore::default())
         .manage(AppExitState::default())

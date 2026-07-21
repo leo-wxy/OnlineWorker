@@ -41,6 +41,10 @@ test("usage browser discovers all usage sources from the usage catalog", () => {
   assert.match(page, /import \{ buildDefaultUsageQuery \} from "\.\.\/utils\/usageDateRange"/);
   assert.match(page, /const autoRangeRef = useRef\(true\)/);
   assert.match(page, /const refreshUsage = useCallback/);
+  assert.match(page, /const summaryRequestIdRef = useRef\(0\)/);
+  assert.match(page, /const forceNextLoadRef = useRef\(false\)/);
+  assert.match(page, /requestId !== summaryRequestIdRef\.current/);
+  assert.doesNotMatch(page, /if \(next\.startDate === query\.startDate/);
   assert.match(page, /autoRangeRef\.current = false/);
   assert.match(page, /const \[draftQuery,\s*setDraftQuery\]/);
   assert.match(page, /fetchUsageSourceSummary\(source\.pluginId, source\.sourceId, query, forceRefresh\)/);

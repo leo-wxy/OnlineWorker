@@ -4,6 +4,8 @@ import importlib
 import logging
 import os
 import sys
+from copy import deepcopy
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -54,7 +56,8 @@ def _load_descriptor(manifest: dict[str, Any], manifest_path: Path) -> UsagePlug
     return descriptor
 
 
-def load_usage_plugins() -> dict[str, tuple[dict[str, Any], UsagePluginDescriptor]]:
+@lru_cache(maxsize=1)
+def _load_usage_plugins_snapshot() -> dict[str, tuple[dict[str, Any], UsagePluginDescriptor]]:
     plugins: dict[str, tuple[dict[str, Any], UsagePluginDescriptor]] = {}
     for path in _manifest_paths():
         manifest = load_usage_manifest(path)
@@ -63,6 +66,11 @@ def load_usage_plugins() -> dict[str, tuple[dict[str, Any], UsagePluginDescripto
     return plugins
 
 
+def load_usage_plugins() -> dict[str, tuple[dict[str, Any], UsagePluginDescriptor]]:
+    return deepcopy(_load_usage_plugins_snapshot())
+
+
+@lru_cache(maxsize=1)
 def _provider_usage_sources() -> dict[str, tuple[str, str]]:
     sources: dict[str, tuple[str, str]] = {}
     manifests = sorted((PROVIDER_PLUGIN_ROOT / "builtin").glob("*/plugin.yaml"))
@@ -86,7 +94,8 @@ def _provider_usage_sources() -> dict[str, tuple[str, str]]:
     return sources
 
 
-def get_usage_source_catalog() -> list[dict[str, Any]]:
+@lru_cache(maxsize=1)
+def _usage_source_catalog_snapshot() -> tuple[dict[str, Any], ...]:
     associations = {
         source: provider_id
         for provider_id, source in _provider_usage_sources().items()
@@ -106,7 +115,17 @@ def get_usage_source_catalog() -> list[dict[str, Any]]:
                 "icon": source.get("icon") or manifest.get("icon") or {},
                 "providerId": associations.get((plugin_id, str(source["id"]))),
             })
-    return sorted(catalog, key=lambda item: (item["order"], item["label"].lower()))
+    return tuple(sorted(catalog, key=lambda item: (item["order"], item["label"].lower())))
+
+
+def get_usage_source_catalog() -> list[dict[str, Any]]:
+    return deepcopy(list(_usage_source_catalog_snapshot()))
+
+
+def clear_usage_registry_cache() -> None:
+    _usage_source_catalog_snapshot.cache_clear()
+    _provider_usage_sources.cache_clear()
+    _load_usage_plugins_snapshot.cache_clear()
 
 
 def resolve_usage_plugin(plugin_id: str, source_id: str) -> UsagePluginDescriptor:

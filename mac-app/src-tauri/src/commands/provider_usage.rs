@@ -32,7 +32,7 @@ pub struct UsageSourceCatalogEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProviderPluginLoadFailure, UsageSourceCatalogEntry};
+    use super::{owner_usage_catalog, ProviderPluginLoadFailure, UsageSourceCatalogEntry};
 
     #[test]
     fn usage_source_catalog_preserves_provider_association() {
@@ -63,6 +63,20 @@ mod tests {
 
         assert_eq!(failure.provider_id, "overlay-tool");
         assert!(failure.error.contains("ImportError"));
+    }
+
+    #[test]
+    fn empty_owner_usage_catalog_uses_fallback() {
+        assert_eq!(
+            owner_usage_catalog(&serde_json::json!({"ok": true, "sources": []})),
+            None
+        );
+        assert_eq!(
+            owner_usage_catalog(
+                &serde_json::json!({"ok": true, "sources": [{"sourceId": "codex"}]})
+            ),
+            Some(serde_json::json!([{"sourceId": "codex"}]))
+        );
     }
 }
 
@@ -179,6 +193,11 @@ async fn run_usage_sidecar(
         .map_err(|e| format!("usage bridge returned invalid JSON: {e}"))
 }
 
+fn owner_usage_catalog(response: &Value) -> Option<Value> {
+    let sources = response.get("sources")?.as_array()?;
+    (!sources.is_empty()).then(|| Value::Array(sources.clone()))
+}
+
 #[tauri::command]
 pub async fn get_usage_source_catalog(
     app: AppHandle,
@@ -190,10 +209,10 @@ pub async fn get_usage_source_catalog(
     )
     .await
     {
-        Ok(response) => response
-            .get("sources")
-            .cloned()
-            .unwrap_or(Value::Array(vec![])),
+        Ok(response) => match owner_usage_catalog(&response) {
+            Some(sources) => sources,
+            None => run_usage_sidecar(&app, "usage-catalog", vec![]).await?,
+        },
         Err(_) => run_usage_sidecar(&app, "usage-catalog", vec![]).await?,
     };
     serde_json::from_value(payload).map_err(|e| format!("parse usage source catalog failed: {e}"))

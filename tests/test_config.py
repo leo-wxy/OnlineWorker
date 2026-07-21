@@ -53,7 +53,12 @@ BASE_ENV = {
 
 @pytest.fixture(autouse=True)
 def clear_provider_overlay(monkeypatch):
+    import config
+
+    config.clear_provider_manifest_cache()
     monkeypatch.delenv("ONLINEWORKER_PROVIDER_OVERLAY", raising=False)
+    yield
+    config.clear_provider_manifest_cache()
 
 def test_load_config_from_yaml(tmp_path, monkeypatch):
     p = tmp_path / "config.yaml"
@@ -451,6 +456,21 @@ def test_builtin_provider_defaults_expose_attachment_capabilities():
     assert "files" in claude["capabilities"]
     assert codex["capabilities"]["files"] is True
     assert claude["capabilities"]["files"] is True
+
+
+def test_builtin_provider_defaults_survive_manifest_directory_disappearance(monkeypatch, tmp_path):
+    import config
+
+    config.clear_provider_manifest_cache()
+    try:
+        first = config._public_default_provider_raw()
+        monkeypatch.setattr(config, "BUILTIN_PROVIDER_PLUGIN_DIR", tmp_path / "missing")
+        monkeypatch.setattr(config, "iter_overlay_manifest_paths", lambda: [])
+
+        assert config._public_default_provider_raw() == first
+        assert set(first) == {"codex", "claude"}
+    finally:
+        config.clear_provider_manifest_cache()
 
 
 def test_config_yaml_example_uses_public_provider_schema():

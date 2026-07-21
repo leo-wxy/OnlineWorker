@@ -185,7 +185,7 @@ class TestListCodexSessionMetaThreadsByCwd:
         assert [item["id"] for item in result] == ["tid-phase15"]
         assert result[0]["preview"] == "继续处理phase15"
         assert result[0]["createdAt"] == 1775813231147
-        assert result[0]["updatedAt"] == int(session_path.stat().st_mtime * 1000)
+        assert result[0]["updatedAt"] == 1775813250000
 
     def test_skips_subagent_sessions(self, tmp_path):
         cwd = "/Users/example/Projects/onlineWorker"
