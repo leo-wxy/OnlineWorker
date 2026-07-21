@@ -983,9 +983,6 @@ class ProviderOwnerBridge:
                     )
                     await _hydrate_low_signal_session_previews(provider_id, facts, sessions)
                     response = {"ok": True, "sessions": sessions}
-                    cached = self._list_sessions_cache.get(cache_key)
-                    if not sessions and cached and cached.get("sessions"):
-                        return cached
                     self._list_sessions_cache[cache_key] = response
                     return response
 

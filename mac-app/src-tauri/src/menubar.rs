@@ -343,6 +343,12 @@ fn toggle_menubar_popover(
     window.unminimize().map_err(|error| error.to_string())?;
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
+    let refresh_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = refresh_menubar_popover_snapshot(&refresh_app, true).await {
+            eprintln!("[menubar] popover open snapshot refresh failed: {error}");
+        }
+    });
     Ok(())
 }
 
@@ -564,8 +570,14 @@ fn start_menubar_snapshot_refresh_loop(app: AppHandle) {
         ticker.tick().await;
         loop {
             ticker.tick().await;
-            if let Err(error) = refresh_menubar_popover_snapshot(&app, true).await {
-                eprintln!("[menubar] popover snapshot refresh failed: {error}");
+            let popover_is_visible = app
+                .get_webview_window(MENUBAR_POPOVER_WINDOW_LABEL)
+                .and_then(|window| window.is_visible().ok())
+                .unwrap_or(false);
+            if popover_is_visible {
+                if let Err(error) = refresh_menubar_popover_snapshot(&app, true).await {
+                    eprintln!("[menubar] popover snapshot refresh failed: {error}");
+                }
             }
 
             if app.tray_by_id(APP_TRAY_ID).is_none() {

@@ -85,7 +85,14 @@ test("menubar refreshes provider sessions without overlapping snapshot loads", (
   );
   assert.match(rustSource, /SNAPSHOT_REFRESH_INTERVAL_SECONDS: u64 = 10/);
   assert.match(rustSource, /ticker\.set_missed_tick_behavior\(MissedTickBehavior::Skip\)/);
-  assert.match(rustSource, /refresh_menubar_popover_snapshot\(&app, true\)\.await/);
+  assert.match(
+    rustSource,
+    /fn start_menubar_snapshot_refresh_loop[\s\S]*get_webview_window\(MENUBAR_POPOVER_WINDOW_LABEL\)[\s\S]*if popover_is_visible[\s\S]*refresh_menubar_popover_snapshot\(&app, true\)\.await/,
+  );
+  assert.match(
+    rustSource,
+    /fn toggle_menubar_popover[\s\S]*window\.show\(\)[\s\S]*refresh_menubar_popover_snapshot\(&refresh_app, true\)\.await/,
+  );
   assert.match(rustSource, /MENUBAR_POPOVER_SNAPSHOT_EVENT/);
 });
 

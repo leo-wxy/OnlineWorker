@@ -2823,7 +2823,7 @@ async def test_provider_owner_bridge_list_sessions_uses_cached_snapshot_on_timeo
 
 
 @pytest.mark.asyncio
-async def test_provider_owner_bridge_list_sessions_preserves_cache_on_empty_refresh(monkeypatch, tmp_path):
+async def test_provider_owner_bridge_list_sessions_replaces_cache_on_empty_refresh(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
     state = AppState(storage=AppStorage())
@@ -2859,8 +2859,12 @@ async def test_provider_owner_bridge_list_sessions_preserves_cache_on_empty_refr
     second = await bridge._handle_list_sessions(
         {"provider_id": "overlay-tool", "limit": 20, "force_refresh": True}
     )
+    third = await bridge._handle_list_sessions(
+        {"provider_id": "overlay-tool", "limit": 20}
+    )
 
-    assert second == first
+    assert second == {"ok": True, "sessions": []}
+    assert third == second
     assert calls["count"] == 2
 
 
