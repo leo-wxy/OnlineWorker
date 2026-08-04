@@ -4,6 +4,7 @@ import { NumberField, TextField, Toggle } from "./fields";
 import type { AiLabels } from "./utils";
 import {
   serviceDescription,
+  serviceUsesProviderLogin,
   serviceTitle,
   statusText,
 } from "./utils";
@@ -37,6 +38,22 @@ export function AiServiceEditor({
   onSave: () => void;
   onTestConnection: (service: AiServiceMetadata) => void;
 }) {
+  const providerLogin = serviceUsesProviderLogin(service);
+  const testButtonLabel = providerLogin ? labels.checkLogin : labels.testConnection;
+  const testingLabel = providerLogin ? labels.checkingLogin : labels.testing;
+  const testResultText = testResult
+    ? providerLogin
+      ? testResult.ok
+        ? labels.loginCheckOk(testResult.message)
+        : labels.loginCheckFailed(testResult.message)
+      : testResult.ok
+        ? labels.connectionOk(statusText(testResult.status))
+        : labels.connectionFailed(
+            statusText(testResult.status),
+            testResult.message,
+          )
+    : null;
+
   return (
     <>
       <div className="border-b border-[var(--ow-line-soft)] px-6 py-5">
@@ -78,56 +95,67 @@ export function AiServiceEditor({
 
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
         <div className="ow-page-frame-soft divide-y divide-[var(--ow-line-soft)] overflow-hidden rounded-[24px] shadow-none">
-          <TextField
-            id={`ai-service-${service.id}-key`}
-            label={labels.apiKey}
-            type="password"
-            value={service.apiKey || ""}
-            disabled={saving}
-            onChange={(value) => onUpdate(service.id, { apiKey: value })}
-          />
-          <TextField
-            id={`ai-service-${service.id}-url`}
-            label={labels.requestUrl}
-            value={service.endpoint || service.baseUrl || ""}
-            disabled={saving}
-            onChange={(value) => onUpdate(
-              service.id,
-              service.protocol === "anthropic_messages" ? { endpoint: value } : { baseUrl: value },
-            )}
-          />
-          <TextField
-            id={`ai-service-${service.id}-models`}
-            label={labels.models}
-            value={service.models.join(", ")}
-            disabled={saving}
-            onChange={(value) => {
-              const models = value.split(",").map((item) => item.trim()).filter(Boolean);
-              onUpdate(service.id, {
-                models,
-                defaultModel: models.includes(service.defaultModel) ? service.defaultModel : models[0] || "",
-              });
-            }}
-          />
-          <div className="grid gap-4 px-5 py-5 md:grid-cols-[220px_minmax(0,1fr)]">
-            <label htmlFor={`ai-service-${service.id}-model`} className="text-sm font-bold text-gray-950">
-              {labels.defaultModel}
-            </label>
-            <select
-              id={`ai-service-${service.id}-model`}
-              value={service.defaultModel}
-              disabled={saving}
-              onChange={(event) => onUpdate(service.id, { defaultModel: event.target.value })}
-              className="block w-full rounded-2xl border border-[var(--ow-line)] bg-white/92 px-4 py-3 text-sm font-medium text-gray-900 outline-none transition-colors focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
-            >
-              {service.models.map((model) => (
-                <option key={model} value={model}>{model}</option>
-              ))}
-              {!service.models.includes(service.defaultModel) && service.defaultModel && (
-                <option value={service.defaultModel}>{service.defaultModel}</option>
-              )}
-            </select>
-          </div>
+          {providerLogin ? (
+            <div className="grid gap-4 px-5 py-5 md:grid-cols-[220px_minmax(0,1fr)]">
+              <span className="text-sm font-bold text-gray-950">{labels.authentication}</span>
+              <div className="rounded-2xl border border-[var(--ow-line)] bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+                {labels.providerLoginAuthentication(service.label || service.name)}
+              </div>
+            </div>
+          ) : (
+            <>
+              <TextField
+                id={`ai-service-${service.id}-key`}
+                label={labels.apiKey}
+                type="password"
+                value={service.apiKey || ""}
+                disabled={saving}
+                onChange={(value) => onUpdate(service.id, { apiKey: value })}
+              />
+              <TextField
+                id={`ai-service-${service.id}-url`}
+                label={labels.requestUrl}
+                value={service.endpoint || service.baseUrl || ""}
+                disabled={saving}
+                onChange={(value) => onUpdate(
+                  service.id,
+                  service.protocol === "anthropic_messages" ? { endpoint: value } : { baseUrl: value },
+                )}
+              />
+              <TextField
+                id={`ai-service-${service.id}-models`}
+                label={labels.models}
+                value={service.models.join(", ")}
+                disabled={saving}
+                onChange={(value) => {
+                  const models = value.split(",").map((item) => item.trim()).filter(Boolean);
+                  onUpdate(service.id, {
+                    models,
+                    defaultModel: models.includes(service.defaultModel) ? service.defaultModel : models[0] || "",
+                  });
+                }}
+              />
+              <div className="grid gap-4 px-5 py-5 md:grid-cols-[220px_minmax(0,1fr)]">
+                <label htmlFor={`ai-service-${service.id}-model`} className="text-sm font-bold text-gray-950">
+                  {labels.defaultModel}
+                </label>
+                <select
+                  id={`ai-service-${service.id}-model`}
+                  value={service.defaultModel}
+                  disabled={saving}
+                  onChange={(event) => onUpdate(service.id, { defaultModel: event.target.value })}
+                  className="block w-full rounded-2xl border border-[var(--ow-line)] bg-white/92 px-4 py-3 text-sm font-medium text-gray-900 outline-none transition-colors focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                >
+                  {service.models.map((model) => (
+                    <option key={model} value={model}>{model}</option>
+                  ))}
+                  {!service.models.includes(service.defaultModel) && service.defaultModel && (
+                    <option value={service.defaultModel}>{service.defaultModel}</option>
+                  )}
+                </select>
+              </div>
+            </>
+          )}
           <NumberField
             id={`ai-service-${service.id}-timeout`}
             label={labels.timeout}
@@ -147,12 +175,7 @@ export function AiServiceEditor({
                     : "border-rose-100 bg-rose-50 text-rose-800"
                 }`}
               >
-                {testResult.ok
-                  ? labels.connectionOk(statusText(testResult.status))
-                  : labels.connectionFailed(
-                      statusText(testResult.status),
-                      testResult.message,
-                    )}
+                {testResultText}
               </div>
             )}
           </div>
@@ -163,7 +186,7 @@ export function AiServiceEditor({
               disabled={testingServiceId === service.id}
               className="rounded-xl border border-[var(--ow-line)] bg-white px-5 py-2.5 text-sm font-semibold text-gray-900 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {testingServiceId === service.id ? labels.testing : labels.testConnection}
+              {testingServiceId === service.id ? testingLabel : testButtonLabel}
             </button>
             <button
               type="button"

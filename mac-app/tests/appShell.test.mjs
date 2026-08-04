@@ -149,12 +149,27 @@ test("ai settings uses fixed service cards and scenario service selection", () =
   assert.match(panel, /get_ai_config/);
   assert.match(panel, /set_ai_config/);
   assert.match(panel, /test_ai_service_connection/);
+  assert.match(panel, /autoTestedLoginServiceIdsRef/);
+  assert.match(panel, /service\.enabled && serviceUsesProviderLogin\(service\)/);
+  assert.match(panel, /await testConnection\(service\)/);
   assert.match(utils, /function serviceTitle/);
+  assert.match(utils, /function serviceUsesProviderLogin/);
+  assert.match(utils, /service\?\.protocol === "provider_login"/);
+  assert.match(utils, /return testResult\.ok \? labels\.loginReady : labels\.loginUnavailable/);
+  assert.match(utils, /return labels\.loginPending/);
   assert.match(utils, /service\.label \|\| service\.name \|\| service\.id/);
   assert.match(utils, /service\.description \|\| labels\.customServiceDescription/);
+  assert.match(utils, /ownerProviderId: \(service\.ownerProviderId \|\| ""\)\.trim\(\)/);
   assert.match(panel, /service\?\.pluginOwned/);
   assert.match(serviceEditor, /labels\.enableService/);
+  assert.match(serviceEditor, /labels\.providerLoginAuthentication/);
+  assert.match(serviceEditor, /const testButtonLabel = providerLogin \? labels\.checkLogin : labels\.testConnection/);
+  assert.match(serviceEditor, /labels\.loginCheckOk/);
+  assert.match(serviceEditor, /labels\.loginCheckFailed/);
+  assert.match(serviceEditor, /onClick=\{\(\) => onTestConnection\(service\)\}/);
+  assert.equal(serviceEditor.includes("!providerLogin && ("), false);
   assert.match(scenarioEditor, /labels\.enableScenario/);
+  assert.match(scenarioEditor, /labels\.providerDefaultModel/);
   assert.match(panel, /const setServiceEnabled = /);
   assert.match(panel, /const setScenarioEnabled = /);
   assert.match(serviceEditor, /onChange=\{\(checked\) => onSetEnabled\(service\.id, checked\)\}/);
@@ -166,6 +181,8 @@ test("ai settings uses fixed service cards and scenario service selection", () =
   assert.match(panel, /updateScenarioLimit/);
   assert.match(utils, /labels\.limitLabels/);
   assert.match(sidebar, /serviceBadge/);
+  assert.match(sidebar, /testResults\[service\.id\]/);
+  assert.match(sidebar, /badgeFailed/);
   assert.match(sidebar, /scenarioBadge/);
   assert.equal(`${panel}${utils}${serviceEditor}${scenarioEditor}${sidebar}`.includes("addService"), false);
   assert.equal(`${panel}${utils}${serviceEditor}${scenarioEditor}${sidebar}`.includes("labels.protocol"), false);
@@ -173,11 +190,19 @@ test("ai settings uses fixed service cards and scenario service selection", () =
   assert.equal(`${panel}${utils}${serviceEditor}${scenarioEditor}${sidebar}`.includes("apiKeySource"), false);
   assert.equal(`${panel}${utils}${serviceEditor}${scenarioEditor}${sidebar}`.includes("selectedScenario.model"), false);
   assert.match(types, /apiKey\?: string \| null;/);
+  assert.match(types, /apiKeyEnv\?: string \| null;/);
+  assert.match(utils, /apiKeyEnv: \(service\.apiKeyEnv \|\| ""\)\.trim\(\)/);
   assert.match(i18nTypes, /effectiveModel:\s*string/);
+  assert.match(i18nTypes, /checkLogin:\s*string/);
+  assert.match(i18nTypes, /loginReady:\s*string/);
   assert.match(zh, /内置服务由插件清单提供/);
   assert.match(zh, /场景只选择一个已配置服务/);
+  assert.match(zh, /检测登录/);
+  assert.match(zh, /已登录/);
   assert.match(en, /Built-in services come from plugin manifests/);
   assert.match(en, /A scenario selects one configured service/);
+  assert.match(en, /Check login/);
+  assert.match(en, /Logged in/);
 });
 
 test("settings exposes attachment cache controls under a maintenance section", () => {

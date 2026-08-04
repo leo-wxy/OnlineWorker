@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AiConfigMetadata,
@@ -14,6 +14,7 @@ import type { AiView } from "./ai-settings/utils";
 import {
   scenariosForSave,
   serviceForSave,
+  serviceUsesProviderLogin,
   servicesForSave,
 } from "./ai-settings/utils";
 
@@ -31,6 +32,7 @@ export function AiSettingsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [testingServiceId, setTestingServiceId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, AiConnectionTestResult>>({});
+  const autoTestedLoginServiceIdsRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -73,11 +75,24 @@ export function AiSettingsPanel() {
     ? metadata.services.find((service) => service.id === selectedScenario.serviceId) || null
     : null;
 
+  const clearServiceTestResult = (id: string) => {
+    autoTestedLoginServiceIdsRef.current.delete(id);
+    setTestResults((current) => {
+      if (!current[id]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+  };
+
   const updateService = (id: string, patch: Partial<AiServiceMetadata>) => {
     setMetadata((current) => ({
       ...current,
       services: current.services.map((service) => service.id === id ? { ...service, ...patch } : service),
     }));
+    clearServiceTestResult(id);
     setSaved(false);
   };
 
@@ -125,6 +140,7 @@ export function AiSettingsPanel() {
       services: metadata.services.map((service) => service.id === id ? { ...service, enabled } : service),
     };
     setMetadata(nextMetadata);
+    clearServiceTestResult(id);
     setSaved(false);
     void persistMetadata(nextMetadata);
   };
@@ -163,7 +179,7 @@ export function AiSettingsPanel() {
     void load();
   };
 
-  const testConnection = async (service: AiServiceMetadata) => {
+  const testConnection = useCallback(async (service: AiServiceMetadata) => {
     setTestingServiceId(service.id);
     try {
       const result = await invoke<AiConnectionTestResult>("test_ai_service_connection", {
@@ -178,7 +194,32 @@ export function AiSettingsPanel() {
     } finally {
       setTestingServiceId(null);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+    const loginServices = metadata.services.filter(
+      (service) => service.enabled && serviceUsesProviderLogin(service),
+    );
+    if (loginServices.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      for (const service of loginServices) {
+        if (cancelled || autoTestedLoginServiceIdsRef.current.has(service.id)) {
+          continue;
+        }
+        autoTestedLoginServiceIdsRef.current.add(service.id);
+        await testConnection(service);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, metadata.services, testConnection]);
 
   return (
     <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col gap-5">
@@ -206,6 +247,8 @@ export function AiSettingsPanel() {
             labels={labels}
             services={metadata.services}
             scenarios={metadata.scenarios}
+            testResults={testResults}
+            testingServiceId={testingServiceId}
             selectedServiceId={selectedService?.id || selectedServiceId}
             selectedScenarioId={selectedScenario?.id || selectedScenarioId}
             onViewChange={setActiveView}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import tomllib
@@ -1599,8 +1600,65 @@ async def setup_connection(manager, bot, adapter, **kwargs) -> None:
     )
     await prime_thread_mappings(manager, adapter)
 
+    async def install_desktop_event_ingress() -> None:
+        data_dir = (
+            manager.state.config.data_dir
+            if manager.state.config is not None
+            else get_data_dir()
+        )
+        configure = getattr(adapter, "configure_external_event_bridge", None)
+        if not callable(configure):
+            configure = getattr(adapter, "configure_hook_bridge", None)
+        install = getattr(adapter, "install_external_event_ingress", None)
+        if not callable(install):
+            install = getattr(adapter, "install_external_hook_ingress", None)
+        if data_dir and callable(configure) and callable(install):
+            configure(data_dir)
+            result = install()
+            if inspect.isawaitable(result):
+                result = await result
+            state_name = str(result.get("state") or "") if isinstance(result, dict) else ""
+            detail = str(result.get("detail") or "") if isinstance(result, dict) else ""
+            if state_name == "installed":
+                logger.info("[codex] CLI notify fallback 已安装")
+            else:
+                logger.warning(
+                    "[codex] CLI notify fallback 安装失败 state=%s detail=%s",
+                    state_name or "unknown",
+                    detail or "-",
+                )
+        else:
+            logger.info("[codex] CLI notify fallback 未启用：缺少运行时配置")
+
+        start_rollout = getattr(adapter, "start_desktop_rollout_ingress", None)
+        if not callable(start_rollout):
+            logger.warning("[codex] Desktop rollout ingress 不可用：adapter 未实现")
+            return
+        rollout_result = start_rollout(manager.state)
+        if inspect.isawaitable(rollout_result):
+            rollout_result = await rollout_result
+        rollout_state = (
+            str(rollout_result.get("state") or "")
+            if isinstance(rollout_result, dict)
+            else ""
+        )
+        rollout_detail = (
+            str(rollout_result.get("detail") or "")
+            if isinstance(rollout_result, dict)
+            else ""
+        )
+        if rollout_state == "running":
+            logger.info("[codex] Desktop rollout event ingress 已启动")
+        else:
+            logger.warning(
+                "[codex] Desktop rollout event ingress 未启动 state=%s detail=%s",
+                rollout_state or "unknown",
+                rollout_detail or "-",
+            )
+
     if not manager.storage.workspaces:
         await ensure_codex_owner_bridge_started(manager.state)
+        await install_desktop_event_ingress()
         return
 
     for ws_name, ws_info in manager.storage.workspaces.items():
@@ -1693,6 +1751,7 @@ async def setup_connection(manager, bot, adapter, **kwargs) -> None:
             _save_storage_via_lifecycle(manager)
 
     await ensure_codex_owner_bridge_started(manager.state)
+    await install_desktop_event_ingress()
 
 
 async def sync_existing_topics_after_startup(manager, bot) -> None:

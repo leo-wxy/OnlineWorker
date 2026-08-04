@@ -7,6 +7,7 @@ import {
   scenarioLimitEntries,
   scenarioTitle,
   serviceTitle,
+  serviceUsesProviderLogin,
 } from "./utils";
 
 type CommonLabels = ReturnType<typeof useI18n>["t"]["common"];
@@ -88,7 +89,9 @@ export function AiScenarioEditor({
           <div className="grid gap-4 px-5 py-5 md:grid-cols-[220px_minmax(0,1fr)]">
             <span className="text-sm font-bold text-gray-950">{labels.effectiveModel}</span>
             <div className="rounded-2xl border border-[var(--ow-line)] bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
-              {selectedService?.defaultModel || labels.noModel}
+              {serviceUsesProviderLogin(selectedService)
+                ? labels.providerDefaultModel
+                : selectedService?.defaultModel || labels.noModel}
             </div>
           </div>
           <TextField

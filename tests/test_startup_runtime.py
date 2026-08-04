@@ -2133,7 +2133,7 @@ async def test_connect_adapter_with_retry_schedules_reconnect_after_initial_fail
 
 
 @pytest.mark.asyncio
-async def test_connect_adapter_with_retry_does_not_start_codex_hook_bridge(tmp_path):
+async def test_connect_adapter_with_retry_installs_desktop_event_ingress_without_hook_socket(tmp_path):
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="proj",
@@ -2163,8 +2163,12 @@ async def test_connect_adapter_with_retry_does_not_start_codex_hook_bridge(tmp_p
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
     adapter = MagicMock()
     adapter.connect = AsyncMock()
+    adapter.configure_external_event_bridge = MagicMock()
     adapter.configure_hook_bridge = MagicMock()
     adapter.start_hook_bridge = AsyncMock()
+    adapter.install_external_event_ingress = AsyncMock(return_value={"state": "installed"})
+    adapter.install_external_hook_ingress = AsyncMock(return_value={"state": "installed"})
+    adapter.start_desktop_rollout_ingress = AsyncMock(return_value={"state": "running"})
     adapter.on_disconnect = MagicMock()
     adapter.on_event = MagicMock()
     adapter.on_server_request = MagicMock()
@@ -2185,8 +2189,12 @@ async def test_connect_adapter_with_retry_does_not_start_codex_hook_bridge(tmp_p
             ws_url="ws://127.0.0.1:4722",
         )
 
+    adapter.configure_external_event_bridge.assert_called_once_with(str(tmp_path))
     adapter.configure_hook_bridge.assert_not_called()
     adapter.start_hook_bridge.assert_not_awaited()
+    adapter.install_external_event_ingress.assert_awaited_once()
+    adapter.install_external_hook_ingress.assert_not_awaited()
+    adapter.start_desktop_rollout_ingress.assert_awaited_once_with(state)
     adapter.register_workspace_cwd.assert_called_once_with(
         "codex:proj",
         "/Users/example/Projects/proj",

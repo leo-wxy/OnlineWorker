@@ -712,6 +712,7 @@ class AppState:
         thread_id: str,
         status: Optional[str] = None,
         final_reply_synced_to_tg: Optional[bool] = None,
+        notification_emitted: Optional[bool] = None,
         first_progress_at: Optional[bool] = None,
         session_tab_visible_at: Optional[bool] = None,
     ) -> Optional[ProviderRunState]:
@@ -736,6 +737,13 @@ class AppState:
             if final_reply_synced_to_tg and run.tg_synced_at <= 0:
                 run.tg_synced_at = now
                 changed = True
+        if notification_emitted is not None:
+            if run.notification_emitted != notification_emitted:
+                run.notification_emitted = notification_emitted
+                changed = True
+            if notification_emitted and run.notification_emitted_at <= 0:
+                run.notification_emitted_at = now
+                changed = True
         if first_progress_at and run.first_progress_at <= 0:
             run.first_progress_at = now
             changed = True
@@ -748,17 +756,20 @@ class AppState:
         run.updated_at = now
         logger.info(
             "%s-run event=updated run_id=%s thread_id=%s workspace_id=%s "
-            "status=%s final_reply_synced_to_tg=%s first_progress_at=%.6f "
-            "final_reply_at=%.6f tg_synced_at=%.6f",
+            "status=%s final_reply_synced_to_tg=%s notification_emitted=%s "
+            "first_progress_at=%.6f final_reply_at=%.6f tg_synced_at=%.6f "
+            "notification_emitted_at=%.6f",
             tool_name,
             run.run_id,
             run.thread_id,
             run.workspace_id,
             run.status,
             run.final_reply_synced_to_tg,
+            run.notification_emitted,
             run.first_progress_at,
             run.final_reply_at,
             run.tg_synced_at,
+            run.notification_emitted_at,
         )
         return run
 

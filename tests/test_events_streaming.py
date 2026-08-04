@@ -27,6 +27,150 @@ class RecordingNotificationRouter:
         return SimpleNamespace(sent=True, channels=("recording",), reason="")
 
 
+@pytest.mark.asyncio
+async def test_codex_desktop_hook_events_reach_bus_and_notification_without_topic():
+    from plugins.providers.builtin.codex.python.adapter import CodexAdapter
+
+    ws = WorkspaceInfo(
+        name="desktop-workspace",
+        path="/Users/example/Projects/desktop-workspace",
+        tool="codex",
+        topic_id=None,
+        daemon_workspace_id="codex:desktop-workspace",
+    )
+    storage = AppStorage(workspaces={"codex:desktop-workspace": ws})
+    state = AppState(storage=storage)
+    state.message_bus.notification_summary.build_completed_notification = AsyncMock(
+        return_value=SimpleNamespace(
+            task_name_override="Desktop 摘要完成",
+            task_summary_override="Codex Desktop 完成消息已经进入通用事件总线。",
+            message="完成摘要：Codex Desktop 完成消息已经进入通用事件总线。",
+        )
+    )
+    bot = SimpleNamespace(
+        send_message=AsyncMock(),
+        delete_message=AsyncMock(),
+        edit_message_text=AsyncMock(),
+    )
+    notifications = RecordingNotificationRouter()
+    handler = make_event_handler(
+        state,
+        bot,
+        GROUP_CHAT_ID,
+        notification_router=notifications,
+    )
+    adapter = CodexAdapter()
+    adapter.register_workspace_cwd(
+        "codex:desktop-workspace",
+        "/Users/example/Projects/desktop-workspace",
+    )
+    adapter.on_event(handler)
+
+    await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "UserPromptSubmit",
+            "session_id": "desktop-session",
+            "turn_id": "desktop-turn",
+            "cwd": "/Users/example/Projects/desktop-workspace",
+            "prompt": "验证 Desktop 通知摘要",
+        }
+    )
+    await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "Stop",
+            "session_id": "desktop-session",
+            "turn_id": "desktop-turn",
+            "cwd": "/Users/example/Projects/desktop-workspace",
+            "last_assistant_message": "Desktop 任务已经完成。",
+        }
+    )
+
+    kinds = [event["kind"] for event in state.message_bus.recent_events()]
+    assert kinds == [
+        "session.created",
+        "message.user.submitted",
+        "turn.started",
+        "message.assistant.final",
+        "notification.requested",
+        "notification.emitted",
+        "turn.completed",
+    ]
+    state.message_bus.notification_summary.build_completed_notification.assert_awaited_once()
+    assert len(notifications.events) == 1
+    assert notifications.events[0].task_id == "desktop-turn"
+    assert notifications.events[0].message == "完成摘要：Codex Desktop 完成消息已经进入通用事件总线。"
+    bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_codex_desktop_notify_event_reaches_summary_and_notification_router():
+    from plugins.providers.builtin.codex.python.adapter import CodexAdapter
+
+    ws = WorkspaceInfo(
+        name="desktop-workspace",
+        path="/Users/example/Projects/desktop-workspace",
+        tool="codex",
+        topic_id=None,
+        daemon_workspace_id="codex:desktop-workspace",
+    )
+    storage = AppStorage(workspaces={"codex:desktop-workspace": ws})
+    state = AppState(storage=storage)
+    state.message_bus.notification_summary.build_completed_notification = AsyncMock(
+        return_value=SimpleNamespace(
+            task_name_override="Desktop 摘要完成",
+            task_summary_override="Codex notify 完成消息已经进入通用事件总线。",
+            message="完成摘要：Codex notify 完成消息已经进入通用事件总线。",
+        )
+    )
+    bot = SimpleNamespace(
+        send_message=AsyncMock(),
+        delete_message=AsyncMock(),
+        edit_message_text=AsyncMock(),
+    )
+    notifications = RecordingNotificationRouter()
+    handler = make_event_handler(
+        state,
+        bot,
+        GROUP_CHAT_ID,
+        notification_router=notifications,
+    )
+    adapter = CodexAdapter()
+    adapter.register_workspace_cwd(
+        "codex:desktop-workspace",
+        "/Users/example/Projects/desktop-workspace",
+    )
+    adapter.on_event(handler)
+
+    result = await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "AgentTurnComplete",
+            "session_id": "desktop-session",
+            "turn_id": "desktop-turn",
+            "cwd": "/Users/example/Projects/desktop-workspace",
+            "input_messages": ["验证 Desktop 通知摘要"],
+            "last_assistant_message": "Desktop 任务已经完成。",
+            "source": "codex_notify",
+        }
+    )
+
+    assert result == {"accepted": True, "emitted": 5}
+    kinds = [event["kind"] for event in state.message_bus.recent_events()]
+    assert kinds == [
+        "session.created",
+        "message.user.submitted",
+        "turn.started",
+        "message.assistant.final",
+        "notification.requested",
+        "notification.emitted",
+        "turn.completed",
+    ]
+    state.message_bus.notification_summary.build_completed_notification.assert_awaited_once()
+    assert len(notifications.events) == 1
+    assert notifications.events[0].task_id == "desktop-turn"
+    assert notifications.events[0].message == "完成摘要：Codex notify 完成消息已经进入通用事件总线。"
+    bot.send_message.assert_not_awaited()
+
+
 def _load_semantic_sequences() -> dict:
     return json.loads(SEMANTIC_FIXTURE_PATH.read_text(encoding="utf-8"))
 
@@ -1530,7 +1674,7 @@ async def test_final_answer_item_completed_sends_task_notification_and_dedupes_l
 
 
 @pytest.mark.asyncio
-async def test_codex_delayed_final_events_skip_when_reply_already_synced(monkeypatch):
+async def test_codex_delayed_final_events_emit_notification_when_reply_already_synced(monkeypatch):
     ws = WorkspaceInfo(
         name="onlineWorker",
         path="/Users/example/Projects/onlineWorker",
@@ -1559,7 +1703,11 @@ async def test_codex_delayed_final_events_skip_when_reply_already_synced(monkeyp
         status="completed",
     )
     state.message_bus.notification_summary.build_completed_notification = AsyncMock(
-        side_effect=AssertionError("duplicate final item should not generate notification summary")
+        return_value=SimpleNamespace(
+            task_name_override="Codex 同步完成",
+            task_summary_override="最终回复已由 Codex 新链路同步，仍需要发送一次任务完成通知。",
+            message="完成摘要：最终回复已由 Codex 新链路同步，仍需要发送一次任务完成通知。",
+        )
     )
 
     bot = SimpleNamespace()
@@ -1607,8 +1755,15 @@ async def test_codex_delayed_final_events_skip_when_reply_already_synced(monkeyp
 
     bot.send_message.assert_not_awaited()
     bot.edit_message_text.assert_not_awaited()
-    assert len(notifications.events) == 0
+    assert len(notifications.events) == 1
+    event = notifications.events[0]
+    assert event.status == "completed"
+    assert event.task_id == "turn-new"
+    assert event.task_name == "Codex 同步完成"
+    assert "仍需要发送一次任务完成通知" in event.task_summary
+    assert "仍需要发送一次任务完成通知" in event.message
     assert run.final_reply_synced_to_tg is True
+    assert run.notification_emitted is True
     assert run.status == "completed"
 
 

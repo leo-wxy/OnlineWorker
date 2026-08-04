@@ -200,6 +200,7 @@ export interface AiServiceMetadata {
   baseUrl?: string | null;
   endpoint?: string | null;
   apiKey?: string | null;
+  apiKeyEnv?: string | null;
   models: string[];
   defaultModel: string;
   timeoutSeconds: number;

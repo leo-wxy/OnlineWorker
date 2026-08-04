@@ -115,6 +115,14 @@ provider:
 
 ai:
   services:
+    - id: codex_login
+      name: Codex Login
+      label: Codex Login
+      description: Uses the authenticated Codex CLI without an API key or persistent session.
+      protocol: provider_login
+      timeout_seconds: 30
+      enabled: true
+      default_for_scenarios: true
     - id: openai_default
       name: OpenAI
       label: OpenAI
@@ -127,8 +135,8 @@ ai:
       default_model: gpt-5.4
       timeout_seconds: 20
       enabled: false
-      default_for_scenarios: true
 
 entrypoints:
   python_descriptor: plugins.providers.builtin.codex.python.provider:create_provider_descriptor
   python_config_normalizer: plugins.providers.builtin.codex.python.config_normalizer:normalize_provider_config
+  python_ai_completion: plugins.providers.builtin.codex.python.ai_completion:complete

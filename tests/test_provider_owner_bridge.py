@@ -3336,6 +3336,88 @@ async def test_provider_owner_bridge_ignores_legacy_mirror_approval(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_provider_owner_bridge_routes_provider_hook_event_to_adapter(tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    state = AppState(storage=AppStorage())
+    adapter = MagicMock()
+    adapter.ingest_external_hook_payload = AsyncMock(return_value={"accepted": True})
+    state.set_adapter("codex", adapter)
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    payload = {
+        "hook_event_name": "Stop",
+        "session_id": "desktop-session",
+        "turn_id": "desktop-turn",
+        "last_assistant_message": "Desktop 任务已经完成。",
+    }
+
+    response = await bridge._handle_provider_hook_event(
+        {
+            "type": "provider_hook_event",
+            "provider_id": "codex",
+            "payload": payload,
+        }
+    )
+    await asyncio.gather(*bridge._pending_send_tasks)
+
+    assert response == {"ok": True, "accepted": True}
+    adapter.ingest_external_hook_payload.assert_awaited_once_with(payload)
+
+
+@pytest.mark.asyncio
+async def test_codex_desktop_hook_relay_reaches_message_bus_over_owner_socket(
+    tmp_path,
+    monkeypatch,
+):
+    from core.messages.publishing import publish_session_message_event
+    from core.provider_owner_bridge import ProviderOwnerBridge
+    from core.providers.session_events import normalize_session_event
+    from plugins.providers.builtin.codex.python.adapter import CodexAdapter
+    from plugins.providers.builtin.codex.python.hook_bridge import relay_codex_hook_payload
+
+    state = AppState(storage=AppStorage())
+    adapter = CodexAdapter()
+
+    async def publish_event(method, params):
+        event = normalize_session_event(method, params)
+        assert event is not None
+        publish_session_message_event(state, event)
+
+    adapter.on_event(publish_event)
+    state.set_adapter("codex", adapter)
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    bridge.socket_path = f"/tmp/ow-codex-hook-test-{os.getpid()}.sock"
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.hook_bridge.provider_owner_bridge_socket_path",
+        lambda data_dir=None: bridge.socket_path,
+    )
+    await bridge.start()
+    try:
+        response = await relay_codex_hook_payload(
+            str(tmp_path),
+            {
+                "hook_event_name": "Stop",
+                "session_id": "desktop-session",
+                "turn_id": "desktop-turn",
+                "cwd": "/Users/example/Projects/demo",
+                "last_assistant_message": "Desktop 任务已经完成。",
+            },
+        )
+        for _ in range(10):
+            if len(state.message_bus.recent_events()) >= 2:
+                break
+            await asyncio.sleep(0)
+    finally:
+        await bridge.stop()
+
+    assert response == {"ok": True, "accepted": True}
+    assert [event["kind"] for event in state.message_bus.recent_events()] == [
+        "message.assistant.final",
+        "turn.completed",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_rejects_approval_without_adapter_authority(tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 

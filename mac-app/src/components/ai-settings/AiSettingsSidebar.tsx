@@ -1,4 +1,4 @@
-import type { AiScenarioMetadata, AiServiceMetadata } from "../../types";
+import type { AiConnectionTestResult, AiScenarioMetadata, AiServiceMetadata } from "../../types";
 import type { AiLabels, AiView } from "./utils";
 import {
   scenarioBadge,
@@ -12,6 +12,8 @@ export function AiSettingsSidebar({
   labels,
   services,
   scenarios,
+  testResults,
+  testingServiceId,
   selectedServiceId,
   selectedScenarioId,
   onViewChange,
@@ -22,6 +24,8 @@ export function AiSettingsSidebar({
   labels: AiLabels;
   services: AiServiceMetadata[];
   scenarios: AiScenarioMetadata[];
+  testResults: Record<string, AiConnectionTestResult>;
+  testingServiceId: string | null;
   selectedServiceId: string;
   selectedScenarioId: string;
   onViewChange: (view: AiView) => void;
@@ -62,7 +66,10 @@ export function AiSettingsSidebar({
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
         {activeView === "services" && services.map((service) => {
           const selected = selectedServiceId === service.id;
-          const badge = serviceBadge(service, labels);
+          const testResult = testResults[service.id];
+          const checking = testingServiceId === service.id;
+          const badge = serviceBadge(service, labels, testResult, checking);
+          const badgeFailed = service.enabled && testResult && !testResult.ok;
           return (
             <button
               key={service.id}
@@ -85,7 +92,9 @@ export function AiSettingsSidebar({
                 </span>
               </span>
               <span className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold ${
-                service.enabled
+                badgeFailed
+                  ? "bg-rose-600 text-white shadow-sm shadow-rose-200"
+                  : service.enabled
                   ? "bg-emerald-600 text-white shadow-sm shadow-emerald-200"
                   : "bg-slate-100 text-slate-500"
               }`}>

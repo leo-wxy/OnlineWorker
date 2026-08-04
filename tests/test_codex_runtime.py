@@ -10,7 +10,7 @@ from plugins.providers.builtin.codex.python import runtime as codex_runtime
 
 
 @pytest.mark.asyncio
-async def test_setup_connection_does_not_start_codex_hook_bridge(tmp_path, monkeypatch):
+async def test_setup_connection_installs_codex_desktop_event_ingress(tmp_path, monkeypatch):
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
@@ -42,8 +42,11 @@ async def test_setup_connection_does_not_start_codex_hook_bridge(tmp_path, monke
     manager.gid = 2
 
     adapter = MagicMock()
+    adapter.configure_external_event_bridge = MagicMock()
     adapter.configure_hook_bridge = MagicMock()
-    adapter.start_hook_bridge = AsyncMock()
+    adapter.install_external_event_ingress = AsyncMock(return_value={"state": "installed"})
+    adapter.install_external_hook_ingress = AsyncMock(return_value={"state": "installed"})
+    adapter.start_desktop_rollout_ingress = AsyncMock(return_value={"state": "running"})
     adapter.on_event = MagicMock()
     adapter.on_server_request = MagicMock()
     adapter.register_workspace_cwd = MagicMock()
@@ -57,8 +60,11 @@ async def test_setup_connection_does_not_start_codex_hook_bridge(tmp_path, monke
 
     await codex_runtime.setup_connection(manager, MagicMock(), adapter)
 
+    adapter.configure_external_event_bridge.assert_called_once_with(str(tmp_path))
     adapter.configure_hook_bridge.assert_not_called()
-    adapter.start_hook_bridge.assert_not_awaited()
+    adapter.install_external_event_ingress.assert_awaited_once()
+    adapter.install_external_hook_ingress.assert_not_awaited()
+    adapter.start_desktop_rollout_ingress.assert_awaited_once_with(state)
     adapter.register_workspace_cwd.assert_called_once_with(
         "codex:onlineWorker",
         "/Users/example/Projects/onlineWorker",

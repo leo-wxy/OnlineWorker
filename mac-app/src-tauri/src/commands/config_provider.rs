@@ -134,6 +134,12 @@ pub(crate) struct AiServiceConfigEntry {
     pub(crate) id: String,
     #[serde(default)]
     pub(crate) name: String,
+    #[serde(
+        default,
+        alias = "owner_provider_id",
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub(crate) owner_provider_id: String,
     #[serde(default)]
     pub(crate) protocol: String,
     #[serde(default, alias = "base_url")]
@@ -1052,6 +1058,7 @@ fn provider_ai_service_default_list() -> Vec<ProviderAiServiceDefault> {
                 config: AiServiceConfigEntry {
                     id: service_id,
                     name,
+                    owner_provider_id: provider_id.clone(),
                     protocol: service
                         .protocol
                         .unwrap_or_else(|| "openai_compatible_chat".to_string())
@@ -2298,6 +2305,7 @@ notifications:
         let services = vec![AiServiceConfigEntry {
             id: "openai_default".to_string(),
             name: "OpenAI".to_string(),
+            owner_provider_id: String::new(),
             protocol: "openai_compatible_chat".to_string(),
             base_url: "https://api.openai.com/v1/".to_string(),
             endpoint: String::new(),
@@ -2350,13 +2358,21 @@ notifications:
     fn provider_ai_service_defaults_come_from_builtin_manifests() {
         let services = provider_ai_service_defaults();
 
-        assert_eq!(services.len(), 2);
+        assert_eq!(services.len(), 4);
         assert!(services
             .iter()
             .all(|service| !service.owner_provider_id.trim().is_empty()));
         assert!(services
             .iter()
+            .filter(|service| service.config.protocol != "provider_login")
             .all(|service| !service.config.api_key_env.trim().is_empty()));
+        assert_eq!(
+            services
+                .iter()
+                .filter(|service| service.config.protocol == "provider_login")
+                .count(),
+            2
+        );
         assert_eq!(
             services
                 .iter()
@@ -2405,7 +2421,7 @@ ai:
             .remove("notification_summary")
             .expect("notification summary");
 
-        assert_eq!(scenario.service_id, "openai_default");
+        assert_eq!(scenario.service_id, "codex_login");
     }
 
     #[test]

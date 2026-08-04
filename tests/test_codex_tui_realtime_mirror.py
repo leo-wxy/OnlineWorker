@@ -779,6 +779,8 @@ async def test_shared_live_imported_thread_bootstraps_bus_activity_without_live_
     imported_thread.preview = "继续查 codex 通知"
     imported_thread.source = "imported"
     imported_thread.is_active = True
+    imported_thread.topic_id = None
+    ws.topic_id = None
     ws.threads["tid-imported"] = imported_thread
     state.storage.workspaces = {ws.daemon_workspace_id: ws}
 

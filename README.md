@@ -64,11 +64,12 @@ React page.
   <img src="./docs/screenshots/ai-scenarios.png" alt="OnlineWorker AI scenarios" width="88%" />
 </p>
 
-The AI page separates reusable service credentials from scenario prompts.
-OpenAI-compatible chat completions and Claude-compatible messages are available
-as built-in service types. Notification completion summary is the first built-in
-scenario and falls back to local deterministic summary rules when AI is disabled
-or unavailable.
+The AI page separates reusable service connections from scenario prompts.
+Authenticated one-shot Codex and Claude CLI calls are available alongside
+OpenAI-compatible chat completions and Claude-compatible messages API services.
+The authenticated CLI path does not create persistent provider sessions.
+Notification completion summary is the first built-in scenario and falls back
+to local deterministic summary rules when AI is disabled or unavailable.
 
 ### Setup
 
@@ -228,9 +229,12 @@ meaningful at the agent/provider topic level.
 
 ### AI Scenarios
 
-The AI layer is a shared app capability, not a provider session. Notification
-completion summary uses the `notification_summary` scenario when enabled and
-correctly configured; otherwise OnlineWorker falls back to local summary rules.
+The AI layer is a shared app capability, not a provider session.
+`provider_login` services use the authenticated Codex or Claude CLI for
+one-shot, non-persistent calls, while API services continue to support explicit
+keys and custom endpoints. Notification completion summary uses the
+`notification_summary` scenario when enabled and correctly configured;
+otherwise OnlineWorker falls back to local summary rules.
 
 ## Development
 

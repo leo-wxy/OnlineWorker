@@ -57,6 +57,7 @@ class ProviderRunState:
     active_interruption_ids: set[str] = field(default_factory=set)
     last_visible_event_seq: int = 0
     final_reply_synced_to_tg: bool = False
+    notification_emitted: bool = False
     created_at: float = 0.0
     updated_at: float = 0.0
     send_started_at: float = 0.0
@@ -66,6 +67,7 @@ class ProviderRunState:
     approval_resolved_at: float = 0.0
     final_reply_at: float = 0.0
     tg_synced_at: float = 0.0
+    notification_emitted_at: float = 0.0
     session_tab_visible_at: float = 0.0
     task_summary: str = ""
 

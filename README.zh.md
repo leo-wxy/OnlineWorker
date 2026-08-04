@@ -56,7 +56,7 @@ Usage 页面通过 provider metadata 和 usage hooks 读取用量。它支持 pr
   <img src="./docs/screenshots/ai-scenarios.png" alt="OnlineWorker AI 场景配置" width="88%" />
 </p>
 
-AI 页面把可复用的服务凭据和具体场景 prompt 分开。内置服务类型包括 OpenAI-compatible chat completions 和 Claude-compatible messages。通知完成摘要是第一个内置场景；当 AI 未启用、配置无效或调用失败时，会回退到确定性的本地摘要规则。
+AI 页面把可复用的服务连接和具体场景 prompt 分开。内置服务既支持 Codex / Claude CLI 登录态的一次性调用，也支持 OpenAI-compatible chat completions 和 Claude-compatible messages API。登录态调用不会创建持久 provider session。通知完成摘要是第一个内置场景；当 AI 未启用、配置无效或调用失败时，会回退到确定性的本地摘要规则。
 
 ### Setup
 
@@ -226,7 +226,7 @@ Telegram 侧也提供 `/token_usage` 本地命令。这个命令只在 agent top
 
 ### AI 场景
 
-AI 层是 OnlineWorker 的通用能力，不是 provider session。通知完成摘要会在启用且配置正确时使用 `notification_summary` 场景；否则 OnlineWorker 会回退到本地摘要规则。
+AI 层是 OnlineWorker 的通用能力，不是 provider session。`provider_login` 服务通过 Codex / Claude 已登录的 CLI 账号执行一次性、无会话持久化的调用；API 服务继续支持显式 Key 和自定义端点。通知完成摘要会在启用且配置正确时使用 `notification_summary` 场景；否则 OnlineWorker 会回退到本地摘要规则。
 
 ## 开发
 

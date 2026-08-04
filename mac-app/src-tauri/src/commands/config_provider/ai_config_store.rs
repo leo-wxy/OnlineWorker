@@ -53,6 +53,7 @@ pub(super) fn normalize_ai_document(doc: &mut ProviderConfigDocument) {
         } else {
             service.name.trim().to_string()
         };
+        service.owner_provider_id = service.owner_provider_id.trim().to_string();
         if service.protocol.trim().is_empty() {
             service.protocol = "openai_compatible_chat".to_string();
         } else {
@@ -130,6 +131,10 @@ pub(super) fn ai_metadata_from_document(doc: ProviderConfigDocument) -> AiConfig
         .into_iter()
         .map(|service| {
             let defaults = builtin_labels.get(&service.id);
+            let owner_provider_id = defaults
+                .map(|item| item.owner_provider_id.clone())
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| service.owner_provider_id.clone());
             AiServiceMetadata {
                 id: service.id.clone(),
                 name: service.name,
@@ -139,9 +144,7 @@ pub(super) fn ai_metadata_from_document(doc: ProviderConfigDocument) -> AiConfig
                 description: defaults
                     .map(|item| item.description.clone())
                     .unwrap_or_default(),
-                owner_provider_id: defaults
-                    .map(|item| item.owner_provider_id.clone())
-                    .unwrap_or_default(),
+                owner_provider_id,
                 plugin_owned: defaults.map(|item| item.plugin_owned).unwrap_or(false),
                 protocol: service.protocol,
                 base_url: service.base_url,

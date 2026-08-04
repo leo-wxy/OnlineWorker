@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from core.ai.client import AiHttpResponse
+from core.ai.client import AiClient, AiHttpResponse
 from core.ai.contracts import AiConfig, AiScenarioConfig, AiServiceConfig
 from core.ai.scenarios import AiScenarioResult, run_ai_scenario
 from core.ai.templates import render_prompt_template
@@ -98,6 +98,136 @@ async def test_run_ai_scenario_returns_valid_notification_summary():
     assert client.calls[0]["model"] == "gpt-5.4"
     assert client.calls[0]["timeout_seconds"] == 7
     assert "通知文案" in client.calls[0]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_run_ai_scenario_uses_provider_login_without_api_key_or_model():
+    calls: list[dict] = []
+
+    async def fake_provider_login_runner(*, service, model, prompt, timeout_seconds):
+        calls.append(
+            {
+                "service": service,
+                "model": model,
+                "prompt": prompt,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
+        return AiHttpResponse(
+            text='{"preview_title": "登录态摘要", "summary": "已通过 Codex 登录态生成摘要。"}',
+            raw={"provider_id": "codex"},
+        )
+
+    config = AiConfig(
+        services={
+            "codex_login": AiServiceConfig(
+                id="codex_login",
+                name="Codex 登录态",
+                protocol="provider_login",
+                owner_provider_id="codex",
+                completion_entrypoint="plugins.providers.builtin.codex.python.ai_completion:complete",
+                timeout_seconds=12,
+                enabled=True,
+            )
+        },
+        scenarios={
+            "notification_summary": AiScenarioConfig(
+                id="notification_summary",
+                enabled=True,
+                service_id="codex_login",
+                output_schema="notification_summary_v1",
+                fallback="local_notification_summary_rules",
+                prompt_template="Final: {{final_message}}",
+            )
+        },
+    )
+
+    result = await run_ai_scenario(
+        "notification_summary",
+        {"final_message": "已完成"},
+        config=config,
+        client=AiClient(provider_login_runner=fake_provider_login_runner),
+    )
+
+    assert result.ok is True
+    assert result.data == {
+        "preview_title": "登录态摘要",
+        "summary": "已通过 Codex 登录态生成摘要。",
+    }
+    assert calls[0]["service"].owner_provider_id == "codex"
+    assert calls[0]["model"] == ""
+    assert calls[0]["timeout_seconds"] == 12
+    assert "已完成" in calls[0]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_run_ai_scenario_auto_uses_provider_login_when_selected_api_service_unavailable():
+    calls: list[dict] = []
+
+    async def fake_provider_login_runner(*, service, model, prompt, timeout_seconds):
+        calls.append(
+            {
+                "service": service,
+                "model": model,
+                "prompt": prompt,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
+        return AiHttpResponse(
+            text='{"preview_title": "自动登录摘要", "summary": "已自动使用 Codex 登录态生成摘要。"}',
+            raw={"provider_id": "codex"},
+        )
+
+    config = AiConfig(
+        services={
+            "openai_default": AiServiceConfig(
+                id="openai_default",
+                name="OpenAI",
+                protocol="openai_compatible_chat",
+                base_url="https://api.openai.com/v1",
+                api_key="",
+                api_key_env="MISSING_OPENAI_API_KEY",
+                models=("gpt-5.4",),
+                default_model="gpt-5.4",
+                timeout_seconds=7,
+                enabled=True,
+            ),
+            "codex_login": AiServiceConfig(
+                id="codex_login",
+                name="Codex 登录态",
+                protocol="provider_login",
+                owner_provider_id="codex",
+                completion_entrypoint="plugins.providers.builtin.codex.python.ai_completion:complete",
+                timeout_seconds=12,
+                enabled=True,
+            ),
+        },
+        scenarios={
+            "notification_summary": AiScenarioConfig(
+                id="notification_summary",
+                enabled=True,
+                service_id="openai_default",
+                output_schema="notification_summary_v1",
+                fallback="local_notification_summary_rules",
+                prompt_template="Final: {{final_message}}",
+            )
+        },
+    )
+
+    result = await run_ai_scenario(
+        "notification_summary",
+        {"final_message": "已完成"},
+        config=config,
+        client=AiClient(provider_login_runner=fake_provider_login_runner),
+    )
+
+    assert result.ok is True
+    assert result.data == {
+        "preview_title": "自动登录摘要",
+        "summary": "已自动使用 Codex 登录态生成摘要。",
+    }
+    assert calls[0]["service"].id == "codex_login"
+    assert calls[0]["model"] == ""
 
 
 @pytest.mark.asyncio

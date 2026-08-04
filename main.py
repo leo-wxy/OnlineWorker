@@ -262,6 +262,11 @@ def main() -> None:
         help="Run once as Codex hook bridge relay and exit",
     )
     parser.add_argument(
+        "--codex-notify-bridge",
+        action="store_true",
+        help="Run once as Codex notify relay and exit",
+    )
+    parser.add_argument(
         "--codex-tui-host",
         action="store_true",
         help="Run a visible single-owner Codex TUI host and exit when Codex exits",
@@ -310,6 +315,11 @@ def main() -> None:
         from plugins.providers.builtin.codex.python.hook_bridge import run_codex_hook_bridge_once
 
         raise SystemExit(run_codex_hook_bridge_once(data_dir))
+    if args.codex_notify_bridge:
+        from plugins.providers.builtin.codex.python.hook_bridge import run_codex_notify_bridge_once
+
+        raw_payload = unknown_args[-1] if unknown_args else ""
+        raise SystemExit(run_codex_notify_bridge_once(data_dir, raw_payload))
     if args.codex_tui_host:
         from plugins.providers.builtin.codex.python.tui_host_runtime import run_codex_tui_host_once
 

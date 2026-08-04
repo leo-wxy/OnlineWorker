@@ -233,7 +233,7 @@ fn provider_validation_command_program_token(command_line: &str) -> String {
     token
 }
 
-fn provider_validation_rich_path() -> String {
+pub(crate) fn provider_validation_rich_path() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
     format!(
         "{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
@@ -250,7 +250,7 @@ fn provider_validation_expand_home_path(value: &str) -> String {
     }
 }
 
-fn resolve_provider_cli_path(command_line: &str) -> Option<String> {
+pub(crate) fn resolve_provider_cli_path(command_line: &str) -> Option<String> {
     let program = provider_validation_command_program_token(command_line);
     if program.trim().is_empty() {
         return None;
@@ -286,7 +286,7 @@ fn non_empty(value: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
-fn provider_launch_command(provider: &ProviderMetadata) -> Option<String> {
+pub(crate) fn provider_launch_command(provider: &ProviderMetadata) -> Option<String> {
     provider
         .launch_methods
         .iter()

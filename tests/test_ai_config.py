@@ -59,14 +59,27 @@ ai:
 def test_ai_config_adds_notification_summary_default_scenario():
     ai_config = load_ai_config({})
 
-    assert set(ai_config.services) == {"openai_default", "anthropic_default"}
+    assert set(ai_config.services) == {
+        "codex_login",
+        "openai_default",
+        "claude_login",
+        "anthropic_default",
+    }
+    assert ai_config.services["codex_login"].protocol == "provider_login"
+    assert ai_config.services["codex_login"].owner_provider_id == "codex"
+    assert ai_config.services["codex_login"].completion_entrypoint.endswith(
+        "codex.python.ai_completion:complete"
+    )
+    assert ai_config.services["codex_login"].enabled is True
     assert ai_config.services["openai_default"].name == "OpenAI"
     assert ai_config.services["openai_default"].enabled is False
+    assert ai_config.services["claude_login"].owner_provider_id == "claude"
+    assert ai_config.services["claude_login"].enabled is True
     assert ai_config.services["anthropic_default"].name == "Anthropic"
     assert ai_config.services["anthropic_default"].protocol == "anthropic_messages"
     scenario = ai_config.scenarios["notification_summary"]
     assert scenario.enabled is False
-    assert scenario.service_id == "openai_default"
+    assert scenario.service_id == "codex_login"
     assert scenario.output_schema == "notification_summary_v1"
     assert scenario.fallback == "local_notification_summary_rules"
     assert scenario.limits == {"preview_title": 16}
@@ -77,12 +90,53 @@ def test_ai_config_adds_notification_summary_default_scenario():
 def test_builtin_ai_service_defaults_come_from_provider_manifests():
     services = {service["id"]: service for service in builtin_ai_service_raws()}
 
-    assert set(services) == {"openai_default", "anthropic_default"}
+    assert set(services) == {
+        "codex_login",
+        "openai_default",
+        "claude_login",
+        "anthropic_default",
+    }
+    assert services["codex_login"]["owner_provider_id"] == "codex"
+    assert services["codex_login"]["protocol"] == "provider_login"
+    assert services["codex_login"]["completion_entrypoint"].endswith(
+        "codex.python.ai_completion:complete"
+    )
+    assert services["codex_login"]["default_for_scenarios"] is True
     assert services["openai_default"]["owner_provider_id"] == "codex"
     assert services["openai_default"]["api_key_env"] == "OPENAI_API_KEY"
-    assert services["openai_default"]["default_for_scenarios"] is True
     assert services["anthropic_default"]["owner_provider_id"] == "claude"
     assert services["anthropic_default"]["api_key_env"] == "ANTHROPIC_API_KEY"
+
+
+def test_ai_config_hydrates_provider_login_entrypoint_from_manifest():
+    ai_config = load_ai_config(
+        {
+            "ai": {
+                "services": [
+                    {
+                        "id": "claude_login",
+                        "name": "Claude Login",
+                        "protocol": "provider_login",
+                        "timeout_seconds": 45,
+                        "enabled": True,
+                    }
+                ],
+                "scenarios": {
+                    "notification_summary": {
+                        "enabled": True,
+                        "service_id": "claude_login",
+                    }
+                },
+            }
+        }
+    )
+
+    service = ai_config.services["claude_login"]
+    assert service.owner_provider_id == "claude"
+    assert service.completion_entrypoint.endswith(
+        "claude.python.ai_completion:complete"
+    )
+    assert service.timeout_seconds == 45
 
 
 def test_builtin_ai_services_survive_manifest_disappearance(monkeypatch):
@@ -131,7 +185,7 @@ ai:
     assert "Return compact JSON" not in scenario.prompt_template
 
 
-def test_ai_config_falls_back_invalid_scenario_service_to_openai_default():
+def test_ai_config_falls_back_invalid_scenario_service_to_codex_login():
     data = yaml.safe_load(
         """
 ai:
@@ -151,7 +205,7 @@ ai:
 
     ai_config = load_ai_config(data)
 
-    assert ai_config.scenarios["notification_summary"].service_id == "openai_default"
+    assert ai_config.scenarios["notification_summary"].service_id == "codex_login"
 
 
 def test_load_config_exposes_ai_namespace(tmp_path, monkeypatch):

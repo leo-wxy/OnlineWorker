@@ -149,6 +149,22 @@ def _provider_final_reply_already_synced(
     return True
 
 
+def _provider_notification_already_emitted(
+    state: AppState,
+    provider_id: str,
+    thread_id: Optional[str],
+    event_turn_id: Optional[str] = None,
+) -> bool:
+    if not thread_id:
+        return False
+    run = state.get_provider_current_run(provider_id, thread_id)
+    if run is None or not getattr(run, "notification_emitted", False):
+        return False
+    if event_turn_id and run.turn_id and str(run.turn_id) != str(event_turn_id):
+        return False
+    return True
+
+
 def _is_tui_mirror_completion(ctx: "EventContext", run_status: str, turn: Any) -> bool:
     if str(run_status or "completed").strip().lower() != "completed":
         return False
@@ -981,6 +997,54 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         st.notification_emitted = True
         return True
 
+    def _claim_provider_notification(
+        ctx: "EventContext",
+        thread_id: str,
+        *,
+        event_turn_id: str | None,
+        source: str,
+    ) -> bool:
+        provider_id = str(ctx.event.provider or "").strip()
+        if not provider_id:
+            return True
+        run = state.get_provider_current_run(provider_id, thread_id)
+        if run is None:
+            return True
+        if event_turn_id and run.turn_id and str(run.turn_id) != str(event_turn_id):
+            return True
+        if run.notification_emitted:
+            logger.info(
+                "[notification] 跳过已占用的 provider 通知 provider=%s thread=%s turn=%s source=%s",
+                provider_id,
+                thread_id[:8],
+                (event_turn_id or run.turn_id or "")[:12] or "?",
+                source,
+            )
+            return False
+        state.mark_provider_run(
+            provider_id,
+            thread_id=thread_id,
+            notification_emitted=True,
+        )
+        return True
+
+    def _claim_notification(
+        ctx: "EventContext",
+        st: StreamingTurn | None,
+        thread_id: str,
+        *,
+        event_turn_id: str | None,
+        source: str,
+    ) -> bool:
+        if not _claim_streaming_notification(st, thread_id, source=source):
+            return False
+        return _claim_provider_notification(
+            ctx,
+            thread_id,
+            event_turn_id=event_turn_id,
+            source=source,
+        )
+
     def _completed_reply_text_from_stream(st: StreamingTurn | None) -> str:
         if st is None:
             return ""
@@ -1458,6 +1522,22 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             )
             return
 
+        if ctx.event.provider and turn_id:
+            current_run = state.get_provider_current_run(ctx.event.provider, thread_id)
+            if current_run is None or current_run.turn_id != turn_id:
+                state.start_provider_run(
+                    ctx.event.provider,
+                    workspace_id=ctx.ws_daemon_id,
+                    thread_id=thread_id,
+                    turn_id=turn_id,
+                )
+            else:
+                state.mark_provider_run(
+                    ctx.event.provider,
+                    thread_id=thread_id,
+                    status="started",
+                )
+
         topic_id = _resolve_topic_id(state, ctx.ws_daemon_id, thread_id, ctx.event_params)
         if topic_id is None:
             if not _provider_should_materialize_unbound_thread_topic(state, thread_id):
@@ -1507,17 +1587,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         try:
             sent = await _send_to_group(bot, group_chat_id, "⏳ 思考中...", topic_id=topic_id)
             if sent:
-                if ctx.event.provider and turn_id:
-                    current_run = state.get_provider_current_run(ctx.event.provider, thread_id)
-                    if current_run is None or current_run.turn_id != turn_id:
-                        state.start_provider_run(
-                            ctx.event.provider,
-                            workspace_id=ctx.ws_daemon_id,
-                            thread_id=thread_id,
-                            turn_id=turn_id,
-                        )
-                    else:
-                        state.mark_provider_run(ctx.event.provider, thread_id=thread_id, status="started")
                 if ctx.event.provider:
                     state.mark_provider_tui_turn_started(ctx.event.provider, thread_id)
                 state.streaming_turns[thread_id] = StreamingTurn(
@@ -1651,6 +1720,35 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                     thread_id[:8],
                     (event_turn_id or "")[:12] or "?",
                 )
+                if _provider_notification_already_emitted(
+                    state,
+                    ctx.event.provider,
+                    thread_id,
+                    event_turn_id,
+                ):
+                    return
+                if not _claim_notification(
+                    ctx,
+                    st,
+                    thread_id,
+                    event_turn_id=event_turn_id,
+                    source="item_completed_synced_final",
+                ):
+                    return
+                (
+                    notification_status,
+                    notification_message,
+                    notification_task_name_override,
+                    notification_task_summary_override,
+                ) = await _notification_for_completed_reply_text(ctx, thread_id, text)
+                await _emit_notification(
+                    ctx,
+                    thread_id=thread_id,
+                    status=notification_status,
+                    message=notification_message,
+                    task_name_override=notification_task_name_override,
+                    task_summary_override=notification_task_summary_override,
+                )
                 return
 
             if is_final_answer and not notification_status:
@@ -1724,7 +1822,13 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                     final_reply_synced_to_tg=True,
                 )
             if is_final_answer and notification_status:
-                if not _claim_streaming_notification(st, thread_id, source="item_completed"):
+                if not _claim_notification(
+                    ctx,
+                    st,
+                    thread_id,
+                    event_turn_id=event_turn_id,
+                    source="item_completed",
+                ):
                     return
                 if notification_status == "completed":
                     (
@@ -1792,7 +1896,13 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                         thread_id=thread_id,
                         status=run_status,
                     )
-                if _claim_streaming_notification(st, thread_id, source="turn_completed_done"):
+                if _claim_notification(
+                    ctx,
+                    st,
+                    thread_id,
+                    event_turn_id=event_turn_id,
+                    source="turn_completed_done",
+                ):
                     if is_tui_mirror_completion and completed_reply_text and run_status == "completed":
                         (
                             notification_status,
@@ -1918,6 +2028,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         if st is None:
             if is_tui_mirror_completion:
                 return
+            notification_claim_source = "turn_completed_no_stream"
             if (
                 ctx.event.provider
                 and _provider_final_reply_already_synced(
@@ -1927,14 +2038,35 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                     event_turn_id,
                 )
             ):
+                if _provider_notification_already_emitted(
+                    state,
+                    ctx.event.provider,
+                    thread_id,
+                    event_turn_id,
+                ):
+                    logger.info(
+                        "[notification] 跳过已同步 provider completion duplicate provider=%s thread=%s turn=%s",
+                        ctx.event.provider,
+                        thread_id[:8],
+                        (event_turn_id or "")[:12] or "?",
+                    )
+                    return
                 logger.info(
-                    "[notification] 跳过已同步 provider completion duplicate provider=%s thread=%s turn=%s",
+                    "[notification] provider final 已同步但通知未发送，补发 completion 通知 provider=%s thread=%s turn=%s",
                     ctx.event.provider,
                     thread_id[:8],
                     (event_turn_id or "")[:12] or "?",
                 )
-                return
+                notification_claim_source = "turn_completed_synced_final"
             notification_status, notification_message = _notification_for_turn_status(run_status, turn, ctx)
+            if not _claim_notification(
+                ctx,
+                st,
+                thread_id,
+                event_turn_id=event_turn_id,
+                source=notification_claim_source,
+            ):
+                return
             await _emit_notification(
                 ctx,
                 thread_id=thread_id,
@@ -1943,7 +2075,13 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             )
             return
 
-        if _claim_streaming_notification(st, thread_id, source="turn_completed"):
+        if _claim_notification(
+            ctx,
+            st,
+            thread_id,
+            event_turn_id=event_turn_id,
+            source="turn_completed",
+        ):
             if is_tui_mirror_completion:
                 if completed_reply_text:
                     _publish_buffered_final_message(

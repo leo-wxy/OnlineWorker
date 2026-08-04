@@ -832,6 +832,8 @@ class ProviderOwnerBridge:
                 response = await self._handle_reply_approval(request)
             elif request_type == "session_control":
                 response = await self._handle_session_control(request)
+            elif request_type == "provider_hook_event":
+                response = await self._handle_provider_hook_event(request)
             elif request_type == "mirror_approval":
                 response = await self._handle_mirror_approval(request)
             else:
@@ -1755,6 +1757,57 @@ class ProviderOwnerBridge:
             str(request.get("source") or ""),
         )
         return {"ok": True, "ignored": True, "reason": "approval_via_app_server_only"}
+
+    async def _handle_provider_hook_event(self, request: dict) -> dict:
+        provider_id = str(request.get("provider_id") or "").strip()
+        payload = request.get("payload")
+        if not provider_id:
+            return {"ok": False, "error": "缺少 provider_id"}
+        if not isinstance(payload, dict):
+            return {"ok": False, "error": "缺少 hook payload"}
+
+        adapter = self.state.get_adapter(provider_id)
+        ingress = getattr(adapter, "ingest_external_hook_payload", None) if adapter is not None else None
+        if not callable(ingress):
+            return {
+                "ok": False,
+                "error": f"Provider '{provider_id}' 没有可用的 hook event ingress",
+            }
+
+        async def dispatch_hook_event() -> None:
+            try:
+                result = await ingress(payload)
+                if isinstance(result, dict) and result.get("accepted") is False:
+                    logger.warning(
+                        "[provider-hook-event] 事件未接收 provider=%s event=%s session=%s reason=%s",
+                        provider_id,
+                        str(payload.get("hook_event_name") or ""),
+                        str(payload.get("session_id") or "")[:12],
+                        str(result.get("reason") or "unknown"),
+                    )
+                else:
+                    logger.info(
+                        "[provider-hook-event] 已接收 provider=%s event=%s session=%s emitted=%s",
+                        provider_id,
+                        str(payload.get("hook_event_name") or ""),
+                        str(payload.get("session_id") or "")[:12],
+                        str(result.get("emitted") or 0) if isinstance(result, dict) else "?",
+                    )
+            except Exception:
+                logger.exception(
+                    "[provider-hook-event] 分发失败 provider=%s event=%s session=%s",
+                    provider_id,
+                    str(payload.get("hook_event_name") or ""),
+                    str(payload.get("session_id") or "")[:12],
+                )
+
+        task = asyncio.create_task(
+            dispatch_hook_event(),
+            name=f"provider-hook-event-{provider_id}",
+        )
+        self._pending_send_tasks.add(task)
+        task.add_done_callback(self._pending_send_tasks.discard)
+        return {"ok": True, "accepted": True}
 
     async def _handle_reply_approval(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()

@@ -16,6 +16,131 @@ def _fake_create_task(coro, name=None):
 
 
 @pytest.mark.asyncio
+async def test_app_server_event_marks_session_as_authoritative_live_source():
+    adapter = CodexAdapter()
+
+    await adapter._dispatch(
+        json.dumps(
+            {
+                "method": "turn/started",
+                "params": {
+                    "threadId": "owned-session",
+                    "turn": {"id": "owned-turn"},
+                },
+            }
+        )
+    )
+
+    assert adapter.has_authoritative_live_session("owned-session") is True
+
+
+@pytest.mark.asyncio
+async def test_desktop_stop_hook_enters_message_event_bus():
+    from core.messages.bus import MessageEventBus
+    from core.messages.publishing import publish_session_message_event
+    from core.providers.session_events import normalize_session_event
+
+    bus = MessageEventBus()
+    state = MagicMock(message_bus=bus)
+    adapter = CodexAdapter()
+    adapter.register_workspace_cwd(
+        "codex:demo",
+        "/Users/example/Projects/demo",
+    )
+
+    async def publish_event(method, params):
+        event = normalize_session_event(method, params)
+        assert event is not None
+        publish_session_message_event(state, event)
+
+    adapter.on_event(publish_event)
+
+    result = await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "Stop",
+            "session_id": "desktop-session",
+            "turn_id": "desktop-turn",
+            "cwd": "/Users/example/Projects/demo",
+            "last_assistant_message": "Desktop 任务已经完成。",
+        }
+    )
+
+    assert result["accepted"] is True
+    assert [event["kind"] for event in bus.recent_events()] == [
+        "message.assistant.final",
+        "turn.completed",
+    ]
+    final_event = bus.recent_events()[0]
+    assert final_event["provider_id"] == "codex"
+    assert final_event["workspace_id"] == "codex:demo"
+    assert final_event["session_id"] == "desktop-session"
+    assert final_event["turn_id"] == "desktop-turn"
+    assert final_event["payload"]["text"] == "Desktop 任务已经完成。"
+
+
+@pytest.mark.asyncio
+async def test_desktop_notify_turn_enters_message_event_bus_as_single_ordered_sequence():
+    from core.messages.bus import MessageEventBus
+    from core.messages.publishing import publish_session_message_event
+    from core.providers.session_events import normalize_session_event
+
+    bus = MessageEventBus()
+    state = MagicMock(message_bus=bus)
+    adapter = CodexAdapter()
+    adapter.register_workspace_cwd(
+        "codex:demo",
+        "/Users/example/Projects/demo",
+    )
+
+    async def publish_event(method, params):
+        event = normalize_session_event(method, params)
+        assert event is not None
+        publish_session_message_event(state, event)
+
+    adapter.on_event(publish_event)
+
+    result = await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "AgentTurnComplete",
+            "session_id": "desktop-session",
+            "turn_id": "desktop-turn",
+            "cwd": "/Users/example/Projects/demo",
+            "input_messages": ["检查摘要链路"],
+            "last_assistant_message": "摘要链路检查完成。",
+            "source": "codex_notify",
+        }
+    )
+
+    assert result == {"accepted": True, "emitted": 5}
+    assert [event["kind"] for event in bus.recent_events()] == [
+        "session.created",
+        "message.user.submitted",
+        "turn.started",
+        "message.assistant.final",
+        "turn.completed",
+    ]
+    final_event = bus.recent_events()[3]
+    assert final_event["workspace_id"] == "codex:demo"
+    assert final_event["session_id"] == "desktop-session"
+    assert final_event["turn_id"] == "desktop-turn"
+    assert final_event["payload"]["text"] == "摘要链路检查完成。"
+
+    duplicate = await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "AgentTurnComplete",
+            "session_id": "desktop-session",
+            "turn_id": "desktop-turn",
+            "cwd": "/Users/example/Projects/demo",
+            "input_messages": ["检查摘要链路"],
+            "last_assistant_message": "摘要链路检查完成。",
+            "source": "codex_notify",
+        }
+    )
+    assert duplicate == {"accepted": True, "emitted": 0, "deduped": True}
+    assert len(bus.recent_events()) == 5
+
+
+@pytest.mark.asyncio
 async def test_connect_disables_websocket_message_size_limit_for_large_resume_payloads():
     ws = AsyncMock()
     ws.recv = AsyncMock(

@@ -1,14 +1,35 @@
 import type { useI18n } from "../../i18n";
-import type { AiScenarioMetadata, AiServiceMetadata } from "../../types";
+import type { AiConnectionTestResult, AiScenarioMetadata, AiServiceMetadata } from "../../types";
 
 export type AiView = "services" | "scenarios";
 export type AiLabels = ReturnType<typeof useI18n>["t"]["ai"];
 
-export function serviceBadge(service: AiServiceMetadata, labels: AiLabels) {
+export function serviceUsesProviderLogin(service: AiServiceMetadata | null | undefined) {
+  return service?.protocol === "provider_login";
+}
+
+export function serviceBadge(
+  service: AiServiceMetadata,
+  labels: AiLabels,
+  testResult?: AiConnectionTestResult,
+  checking = false,
+) {
   if (!service.enabled) {
     return labels.disabled;
   }
-  if (!service.apiKey?.trim() || !service.defaultModel.trim()) {
+  if (serviceUsesProviderLogin(service)) {
+    if (checking) {
+      return labels.checkingLogin;
+    }
+    if (testResult) {
+      return testResult.ok ? labels.loginReady : labels.loginUnavailable;
+    }
+    return labels.loginPending;
+  }
+  if (
+    !service.apiKey?.trim()
+    || !service.defaultModel.trim()
+  ) {
     return labels.needsConfig;
   }
   return labels.configured;
@@ -23,7 +44,11 @@ export function scenarioBadge(
     return labels.disabled;
   }
   const service = services.find((item) => item.id === scenario.serviceId);
-  if (!service || !service.enabled || !service.defaultModel.trim()) {
+  if (
+    !service
+    || !service.enabled
+    || (!serviceUsesProviderLogin(service) && !service.defaultModel.trim())
+  ) {
     return labels.needsConfig;
   }
   return labels.configured;
@@ -70,6 +95,8 @@ export function serviceForSave(service: AiServiceMetadata) {
     baseUrl: (service.baseUrl || "").trim(),
     endpoint: (service.endpoint || "").trim(),
     apiKey: (service.apiKey || "").trim(),
+    apiKeyEnv: (service.apiKeyEnv || "").trim(),
+    ownerProviderId: (service.ownerProviderId || "").trim(),
     models: service.models.map((model) => model.trim()).filter(Boolean),
     defaultModel: service.defaultModel.trim(),
     timeoutSeconds: Math.max(1, Number(service.timeoutSeconds || 20)),

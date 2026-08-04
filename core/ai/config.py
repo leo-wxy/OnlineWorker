@@ -69,6 +69,10 @@ def build_ai_service_config(service_id: str, raw: dict[str, Any] | None) -> AiSe
         id=normalized_service_id,
         name=str(raw.get("name") or normalized_service_id),
         protocol=protocol,
+        owner_provider_id=str(raw.get("owner_provider_id") or raw.get("ownerProviderId") or ""),
+        completion_entrypoint=str(
+            raw.get("completion_entrypoint") or raw.get("completionEntrypoint") or ""
+        ),
         base_url=str(raw.get("base_url") or raw.get("baseUrl") or ""),
         endpoint=str(raw.get("endpoint") or ""),
         api_key=str(raw.get("api_key") or raw.get("apiKey") or ""),
@@ -193,11 +197,20 @@ def iter_ai_scenario_raws(raw_scenarios: Any) -> list[tuple[str, dict[str, Any]]
 def load_ai_config(data: dict[str, Any]) -> AiConfig:
     raw = data.get("ai") if isinstance(data, dict) else {}
     raw = raw if isinstance(raw, dict) else {}
-    services: dict[str, AiServiceConfig] = {
-        service_id: build_ai_service_config(service_id, service_raw)
-        for service_id, service_raw in iter_ai_service_raws(raw.get("services"))
-    }
     builtin_services = builtin_ai_service_raws()
+    builtin_by_id = {
+        normalize_ai_service_id(service.get("id")): service
+        for service in builtin_services
+        if normalize_ai_service_id(service.get("id"))
+    }
+    services: dict[str, AiServiceConfig] = {}
+    for service_id, service_raw in iter_ai_service_raws(raw.get("services")):
+        hydrated_raw = dict(service_raw)
+        builtin = builtin_by_id.get(service_id, {})
+        for key in ("owner_provider_id", "completion_entrypoint"):
+            if not hydrated_raw.get(key) and builtin.get(key):
+                hydrated_raw[key] = builtin[key]
+        services[service_id] = build_ai_service_config(service_id, hydrated_raw)
     for builtin in builtin_services:
         builtin_service_id = normalize_ai_service_id(builtin.get("id"))
         if builtin_service_id and builtin_service_id not in services:

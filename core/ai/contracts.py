@@ -9,6 +9,8 @@ class AiServiceConfig:
     id: str
     name: str = ""
     protocol: str = "openai_compatible_chat"
+    owner_provider_id: str = ""
+    completion_entrypoint: str = ""
     base_url: str = ""
     endpoint: str = ""
     api_key: str = ""
@@ -22,6 +24,8 @@ class AiServiceConfig:
         object.__setattr__(self, "id", str(self.id or "").strip())
         object.__setattr__(self, "name", str(self.name or self.id).strip())
         object.__setattr__(self, "protocol", str(self.protocol or "openai_compatible_chat").strip())
+        object.__setattr__(self, "owner_provider_id", str(self.owner_provider_id or "").strip())
+        object.__setattr__(self, "completion_entrypoint", str(self.completion_entrypoint or "").strip())
         object.__setattr__(self, "base_url", str(self.base_url or "").strip().rstrip("/"))
         object.__setattr__(self, "endpoint", str(self.endpoint or "").strip())
         object.__setattr__(self, "api_key", str(self.api_key or "").strip())

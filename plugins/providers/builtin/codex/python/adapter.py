@@ -16,6 +16,7 @@ import logging
 import os
 import sqlite3
 import time
+import uuid
 from collections import deque
 from typing import Any, Callable, Awaitable, Optional
 
@@ -68,6 +69,18 @@ class CodexAdapter:
         self._thread_workspace_map: dict[str, str] = {}
         self._pending_thread_starts: list[dict[str, Any]] = []
         self._thread_policy_lookup_enabled = False
+        self._hook_data_dir: str | None = None
+        self._external_hook_status: dict[str, Any] = {
+            "state": "disabled",
+            "detail": "",
+        }
+        self._external_hook_sessions: dict[str, dict[str, Any]] = {}
+        self._desktop_rollout_ingress = None
+        self._desktop_rollout_status: dict[str, Any] = {
+            "state": "disabled",
+            "detail": "",
+        }
+        self._authoritative_live_sessions: set[str] = set()
         # 最近协议收发摘要，用于 1006 / EOF 断线诊断
         self._recent_inbound_messages: deque[str] = deque(maxlen=6)
         self._recent_outbound_messages: deque[str] = deque(maxlen=6)
@@ -175,6 +188,7 @@ class CodexAdapter:
 
     async def disconnect(self) -> None:
         """断开连接，取消所有后台任务。"""
+        await self.stop_desktop_rollout_ingress()
         self._connected = False
         self._disconnect_notified = True
         self._fail_pending_requests(RuntimeError("app-server 连接断开"))
@@ -222,6 +236,321 @@ class CodexAdapter:
     def on_disconnect(self, callback: Callable[[], None]) -> None:
         """注册断线回调。"""
         self._disconnect_callbacks.append(callback)
+
+    @property
+    def external_hook_status(self) -> dict[str, Any]:
+        return self.external_event_status
+
+    @property
+    def external_event_status(self) -> dict[str, Any]:
+        status = dict(self._external_hook_status)
+        status["rollout"] = dict(self._desktop_rollout_status)
+        return status
+
+    def configure_hook_bridge(self, data_dir: str) -> None:
+        self.configure_external_event_bridge(data_dir)
+
+    def configure_external_event_bridge(self, data_dir: str) -> None:
+        self._hook_data_dir = str(data_dir or "").strip() or None
+
+    def has_authoritative_live_session(self, session_id: str) -> bool:
+        return str(session_id or "").strip() in self._authoritative_live_sessions
+
+    async def start_desktop_rollout_ingress(
+        self,
+        state,
+        *,
+        sessions_dir: str | None = None,
+    ) -> dict[str, Any]:
+        current = self._desktop_rollout_ingress
+        if current is not None and current.running:
+            return dict(self._desktop_rollout_status)
+        from plugins.providers.builtin.codex.python.external_ingress import (
+            CodexDesktopRolloutIngress,
+        )
+
+        ingress = CodexDesktopRolloutIngress(
+            adapter=self,
+            state=state,
+            sessions_dir=sessions_dir,
+        )
+        result = await ingress.start()
+        self._desktop_rollout_status = dict(result)
+        if str(result.get("state") or "") == "running":
+            self._desktop_rollout_ingress = ingress
+        else:
+            await ingress.close()
+            self._desktop_rollout_ingress = None
+        return dict(self._desktop_rollout_status)
+
+    async def stop_desktop_rollout_ingress(self) -> None:
+        ingress = self._desktop_rollout_ingress
+        self._desktop_rollout_ingress = None
+        if ingress is not None:
+            await ingress.close()
+        self._desktop_rollout_status = {
+            "state": "stopped",
+            "detail": "",
+        }
+
+    async def install_external_hook_ingress(self) -> dict[str, Any]:
+        return await self.install_external_event_ingress()
+
+    async def install_external_event_ingress(self) -> dict[str, Any]:
+        if not self._hook_data_dir:
+            self._external_hook_status = {
+                "state": "disabled",
+                "detail": "缺少 data_dir，未安装 Codex Desktop event ingress",
+            }
+            return dict(self._external_hook_status)
+        from plugins.providers.builtin.codex.python.hook_bridge import (
+            install_onlineworker_codex_notify,
+        )
+
+        result = install_onlineworker_codex_notify(self._hook_data_dir)
+        self._external_hook_status = {
+            "state": str(result.get("state") or "disabled"),
+            "detail": str(result.get("detail") or ""),
+            "configPath": str(result.get("configPath") or ""),
+            "forwardPath": str(result.get("forwardPath") or ""),
+            "hooksPath": str(result.get("hooksPath") or ""),
+            "removedEvents": list(result.get("removedEvents") or []),
+            "changed": bool(result.get("changed")),
+        }
+        return dict(self._external_hook_status)
+
+    def _external_hook_workspace_id(self, payload: dict[str, Any]) -> str:
+        cwd_text = str(payload.get("cwd") or "").strip()
+        cwd = os.path.abspath(os.path.expanduser(cwd_text)) if cwd_text else ""
+        if cwd:
+            for workspace_id, workspace_cwd in self._workspace_cwd_map.items():
+                resolved_workspace_cwd = os.path.abspath(
+                    os.path.expanduser(str(workspace_cwd or "").strip())
+                )
+                if resolved_workspace_cwd == cwd:
+                    return workspace_id
+        session_id = str(payload.get("session_id") or "").strip()
+        if session_id:
+            mapped = self._thread_workspace_map.get(session_id)
+            if mapped:
+                return mapped
+        return f"codex:{cwd}" if cwd else "codex:desktop"
+
+    async def _emit_external_hook_event(
+        self,
+        workspace_id: str,
+        method: str,
+        params: dict[str, Any],
+    ) -> None:
+        envelope = {
+            "message": {
+                "method": method,
+                "params": params,
+            },
+            "workspace_id": workspace_id,
+        }
+        for callback in tuple(self._event_callbacks):
+            await callback("app-server-event", envelope)
+
+    async def ingest_external_hook_payload(
+        self,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        event_name = str(payload.get("hook_event_name") or "").strip()
+        if event_name not in {
+            "SessionStart",
+            "UserPromptSubmit",
+            "Stop",
+            "AgentTurnComplete",
+        }:
+            return {"accepted": False, "reason": "unsupported_hook_event"}
+
+        session_id = str(payload.get("session_id") or "").strip()
+        if not session_id:
+            return {"accepted": False, "reason": "missing_session_id"}
+        if not self._event_callbacks:
+            return {"accepted": False, "reason": "event_callback_unavailable"}
+
+        workspace_id = self._external_hook_workspace_id(payload)
+        self._thread_workspace_map[session_id] = workspace_id
+        session = self._external_hook_sessions.setdefault(session_id, {})
+        session["workspace_id"] = workspace_id
+
+        if event_name == "SessionStart":
+            if not session.get("session_created_emitted"):
+                await self._emit_external_hook_event(
+                    workspace_id,
+                    "session.created",
+                    {
+                        "threadId": session_id,
+                        "_mirroredOnly": True,
+                    },
+                )
+                session["session_created_emitted"] = True
+            return {"accepted": True, "emitted": 1}
+
+        if event_name == "UserPromptSubmit":
+            prompt = str(
+                payload.get("prompt")
+                or payload.get("user_prompt")
+                or payload.get("userPrompt")
+                or ""
+            ).strip()
+            turn_id = str(payload.get("turn_id") or "").strip() or str(uuid.uuid4())
+            if not session.get("session_created_emitted"):
+                await self._emit_external_hook_event(
+                    workspace_id,
+                    "session.created",
+                    {
+                        "threadId": session_id,
+                        "title": prompt[:120],
+                        "_mirroredOnly": True,
+                    },
+                )
+                session["session_created_emitted"] = True
+            session["turn_id"] = turn_id
+            session["turn_open"] = True
+            session.pop("terminal_emitted_turn_id", None)
+            emitted = 1
+            if prompt:
+                await self._emit_external_hook_event(
+                    workspace_id,
+                    "message.user.submitted",
+                    {
+                        "threadId": session_id,
+                        "turnId": turn_id,
+                        "text": prompt,
+                        "_mirroredOnly": True,
+                    },
+                )
+                emitted += 1
+            await self._emit_external_hook_event(
+                workspace_id,
+                "turn/started",
+                {
+                    "threadId": session_id,
+                    "turn": {
+                        "id": turn_id,
+                        "threadId": session_id,
+                    },
+                    "_mirroredOnly": True,
+                },
+            )
+            return {"accepted": True, "emitted": emitted + 1}
+
+        notify_prefix_emitted = 0
+        if event_name == "AgentTurnComplete":
+            turn_id = str(payload.get("turn_id") or "").strip() or str(uuid.uuid4())
+            if str(session.get("terminal_emitted_turn_id") or "").strip() == turn_id:
+                return {"accepted": True, "emitted": 0, "deduped": True}
+            input_messages = payload.get("input_messages")
+            if isinstance(input_messages, str):
+                prompts = [input_messages.strip()] if input_messages.strip() else []
+            elif isinstance(input_messages, list):
+                prompts = [
+                    str(item).strip()
+                    for item in input_messages
+                    if str(item).strip()
+                ]
+            else:
+                prompts = []
+            prompt = "\n\n".join(prompts)
+            if not session.get("session_created_emitted"):
+                await self._emit_external_hook_event(
+                    workspace_id,
+                    "session.created",
+                    {
+                        "threadId": session_id,
+                        "title": prompt[:120],
+                        "_mirroredOnly": True,
+                        "_externalSource": "codex_notify",
+                    },
+                )
+                session["session_created_emitted"] = True
+                notify_prefix_emitted += 1
+            if prompt:
+                await self._emit_external_hook_event(
+                    workspace_id,
+                    "message.user.submitted",
+                    {
+                        "threadId": session_id,
+                        "turnId": turn_id,
+                        "text": prompt,
+                        "_mirroredOnly": True,
+                        "_externalSource": "codex_notify",
+                    },
+                )
+                notify_prefix_emitted += 1
+            await self._emit_external_hook_event(
+                workspace_id,
+                "turn/started",
+                {
+                    "threadId": session_id,
+                    "turn": {
+                        "id": turn_id,
+                        "threadId": session_id,
+                    },
+                    "_mirroredOnly": True,
+                    "_externalSource": "codex_notify",
+                },
+            )
+            notify_prefix_emitted += 1
+            session["turn_id"] = turn_id
+            session["turn_open"] = True
+            session.pop("terminal_emitted_turn_id", None)
+
+        turn_id = (
+            str(payload.get("turn_id") or "").strip()
+            or str(session.get("turn_id") or "").strip()
+            or str(uuid.uuid4())
+        )
+        if str(session.get("terminal_emitted_turn_id") or "").strip() == turn_id:
+            return {"accepted": True, "emitted": 0, "deduped": True}
+
+        final_text = str(
+            payload.get("last_assistant_message")
+            or payload.get("lastAssistantMessage")
+            or ""
+        ).strip()
+        emitted = notify_prefix_emitted
+        if final_text:
+            await self._emit_external_hook_event(
+                workspace_id,
+                "item/completed",
+                {
+                    "threadId": session_id,
+                    "turnId": turn_id,
+                    "request_id": f"codex-desktop:{session_id}:{turn_id}:final",
+                    "item": {
+                        "type": "agentMessage",
+                        "text": final_text,
+                        "phase": "final_answer",
+                        "threadId": session_id,
+                        "turn": {"id": turn_id},
+                    },
+                    "_mirroredOnly": True,
+                },
+            )
+            emitted += 1
+        await self._emit_external_hook_event(
+            workspace_id,
+            "turn/completed",
+            {
+                "threadId": session_id,
+                "turnId": turn_id,
+                "request_id": f"codex-desktop:{session_id}:{turn_id}:completed",
+                "turn": {
+                    "id": turn_id,
+                    "threadId": session_id,
+                    "status": "completed",
+                },
+                "_mirroredOnly": True,
+            },
+        )
+        session["turn_id"] = turn_id
+        session["turn_open"] = False
+        session["terminal_emitted_turn_id"] = turn_id
+        return {"accepted": True, "emitted": emitted + 1}
 
     # ------------------------------------------------------------------
     # 内部 RPC 调用
@@ -951,6 +1280,9 @@ class CodexAdapter:
             # ── Server notification（事件）──
             # 先维护 thread_id → workspace_id 映射，再包装事件信封。
             # 这样像 turn/started 这类首个事件，如果携带 cwd，也能在当前事件内解析到 workspace。
+            thread_id = self._extract_thread_id_from_event_params(params)
+            if thread_id:
+                self._authoritative_live_sessions.add(thread_id)
             self._update_thread_workspace_map(method, params)
             workspace_id = self._resolve_workspace_id_from_params(params)
             envelope = {

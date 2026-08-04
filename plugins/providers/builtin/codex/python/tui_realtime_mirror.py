@@ -22,8 +22,6 @@ DEFAULT_WATCH_TTL_SECONDS = 900.0
 WATCH_STATE_TOUCH_INTERVAL_SECONDS = 1.0
 ACTIVE_BOOTSTRAP_TAIL_BYTES = 128 * 1024
 COMMENTARY_IDLE_COMPLETION_POLLS = 6
-
-
 def _workspace_key(state: AppState, ws: WorkspaceInfo) -> str:
     return state.get_workspace_storage_key(ws) or ws.daemon_workspace_id or f"{ws.tool}:{ws.name}"
 
@@ -331,8 +329,6 @@ def _ensure_bound_codex_thread_watches(
             if not _should_watch_thread_from_session_file(state, thread):
                 continue
             topic_id = _thread_topic_id(state, ws, thread)
-            if topic_id is None:
-                continue
 
             runtime = codex_state.get_runtime(state)
             watch = runtime.watched_threads.get(thread_id)

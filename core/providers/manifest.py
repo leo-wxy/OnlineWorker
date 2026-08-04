@@ -40,6 +40,8 @@ def _string_tuple(value: Any, default: tuple[str, ...] = ()) -> tuple[str, ...]:
 def ai_services_from_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     ai = _mapping(manifest.get("ai"))
     services = ai.get("services")
+    entrypoints = _mapping(manifest.get("entrypoints"))
+    completion_entrypoint = _str_value(entrypoints.get("python_ai_completion")).strip()
     if not isinstance(services, list):
         return []
     normalized: list[dict[str, Any]] = []
@@ -73,6 +75,7 @@ def ai_services_from_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
                 "enabled": _bool_value(item.get("enabled"), False),
                 "default_for_scenarios": _bool_value(item.get("default_for_scenarios"), False),
                 "owner_provider_id": _str_value(manifest.get("id")).strip(),
+                "completion_entrypoint": completion_entrypoint,
                 "plugin_owned": True,
             }
         )

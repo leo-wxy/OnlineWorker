@@ -84,6 +84,13 @@ provider:
 
 ai:
   services:
+    - id: claude_login
+      name: Claude Login
+      label: Claude Login
+      description: Uses the authenticated Claude CLI without an API key or persistent session.
+      protocol: provider_login
+      timeout_seconds: 30
+      enabled: true
     - id: anthropic_default
       name: Anthropic
       label: Claude
@@ -100,3 +107,4 @@ ai:
 entrypoints:
   python_descriptor: plugins.providers.builtin.claude.python.provider:create_provider_descriptor
   python_document_normalizer: plugins.providers.builtin.claude.python.config_normalizer:normalize_config_document
+  python_ai_completion: plugins.providers.builtin.claude.python.ai_completion:complete

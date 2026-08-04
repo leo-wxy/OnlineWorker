@@ -174,6 +174,7 @@ fn is_onlineworker_cli_wrapper_command(command_line: &str) -> bool {
             || normalized == "--provider-session-bridge"
             // Keep legacy provider-specific wrapper flags as compatibility-only markers.
             || normalized == "--codex-hook-bridge"
+            || normalized == "--codex-notify-bridge"
             || normalized == "--claude-hook-bridge"
             || normalized == "--codex-tui-host"
             || normalized == "--provider-tui-host"
@@ -1204,6 +1205,7 @@ mod tests {
  104 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --ow-secondary --data-dir /Users/example/Library/Application Support/OnlineWorker
  108 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --provider-session-bridge --provider-id primary
  109 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --codex-hook-bridge
+ 110 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot --data-dir /Users/example/Library/Application Support/OnlineWorker --codex-notify-bridge {\"type\":\"agent-turn-complete\"}
  105 /usr/bin/python3 /repo/main.py --data-dir /Users/example/Library/Application Support/OnlineWorker
  106 /usr/bin/python3 /repo/main.py --data-dir /Users/example/Library/Application Support/OnlineWorker --ow-primary
  107 /usr/bin/python3 /repo/main.py --ow-secondary --data-dir /Users/example/Library/Application Support/OnlineWorker

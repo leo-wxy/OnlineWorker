@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import httpx
 
 from .contracts import AiServiceConfig
+from .provider_login import complete_with_provider_login
+
+
+ProviderLoginRunner = Callable[..., Awaitable["AiHttpResponse"]]
 
 
 @dataclass(frozen=True)
@@ -16,6 +20,13 @@ class AiHttpResponse:
 
 
 class AiClient:
+    def __init__(
+        self,
+        *,
+        provider_login_runner: ProviderLoginRunner = complete_with_provider_login,
+    ) -> None:
+        self._provider_login_runner = provider_login_runner
+
     async def complete(
         self,
         *,
@@ -34,6 +45,13 @@ class AiClient:
             )
         if protocol == "anthropic_messages":
             return await self._complete_anthropic_messages(
+                service=service,
+                model=model,
+                prompt=prompt,
+                timeout_seconds=timeout_seconds,
+            )
+        if protocol == "provider_login":
+            return await self._provider_login_runner(
                 service=service,
                 model=model,
                 prompt=prompt,

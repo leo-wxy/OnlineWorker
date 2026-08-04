@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any
 
@@ -28,41 +29,84 @@ async def run_ai_scenario(
         return AiScenarioResult(ok=False, fallback="", error="scenario_not_found")
     if not scenario.enabled:
         return _fallback(scenario, "scenario_disabled")
-    service = active_config.services.get(scenario.service_id)
-    if service is None:
-        return _fallback(scenario, "service_not_found")
-    if not service.enabled:
-        return _fallback(scenario, "service_disabled")
-    model = service.default_model
-    if not model:
-        return _fallback(scenario, "model_missing")
+    candidates = _service_candidates_for_scenario(active_config, scenario)
+    if not candidates:
+        service = active_config.services.get(scenario.service_id)
+        if service is None:
+            return _fallback(scenario, "service_not_found")
+        if not service.enabled:
+            return _fallback(scenario, "service_disabled")
+        if not service.default_model and service.protocol != "provider_login":
+            return _fallback(scenario, "model_missing")
+        return _fallback(scenario, "service_unavailable")
 
     prompt = render_prompt_template(scenario.prompt_template, variables)
     ai_client = client or AiClient()
-    try:
-        response = await ai_client.complete(
-            service=service,
-            model=model,
-            prompt=prompt,
-            timeout_seconds=service.timeout_seconds,
-        )
-    except Exception as exc:
-        logger.warning(
-            "[ai] scenario failed scenario=%s %s",
-            scenario.id,
-            _format_client_error_context(service, model, exc),
-        )
-        return _fallback(scenario, "client_error")
 
-    data = _parse_json_object(response.text)
-    if not _validate_schema(scenario, data):
-        return _fallback(scenario, "invalid_output")
-    data = _apply_limits(scenario, data)
-    return AiScenarioResult(ok=True, data=data)
+    last_error = ""
+    for service in candidates:
+        model = service.default_model
+        try:
+            response = await ai_client.complete(
+                service=service,
+                model=model,
+                prompt=prompt,
+                timeout_seconds=service.timeout_seconds,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[ai] scenario failed scenario=%s %s",
+                scenario.id,
+                _format_client_error_context(service, model, exc),
+            )
+            last_error = "client_error"
+            continue
+
+        data = _parse_json_object(response.text)
+        if not _validate_schema(scenario, data):
+            last_error = "invalid_output"
+            continue
+        data = _apply_limits(scenario, data)
+        return AiScenarioResult(ok=True, data=data)
+
+    return _fallback(scenario, last_error or "service_unavailable")
 
 
 def _fallback(scenario: AiScenarioConfig, error: str) -> AiScenarioResult:
     return AiScenarioResult(ok=False, fallback=scenario.fallback, error=error)
+
+
+def _service_candidates_for_scenario(
+    active_config: AiConfig,
+    scenario: AiScenarioConfig,
+) -> list[Any]:
+    selected = active_config.services.get(scenario.service_id)
+    candidates: list[Any] = []
+    if selected is not None and _service_is_callable(selected):
+        candidates.append(selected)
+    for service in active_config.services.values():
+        if service.id == getattr(selected, "id", ""):
+            continue
+        if service.protocol != "provider_login" or not _service_is_callable(service):
+            continue
+        candidates.append(service)
+    return candidates
+
+
+def _service_is_callable(service: Any) -> bool:
+    if not getattr(service, "enabled", False):
+        return False
+    protocol = str(getattr(service, "protocol", "") or "").strip()
+    if protocol == "provider_login":
+        return bool(
+            str(getattr(service, "owner_provider_id", "") or "").strip()
+            and str(getattr(service, "completion_entrypoint", "") or "").strip()
+        )
+    if not str(getattr(service, "default_model", "") or "").strip():
+        return False
+    api_key = str(getattr(service, "api_key", "") or "").strip()
+    api_key_env = str(getattr(service, "api_key_env", "") or "").strip()
+    return bool(api_key or (api_key_env and os.environ.get(api_key_env, "").strip()))
 
 
 def _service_target(service: AiScenarioConfig | Any) -> str:
@@ -75,6 +119,9 @@ def _service_target(service: AiScenarioConfig | Any) -> str:
         return f"{base_url or 'https://api.openai.com/v1'}/chat/completions"
     if protocol == "anthropic_messages":
         return "https://api.anthropic.com/v1/messages"
+    if protocol == "provider_login":
+        owner_provider_id = str(getattr(service, "owner_provider_id", "") or "").strip()
+        return f"provider-login://{owner_provider_id or 'unknown'}"
     return base_url
 
 

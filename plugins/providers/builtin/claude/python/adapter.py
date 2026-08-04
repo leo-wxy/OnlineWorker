@@ -8,6 +8,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import time
 import uuid
 from typing import Any, Awaitable, Callable
@@ -1733,19 +1734,45 @@ class ClaudeAdapter:
             legacy["detail"] = readiness.get("detail")
         return legacy
 
-    async def _check_cli_readiness_for_prefix(self, prefix: list[str]) -> dict[str, Any]:
+    async def _check_cli_readiness_for_prefix(
+        self,
+        prefix: list[str],
+        *,
+        env: dict[str, str] | None = None,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
         try:
             proc = await asyncio.create_subprocess_exec(
                 *prefix,
                 "auth",
                 "status",
-                env=self._build_claude_env(),
+                env=env if env is not None else self._build_claude_env(),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 limit=CLAUDE_STREAM_BUFFER_LIMIT,
+                start_new_session=True,
             )
-            stdout, stderr = await proc.communicate()
+            communicate = proc.communicate()
+            if timeout_seconds is None:
+                stdout, stderr = await communicate
+            else:
+                stdout, stderr = await asyncio.wait_for(
+                    communicate,
+                    timeout=max(0.01, float(timeout_seconds)),
+                )
+        except asyncio.TimeoutError:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                proc.kill()
+            await proc.wait()
+            return _new_claude_readiness(
+                ready=False,
+                source="cliAuth",
+                reason="authStatusFailed",
+                detail=f"Claude auth status timed out after {timeout_seconds}s.",
+            )
         except FileNotFoundError as e:
             return _new_claude_readiness(
                 ready=False,
@@ -1817,6 +1844,9 @@ class ClaudeAdapter:
     async def _check_launch_methods_readiness(
         self,
         runtime_readiness: dict[str, Any] | None,
+        *,
+        cli_env: dict[str, str] | None = None,
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         if runtime_readiness is not None and runtime_readiness.get("ready"):
             method_statuses: list[dict[str, Any]] = []
@@ -1872,7 +1902,11 @@ class ClaudeAdapter:
 
         for method in self._launch_methods:
             prefix = resolve_claude_command_prefix(method["bin"])
-            readiness = await self._check_cli_readiness_for_prefix(prefix)
+            readiness = await self._check_cli_readiness_for_prefix(
+                prefix,
+                env=cli_env,
+                timeout_seconds=timeout_seconds,
+            )
             if first_cli_readiness is None:
                 first_cli_readiness = readiness
                 first_cli_method = method
