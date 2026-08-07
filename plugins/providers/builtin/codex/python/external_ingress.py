@@ -10,6 +10,10 @@ import select
 import sys
 from typing import Any
 
+from plugins.providers.builtin.codex.python.storage_runtime import (
+    is_codex_user_visible_session,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +37,10 @@ _RELOAD_FLAGS = (
 class _RolloutState:
     session_id: str
     cwd: str = ""
+    source: Any = None
+    thread_source: str = ""
+    parent_thread_id: str = ""
+    user_visible: bool = True
     turn_id: str = ""
     prompt: str = ""
     final_text: str = ""
@@ -411,6 +419,22 @@ class CodexDesktopRolloutIngress:
         if row_type == "session_meta":
             state.session_id = str(payload.get("id") or state.session_id).strip()
             state.cwd = str(payload.get("cwd") or state.cwd).strip()
+            state.source = payload.get("source")
+            state.thread_source = str(payload.get("thread_source") or "").strip()
+            source = state.source if isinstance(state.source, dict) else {}
+            subagent = source.get("subagent") if isinstance(source, dict) else None
+            thread_spawn = (
+                subagent.get("thread_spawn") if isinstance(subagent, dict) else None
+            )
+            state.parent_thread_id = str(
+                thread_spawn.get("parent_thread_id")
+                if isinstance(thread_spawn, dict)
+                else ""
+            ).strip()
+            state.user_visible = is_codex_user_visible_session(
+                state.source,
+                thread_source=state.thread_source,
+            )
         elif row_type == "turn_context":
             state.turn_id = str(
                 payload.get("turn_id") or payload.get("turnId") or state.turn_id
@@ -446,6 +470,8 @@ class CodexDesktopRolloutIngress:
         if parsed is None or not state.session_id:
             return
         row_type, payload = parsed
+        if not state.user_visible:
+            return
         if not self._should_publish_session(state.session_id):
             return
 

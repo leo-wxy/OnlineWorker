@@ -201,6 +201,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-11)
 - Phase 19 added on 2026-07-11: Attention Center And Session Interrupt/Resume. Global search is explicitly excluded.
 - Phase 19 completed on 2026-07-11 with source and installed core UAT, version `1.8.0` package/install verification, and explicit waiver of the unexecuted installed narrow-width visual check.
 - Phase 20 added on 2026-07-11: bounded local diagnostics and privacy-safe support-bundle export in Maintenance; no automatic repair or upload.
+- Phase 21 added on 2026-08-04: unify provider-owned child-session visibility before EventBus publication so Desktop and Telegram consume the same top-level session set.
+- Phase 21 `21-01` source and installed Desktop verification completed on 2026-08-07: child rollout ingress is suppressed before EventBus publication, the affected workspace renders only parent sessions, and real Telegram workspace visual UAT remains unverified.
 
 ## Session Continuity
 

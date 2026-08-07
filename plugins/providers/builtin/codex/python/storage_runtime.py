@@ -12,19 +12,21 @@ CODEX_SESSIONS_DIR = "~/.codex/sessions"
 _CODEX_SESSION_FILE_CACHE: dict[str, dict[str, object]] = {}
 
 
-def _is_codex_subagent_source(source) -> bool:
-    """判断 codex threads.source 是否表示 subagent 线程。"""
+def is_codex_user_visible_session(source=None, *, thread_source=None) -> bool:
+    """统一判断 Codex session 是否应作为顶层用户会话展示。"""
+    if str(thread_source or "").strip().lower() == "subagent":
+        return False
     if not source or source == "vscode":
-        return False
+        return True
     if isinstance(source, dict):
-        return "subagent" in source
+        return "subagent" not in source
     if not isinstance(source, str):
-        return False
+        return True
     try:
         parsed = json.loads(source)
     except Exception:
-        return False
-    return isinstance(parsed, dict) and "subagent" in parsed
+        return True
+    return not (isinstance(parsed, dict) and "subagent" in parsed)
 
 
 def scan_codex_session_cwds(sessions_dir: Optional[str] = None) -> list[dict]:
@@ -125,7 +127,10 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
                         _parse_codex_timestamp_ms(candidate.get("timestamp")),
                         _parse_codex_timestamp_ms(payload.get("timestamp")),
                     )
-                    if not _is_codex_subagent_source(payload.get("source")):
+                    if is_codex_user_visible_session(
+                        payload.get("source"),
+                        thread_source=payload.get("thread_source"),
+                    ):
                         cwd = payload.get("cwd") or candidate.get("cwd")
                         if isinstance(cwd, str) and cwd and os.path.isabs(cwd):
                             tid = (
@@ -219,7 +224,7 @@ def _query_codex_active_thread_rows_by_workspace() -> tuple[dict[str, set[str]],
         return active_ids_by_workspace, rows_by_workspace
 
     for row in rows:
-        if _is_codex_subagent_source(row["source"] or ""):
+        if not is_codex_user_visible_session(row["source"] or ""):
             continue
         workspace_path = str(row["cwd"] or "").strip()
         thread_id = str(row["id"] or "").strip()
@@ -502,7 +507,7 @@ def query_codex_active_thread_ids(
             active_ids.update(
                 row[0]
                 for row in rows
-                if not _is_codex_subagent_source(row[1] or "")
+                if is_codex_user_visible_session(row[1] or "")
             )
     except Exception:
         pass
@@ -747,7 +752,7 @@ def list_codex_threads_by_cwd(
         }
 
     for r in rows:
-        if _is_codex_subagent_source(r["source"] or ""):
+        if not is_codex_user_visible_session(r["source"] or ""):
             continue
         tid = r["id"]
         item = {
@@ -888,7 +893,7 @@ def list_codex_subagent_thread_ids(thread_ids: list[str]) -> set[str]:
         return {
             row["id"]
             for row in rows
-            if _is_codex_subagent_source(row["source"] or "")
+            if not is_codex_user_visible_session(row["source"] or "")
         }
     except Exception:
         return set()

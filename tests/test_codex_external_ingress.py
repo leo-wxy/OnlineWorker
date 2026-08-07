@@ -242,6 +242,76 @@ async def test_new_desktop_rollout_file_is_discovered_without_session_polling(tm
     )
 
 
+@pytest.mark.asyncio
+async def test_desktop_rollout_subagent_never_enters_provider_event_path(tmp_path: Path):
+    parent_session_id = "11111111-2222-4333-8444-555555555555"
+    child_session_id = "22222222-3333-4444-8555-666666666666"
+    turn_id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+    rollout_path = str(
+        tmp_path / f"rollout-2026-08-07T10-00-00-{child_session_id}.jsonl"
+    )
+    adapter = SimpleNamespace(
+        ingest_external_hook_payload=AsyncMock(
+            return_value={"accepted": True, "emitted": 4}
+        ),
+        has_authoritative_live_session=MagicMock(return_value=False),
+    )
+    ingress = CodexDesktopRolloutIngress(
+        adapter=adapter,
+        state=AppState(storage=AppStorage()),
+        sessions_dir=str(tmp_path),
+    )
+
+    rows = [
+        {
+            "type": "session_meta",
+            "payload": {
+                "id": child_session_id,
+                "cwd": "/Users/example/Projects/desktop-workspace",
+                "source": {
+                    "subagent": {
+                        "thread_spawn": {
+                            "parent_thread_id": parent_session_id,
+                            "depth": 1,
+                            "agent_path": "/root/example-child",
+                            "agent_nickname": "Example",
+                            "agent_role": "default",
+                        }
+                    }
+                },
+                "thread_source": "subagent",
+            },
+        },
+        {
+            "type": "turn_context",
+            "payload": {"turn_id": turn_id},
+        },
+        {
+            "type": "response_item",
+            "payload": {
+                "role": "user",
+                "content": [{"type": "input_text", "text": "内部子任务"}],
+            },
+        },
+        {
+            "type": "event_msg",
+            "payload": {
+                "type": "task_complete",
+                "turn_id": turn_id,
+                "last_agent_message": "内部子任务已完成。",
+            },
+        },
+    ]
+
+    for row in rows:
+        await ingress._process_rollout_line(
+            rollout_path,
+            json.dumps(row, ensure_ascii=False).encode("utf-8"),
+        )
+
+    adapter.ingest_external_hook_payload.assert_not_awaited()
+
+
 def test_rollout_ingress_skips_onlineworker_owned_and_live_sessions(tmp_path: Path):
     session_id = "33333333-4444-4555-8666-777777777777"
     workspace = WorkspaceInfo(

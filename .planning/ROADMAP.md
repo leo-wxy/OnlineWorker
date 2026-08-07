@@ -26,6 +26,7 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 17: Provider Session Core Isolation** - Provider-private parsing stays in provider/plugin code; shared surfaces consume generic owner-bridge facts. Full source gates and installed package/IPC/provider-facts checks passed; real Telegram visual UAT was explicitly waived and is not claimed as passed. (completed 2026-07-11)
 - [x] **Phase 18: Provider Session New Flow** - App and Telegram share `core/provider_session_new.py` for validation, real thread materialization, and first-message send while retaining separate transport shells. Packaged App materialization passed for Codex and Claude; real Telegram `/new` UAT was explicitly waived and is not claimed as passed. (completed 2026-07-11)
 - [x] **Phase 19: Attention Center And Session Interrupt/Resume** - Added the focused Task Board attention center and provider-owned Session interrupt/resume/recovery controls. Source and installed core UAT passed; narrow-width installed visual UAT was explicitly waived without claiming a pass. (completed 2026-07-11)
+- [ ] **Phase 21: Provider Child-Session Visibility** - Unify provider-owned child-session classification before EventBus publication so Desktop, Telegram, Task Board, notifications, and persisted runtime state expose the same top-level session set.
 
 ## Phase Details
 
@@ -799,3 +800,37 @@ Plans:
 - [x] 20-02 — Add Maintenance UI, export/reveal flow, and installed-app verification
 
 **Status:** Completed on 2026-07-11. Source regression and installed-app diagnostics, localized cancellation, strict privacy-safe ZIP export, real `.env` zero-match scan, and Finder reveal passed.
+
+### Phase 21: 统一 Provider 子会话可见性与多端展示过滤
+
+**Goal:** Establish one provider-owned session visibility decision so internal child sessions never become top-level user sessions in Desktop, Telegram workspace/thread lists, notifications, or shared runtime state.
+**Requirements**: TBD
+**Depends on:** Phase 16, Phase 17
+**Scope Fence:** Provider plugins own provider-private child-session classification. Shared ingress, EventBus, owner bridge, Desktop, Telegram, and notification consumers receive only canonical user-visible sessions. This phase must not add provider-private source parsing to shared UI/bot code, delete provider transcript history, or hide normal parent sessions.
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 21-01: Filter Codex child sessions before top-level event publication
+  - [x] Preserve rollout source, thread source, and parent metadata in the Codex provider ingress.
+  - [x] Reuse one provider-owned visibility decision for rollout ingress and stored-session filtering.
+  - [x] Prevent child start/completion events from creating Desktop, Task Board, notification, or Telegram projections.
+  - [x] Keep existing provider-backed stale-state cleanup and Telegram list filtering on the same Codex classification helper.
+  - [x] Source-verify normal parent ingress, child suppression, provider facts, and Telegram cleanup/list behavior.
+  - [x] Package, install, restart, and visually verify the Desktop Session Browser.
+
+Success Criteria (what must be TRUE):
+
+  1. A single provider capability decides whether a session is user-visible; all provider-specific source parsing stays inside the provider plugin.
+  2. External ingress applies that decision before publishing session lifecycle events to the shared EventBus.
+  3. Desktop Session Browser and Telegram workspace `/list`/overview show the same visible session set.
+  4. Previously persisted child-session projections are reconciled out of OnlineWorker state and in-memory UI snapshots without deleting provider history.
+  5. Parent sessions and providers without child-session semantics retain their existing behavior.
+  6. Focused regression tests cover ingress, provider facts, shared state reconciliation, Desktop session projection, and Telegram workspace/thread presentation.
+
+Planning status:
+
+- Phase 21 was added on 2026-08-04 after a real Codex child session appeared as a top-level Desktop session. Investigation confirmed provider storage already filtered the child source, while external rollout ingress discarded that source classification and published the rollout as an ordinary session, allowing shared state and downstream surfaces to diverge.
+- The architecture decision is explicit: Desktop and Telegram must not maintain separate child-session filters. They consume one provider-owned visibility result at the common session/event boundary.
+- Phase 21 inherits the session-related follow-up from `ea6ba8f`: keep Desktop external rollout ingress and shared EventBus delivery, but repair its source-metadata loss, top-level session projection, stale-state reconciliation, and multi-surface visibility parity. Login-state AI summary transport remains an upstream capability and is not reimplemented in this phase.
+- `21-01` reached source-verified and installed-Desktop-verified status on 2026-08-07. The red regression reproduced two provider-event publications for one child rollout; after the fix it passed, the focused ingress/storage/Telegram set passed `42` tests, and the broader Codex/event/owner-bridge set passed `167` tests. The packaged `1.8.1` app was installed and its Session Browser showed only the two parent sessions in the affected workspace. Real Telegram workspace visual UAT remains unverified, so Phase 21 is not closed.
