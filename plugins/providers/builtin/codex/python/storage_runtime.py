@@ -29,6 +29,29 @@ def is_codex_user_visible_session(source=None, *, thread_source=None) -> bool:
     return not (isinstance(parsed, dict) and "subagent" in parsed)
 
 
+def _load_codex_thread_names() -> dict[str, str]:
+    names: dict[str, str] = {}
+    try:
+        with open(
+            os.path.expanduser("~/.codex/session_index.jsonl"),
+            "r",
+            encoding="utf-8",
+            errors="ignore",
+        ) as f:
+            for line in f:
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                thread_id = str(row.get("id") or "").strip()
+                thread_name = str(row.get("thread_name") or "").strip()
+                if thread_id and thread_name:
+                    names[thread_id] = thread_name
+    except OSError:
+        pass
+    return names
+
+
 def scan_codex_session_cwds(sessions_dir: Optional[str] = None) -> list[dict]:
     """
     扫描 ~/.codex/sessions/ 中所有 session 的 cwd，去重后返回列表。
@@ -724,6 +747,7 @@ def list_codex_threads_by_cwd(
     import sqlite3
 
     db_path = os.path.expanduser("~/.codex/state_5.sqlite")
+    thread_names = _load_codex_thread_names()
     rows: list[dict] = []
 
     try:
@@ -746,6 +770,7 @@ def list_codex_threads_by_cwd(
     for meta in list_codex_session_meta_threads_by_cwd(cwd, sessions_dir=sessions_dir, limit=limit * 3):
         result_by_id[meta["id"]] = {
             "id": meta["id"],
+            "title": thread_names.get(str(meta["id"])),
             "preview": meta.get("preview"),
             "createdAt": int(meta.get("createdAt") or 0),
             "updatedAt": int(meta.get("updatedAt") or 0),
@@ -757,6 +782,7 @@ def list_codex_threads_by_cwd(
         tid = r["id"]
         item = {
             "id": tid,
+            "title": thread_names.get(str(tid)),
             "preview": r["title"] or None,
             "createdAt": r["created_at"] or 0,
             "updatedAt": r["updated_at"] or 0,
@@ -765,6 +791,8 @@ def list_codex_threads_by_cwd(
         if existing is None:
             result_by_id[tid] = item
         else:
+            if not existing.get("title"):
+                existing["title"] = item["title"]
             if not existing.get("preview"):
                 existing["preview"] = item["preview"]
             existing["createdAt"] = max(int(existing.get("createdAt") or 0), int(item["createdAt"] or 0))
@@ -787,6 +815,7 @@ def list_codex_sessions(
     sessions_dir: Optional[str] = None,
 ) -> list[dict]:
     index = _build_codex_session_index(sessions_dir)
+    thread_names = _load_codex_thread_names()
     workspace_counts = dict(index.get("workspace_counts", {}))
     threads_by_workspace = dict(index.get("threads_by_workspace", {}))
     running_ids_by_workspace = dict(index.get("running_ids_by_workspace", {}))
@@ -846,7 +875,13 @@ def list_codex_sessions(
             session_rows.append(
                 {
                     "id": thread_id,
-                    "title": str(item.get("preview") or thread_id).strip() or thread_id,
+                    "title": str(
+                        thread_names.get(thread_id)
+                        or item.get("title")
+                        or item.get("preview")
+                        or thread_id
+                    ).strip() or thread_id,
+                    "preview": str(item.get("preview") or "").strip(),
                     "workspace": workspace_path,
                     "archived": bool(active_ids) and thread_id not in active_ids,
                     "providerActive": thread_id in running_ids,

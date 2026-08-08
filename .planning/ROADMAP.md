@@ -803,11 +803,11 @@ Plans:
 
 ### Phase 21: 统一 Provider 子会话可见性与多端展示过滤
 
-**Goal:** Establish one provider-owned session visibility decision so internal child sessions never become top-level user sessions in Desktop, Telegram workspace/thread lists, notifications, or shared runtime state.
+**Goal:** Establish one provider-owned session presentation decision so internal child sessions stay hidden and provider-native user-facing titles remain consistent across Desktop and Telegram.
 **Requirements**: TBD
 **Depends on:** Phase 16, Phase 17
 **Scope Fence:** Provider plugins own provider-private child-session classification. Shared ingress, EventBus, owner bridge, Desktop, Telegram, and notification consumers receive only canonical user-visible sessions. This phase must not add provider-private source parsing to shared UI/bot code, delete provider transcript history, or hide normal parent sessions.
-**Plans:** 1 plan
+**Plans:** 2 plans
 
 Plans:
 
@@ -818,12 +818,19 @@ Plans:
   - [x] Keep existing provider-backed stale-state cleanup and Telegram list filtering on the same Codex classification helper.
   - [x] Source-verify normal parent ingress, child suppression, provider facts, and Telegram cleanup/list behavior.
   - [x] Package, install, restart, and visually verify the Desktop Session Browser.
+- [x] 21-02: Reuse Codex user-facing thread names across Desktop and Telegram
+  - [x] Read Codex `session_index.jsonl.thread_name` as the offline user-facing title source.
+  - [x] Preserve rollout/SQLite first-user content as `preview` instead of treating it as the title.
+  - [x] Prefer app-server `Thread.name` when a workspace is opened or a Telegram topic is created.
+  - [x] Make Telegram `/list` prefer provider `title`/`name` before `preview`.
+  - [x] Source-verify provider facts, Telegram list labels, workspace synchronization, and topic naming.
+  - [x] Package, install, restart, and verify the installed runtime.
 
 Success Criteria (what must be TRUE):
 
   1. A single provider capability decides whether a session is user-visible; all provider-specific source parsing stays inside the provider plugin.
   2. External ingress applies that decision before publishing session lifecycle events to the shared EventBus.
-  3. Desktop Session Browser and Telegram workspace `/list`/overview show the same visible session set.
+  3. Desktop Session Browser and Telegram workspace `/list`/overview show the same visible session set and provider-native user-facing titles.
   4. Previously persisted child-session projections are reconciled out of OnlineWorker state and in-memory UI snapshots without deleting provider history.
   5. Parent sessions and providers without child-session semantics retain their existing behavior.
   6. Focused regression tests cover ingress, provider facts, shared state reconciliation, Desktop session projection, and Telegram workspace/thread presentation.
@@ -834,3 +841,4 @@ Planning status:
 - The architecture decision is explicit: Desktop and Telegram must not maintain separate child-session filters. They consume one provider-owned visibility result at the common session/event boundary.
 - Phase 21 inherits the session-related follow-up from `ea6ba8f`: keep Desktop external rollout ingress and shared EventBus delivery, but repair its source-metadata loss, top-level session projection, stale-state reconciliation, and multi-surface visibility parity. Login-state AI summary transport remains an upstream capability and is not reimplemented in this phase.
 - `21-01` reached source-verified and installed-Desktop-verified status on 2026-08-07. The red regression reproduced two provider-event publications for one child rollout; after the fix it passed, the focused ingress/storage/Telegram set passed `42` tests, and the broader Codex/event/owner-bridge set passed `167` tests. The packaged `1.8.1` app was installed and its Session Browser showed only the two parent sessions in the affected workspace. Real Telegram workspace visual UAT remains unverified, so Phase 21 is not closed.
+- `21-02` reached source-verified and packaged-runtime-verified status on 2026-08-08. Investigation confirmed Codex app-server exposes the optional user-facing title as `Thread.name`, while `Thread.preview` is normally the first user message; the offline equivalent is `session_index.jsonl.thread_name`. OnlineWorker previously bypassed both title sources and truncated path-prefixed preview text. The repair preserves title and preview separately in provider facts, refreshes cached workspace labels from app-server names, and makes Telegram list/topic presentation prefer the canonical title. Focused red/green coverage, a `200 passed` broader regression, and a real local two-session replay returned the expected provider-native titles. `bash verify-packaged-fast.sh` built and installed `OnlineWorker_1.8.1_aarch64.dmg`, then relaunched the installed App and bot successfully. Live Telegram visual UAT remains unverified.

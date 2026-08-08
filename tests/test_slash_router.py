@@ -714,7 +714,13 @@ async def test_list_threads_excludes_inactive_codex_state_only_placeholders(monk
     monkeypatch.setattr(
         "bot.handlers.thread.list_provider_threads",
         lambda tool_name, workspace_path, limit=20: [
-            {"id": "tid-real-1", "preview": "真实会话 1", "createdAt": 300, "updatedAt": 300},
+            {
+                "id": "tid-real-1",
+                "title": "真实会话 1",
+                "preview": "/Users/example/Projects/sample-project/module 1",
+                "createdAt": 300,
+                "updatedAt": 300,
+            },
             {"id": "tid-real-2", "preview": "真实会话 2", "createdAt": 200, "updatedAt": 200},
             {"id": "tid-real-3", "preview": "真实会话 3", "createdAt": 100, "updatedAt": 100},
         ],

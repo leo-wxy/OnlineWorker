@@ -269,6 +269,82 @@ def test_list_codex_threads_by_cwd_filters_subagent_threads(tmp_path, monkeypatc
     assert [r["id"] for r in result] == ["main-1"]
 
 
+def test_codex_session_index_thread_name_is_the_user_visible_title(tmp_path, monkeypatch):
+    sessions_dir = tmp_path / "sessions"
+    day_dir = sessions_dir / "2026" / "08" / "08"
+    day_dir.mkdir(parents=True)
+    session_id = "11111111-2222-4333-8444-555555555555"
+    rollout_path = day_dir / f"rollout-2026-08-08T10-00-00-{session_id}.jsonl"
+    rollout_path.write_text(
+        "\n".join(
+            json.dumps(row, ensure_ascii=False)
+            for row in [
+                {
+                    "type": "session_meta",
+                    "payload": {
+                        "id": session_id,
+                        "cwd": "/Users/example/Projects/sample-workspace",
+                        "source": "vscode",
+                        "timestamp": "2026-08-08T10:00:00Z",
+                    },
+                },
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": "/Users/example/Projects/sample-workspace/module\n\n检查 network 配置",
+                            }
+                        ],
+                    },
+                },
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    session_index_path = tmp_path / "session_index.jsonl"
+    session_index_path.write_text(
+        json.dumps(
+            {
+                "id": session_id,
+                "thread_name": "检查 Harmony network 配置",
+                "updated_at": "2026-08-08T10:01:00Z",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    real_expanduser = __import__("os").path.expanduser
+
+    def fake_expanduser(path: str) -> str:
+        if path == "~/.codex/state_5.sqlite":
+            return str(tmp_path / "missing-state.sqlite")
+        if path == "~/.codex/session_index.jsonl":
+            return str(session_index_path)
+        return real_expanduser(path)
+
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.storage_runtime.os.path.expanduser",
+        fake_expanduser,
+    )
+
+    threads = list_codex_threads_by_cwd(
+        "/Users/example/Projects/sample-workspace",
+        sessions_dir=str(sessions_dir),
+    )
+    sessions = list_codex_sessions(limit=20, sessions_dir=str(sessions_dir))
+
+    assert threads[0]["title"] == "检查 Harmony network 配置"
+    assert threads[0]["preview"].startswith("/Users/example/Projects/sample-workspace")
+    assert sessions[0]["title"] == "检查 Harmony network 配置"
+    assert sessions[0]["preview"].startswith("/Users/example/Projects/sample-workspace")
+
+
 def test_list_codex_threads_by_cwd_sorts_by_created_at_desc(tmp_path, monkeypatch):
     """codex /list 应按 created_at 倒序，而不是按 updated_at。"""
     db_path = tmp_path / "state_5.sqlite"

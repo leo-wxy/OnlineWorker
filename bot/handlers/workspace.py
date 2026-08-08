@@ -822,7 +822,11 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
                 thread_info = ThreadInfo(
                     thread_id=sid,
                     topic_id=None,
-                    preview=matched.get("preview"),
+                    preview=(
+                        matched.get("title")
+                        or matched.get("name")
+                        or matched.get("preview")
+                    ),
                     archived=False,
                     is_active=True,
                     source=_provider_thread_source(ws_info.tool),
@@ -845,12 +849,22 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
 
             for item in db_threads:
                 if item.get("id") == full_tid:
-                    latest_preview = item.get("preview") or item.get("title") or None
+                    latest_preview = (
+                        item.get("title")
+                        or item.get("name")
+                        or item.get("preview")
+                        or None
+                    )
                     break
             if not latest_preview:
                 for item in local_threads:
                     if item.get("id") == full_tid:
-                        latest_preview = item.get("preview") or item.get("title") or None
+                        latest_preview = (
+                            item.get("title")
+                            or item.get("name")
+                            or item.get("preview")
+                            or None
+                        )
                         break
             if latest_preview and latest_preview != thread_info.preview:
                 thread_info.preview = latest_preview
@@ -1167,9 +1181,15 @@ async def _open_workspace(
     needs_save = False
     for dt in threads_from_server:
         tid = dt.get("id", "")
-        if not tid or tid in ws_info.threads:
+        if not tid:
             continue
-        preview = dt.get("preview") or dt.get("title") or None
+        preview = dt.get("name") or dt.get("title") or dt.get("preview") or None
+        existing_thread = ws_info.threads.get(tid)
+        if existing_thread is not None:
+            if preview and existing_thread.preview != preview:
+                existing_thread.preview = preview
+                needs_save = True
+            continue
         ws_info.threads[tid] = ThreadInfo(
             thread_id=tid,
             topic_id=None,

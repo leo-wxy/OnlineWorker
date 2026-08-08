@@ -105,3 +105,33 @@ Feedback loop and verification:
 Remaining validation:
 
 - Real Telegram workspace overview and `/list` visual UAT has not been executed. Source tests cover the shared provider classification and existing Telegram filter/cleanup paths, but Phase 21 remains open until that live surface is accepted or explicitly waived.
+
+## Implementation Record — 2026-08-08
+
+Implemented the second Phase 21 slice for provider-native session titles.
+
+Verified root cause:
+
+- Codex app-server defines `Thread.name` as the optional user-facing thread title and `Thread.preview` as usually the first user message.
+- The offline Codex index stores the same user-facing value in `~/.codex/session_index.jsonl` as `thread_name`.
+- OnlineWorker provider facts previously read SQLite/rollout first-user content into `preview` and never read `thread_name`.
+- Telegram `/list`, workspace overview state, and topic creation then treated the path-prefixed preview as the display title and truncated it from the front.
+
+Implemented behavior:
+
+- Codex storage facts now expose `thread_name` as `title` while retaining first-user content as `preview`.
+- Workspace synchronization prefers live app-server `name`, then provider `title`, then `preview`, and refreshes stale cached labels.
+- Telegram `/list` and topic creation use `title`/`name` before `preview`.
+- No title generator, AI request, shared storage schema, or new dependency was added.
+
+Feedback loop and verification:
+
+- Four focused regressions failed before the repair: provider title extraction, Telegram list naming, workspace synchronization, and topic naming.
+- The same four regressions passed after the repair.
+- Broader storage, adapter, owner-bridge, Telegram, and workspace regression passed: `200 passed`.
+- A real local two-session replay changed from duplicate path-prefix labels to two distinct Codex-native titles.
+- `bash verify-packaged-fast.sh` built and installed `OnlineWorker_1.8.1_aarch64.dmg`, then relaunched `/Applications/OnlineWorker.app`; the installed App and bot processes were running.
+
+Remaining validation:
+
+- Real Telegram workspace `/list`/overview visual UAT has not been run in this slice.

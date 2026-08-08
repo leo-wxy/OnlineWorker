@@ -880,9 +880,14 @@ def make_list_thread_handler(state: AppState, group_chat_id: int) -> Callable:
 
         for s in merged_sessions[:20]:
             tid = s.get("id", "")
-            preview = (s.get("preview") or "")[:40]
+            title = (
+                s.get("title")
+                or s.get("name")
+                or s.get("preview")
+                or ""
+            )[:40]
             tid_short = tid[-8:]
-            label = preview or f"thread-{tid_short}"
+            label = title or f"thread-{tid_short}"
             existing_thread = ws.threads.get(tid)
             existing_topic_id = (
                 get_route_aware_thread_topic_id(state, ws, existing_thread)
@@ -890,7 +895,7 @@ def make_list_thread_handler(state: AppState, group_chat_id: int) -> Callable:
                 else None
             )
             icon = "✅" if existing_topic_id else "📌"
-            lines.append(f"{icon} `{tid_short}`  {preview}")
+            lines.append(f"{icon} `{tid_short}`  {title}")
 
             label = f"{icon} {label}"[:40]
             buttons.append([InlineKeyboardButton(

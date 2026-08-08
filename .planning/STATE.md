@@ -203,6 +203,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-11)
 - Phase 20 added on 2026-07-11: bounded local diagnostics and privacy-safe support-bundle export in Maintenance; no automatic repair or upload.
 - Phase 21 added on 2026-08-04: unify provider-owned child-session visibility before EventBus publication so Desktop and Telegram consume the same top-level session set.
 - Phase 21 `21-01` source and installed Desktop verification completed on 2026-08-07: child rollout ingress is suppressed before EventBus publication, the affected workspace renders only parent sessions, and real Telegram workspace visual UAT remains unverified.
+- Phase 21 `21-02` source and packaged-runtime verification completed on 2026-08-08: Codex app-server `Thread.name` and offline `session_index.jsonl.thread_name` now drive user-facing titles, rollout/SQLite content remains preview text, and Telegram list/workspace/topic labels share the provider title priority. Focused red/green tests, a broader `200 passed` regression, and a real local two-session replay passed. `bash verify-packaged-fast.sh` built and installed `OnlineWorker_1.8.1_aarch64.dmg`, then relaunched the installed App and bot successfully; live Telegram visual UAT remains unverified.
 
 ## Session Continuity
 

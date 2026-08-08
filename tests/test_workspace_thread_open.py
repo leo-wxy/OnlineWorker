@@ -308,7 +308,13 @@ async def test_open_workspace_uses_provider_workspace_hooks_for_custom_provider(
     adapter.list_threads = AsyncMock(
         return_value=[
             {"id": "noise-1", "preview": "noise", "updatedAt": 1, "kind": "noise"},
-            {"id": "main-1", "preview": "main", "updatedAt": 2, "kind": "main"},
+            {
+                "id": "main-1",
+                "name": "可读的会话标题",
+                "preview": "/Users/example/Projects/sample-project/module",
+                "updatedAt": 2,
+                "kind": "main",
+            },
         ]
     )
     state.set_adapter("custom", adapter)
@@ -363,6 +369,7 @@ async def test_open_workspace_uses_provider_workspace_hooks_for_custom_provider(
     assert normalized_calls
     assert opened_calls == [(adapter, "/tmp/custom", "custom:/tmp/custom")]
     assert list(ws_info.threads.keys()) == ["main-1"]
+    assert ws_info.threads["main-1"].preview == "可读的会话标题"
     assert ws_info.threads["main-1"].is_active is True
     assert ws_info.header_message_id == 7101
 
@@ -408,7 +415,8 @@ async def test_thread_open_uses_latest_codex_title_for_topic_name(monkeypatch):
         lambda tool_name, path, limit=100: [
             {
                 "id": "tid-1234567890abcdef",
-                "preview": "latest title from sqlite",
+                "title": "latest user-visible title",
+                "preview": "/Users/example/Projects/sample-project/module",
                 "updatedAt": 123,
             }
         ],
@@ -435,8 +443,8 @@ async def test_thread_open_uses_latest_codex_title_for_topic_name(monkeypatch):
 
     bot.create_forum_topic.assert_awaited_once()
     call_kwargs = bot.create_forum_topic.await_args.kwargs
-    assert call_kwargs["name"] == "[codex/onlineWorker] latest title from sqlite"
-    assert ws.threads["tid-1234567890abcdef"].preview == "latest title from sqlite"
+    assert call_kwargs["name"] == "[codex/onlineWorker] latest user-visible title"
+    assert ws.threads["tid-1234567890abcdef"].preview == "latest user-visible title"
 
 
 @pytest.mark.asyncio
