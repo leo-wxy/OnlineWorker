@@ -28,15 +28,21 @@ test("menubar popover keeps dynamic provider tabs and existing navigation action
   assert.match(source, /label="Usage"/);
 });
 
-test("menubar overview combines precision usage with provider session rails", () => {
+test("menubar overview prioritizes session rows before the compact usage summary", () => {
   assert.match(source, /function OverviewRailPanel/);
+  assert.match(source, />\s*OnlineWorker\s*<\/h1>/);
+  assert.match(source, />Live</);
   assert.match(source, /function UsageSegments/);
   assert.match(source, /style=\{\{ width: `\$\{\(\(provider\.tokensToday/);
   assert.match(source, /function SessionRailRow/);
-  assert.match(source, /grid-cols-\[3px_minmax\(0,1fr\)_30px\]/);
-  assert.match(source, />Sessions<\/h3>/);
-  assert.match(source, /Latest from each provider/);
-  assert.match(source, /const status = lane\?\.status \|\| "Idle"/);
+  assert.match(source, />Sessions<\/h2>[\s\S]*>Usage<\/h2>/);
+  assert.match(source, /statusTone\(lane\.status\)/);
+  assert.match(source, /providerIconUrls\[lane\.providerId\]/);
+  assert.match(source, /get_provider_metadata/);
+  assert.doesNotMatch(source, /function OverviewPulse/);
+  assert.doesNotMatch(source, /needsAttentionCount/);
+  assert.doesNotMatch(source, /Latest from each provider/);
+  assert.doesNotMatch(source, /workspaceText\} · \{status\}/);
 });
 
 test("menubar provider tab uses the provider rail detail layout", () => {

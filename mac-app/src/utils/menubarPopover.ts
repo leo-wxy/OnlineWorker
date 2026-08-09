@@ -108,17 +108,20 @@ export function statusTone(status: string | null) {
     return {
       badge: "bg-amber-50 text-amber-700 border border-amber-100",
       chip: "bg-amber-50 text-amber-700",
+      text: "text-amber-600",
     };
   }
   if (normalized.includes("run")) {
     return {
       badge: "bg-blue-50 text-blue-700 border border-blue-100",
       chip: "bg-emerald-50 text-emerald-700",
+      text: "text-emerald-600",
     };
   }
   return {
     badge: "bg-slate-100 text-slate-700 border border-slate-200",
     chip: "bg-slate-100 text-slate-700",
+    text: "text-slate-500",
   };
 }
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { ProviderMetadata } from "../../types";
 import type {
   MenubarPopoverSessionLane,
   MenubarPopoverSnapshot,
@@ -10,9 +11,9 @@ import type {
 } from "./types";
 import {
   formatRelativeAge,
-  formatTokenCount,
   lanePreviewText,
   providerAccent,
+  statusTone,
 } from "../../utils/menubarPopover";
 
 const OVERVIEW_TAB_ID = "overview";
@@ -30,7 +31,14 @@ function formatPopoverTokenCount(value: number | null, estimated = false) {
   if (value === null || Number.isNaN(value)) {
     return "--";
   }
-  return `${estimated ? "~" : ""}${formatTokenCount(value, false)}`;
+  const prefix = estimated ? "~" : "";
+  if (value >= 1_000_000) {
+    return `${prefix}${Number((value / 1_000_000).toFixed(2))}M`;
+  }
+  if (value >= 1_000) {
+    return `${prefix}${Number((value / 1_000).toFixed(1))}k`;
+  }
+  return `${prefix}${value}`;
 }
 
 function formatUsd(value: number | null) {
@@ -43,6 +51,10 @@ function formatUsd(value: number | null) {
   return `$${value.toFixed(value < 1 ? 3 : 2)}`;
 }
 
+function formatFreshness(generatedAtEpoch: number | null, nowMs: number) {
+  return formatRelativeAge(generatedAtEpoch, nowMs).replace(/ ago$/, "");
+}
+
 export function MenubarPopover() {
   const [snapshot, setSnapshot] = useState<MenubarPopoverSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
@@ -50,6 +62,7 @@ export function MenubarPopover() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [selectedTab, setSelectedTab] = useState(OVERVIEW_TAB_ID);
+  const [providerIconUrls, setProviderIconUrls] = useState<Record<string, string>>({});
   const snapshotLoadInFlight = useRef(false);
 
   useEffect(() => {
@@ -119,6 +132,29 @@ export function MenubarPopover() {
       }
     };
   }, [loadSnapshot]);
+
+  useEffect(() => {
+    let disposed = false;
+    void invoke<ProviderMetadata[]>("get_provider_metadata")
+      .then((metadata) => {
+        if (disposed) {
+          return;
+        }
+        const nextIconUrls = Object.fromEntries(
+          metadata.flatMap((provider) => {
+            const iconUrl = provider.icon?.url?.trim();
+            return iconUrl ? [[provider.id, iconUrl]] : [];
+          }),
+        );
+        setProviderIconUrls(nextIconUrls);
+      })
+      .catch(() => {
+        // Provider icons are optional in non-Tauri previews.
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -209,14 +245,50 @@ export function MenubarPopover() {
 
   const selectedProvider = providers.find((provider) => provider.providerId === selectedTab);
   const totalTokensText = formatPopoverTokenCount(snapshot?.usage.totalTokensToday ?? null);
-  const activeSessionCount = snapshot?.usage.activeSessionCount ?? 0;
-  const needsAttentionCount = snapshot?.usage.needsAttentionCount ?? 0;
+  const totalCostUsd = useMemo(() => {
+    const pricedProviders = providers.filter((provider) => provider.totalCostUsd !== null);
+    if (pricedProviders.length === 0) {
+      return null;
+    }
+    return pricedProviders.reduce((sum, provider) => sum + (provider.totalCostUsd ?? 0), 0);
+  }, [providers]);
+  const freshnessText = snapshot
+    ? formatFreshness(snapshot.generatedAtEpoch, nowMs)
+    : loading
+      ? "syncing"
+      : "--";
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-transparent p-[1px] text-[var(--ow-text)]">
-      <div className="relative flex h-full flex-col overflow-hidden rounded-[16px] border border-slate-200/90 bg-slate-50">
-        <header className="flex h-[50px] shrink-0 items-center gap-2 border-b border-slate-200/80 bg-white px-3">
-          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="relative flex h-full flex-col overflow-hidden rounded-[16px] border border-slate-300/90 bg-white shadow-[0_2px_8px_rgba(15,23,42,0.08)]">
+        <header className="flex h-[84px] shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-5">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2.5">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
+              <h1 className="truncate text-[18px] font-bold tracking-[-0.02em] text-slate-950">
+                OnlineWorker
+              </h1>
+            </div>
+            <p className="mt-1 flex items-center gap-1.5 text-[12px] font-medium text-slate-500" aria-live="polite">
+              <span>Live</span>
+              <span className="h-1 w-1 rounded-full bg-emerald-500" aria-hidden="true" />
+              <span>{freshnessText}</span>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadSnapshot(true)}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-wait disabled:opacity-60"
+            disabled={loading}
+            title="Refresh"
+            aria-label="Refresh menubar data"
+          >
+            <RefreshIcon className={loading ? "animate-spin" : ""} />
+          </button>
+        </header>
+
+        <nav className="flex h-12 shrink-0 items-stretch border-b border-slate-200 bg-white" aria-label="Provider views">
+          <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <ProviderTabButton
               active={selectedTab === OVERVIEW_TAB_ID}
               label="总览"
@@ -231,16 +303,7 @@ export function MenubarPopover() {
               />
             ))}
           </div>
-          <button
-            type="button"
-            onClick={() => void loadSnapshot(true)}
-            className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[7px] text-slate-500 transition hover:bg-slate-100 hover:text-gray-950 disabled:cursor-wait disabled:opacity-60"
-            disabled={loading}
-            title="Refresh"
-          >
-            <RefreshIcon className={loading ? "animate-spin" : ""} />
-          </button>
-        </header>
+        </nav>
 
         {error && (
           <div className="shrink-0 border-b border-rose-100 bg-rose-50 px-3.5 py-2 text-[11px] font-semibold text-rose-700">
@@ -257,11 +320,12 @@ export function MenubarPopover() {
           </div>
         )}
 
-        <main className="min-h-0 flex-1 overflow-y-auto bg-slate-50">
+        <main className="min-h-0 flex-1 overflow-y-auto bg-white">
           {selectedProvider ? (
             <ProviderRailPanel
               provider={selectedProvider}
               lane={laneByProviderId.get(selectedProvider.providerId) ?? null}
+              iconUrl={providerIconUrls[selectedProvider.providerId]}
               busyKey={busyKey}
               nowMs={nowMs}
               onOpenSession={openSession}
@@ -271,9 +335,9 @@ export function MenubarPopover() {
               loading={loading && !snapshot}
               providers={providers}
               lanes={lanes}
+              providerIconUrls={providerIconUrls}
               totalTokensText={totalTokensText}
-              activeSessionCount={activeSessionCount}
-              needsAttentionCount={needsAttentionCount}
+              totalCostText={formatUsd(totalCostUsd)}
               busyKey={busyKey}
               nowMs={nowMs}
               onOpenSession={openSession}
@@ -281,22 +345,25 @@ export function MenubarPopover() {
           )}
         </main>
 
-        <div className="grid h-11 shrink-0 grid-cols-3 border-t border-slate-200/80 bg-white">
+        <div className="grid h-[52px] shrink-0 grid-cols-3 border-t border-slate-200 bg-white">
           <PopoverActionButton
             label="Tasks"
             icon={<TaskBoardIcon />}
+            active={false}
             busy={busyKey === "tab:tasks"}
             onClick={() => void openTab("tasks")}
           />
           <PopoverActionButton
             label="Sessions"
             icon={<SessionsIcon />}
+            active
             busy={busyKey === "tab:sessions"}
             onClick={() => void openTab("sessions")}
           />
           <PopoverActionButton
             label="Usage"
             icon={<UsageIcon />}
+            active={false}
             busy={busyKey === "tab:usage"}
             onClick={() => void openTab("usage")}
           />
@@ -310,9 +377,9 @@ function OverviewRailPanel({
   loading,
   providers,
   lanes,
+  providerIconUrls,
   totalTokensText,
-  activeSessionCount,
-  needsAttentionCount,
+  totalCostText,
   busyKey,
   nowMs,
   onOpenSession,
@@ -320,51 +387,26 @@ function OverviewRailPanel({
   loading: boolean;
   providers: MenubarPopoverUsageProvider[];
   lanes: MenubarPopoverSessionLane[];
+  providerIconUrls: Record<string, string>;
   totalTokensText: string;
-  activeSessionCount: number;
-  needsAttentionCount: number;
+  totalCostText: string;
   busyKey: string | null;
   nowMs: number;
   onOpenSession: (lane: MenubarPopoverSessionLane) => void;
 }) {
   return (
     <div>
-      <section className="min-h-[138px] border-b border-slate-200/80 bg-white px-[18px] pb-4 pt-5">
-        <p className="text-[10px] font-bold text-slate-500">Today usage</p>
-        <div className="mt-2 flex items-end justify-between gap-4">
-          <div className="min-w-0 truncate text-[39px] font-bold leading-none text-gray-950">
-            {loading ? "..." : totalTokensText}
-            <span className="ml-1 text-[12px] font-semibold text-slate-500">tokens</span>
-          </div>
-          <div className="flex shrink-0 gap-4 pb-0.5">
-            <OverviewPulse
-              label="Active"
-              value={activeSessionCount}
-              className="text-[var(--ow-green)]"
-            />
-            <OverviewPulse
-              label="Reply"
-              value={needsAttentionCount}
-              className="text-[var(--ow-amber)]"
-            />
-          </div>
+      <section className="border-b border-slate-200 bg-white">
+        <div className="flex h-11 items-end px-5 pb-2">
+          <h2 className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">Sessions</h2>
         </div>
-        <UsageSegments providers={providers} />
-      </section>
-
-      <section className="px-3.5 pb-3.5">
-        <div className="flex h-11 items-center justify-between gap-3">
-          <h3 className="text-[12px] font-bold text-gray-950">Sessions</h3>
-          <p className="text-[10px] font-medium text-slate-500">
-            Latest from each provider
-          </p>
-        </div>
-        <div className="overflow-hidden rounded-[9px] border border-slate-200 bg-white">
+        <div className="divide-y divide-slate-200">
           {lanes.length > 0 ? (
             lanes.map((lane) => (
               <SessionRailRow
                 key={lane.providerId}
                 lane={lane}
+                iconUrl={providerIconUrls[lane.providerId]}
                 busyKey={busyKey}
                 nowMs={nowMs}
                 onOpenSession={onOpenSession}
@@ -375,6 +417,19 @@ function OverviewRailPanel({
           )}
         </div>
       </section>
+
+      <section className="bg-white px-5 pb-4 pt-3.5">
+        <h2 className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">Usage</h2>
+        <p className="mt-1.5 text-[11px] font-medium text-slate-500">
+          Today
+          <strong className="ml-2 font-bold text-slate-700">
+            {loading ? "..." : totalTokensText} tokens
+          </strong>
+          <span className="mx-1.5 text-slate-300">·</span>
+          <strong className="font-bold text-slate-700">{totalCostText}</strong>
+        </p>
+        <UsageSegments providers={providers} showLegend />
+      </section>
     </div>
   );
 }
@@ -382,19 +437,19 @@ function OverviewRailPanel({
 function ProviderRailPanel({
   provider,
   lane,
+  iconUrl,
   busyKey,
   nowMs,
   onOpenSession,
 }: {
   provider: MenubarPopoverUsageProvider;
   lane: MenubarPopoverSessionLane | null;
+  iconUrl?: string;
   busyKey: string | null;
   nowMs: number;
   onOpenSession: (lane: MenubarPopoverSessionLane) => void;
 }) {
-  const accent = providerAccent(provider.providerId);
   const workspaceText = lane?.workspaceName || lane?.workspace || "No active workspace";
-  const status = lane?.status || "Idle";
   const breakdown = [
     { label: "Input", value: formatPopoverTokenCount(provider.inputTokens) },
     { label: "Output", value: formatPopoverTokenCount(provider.outputTokens) },
@@ -403,17 +458,31 @@ function ProviderRailPanel({
   ];
 
   return (
-    <div className="space-y-0 px-3.5 py-3.5">
-      <section className="relative min-h-[148px] overflow-hidden rounded-[9px] border border-slate-200 bg-white px-4 py-4">
-        <span className={`absolute inset-y-0 left-0 w-[3px] ${accent.laneDot}`} />
+    <div className="bg-white">
+      <section className="border-b border-slate-200 px-5 pb-4 pt-4">
         <div className="flex min-w-0 items-center justify-between gap-3">
-          <h2 className="truncate text-[15px] font-bold text-gray-950">{provider.label}</h2>
-          <p className="min-w-0 truncate text-[9px] font-medium text-slate-500">
-            {workspaceText} · {status}
+          <div className="flex min-w-0 items-center gap-3">
+            <ProviderIconTile
+              providerId={provider.providerId}
+              label={provider.label}
+              iconUrl={iconUrl}
+              size="compact"
+            />
+            <div className="min-w-0">
+              <h2 className="truncate text-[15px] font-bold text-slate-950">{provider.label}</h2>
+              <p className="mt-0.5 truncate text-[10px] font-medium text-slate-500">
+                {workspaceText}
+              </p>
+            </div>
+          </div>
+          <p className="shrink-0 text-[10px] font-semibold text-slate-500">
+            {formatUsd(provider.totalCostUsd)}
           </p>
         </div>
-        <div className="mt-4 text-[32px] font-bold leading-none text-gray-950">
+        <div className="mt-4 text-[30px] font-bold leading-none tracking-[-0.03em] text-slate-950">
           {formatPopoverTokenCount(provider.tokensToday, provider.estimated)}
+          {" "}
+          <span className="ml-1.5 text-[11px] font-semibold tracking-normal text-slate-500">tokens today</span>
         </div>
         <div className="mt-4 grid grid-cols-4 gap-2">
           {breakdown.map((item) => (
@@ -422,19 +491,18 @@ function ProviderRailPanel({
         </div>
       </section>
 
-      <div className="flex h-11 items-center justify-between gap-3 px-0.5">
-        <h3 className="text-[12px] font-bold text-gray-950">Latest session</h3>
+      <div className="flex h-11 items-end justify-between gap-3 px-5 pb-2">
+        <h3 className="text-[14px] font-bold text-slate-950">Latest session</h3>
         <p className="text-[10px] font-medium text-slate-500">
           {lane?.updatedAtEpoch ? formatRelativeAge(lane.updatedAtEpoch, nowMs) : "No activity"}
-          {" · "}
-          {formatUsd(provider.totalCostUsd)}
         </p>
       </div>
 
-      <div className="overflow-hidden rounded-[9px] border border-slate-200 bg-white">
+      <div className="border-y border-slate-200 bg-white">
         {lane ? (
           <SessionRailRow
             lane={lane}
+            iconUrl={iconUrl}
             busyKey={busyKey}
             nowMs={nowMs}
             onOpenSession={onOpenSession}
@@ -447,43 +515,48 @@ function ProviderRailPanel({
   );
 }
 
-function OverviewPulse({
-  label,
-  value,
-  className,
+function UsageSegments({
+  providers,
+  showLegend = false,
 }: {
-  label: string;
-  value: number;
-  className: string;
+  providers: MenubarPopoverUsageProvider[];
+  showLegend?: boolean;
 }) {
-  return (
-    <div className="text-right">
-      <strong className={`block text-[18px] font-bold leading-5 ${className}`}>{value}</strong>
-      <span className="mt-0.5 block text-[9px] font-semibold text-slate-500">{label}</span>
-    </div>
-  );
-}
-
-function UsageSegments({ providers }: { providers: MenubarPopoverUsageProvider[] }) {
   const visibleProviders = providers.filter((provider) => (provider.tokensToday ?? 0) > 0);
   const total = visibleProviders.reduce((sum, provider) => sum + (provider.tokensToday ?? 0), 0);
 
   return (
-    <div className="mt-4 flex h-1 overflow-hidden rounded-sm bg-slate-200">
-      {total > 0 ? (
-        visibleProviders.map((provider) => {
-          const accent = providerAccent(provider.providerId);
-          return (
-            <span
-              key={provider.providerId}
-              className={`h-full ${accent.laneDot}`}
-              style={{ width: `${((provider.tokensToday ?? 0) / total) * 100}%` }}
-              title={`${provider.label}: ${formatPopoverTokenCount(provider.tokensToday, provider.estimated)}`}
-            />
-          );
-        })
-      ) : (
-        <span className="h-full w-full bg-slate-300" />
+    <div className="mt-3">
+      <div className="flex h-1.5 overflow-hidden rounded-[2px] bg-slate-200">
+        {total > 0 ? (
+          visibleProviders.map((provider) => {
+            const accent = providerAccent(provider.providerId);
+            return (
+              <span
+                key={provider.providerId}
+                className={`h-full border-r border-white last:border-r-0 ${accent.laneDot}`}
+                style={{ width: `${((provider.tokensToday ?? 0) / total) * 100}%` }}
+                title={`${provider.label}: ${formatPopoverTokenCount(provider.tokensToday, provider.estimated)}`}
+              />
+            );
+          })
+        ) : (
+          <span className="h-full w-full bg-slate-300" />
+        )}
+      </div>
+      {showLegend && visibleProviders.length > 0 && (
+        <div className="mt-2.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
+          {visibleProviders.map((provider) => {
+            const accent = providerAccent(provider.providerId);
+            return (
+              <div key={provider.providerId} className="flex min-w-0 items-center gap-1.5 text-[10px] font-medium text-slate-500">
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${accent.laneDot}`} aria-hidden="true" />
+                <span className="truncate">{provider.label}</span>
+                <span className="shrink-0">{formatPopoverTokenCount(provider.tokensToday, provider.estimated)}</span>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
@@ -493,10 +566,39 @@ function ProviderMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
       <span className="block truncate text-[8px] font-semibold text-slate-500">{label}</span>
-      <strong className="mt-1 block truncate font-mono text-[11px] font-bold text-gray-950">
+      <strong className="mt-1 block truncate font-mono text-[11px] font-bold text-slate-950">
         {value}
       </strong>
     </div>
+  );
+}
+
+function ProviderIconTile({
+  providerId,
+  label,
+  iconUrl,
+  size = "regular",
+}: {
+  providerId: string;
+  label: string;
+  iconUrl?: string;
+  size?: "compact" | "regular";
+}) {
+  const accent = providerAccent(providerId);
+  const sizeClass = size === "compact" ? "h-10 w-10 rounded-[9px]" : "h-[52px] w-[52px] rounded-[10px]";
+  const imageClass = size === "compact" ? "h-5 w-5" : "h-7 w-7";
+
+  return (
+    <span
+      className={`grid shrink-0 place-items-center border ${sizeClass} ${accent.cardBorder} ${accent.cardBg}`}
+      aria-hidden="true"
+    >
+      {iconUrl ? (
+        <img src={iconUrl} alt="" className={`${imageClass} object-contain`} />
+      ) : (
+        <span className={`text-[13px] font-bold ${accent.laneText}`}>{label.slice(0, 1).toUpperCase()}</span>
+      )}
+    </span>
   );
 }
 
@@ -513,25 +615,26 @@ function ProviderTabButton({
     <button
       type="button"
       onClick={onClick}
-      className={`h-7 shrink-0 rounded-[7px] px-2.5 text-[11px] font-semibold transition ${
-        active
-          ? "bg-slate-100 text-gray-950"
-          : "text-slate-500 hover:bg-slate-50 hover:text-gray-900"
+      className={`relative min-w-[112px] shrink-0 px-4 text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/40 ${
+        active ? "text-blue-600" : "text-slate-500 hover:bg-slate-50 hover:text-slate-950"
       }`}
       title={label}
     >
       {label}
+      {active && <span className="absolute inset-x-5 bottom-0 h-[2px] rounded-t bg-blue-600" aria-hidden="true" />}
     </button>
   );
 }
 
 function SessionRailRow({
   lane,
+  iconUrl,
   busyKey,
   nowMs,
   onOpenSession,
 }: {
   lane: MenubarPopoverSessionLane;
+  iconUrl?: string;
   busyKey: string | null;
   nowMs: number;
   onOpenSession: (lane: MenubarPopoverSessionLane) => void;
@@ -542,15 +645,17 @@ function SessionRailRow({
   const titleText = lane.title?.trim() || lane.sessionId || "Untitled session";
   const rawPreview = lanePreviewText(lane);
   const previewText = rawPreview !== titleText && rawPreview !== "No recent message" ? rawPreview : "";
+  const statusText = lane.status?.trim() || "";
+  const tone = statusTone(lane.status);
 
   if (!lane.sessionId) {
     return (
-      <div className="grid min-h-[66px] grid-cols-[3px_minmax(0,1fr)] border-b border-slate-100 last:border-b-0">
-        <span className={accent.laneDot} />
-        <div className="flex min-w-0 items-center px-3 py-2.5">
+      <div className="flex min-h-[76px] items-center gap-3 px-5 py-3">
+        <ProviderIconTile providerId={lane.providerId} label={lane.label} iconUrl={iconUrl} />
+        <div className="flex min-w-0 flex-1 items-center">
           <div className="min-w-0">
-            <p className="truncate text-[10px] font-semibold text-slate-500">{lane.label}</p>
-            <p className="mt-1 truncate text-[12px] font-semibold text-slate-700">No recent session</p>
+            <p className={`truncate text-[11px] font-semibold ${accent.laneText}`}>{lane.label}</p>
+            <p className="mt-1 truncate text-[12px] font-semibold text-slate-600">No recent session</p>
           </div>
         </div>
       </div>
@@ -562,18 +667,16 @@ function SessionRailRow({
       type="button"
       onClick={() => onOpenSession(lane)}
       disabled={Boolean(isBusy)}
-      className="group grid min-h-[74px] w-full grid-cols-[3px_minmax(0,1fr)_30px] border-b border-slate-100 bg-white text-left transition last:border-b-0 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-70"
+      className="group flex min-h-[94px] w-full items-center gap-3 bg-white px-5 py-3 text-left transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/40 disabled:cursor-wait disabled:opacity-70"
     >
-      <span className={accent.laneDot} />
-      <div className="min-w-0 px-3 py-2.5">
-        <div className="flex min-w-0 items-center justify-between gap-3 text-[9px] font-semibold text-slate-500">
-          <span className="min-w-0 truncate">
-            {workspaceText}
-            <span className={`ml-1.5 ${accent.laneText}`}>· {lane.label}</span>
-          </span>
-          <span className="shrink-0">{formatRelativeAge(lane.updatedAtEpoch, nowMs)}</span>
+      <ProviderIconTile providerId={lane.providerId} label={lane.label} iconUrl={iconUrl} />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-1.5 text-[10px] font-semibold text-slate-500">
+          <span className={`shrink-0 ${accent.laneText}`}>{lane.label}</span>
+          <span className="text-slate-300" aria-hidden="true">·</span>
+          <span className="min-w-0 truncate">{workspaceText}</span>
         </div>
-        <p className="mt-1 truncate text-[12px] font-bold leading-4 text-gray-950">
+        <p className="mt-1 truncate text-[13px] font-bold leading-[18px] text-slate-950">
           {titleText}
         </p>
         {previewText && (
@@ -582,16 +685,24 @@ function SessionRailRow({
           </p>
         )}
       </div>
-      <span className="grid place-items-center text-slate-400 transition group-hover:text-gray-900">
-        <ArrowUpRightIcon />
-      </span>
+      <div className="flex shrink-0 items-center gap-2.5">
+        <div className="flex items-center gap-2 text-right">
+          {statusText && <p className={`text-[11px] font-semibold ${tone.text}`}>{statusText}</p>}
+          <p className="text-[10px] font-medium text-slate-500">
+            {formatFreshness(lane.updatedAtEpoch, nowMs)}
+          </p>
+        </div>
+        <span className="grid place-items-center text-slate-400 transition-colors group-hover:text-slate-800">
+          <ChevronRightIcon />
+        </span>
+      </div>
     </button>
   );
 }
 
 function EmptyLine({ label }: { label: string }) {
   return (
-    <div className="px-3.5 py-4 text-[12px] font-semibold text-slate-400">
+    <div className="px-5 py-6 text-[12px] font-semibold text-slate-400">
       {label}
     </div>
   );
@@ -600,11 +711,13 @@ function EmptyLine({ label }: { label: string }) {
 function PopoverActionButton({
   label,
   icon,
+  active,
   busy,
   onClick,
 }: {
   label: string;
   icon: ReactNode;
+  active: boolean;
   busy: boolean;
   onClick: () => void;
 }) {
@@ -613,18 +726,20 @@ function PopoverActionButton({
       type="button"
       onClick={onClick}
       disabled={busy}
-      className="flex h-11 items-center justify-center gap-1.5 border-r border-slate-200/80 px-2 text-[10px] font-semibold text-slate-600 transition last:border-r-0 hover:bg-slate-50 hover:text-gray-950 disabled:cursor-wait disabled:opacity-70"
+      className={`flex h-[52px] items-center justify-center gap-1.5 border-r border-slate-200 px-2 text-[11px] font-semibold transition-colors last:border-r-0 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/40 disabled:cursor-wait disabled:opacity-70 ${
+        active ? "text-blue-600" : "text-slate-600 hover:text-slate-950"
+      }`}
     >
-      <span className="text-slate-400">{icon}</span>
+      <span className={active ? "text-blue-600" : "text-slate-400"}>{icon}</span>
       <span>{label}</span>
     </button>
   );
 }
 
-function ArrowUpRightIcon() {
+function ChevronRightIcon() {
   return (
     <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 17L17 7m0 0H9m8 0v8" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
     </svg>
   );
 }
@@ -655,7 +770,7 @@ function UsageIcon() {
 
 function RefreshIcon({ className = "" }: { className?: string }) {
   return (
-    <svg className={`h-4 w-4 ${className}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={`h-[18px] w-[18px] ${className}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 11a8.1 8.1 0 00-15.5-2M4 5v4h4m-4 4a8.1 8.1 0 0015.5 2M20 19v-4h-4" />
     </svg>
   );
