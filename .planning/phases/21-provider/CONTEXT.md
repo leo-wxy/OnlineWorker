@@ -135,3 +135,32 @@ Feedback loop and verification:
 Remaining validation:
 
 - Real Telegram workspace `/list`/overview visual UAT has not been run in this slice.
+
+## Implementation Record — 2026-08-10
+
+Implemented the third Phase 21 slice for bounded Codex Desktop ingress resources.
+
+Verified root cause:
+
+- The installed main bot held `255` numeric FDs against the macOS soft limit of `256` while `~/.codex/sessions` contained `531` rollout files.
+- The kqueue implementation recursively opened every historical directory and rollout and retained each FD for the lifetime of the process.
+- Once exhausted, socket accept, SQLite opens, Codex ingress, and Telegram polling all failed with `Errno 24`.
+
+Implemented behavior:
+
+- The provider now uses one recursive macOS FSEvents watcher through `watchfiles`.
+- Startup still seeds historical offsets without replaying old completions, but every rollout handle is closed immediately after reading.
+- Added and modified rollout files are read through short-lived handles and continue through the same adapter and EventBus path.
+- No file polling, session replay, EventBus change, Telegram-specific bypass, or higher FD limit was added.
+
+Feedback loop and verification:
+
+- The red regression created `80` historical rollouts and reproduced FD growth from `16` to `101`, a net increase of `85`.
+- After the repair, the same regression passed with constant FD usage; the full ingress suite passed `6` tests.
+- Broader Codex adapter, startup, EventBus, owner-bridge, notification, and streaming regression passed: `276 passed`.
+- `bash verify-packaged-fast.sh` built and installed `OnlineWorker_1.8.2_aarch64.dmg` in `86s`, including the native `watchfiles/_rust_notify` module.
+- With all `531` real rollouts tracked, the installed main bot held `29` FDs, held no rollout files open, emitted no new FD/SQLite/socket resource errors, and logged repeated Telegram `getUpdates 200 OK` responses.
+
+Remaining validation:
+
+- Real Telegram workspace `/list`/overview title visual UAT from `21-02` remains open; the Telegram transport itself is healthy after this repair.

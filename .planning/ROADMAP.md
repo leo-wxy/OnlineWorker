@@ -142,7 +142,7 @@ Remaining Phase 7 verification:
 **Goal:** Add shared AI configuration and runtime support that can power multiple OnlineWorker scenarios through prompt-driven configuration, starting with notification completion summary.
 **Requirements**: TBD
 **Depends on:** Phase 6
-**Plans:** 2 plans
+**Plans:** 3 plans
 
 Plans:
 
@@ -825,6 +825,12 @@ Plans:
   - [x] Make Telegram `/list` prefer provider `title`/`name` before `preview`.
   - [x] Source-verify provider facts, Telegram list labels, workspace synchronization, and topic naming.
   - [x] Package, install, restart, and verify the installed runtime.
+- [x] 21-03: Bound Codex Desktop ingress file-descriptor usage
+  - [x] Reproduce the installed runtime failure at the macOS `256` FD soft limit.
+  - [x] Replace one-kqueue-watch-per-rollout with one recursive FSEvents root watch.
+  - [x] Keep historical rollout files closed after startup seeding and read appends through short-lived handles.
+  - [x] Preserve new-file discovery, append delivery, child filtering, and EventBus publication.
+  - [x] Package, install, and verify FD usage plus Telegram polling recovery.
 
 Success Criteria (what must be TRUE):
 
@@ -842,3 +848,4 @@ Planning status:
 - Phase 21 inherits the session-related follow-up from `ea6ba8f`: keep Desktop external rollout ingress and shared EventBus delivery, but repair its source-metadata loss, top-level session projection, stale-state reconciliation, and multi-surface visibility parity. Login-state AI summary transport remains an upstream capability and is not reimplemented in this phase.
 - `21-01` reached source-verified and installed-Desktop-verified status on 2026-08-07. The red regression reproduced two provider-event publications for one child rollout; after the fix it passed, the focused ingress/storage/Telegram set passed `42` tests, and the broader Codex/event/owner-bridge set passed `167` tests. The packaged `1.8.1` app was installed and its Session Browser showed only the two parent sessions in the affected workspace. Real Telegram workspace visual UAT remains unverified, so Phase 21 is not closed.
 - `21-02` reached source-verified and packaged-runtime-verified status on 2026-08-08. Investigation confirmed Codex app-server exposes the optional user-facing title as `Thread.name`, while `Thread.preview` is normally the first user message; the offline equivalent is `session_index.jsonl.thread_name`. OnlineWorker previously bypassed both title sources and truncated path-prefixed preview text. The repair preserves title and preview separately in provider facts, refreshes cached workspace labels from app-server names, and makes Telegram list/topic presentation prefer the canonical title. Focused red/green coverage, a `200 passed` broader regression, and a real local two-session replay returned the expected provider-native titles. `bash verify-packaged-fast.sh` built and installed `OnlineWorker_1.8.1_aarch64.dmg`, then relaunched the installed App and bot successfully. Live Telegram visual UAT remains unverified.
+- `21-03` reached source-verified and packaged-runtime-verified status on 2026-08-10. The old kqueue tree watcher opened every historical rollout and directory, filling `255` of the process's `256` FDs with `531` local rollouts and stopping Telegram, SQLite, and socket accept. The repair uses one recursive FSEvents watcher and transient rollout reads. The red FD regression moved from `85` added FDs to constant usage, the focused ingress suite passed `6` tests, and the broader Codex/EventBus/Telegram set passed `276` tests. The installed `1.8.2` main bot held `29` FDs, no historical rollout handles, no new resource errors, and repeated Telegram `getUpdates 200 OK` responses.

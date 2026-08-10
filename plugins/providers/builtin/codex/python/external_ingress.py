@@ -6,9 +6,10 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-import select
 import sys
 from typing import Any
+
+from watchfiles import Change, awatch
 
 from plugins.providers.builtin.codex.python.storage_runtime import (
     is_codex_user_visible_session,
@@ -18,19 +19,6 @@ from plugins.providers.builtin.codex.python.storage_runtime import (
 logger = logging.getLogger(__name__)
 
 _OWNED_THREAD_SOURCES = {"app", "provider", "telegram_new_thread"}
-_WATCH_FLAGS = (
-    getattr(select, "KQ_NOTE_WRITE", 0)
-    | getattr(select, "KQ_NOTE_EXTEND", 0)
-    | getattr(select, "KQ_NOTE_ATTRIB", 0)
-    | getattr(select, "KQ_NOTE_DELETE", 0)
-    | getattr(select, "KQ_NOTE_RENAME", 0)
-    | getattr(select, "KQ_NOTE_REVOKE", 0)
-)
-_RELOAD_FLAGS = (
-    getattr(select, "KQ_NOTE_DELETE", 0)
-    | getattr(select, "KQ_NOTE_RENAME", 0)
-    | getattr(select, "KQ_NOTE_REVOKE", 0)
-)
 
 
 @dataclass
@@ -49,10 +37,8 @@ class _RolloutState:
 
 
 @dataclass
-class _VnodeWatch:
-    fd: int
+class _RolloutCursor:
     path: str
-    is_dir: bool
     offset: int = 0
     partial: bytes = b""
 
@@ -65,6 +51,15 @@ def _thread_id_from_rollout_path(path: str) -> str:
     if len(parts) < 6:
         return ""
     return "-".join(parts[-5:])
+
+
+def _is_rollout_path(path: str) -> bool:
+    name = os.path.basename(path)
+    return name.startswith("rollout-") and name.endswith(".jsonl")
+
+
+def _rollout_watch_filter(_change: Change, path: str) -> bool:
+    return _is_rollout_path(path)
 
 
 def _content_text(payload: dict[str, Any]) -> str:
@@ -105,30 +100,29 @@ class CodexDesktopRolloutIngress:
             os.path.expanduser(sessions_dir or "~/.codex/sessions")
         )
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._kqueue = None
-        self._watches_by_fd: dict[int, _VnodeWatch] = {}
-        self._fd_by_path: dict[str, int] = {}
         self._rollouts: dict[str, _RolloutState] = {}
-        self._pending_files: set[int] = set()
-        self._needs_rescan = False
+        self._cursors: dict[str, _RolloutCursor] = {}
+        self._pending_files: set[str] = set()
+        self._watch_task: asyncio.Task | None = None
+        self._stop_event: asyncio.Event | None = None
         self._drain_task: asyncio.Task | None = None
         self._closed = True
 
     @property
     def running(self) -> bool:
-        return not self._closed and self._kqueue is not None
+        return (
+            not self._closed
+            and self._watch_task is not None
+            and not self._watch_task.done()
+        )
 
     async def start(self) -> dict[str, Any]:
         if self.running:
             return {"state": "running", "sessionsDir": self._sessions_dir}
-        if (
-            sys.platform != "darwin"
-            or not hasattr(select, "kqueue")
-            or not hasattr(asyncio.get_running_loop(), "add_reader")
-        ):
+        if sys.platform != "darwin":
             return {
                 "state": "unsupported",
-                "detail": "Codex Desktop rollout ingress requires macOS kqueue",
+                "detail": "Codex Desktop rollout ingress requires macOS FSEvents",
                 "sessionsDir": self._sessions_dir,
             }
         if not os.path.isdir(self._sessions_dir):
@@ -139,23 +133,24 @@ class CodexDesktopRolloutIngress:
             }
 
         self._loop = asyncio.get_running_loop()
-        self._kqueue = select.kqueue()
+        self._stop_event = asyncio.Event()
         self._closed = False
         try:
-            self._scan_tree(initial=True)
-            self._loop.add_reader(self._kqueue.fileno(), self._on_kqueue_ready)
-            self._pending_files.update(
-                watch.fd for watch in self._watches_by_fd.values() if not watch.is_dir
+            self._seed_existing_rollouts()
+            self._watch_task = self._loop.create_task(
+                self._watch_changes(),
+                name="codex-desktop-rollout-fsevents",
             )
-            self._ensure_drain_task()
+            await asyncio.sleep(0)
+            if self._watch_task.done():
+                self._watch_task.result()
         except Exception:
             await self.close()
             raise
 
         logger.info(
-            "[codex-external-ingress] 已监听 Desktop rollout files=%s dirs=%s root=%s",
-            sum(not watch.is_dir for watch in self._watches_by_fd.values()),
-            sum(watch.is_dir for watch in self._watches_by_fd.values()),
+            "[codex-external-ingress] 已通过 FSEvents 监听 Desktop rollout tracked=%s root=%s",
+            len(self._cursors),
             self._sessions_dir,
         )
         return {"state": "running", "sessionsDir": self._sessions_dir}
@@ -164,170 +159,105 @@ class CodexDesktopRolloutIngress:
         if self._closed:
             return
         self._closed = True
-        if self._loop is not None and self._kqueue is not None:
-            try:
-                self._loop.remove_reader(self._kqueue.fileno())
-            except Exception:
-                pass
+        if self._stop_event is not None:
+            self._stop_event.set()
 
         current = asyncio.current_task()
-        drain_task = self._drain_task
+        tasks = (self._watch_task, self._drain_task)
+        self._watch_task = None
         self._drain_task = None
-        if drain_task is not None and drain_task is not current and not drain_task.done():
-            drain_task.cancel()
-            await asyncio.gather(drain_task, return_exceptions=True)
+        pending_tasks = [
+            task
+            for task in tasks
+            if task is not None and task is not current and not task.done()
+        ]
+        for task in pending_tasks:
+            task.cancel()
+        if pending_tasks:
+            await asyncio.gather(*pending_tasks, return_exceptions=True)
 
-        for fd in list(self._watches_by_fd):
-            self._unregister_fd(fd)
-        if self._kqueue is not None:
-            try:
-                self._kqueue.close()
-            except Exception:
-                pass
-        self._kqueue = None
         self._loop = None
+        self._stop_event = None
         self._pending_files.clear()
-        self._needs_rescan = False
+        self._cursors.clear()
+        self._rollouts.clear()
 
-    def _scan_tree(self, *, initial: bool) -> None:
-        seen: set[str] = set()
+    def _seed_existing_rollouts(self) -> None:
         for root, dirnames, filenames in os.walk(self._sessions_dir, followlinks=False):
             dirnames[:] = [
                 name
                 for name in dirnames
                 if not os.path.islink(os.path.join(root, name))
             ]
-            root_path = os.path.abspath(root)
-            seen.add(root_path)
-            self._register_path(root_path, is_dir=True, initial=initial)
             for filename in filenames:
-                if not filename.startswith("rollout-") or not filename.endswith(".jsonl"):
+                if not _is_rollout_path(filename):
                     continue
                 path = os.path.abspath(os.path.join(root, filename))
-                seen.add(path)
-                self._register_path(path, is_dir=False, initial=initial)
+                self._seed_rollout_state(path)
 
-        for path, fd in list(self._fd_by_path.items()):
-            if path not in seen:
-                self._unregister_fd(fd)
-
-    def _register_path(self, path: str, *, is_dir: bool, initial: bool) -> None:
-        existing_fd = self._fd_by_path.get(path)
-        if existing_fd is not None:
-            existing = self._watches_by_fd.get(existing_fd)
-            try:
-                path_stat = os.stat(path)
-                fd_stat = os.fstat(existing_fd)
-            except OSError:
-                self._unregister_fd(existing_fd)
-            else:
-                if (
-                    existing is not None
-                    and existing.is_dir == is_dir
-                    and path_stat.st_dev == fd_stat.st_dev
-                    and path_stat.st_ino == fd_stat.st_ino
-                ):
-                    return
-                self._unregister_fd(existing_fd)
-        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
-        if is_dir:
-            flags |= getattr(os, "O_DIRECTORY", 0)
+    def _seed_rollout_state(self, path: str) -> None:
         try:
-            fd = os.open(path, flags)
-            stat = os.fstat(fd)
+            size = os.path.getsize(path)
+            with open(path, "rb") as source:
+                head = source.read(min(size, 256 * 1024))
+                tail_start = max(0, size - 256 * 1024)
+                if tail_start:
+                    source.seek(tail_start)
+                    tail = source.read()
+                else:
+                    tail = b""
         except OSError:
             return
 
-        watch = _VnodeWatch(
-            fd=fd,
-            path=path,
-            is_dir=is_dir,
-            offset=stat.st_size if initial and not is_dir else 0,
-        )
-        try:
-            event = select.kevent(
-                fd,
-                filter=select.KQ_FILTER_VNODE,
-                flags=select.KQ_EV_ADD | select.KQ_EV_ENABLE | select.KQ_EV_CLEAR,
-                fflags=_WATCH_FLAGS,
-                udata=fd,
-            )
-            self._kqueue.control([event], 0, 0)
-        except Exception:
-            os.close(fd)
-            return
-
-        self._watches_by_fd[fd] = watch
-        self._fd_by_path[path] = fd
-        if is_dir:
-            return
-        if initial:
-            self._seed_rollout_state(watch)
-        else:
-            self._rollouts.setdefault(
-                watch.path,
-                _RolloutState(session_id=_thread_id_from_rollout_path(watch.path)),
-            )
-        self._pending_files.add(fd)
-
-    def _unregister_fd(self, fd: int) -> None:
-        watch = self._watches_by_fd.pop(fd, None)
-        if watch is None:
-            return
-        self._fd_by_path.pop(watch.path, None)
-        self._pending_files.discard(fd)
-        if not watch.is_dir:
-            self._rollouts.pop(watch.path, None)
-        if self._kqueue is not None:
-            try:
-                event = select.kevent(
-                    fd,
-                    filter=select.KQ_FILTER_VNODE,
-                    flags=select.KQ_EV_DELETE,
-                )
-                self._kqueue.control([event], 0, 0)
-            except Exception:
-                pass
-        try:
-            os.close(fd)
-        except OSError:
-            pass
-
-    def _seed_rollout_state(self, watch: _VnodeWatch) -> None:
         state = self._rollouts.setdefault(
-            watch.path,
-            _RolloutState(session_id=_thread_id_from_rollout_path(watch.path)),
+            path,
+            _RolloutState(session_id=_thread_id_from_rollout_path(path)),
         )
-        try:
-            size = os.fstat(watch.fd).st_size
-            head = os.pread(watch.fd, min(size, 256 * 1024), 0)
-            tail_start = max(0, size - 256 * 1024)
-            tail = os.pread(watch.fd, size - tail_start, tail_start) if tail_start else b""
-        except OSError:
-            return
         for raw in (head + (b"\n" + tail if tail else b"")).splitlines():
             self._update_rollout_state(state, raw, historical=True)
+        partial = b""
+        if size and not (tail or head).endswith(b"\n"):
+            candidate = (tail or head).rsplit(b"\n", 1)[-1]
+            try:
+                json.loads(candidate.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                partial = candidate
+        self._cursors[path] = _RolloutCursor(
+            path=path,
+            offset=size,
+            partial=partial,
+        )
 
-    def _on_kqueue_ready(self) -> None:
-        if self._closed or self._kqueue is None:
+    async def _watch_changes(self) -> None:
+        stop_event = self._stop_event
+        if stop_event is None:
             return
         try:
-            events = self._kqueue.control(None, 512, 0)
+            async for changes in awatch(
+                self._sessions_dir,
+                watch_filter=_rollout_watch_filter,
+                debounce=50,
+                step=10,
+                stop_event=stop_event,
+                force_polling=False,
+                recursive=True,
+                ignore_permission_denied=True,
+            ):
+                if self._closed:
+                    break
+                for change, raw_path in changes:
+                    path = os.path.abspath(raw_path)
+                    if change == Change.deleted:
+                        self._pending_files.discard(path)
+                        self._cursors.pop(path, None)
+                        self._rollouts.pop(path, None)
+                    else:
+                        self._pending_files.add(path)
+                self._ensure_drain_task()
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            logger.warning("[codex-external-ingress] 读取 kqueue 事件失败", exc_info=True)
-            return
-        for event in events:
-            fd = int(event.udata if event.udata is not None else event.ident)
-            watch = self._watches_by_fd.get(fd)
-            if watch is None:
-                continue
-            if watch.is_dir:
-                self._needs_rescan = True
-            else:
-                self._pending_files.add(fd)
-            if int(event.fflags or 0) & _RELOAD_FLAGS:
-                self._needs_rescan = True
-        self._ensure_drain_task()
+            logger.warning("[codex-external-ingress] FSEvents 监听失败", exc_info=True)
 
     def _ensure_drain_task(self) -> None:
         if self._closed or self._loop is None:
@@ -343,13 +273,8 @@ class CodexDesktopRolloutIngress:
             while not self._closed:
                 pending = list(self._pending_files)
                 self._pending_files.clear()
-                for fd in pending:
-                    await self._read_appended_lines(fd)
-
-                if self._needs_rescan:
-                    self._needs_rescan = False
-                    self._scan_tree(initial=False)
-                    continue
+                for path in pending:
+                    await self._read_appended_lines(path)
                 if not self._pending_files:
                     break
         except asyncio.CancelledError:
@@ -360,45 +285,45 @@ class CodexDesktopRolloutIngress:
             if (
                 not self._closed
                 and self._loop is not None
-                and (self._needs_rescan or self._pending_files)
+                and self._pending_files
             ):
                 self._loop.call_soon(self._ensure_drain_task)
 
-    async def _read_appended_lines(self, fd: int) -> None:
-        watch = self._watches_by_fd.get(fd)
-        if watch is None or watch.is_dir:
-            return
+    async def _read_appended_lines(self, path: str) -> None:
+        cursor = self._cursors.setdefault(path, _RolloutCursor(path=path))
         try:
-            size = os.fstat(fd).st_size
+            size = os.path.getsize(path)
         except OSError:
-            self._needs_rescan = True
+            self._cursors.pop(path, None)
+            self._rollouts.pop(path, None)
             return
-        if size < watch.offset:
-            watch.offset = 0
-            watch.partial = b""
-        if size <= watch.offset:
+        if size < cursor.offset:
+            cursor.offset = 0
+            cursor.partial = b""
+        if size <= cursor.offset:
             return
 
         chunks: list[bytes] = []
-        while watch.offset < size:
-            try:
-                chunk = os.pread(fd, min(256 * 1024, size - watch.offset), watch.offset)
-            except OSError:
-                self._needs_rescan = True
-                return
-            if not chunk:
-                break
-            chunks.append(chunk)
-            watch.offset += len(chunk)
+        try:
+            with open(path, "rb") as source:
+                source.seek(cursor.offset)
+                while cursor.offset < size:
+                    chunk = source.read(min(256 * 1024, size - cursor.offset))
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    cursor.offset += len(chunk)
+        except OSError:
+            return
         if not chunks:
             return
 
-        data = watch.partial + b"".join(chunks)
+        data = cursor.partial + b"".join(chunks)
         lines = data.split(b"\n")
-        watch.partial = lines.pop() if lines else data
+        cursor.partial = lines.pop() if lines else data
         for raw in lines:
             if raw.strip():
-                await self._process_rollout_line(watch.path, raw)
+                await self._process_rollout_line(path, raw)
 
     def _update_rollout_state(
         self,

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -42,6 +43,46 @@ async def _wait_until(predicate, *, timeout: float = 4.0) -> None:
         if asyncio.get_running_loop().time() >= deadline:
             raise AssertionError("等待 Codex Desktop rollout 事件超时")
         await asyncio.sleep(0.01)
+
+
+@pytest.mark.asyncio
+async def test_large_rollout_history_does_not_consume_one_fd_per_file(
+    tmp_path: Path,
+):
+    sessions_dir = tmp_path / "sessions"
+    day_dir = sessions_dir / "2026" / "08" / "10"
+    day_dir.mkdir(parents=True)
+    for index in range(80):
+        session_id = f"00000000-0000-4000-8000-{index:012d}"
+        _append_jsonl(
+            day_dir / f"rollout-2026-08-10T10-00-00-{session_id}.jsonl",
+            {
+                "type": "session_meta",
+                "payload": {
+                    "id": session_id,
+                    "cwd": "/Users/example/Projects/history-workspace",
+                },
+            },
+        )
+
+    adapter = SimpleNamespace(
+        ingest_external_hook_payload=AsyncMock(),
+        has_authoritative_live_session=MagicMock(return_value=False),
+    )
+    ingress = CodexDesktopRolloutIngress(
+        adapter=adapter,
+        state=AppState(storage=AppStorage()),
+        sessions_dir=str(sessions_dir),
+    )
+    before = len(os.listdir("/dev/fd"))
+
+    await ingress.start()
+    try:
+        after = len(os.listdir("/dev/fd"))
+        assert len(ingress._rollouts) == 80
+        assert after - before < 16
+    finally:
+        await ingress.close()
 
 
 @pytest.mark.asyncio
