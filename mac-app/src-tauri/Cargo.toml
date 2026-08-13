@@ -1,6 +1,6 @@
 [package]
 name = "onlineworker-app"
-version = "1.8.2"
+version = "1.8.3"
 description = "OnlineWorker Mac App"
 authors = ["OnlineWorker Contributors"]
 license = "MIT"
