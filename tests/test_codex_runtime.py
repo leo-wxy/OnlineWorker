@@ -9,6 +9,43 @@ from core.storage import AppStorage, ThreadInfo, WorkspaceInfo
 from plugins.providers.builtin.codex.python import runtime as codex_runtime
 
 
+def test_build_status_lines_reports_codex_hook_review_after_connected_status():
+    adapter = SimpleNamespace(
+        external_event_status={
+            "state": "installed",
+            "trustState": "review_required",
+        }
+    )
+    state = MagicMock()
+    state.config = None
+    state.is_adapter_connected.return_value = True
+    state.get_adapter.return_value = adapter
+
+    lines = codex_runtime.build_status_lines(state)
+
+    assert lines == [
+        "• codex app-server：✅ 已连接 (App)",
+        "• Codex hook ingress：⚠️ 待信任：请在 Codex 输入 /hooks",
+    ]
+
+
+def test_build_status_lines_reports_verified_codex_hook_ingress():
+    adapter = SimpleNamespace(
+        external_event_status={
+            "state": "installed",
+            "trustState": "verified",
+        }
+    )
+    state = MagicMock()
+    state.config = None
+    state.is_adapter_connected.return_value = True
+    state.get_adapter.return_value = adapter
+
+    assert codex_runtime.build_status_lines(state)[-1] == (
+        "• Codex hook ingress：✅ 已验证"
+    )
+
+
 @pytest.mark.asyncio
 async def test_setup_connection_installs_codex_desktop_event_ingress(tmp_path, monkeypatch):
     storage = AppStorage()

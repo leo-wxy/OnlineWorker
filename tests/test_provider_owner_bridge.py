@@ -12,6 +12,18 @@ from core.messages import MessageEventBus, create_message_event
 from core.storage import AppStorage, ThreadInfo, WorkspaceInfo
 
 
+def test_runtime_health_prioritizes_actionable_warning_over_connected_line():
+    from core.provider_owner_bridge import _runtime_health_from_lines
+
+    assert _runtime_health_from_lines(
+        [
+            "• codex app-server：✅ 已连接 (App)",
+            "• Codex hook ingress：⚠️ 待信任：请在 Codex 输入 /hooks",
+        ],
+        SimpleNamespace(connected=True),
+    ) == "degraded"
+
+
 @pytest.mark.asyncio
 async def test_provider_owner_bridge_creates_provider_session(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge

@@ -453,28 +453,27 @@ def _filter_visible_session_activities(state, activities: list[dict], limit: int
 
 def _runtime_health_from_lines(lines: list[str], adapter) -> str:
     normalized_lines = [str(line or "").strip() for line in lines if str(line or "").strip()]
-    for line in normalized_lines:
-        lowered = line.lower()
-        if (
-            "⚠️" in line
-            or "未鉴权" in line
-            or "不可用" in line
-            or "unavailable" in lowered
-            or "not logged in" in lowered
-        ):
-            return "degraded"
-        if "✅" in line or "已连接" in line or "connected" in lowered or "healthy" in lowered:
-            return "healthy"
-        if (
-            "❌" in line
-            or "已断开" in line
-            or "disconnected" in lowered
-            or "degraded" in lowered
-            or "failed" in lowered
-        ):
-            return "degraded"
+    lowered_lines = [(line, line.lower()) for line in normalized_lines]
+    if any(
+        "⚠️" in line
+        or "未鉴权" in line
+        or "不可用" in line
+        or "unavailable" in lowered
+        or "not logged in" in lowered
+        or "❌" in line
+        or "已断开" in line
+        or "disconnected" in lowered
+        or "degraded" in lowered
+        or "failed" in lowered
+        for line, lowered in lowered_lines
+    ):
+        return "degraded"
+    for line, lowered in lowered_lines:
         if "未启动" in line or "stopped" in lowered:
             return "stopped"
+    for line, lowered in lowered_lines:
+        if "✅" in line or "已连接" in line or "connected" in lowered or "healthy" in lowered:
+            return "healthy"
     if adapter is not None:
         return "healthy" if bool(getattr(adapter, "connected", False)) else "degraded"
     return "unknown"

@@ -21,6 +21,7 @@ interface Props {
     nextAutostart: boolean
   ) => void;
   onRefresh: () => void;
+  onOpenActionGuide: (guideId: string) => void;
 }
 
 type StatusTone = "healthy" | "warning" | "error" | "neutral";
@@ -85,7 +86,10 @@ function parseProviderStatusItems(detail: string | null | undefined): ParsedStat
     .filter(Boolean);
 
   return segments.map((segment) => {
-    const cleaned = segment.replace(/^[•\-]\s*/, "").trim();
+    const cleaned = segment
+      .replace(/^[•\-]\s*/, "")
+      .replace(/\s*·\s*$/, "")
+      .trim();
     const match = cleaned.match(/^([^:：]+?)\s*[:：]\s*(.+)$/);
     const label = match ? match[1].trim() : null;
     const rawValue = match ? match[2].trim() : cleaned;
@@ -109,6 +113,21 @@ function formatStatusBadgeText(item: ParsedStatusItem): string {
   return item.label ?? item.badgeText;
 }
 
+function statusActionGuideId(
+  provider: ProviderDashboardStatus,
+  item: ParsedStatusItem
+): string | null {
+  if (
+    provider.id === "codex" &&
+    item.tone === "warning" &&
+    item.label?.toLowerCase() === "codex hook ingress" &&
+    item.badgeText.includes("待信任")
+  ) {
+    return "codex-hook-trust";
+  }
+  return null;
+}
+
 export function ProviderStatusList({
   loading,
   providers,
@@ -116,6 +135,7 @@ export function ProviderStatusList({
   texts,
   onProviderFlagsChange,
   onRefresh,
+  onOpenActionGuide,
 }: Props) {
   return (
     <div className="space-y-4">
@@ -157,6 +177,7 @@ export function ProviderStatusList({
             providerBusy={savingProviderId === provider.id}
             texts={texts}
             onProviderFlagsChange={onProviderFlagsChange}
+            onOpenActionGuide={onOpenActionGuide}
           />
         ))}
       </div>
@@ -170,6 +191,7 @@ function ProviderStatusCard({
   providerBusy,
   texts,
   onProviderFlagsChange,
+  onOpenActionGuide,
 }: {
   loading: boolean;
   provider: ProviderDashboardStatus;
@@ -180,12 +202,14 @@ function ProviderStatusCard({
     nextManaged: boolean,
     nextAutostart: boolean
   ) => void;
+  onOpenActionGuide: (guideId: string) => void;
 }) {
   const accent = providerAccent(provider);
   const statusStyle = getServiceStyles(texts)[provider.health] ?? getServiceStyles(texts).unknown;
   const unavailable = provider.health === "stopped" || !provider.managed;
   const statusText = providerDetail(provider, texts);
   const statusItems = parseProviderStatusItems(statusText);
+  const needsAction = statusItems.some((item) => statusActionGuideId(provider, item));
 
   return (
     <div className={`ow-page-frame rounded-[26px] p-5 ${unavailable ? "opacity-60 grayscale" : ""}`}>
@@ -203,7 +227,7 @@ function ProviderStatusCard({
                 className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${statusStyle.badge}`}
               >
                 <span className={`h-1.5 w-1.5 rounded-full ${statusStyle.dot}`}></span>
-                {statusStyle.label}
+                {needsAction ? texts.dashboard.needsActionLabel : statusStyle.label}
               </span>
             </div>
             <p className="mt-1 text-sm text-slate-500">{describeProvider(provider, texts)}</p>
@@ -239,22 +263,38 @@ function ProviderStatusCard({
               </div>
             )}
             {statusItems.length > 0 ? (
-              statusItems.map((item, index) => (
-                <div
-                  key={`${provider.id}-status-${index}`}
-                  className={`rounded-2xl px-3 py-2.5 ${statusToneStyles[item.tone]}`}
-                >
-                  <div className="flex items-start gap-1.5 text-[13px] font-semibold leading-5">
-                    {item.icon ? <span>{item.icon}</span> : null}
-                    <span className="min-w-0">{formatStatusBadgeText(item)}</span>
+              statusItems.map((item, index) => {
+                const actionGuideId = statusActionGuideId(provider, item);
+                return (
+                  <div
+                    key={`${provider.id}-status-${index}`}
+                    className={`rounded-2xl px-3 py-2.5 ${statusToneStyles[item.tone]}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-start gap-1.5 text-[13px] font-semibold leading-5">
+                          {item.icon ? <span>{item.icon}</span> : null}
+                          <span className="min-w-0">{formatStatusBadgeText(item)}</span>
+                        </div>
+                        {item.note ? (
+                          <span className="mt-1 block text-[13px] leading-5 opacity-80">
+                            {item.note}
+                          </span>
+                        ) : null}
+                      </div>
+                      {actionGuideId ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenActionGuide(actionGuideId)}
+                          className="shrink-0 rounded-lg bg-white/80 px-2.5 py-1.5 text-xs font-bold text-amber-700 ring-1 ring-inset ring-amber-200 transition hover:bg-white"
+                        >
+                          {texts.dashboard.viewGuide}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
-                  {item.note ? (
-                    <span className="mt-1 block text-[13px] leading-5 opacity-80">
-                      {item.note}
-                    </span>
-                  ) : null}
-                </div>
-              ))
+                );
+              })
             ) : (
               <p className="text-sm leading-6 text-gray-800">{statusText}</p>
             )}

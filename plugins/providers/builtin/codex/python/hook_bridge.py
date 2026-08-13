@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
 import shlex
 import subprocess
 import sys
+import time
 import tomllib
 from typing import Any
 
@@ -14,30 +16,74 @@ from core.provider_owner_bridge import provider_owner_bridge_socket_path
 
 
 CODEX_PERMISSION_HOOK_NAME = "PermissionRequest"
-CODEX_EXTERNAL_EVENT_HOOK_NAMES = ("SessionStart", "UserPromptSubmit", "Stop")
+CODEX_EXTERNAL_EVENT_HOOK_NAMES = (
+    "SessionStart",
+    "UserPromptSubmit",
+    "Stop",
+    "SessionEnd",
+)
 CODEX_HOOK_RELAY_TIMEOUT_SECONDS = 2.0
+CODEX_NOTIFY_FALLBACK_DELAY_SECONDS = 0.5
 ONLINEWORKER_CODEX_HOOK_MARKER = "--codex-hook-bridge"
 ONLINEWORKER_CODEX_NOTIFY_MARKER = "--codex-notify-bridge"
+CODEX_HOOK_FORWARDER_FILENAME = "codex_hook_forwarder.py"
+CODEX_HOOK_TRUST_FILENAME = "codex_hook_trust.json"
 CODEX_NOTIFY_FORWARD_FILENAME = "codex_notify_forward.json"
+CODEX_HOOK_TIMEOUT_SECONDS = 3
+CODEX_HOOK_FORWARDER_SOURCE = """from __future__ import annotations
+
+import subprocess
+import sys
+import tempfile
 
 
-def _codex_hook_command(data_dir: str) -> str:
+def main() -> int:
+    payload = sys.stdin.buffer.read()
+    try:
+        with tempfile.TemporaryFile() as payload_file:
+            payload_file.write(payload)
+            payload_file.seek(0)
+            subprocess.Popen(
+                sys.argv[1:],
+                stdin=payload_file,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+    except Exception:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+"""
+
+
+def _codex_hook_target_argv(data_dir: str) -> list[str]:
     if getattr(sys, "frozen", False):
-        argv = [
+        return [
             sys.executable,
             "--codex-hook-bridge",
             "--data-dir",
             data_dir,
         ]
-    else:
-        main_py = str(Path(__file__).resolve().parents[5] / "main.py")
-        argv = [
-            sys.executable,
-            main_py,
-            "--codex-hook-bridge",
-            "--data-dir",
-            data_dir,
-        ]
+    main_py = str(Path(__file__).resolve().parents[5] / "main.py")
+    return [
+        sys.executable,
+        main_py,
+        "--codex-hook-bridge",
+        "--data-dir",
+        data_dir,
+    ]
+
+
+def _codex_hook_command(data_dir: str, forwarder_path: str) -> str:
+    argv = [
+        "/usr/bin/python3",
+        forwarder_path,
+        *_codex_hook_target_argv(data_dir),
+    ]
     return " ".join(shlex.quote(str(item)) for item in argv)
 
 
@@ -70,6 +116,28 @@ def _default_codex_notify_forward_path(
     return os.path.abspath(
         os.path.expanduser(
             forward_path or os.path.join(data_dir, CODEX_NOTIFY_FORWARD_FILENAME)
+        )
+    )
+
+
+def _default_codex_hook_forwarder_path(
+    data_dir: str,
+    forwarder_path: str | None = None,
+) -> str:
+    return os.path.abspath(
+        os.path.expanduser(
+            forwarder_path or os.path.join(data_dir, CODEX_HOOK_FORWARDER_FILENAME)
+        )
+    )
+
+
+def _default_codex_hook_trust_path(
+    data_dir: str,
+    trust_path: str | None = None,
+) -> str:
+    return os.path.abspath(
+        os.path.expanduser(
+            trust_path or os.path.join(data_dir, CODEX_HOOK_TRUST_FILENAME)
         )
     )
 
@@ -182,6 +250,7 @@ def install_onlineworker_codex_notify(
     forward_path: str | None = None,
 ) -> dict[str, Any]:
     resolved_config_path = _default_codex_config_path(config_path)
+    resolved_hooks_path = _default_codex_hooks_path(hooks_path)
     resolved_forward_path = _default_codex_notify_forward_path(
         data_dir,
         forward_path,
@@ -207,7 +276,6 @@ def install_onlineworker_codex_notify(
         config_changed = desired_text != config_text
         if config_changed:
             _atomic_write_text(config_file, desired_text)
-        hooks_result = remove_onlineworker_codex_event_hooks(hooks_path=hooks_path)
     except Exception as exc:
         return {
             "state": "install_failed",
@@ -221,12 +289,10 @@ def install_onlineworker_codex_notify(
         "state": "installed",
         "configPath": resolved_config_path,
         "forwardPath": resolved_forward_path,
-        "hooksPath": str(hooks_result.get("hooksPath") or ""),
-        "removedEvents": list(hooks_result.get("removedEvents") or []),
+        "hooksPath": resolved_hooks_path,
+        "removedEvents": [],
         "detail": "",
-        "changed": bool(
-            config_changed or forward_changed or hooks_result.get("changed")
-        ),
+        "changed": bool(config_changed or forward_changed),
     }
 
 
@@ -254,34 +320,112 @@ def _is_onlineworker_codex_hook_entry(value: Any) -> bool:
     )
 
 
-def _existing_onlineworker_codex_hook_handler(
-    hooks: dict[str, Any],
-) -> dict[str, Any] | None:
-    for entries in hooks.values():
-        if not isinstance(entries, list):
-            continue
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            handlers = entry.get("hooks")
-            if not isinstance(handlers, list):
-                continue
-            for handler in handlers:
-                if (
-                    isinstance(handler, dict)
-                    and ONLINEWORKER_CODEX_HOOK_MARKER
-                    in str(handler.get("command") or "")
-                ):
-                    return dict(handler)
-    return None
+def _codex_hook_definition_hash(handler: dict[str, Any]) -> str:
+    serialized = json.dumps(
+        {
+            "events": list(CODEX_EXTERNAL_EVENT_HOOK_NAMES),
+            "handler": handler,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _sync_codex_hook_trust_state(
+    data_dir: str,
+    definition_hash: str,
+    *,
+    trust_path: str | None = None,
+) -> dict[str, Any]:
+    resolved_path = _default_codex_hook_trust_path(data_dir, trust_path)
+    path = Path(resolved_path)
+    try:
+        current = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if not isinstance(current, dict):
+            current = {}
+        verified_hash = str(current.get("verifiedDefinitionHash") or "").strip()
+        next_state = {
+            "definitionHash": definition_hash,
+            "verifiedDefinitionHash": (
+                definition_hash if verified_hash == definition_hash else ""
+            ),
+        }
+        if current != next_state:
+            _atomic_write_text(
+                path,
+                json.dumps(next_state, ensure_ascii=False, indent=2) + "\n",
+            )
+    except Exception as exc:
+        return {
+            "state": "unknown",
+            "trustPath": resolved_path,
+            "detail": f"记录 Codex hook 信任状态失败：{exc}",
+        }
+    return {
+        "state": (
+            "verified"
+            if next_state["verifiedDefinitionHash"] == definition_hash
+            else "review_required"
+        ),
+        "trustPath": resolved_path,
+        "detail": "",
+    }
+
+
+def mark_onlineworker_codex_hooks_verified(
+    data_dir: str,
+    *,
+    trust_path: str | None = None,
+) -> dict[str, Any]:
+    resolved_path = _default_codex_hook_trust_path(data_dir, trust_path)
+    path = Path(resolved_path)
+    try:
+        current = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if not isinstance(current, dict):
+            current = {}
+        definition_hash = str(current.get("definitionHash") or "").strip()
+        if not definition_hash:
+            return {
+                "state": "unknown",
+                "trustPath": resolved_path,
+                "detail": "缺少 Codex hook 定义指纹",
+            }
+        next_state = {
+            "definitionHash": definition_hash,
+            "verifiedDefinitionHash": definition_hash,
+        }
+        if current != next_state:
+            _atomic_write_text(
+                path,
+                json.dumps(next_state, ensure_ascii=False, indent=2) + "\n",
+            )
+    except Exception as exc:
+        return {
+            "state": "unknown",
+            "trustPath": resolved_path,
+            "detail": f"更新 Codex hook 信任状态失败：{exc}",
+        }
+    return {
+        "state": "verified",
+        "trustPath": resolved_path,
+        "detail": "",
+    }
 
 
 def install_onlineworker_codex_hooks(
     data_dir: str,
     *,
     hooks_path: str | None = None,
+    forwarder_path: str | None = None,
+    trust_path: str | None = None,
 ) -> dict[str, Any]:
     resolved_path = _default_codex_hooks_path(hooks_path)
+    resolved_forwarder_path = _default_codex_hook_forwarder_path(
+        data_dir,
+        forwarder_path,
+    )
     path = Path(resolved_path)
     try:
         payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
@@ -312,24 +456,46 @@ def install_onlineworker_codex_hooks(
             "changed": False,
         }
 
-    desired_handler = _existing_onlineworker_codex_hook_handler(hooks) or {
+    for event_name in CODEX_EXTERNAL_EVENT_HOOK_NAMES:
+        if not isinstance(hooks.get(event_name, []), list):
+            return {
+                "state": "install_failed",
+                "hooksPath": resolved_path,
+                "forwarderPath": resolved_forwarder_path,
+                "detail": f"Codex hooks.{event_name} 不是数组",
+                "installedEvents": [],
+                "changed": False,
+            }
+
+    forwarder = Path(resolved_forwarder_path)
+    try:
+        forwarder_changed = (
+            not forwarder.exists()
+            or forwarder.read_text(encoding="utf-8") != CODEX_HOOK_FORWARDER_SOURCE
+        )
+        if forwarder_changed:
+            _atomic_write_text(forwarder, CODEX_HOOK_FORWARDER_SOURCE)
+    except Exception as exc:
+        return {
+            "state": "install_failed",
+            "hooksPath": resolved_path,
+            "forwarderPath": resolved_forwarder_path,
+            "detail": f"写入 Codex hook 转发器失败：{exc}",
+            "installedEvents": [],
+            "changed": False,
+        }
+
+    desired_handler = {
         "type": "command",
-        "command": _codex_hook_command(data_dir),
-        "timeout": 5,
+        "command": _codex_hook_command(data_dir, resolved_forwarder_path),
+        "timeout": CODEX_HOOK_TIMEOUT_SECONDS,
     }
+    definition_hash = _codex_hook_definition_hash(desired_handler)
     desired_entry = _onlineworker_codex_hook_entry(desired_handler)
     installed_events: list[str] = []
     changed = False
     for event_name in CODEX_EXTERNAL_EVENT_HOOK_NAMES:
         current_entries = hooks.get(event_name, [])
-        if not isinstance(current_entries, list):
-            return {
-                "state": "install_failed",
-                "hooksPath": resolved_path,
-                "detail": f"Codex hooks.{event_name} 不是数组",
-                "installedEvents": installed_events,
-                "changed": changed,
-            }
         preserved = [
             entry
             for entry in current_entries
@@ -359,12 +525,23 @@ def install_onlineworker_codex_hooks(
                 "changed": False,
             }
 
+    trust_result = _sync_codex_hook_trust_state(
+        data_dir,
+        definition_hash,
+        trust_path=trust_path,
+    )
     return {
         "state": "installed",
         "hooksPath": resolved_path,
+        "forwarderPath": resolved_forwarder_path,
         "detail": "",
         "installedEvents": installed_events,
-        "changed": changed,
+        "changed": bool(changed or forwarder_changed),
+        "hooksChanged": changed,
+        "definitionHash": definition_hash,
+        "trustState": str(trust_result.get("state") or "unknown"),
+        "trustPath": str(trust_result.get("trustPath") or ""),
+        "trustDetail": str(trust_result.get("detail") or ""),
     }
 
 
@@ -492,16 +669,15 @@ def run_codex_notify_bridge_once(data_dir: str, raw_payload: str) -> int:
         payload = json.loads(raw_payload or "{}")
     except Exception:
         payload = {}
-    try:
-        normalized = (
-            normalize_codex_notify_payload(payload)
-            if isinstance(payload, dict)
-            else {}
-        )
-        if normalized:
-            asyncio.run(relay_codex_hook_payload(data_dir, normalized))
-    finally:
-        forward_codex_notify_payload(data_dir, raw_payload)
+    normalized = (
+        normalize_codex_notify_payload(payload)
+        if isinstance(payload, dict)
+        else {}
+    )
+    forward_codex_notify_payload(data_dir, raw_payload)
+    if normalized:
+        time.sleep(CODEX_NOTIFY_FALLBACK_DELAY_SECONDS)
+        asyncio.run(relay_codex_hook_payload(data_dir, normalized))
     return 0
 
 

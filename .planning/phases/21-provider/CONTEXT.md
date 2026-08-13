@@ -164,3 +164,73 @@ Feedback loop and verification:
 Remaining validation:
 
 - Real Telegram workspace `/list`/overview title visual UAT from `21-02` remains open; the Telegram transport itself is healthy after this repair.
+
+## Implementation Record — 2026-08-11
+
+Implemented the fourth Phase 21 slice for Codex Desktop event-source priority.
+
+Verified root cause:
+
+- [Codex Hooks](https://developers.openai.com/codex/hooks/) officially supports `SessionStart`, `UserPromptSubmit`, `Stop`, and `SessionEnd` command hooks, but OnlineWorker installed only `notify` and removed its own lifecycle hook entries.
+- The rollout listener published appended transcript rows immediately, so the fallback could win before an official hook or notify completion reached the provider adapter.
+- When a hook had already published the turn start, a later notify completion published the user message and turn start a second time.
+
+Implemented behavior:
+
+- OnlineWorker now installs the official lifecycle hooks as the primary Desktop event source while retaining `notify` as the completion fallback and preserving third-party hook/notify handlers.
+- A session already owned by the app-server live stream suppresses Hook, notify, and rollout publication, preserving the existing authoritative source.
+- Hook and notify events share the existing adapter turn state, so the same session/turn produces one start and one terminal sequence.
+- Completion priority is deterministic: Hook relays immediately, OnlineWorker's notify relay waits `0.5s`, and rollout-derived events wait `1s`; third-party notify handlers are forwarded before the OnlineWorker delay.
+- FSEvents still uses one root watcher, and pending rollout fallbacks are cancelled when a primary event claims the turn.
+- The existing provider adapter and EventBus contracts remain unchanged; no polling loop, new dependency, or user-facing source-priority configuration was added.
+
+Feedback loop and verification:
+
+- Five focused regressions failed before the repair, covering hook preservation, combined installation, cross-source turn dedupe, and delayed fallback cancellation.
+- The focused repair suite passed `10` tests.
+- Hook bridge, Codex adapter, real macOS FSEvents ingress, and EventBus/notification regression passed `98` tests.
+- Runtime startup and owner-bridge routing regression passed `21` tests.
+- The real FSEvents checks were run outside the test sandbox because sandboxed macOS file events were not delivered.
+- Packaged verification exposed a synchronous-hook latency defect: the bundled `onlineworker-bot` needed about `7.9s` just to start, while Codex does not yet support asynchronous command hooks and `SessionEnd` allows at most `3s`.
+- Lifecycle hooks now invoke a lightweight `/usr/bin/python3` forwarder that captures stdin, detaches the bundled bot relay, and returns within the hook timeout; `PermissionRequest` remains on the synchronous decision path.
+- `bash build.sh` rebuilt `OnlineWorker_1.8.2_aarch64.dmg`; the final DMG SHA-256 was `4e05620705c4f195078170c5c00c783b0ac5c9399e0b349874e9dc65153c27ef`.
+- The installed bot hash matched the DMG (`c68e89a0b85e1a17fb5f172e8a7dd30c93232f03adee9a2f43de282e0e641f15`), and the installed app plus persistent bot processes were running.
+- Runtime installation produced one lightweight handler with `timeout=3` for each lifecycle event. The forwarder returned in `0.08s`, and its detached `SessionEnd` smoke payload reached the owner bridge with `emitted=0`.
+- `verify-packaged-fast.sh` rebuilt and validated the DMG but could not stop two pre-existing bot processes cleanly; those exact stale PIDs were terminated, after which `install-current-dmg.sh` completed installation and restart successfully.
+
+Remaining validation:
+
+- Codex requires review and trust when a non-managed hook definition changes. A real Codex-triggered lifecycle event after that trust step has not been observed in this slice; the installed bridge itself, notify fallback, and rollout fallback are verified.
+
+## Implementation Record — 2026-08-11 (Hook Trust Guidance)
+
+Implemented the fifth Phase 21 slice for the user-visible Codex Hook trust workflow.
+
+Verified root cause:
+
+- Codex requires users to review and trust changed non-managed command Hook definitions through `/hooks`.
+- The provider previously reported only the connected app-server line, so the later Hook trust warning was masked by first-line health parsing and had no actionable UI path.
+- Installation state alone cannot prove that the current Hook definition was trusted; a real Hook event is the reliable local completion signal.
+
+Implemented behavior:
+
+- Hook installation persists the exact definition hash and marks it verified only after a real `codex_hook` event reaches the adapter.
+- Runtime health exposes app-server connectivity and Hook trust as separate status lines, while owner-bridge health aggregation gives warning/error lines priority over an earlier connected line.
+- Dashboard provider cards show `需操作` and expose a focused guide when Hook trust is pending.
+- Added one reusable `ActionGuideDialog` for future user-action workflows. Provider-specific copy and steps remain outside the visual component.
+- The guide supports command copying, backdrop/Escape dismissal, focus restoration, and a refresh-based recheck action. Fallback remains active until the real Hook event verifies the current definition.
+
+Feedback loop and verification:
+
+- Hook state, adapter verification, runtime status, and owner-bridge health regression passed `126` focused Python tests.
+- The macOS frontend production build and Dashboard provider-status tests passed.
+- Browser QA at `1179 x 1334`, device pixel ratio `1`, exercised copy, dismiss, primary recheck, backdrop, and Escape flows with no console warnings or errors.
+- Side-by-side visual comparison found one footer-order mismatch; the primary and secondary actions were reordered and the second comparison passed with no remaining P0/P1/P2 findings.
+- `bash build.sh` and `bash verify-packaged-fast.sh` rebuilt `OnlineWorker_1.8.2_aarch64.dmg`; the final DMG SHA-256 was `2f55a0c87608acf644ae7dd68c1411efec801bc816cd9e5bcc6870542404d82d`.
+- The first install attempt exposed two stale bot processes that ignored normal termination. After terminating those exact stale processes, `install-current-dmg.sh` installed and relaunched the current DMG successfully.
+- Installed bot, app, and usage-sidecar hashes matched the mounted DMG, both staged private plugin manifests were present, and the main app, main bot, and Codex app-server remained running.
+- Installed-App UI verification confirmed the Codex card displays `需操作`, `查看引导` opens the reusable dialog, all expected instructions/actions are visible, and dismissal returns to Dashboard.
+
+Remaining validation:
+
+- End-to-end trust completion still requires the user to accept the current Hook definition in Codex and then trigger one real lifecycle event.

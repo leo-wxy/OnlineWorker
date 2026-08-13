@@ -19,14 +19,17 @@ def is_codex_user_visible_session(source=None, *, thread_source=None) -> bool:
     if not source or source == "vscode":
         return True
     if isinstance(source, dict):
-        return "subagent" not in source
+        return "subagent" not in source and "subAgent" not in source
     if not isinstance(source, str):
         return True
     try:
         parsed = json.loads(source)
     except Exception:
         return True
-    return not (isinstance(parsed, dict) and "subagent" in parsed)
+    return not (
+        isinstance(parsed, dict)
+        and ("subagent" in parsed or "subAgent" in parsed)
+    )
 
 
 def _load_codex_thread_names() -> dict[str, str]:
@@ -917,7 +920,7 @@ def list_codex_subagent_thread_ids(thread_ids: list[str]) -> set[str]:
         placeholders = ",".join("?" for _ in thread_ids)
         rows = conn.execute(
             f"""
-            SELECT id, source
+            SELECT *
             FROM threads
             WHERE id IN ({placeholders})
             """,
@@ -928,7 +931,12 @@ def list_codex_subagent_thread_ids(thread_ids: list[str]) -> set[str]:
         return {
             row["id"]
             for row in rows
-            if not is_codex_user_visible_session(row["source"] or "")
+            if not is_codex_user_visible_session(
+                row["source"] or "",
+                thread_source=(
+                    row["thread_source"] if "thread_source" in row.keys() else None
+                ),
+            )
         }
     except Exception:
         return set()

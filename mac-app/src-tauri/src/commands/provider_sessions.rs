@@ -843,7 +843,14 @@ fn overlay_provider_sessions(data_dir: &Path, provider_id: &str, sessions: Value
                 );
             }
             if let Some(preview) = &overlay.preview {
-                object.insert("title".to_string(), Value::String(preview.clone()));
+                let has_provider_title = object
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .is_some_and(|title| !title.is_empty() && title != session_id);
+                if !has_provider_title {
+                    object.insert("title".to_string(), Value::String(preview.clone()));
+                }
                 object
                     .entry("preview".to_string())
                     .or_insert_with(|| Value::String(preview.clone()));

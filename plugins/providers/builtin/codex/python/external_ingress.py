@@ -19,6 +19,7 @@ from plugins.providers.builtin.codex.python.storage_runtime import (
 logger = logging.getLogger(__name__)
 
 _OWNED_THREAD_SOURCES = {"app", "provider", "telegram_new_thread"}
+_ROLLOUT_FALLBACK_GRACE_SECONDS = 1.0
 
 
 @dataclass
@@ -93,12 +94,20 @@ def _task_complete_text(payload: dict[str, Any]) -> str:
 class CodexDesktopRolloutIngress:
     """Turns externally-owned Codex Desktop rollout appends into provider events."""
 
-    def __init__(self, *, adapter, state, sessions_dir: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        adapter,
+        state,
+        sessions_dir: str | None = None,
+        fallback_grace_seconds: float = _ROLLOUT_FALLBACK_GRACE_SECONDS,
+    ) -> None:
         self._adapter = adapter
         self._state = state
         self._sessions_dir = os.path.abspath(
             os.path.expanduser(sessions_dir or "~/.codex/sessions")
         )
+        self._fallback_grace_seconds = max(0.0, float(fallback_grace_seconds))
         self._loop: asyncio.AbstractEventLoop | None = None
         self._rollouts: dict[str, _RolloutState] = {}
         self._cursors: dict[str, _RolloutCursor] = {}
@@ -106,6 +115,7 @@ class CodexDesktopRolloutIngress:
         self._watch_task: asyncio.Task | None = None
         self._stop_event: asyncio.Event | None = None
         self._drain_task: asyncio.Task | None = None
+        self._fallback_tasks: dict[tuple[str, str, str], asyncio.Task] = {}
         self._closed = True
 
     @property
@@ -163,9 +173,14 @@ class CodexDesktopRolloutIngress:
             self._stop_event.set()
 
         current = asyncio.current_task()
-        tasks = (self._watch_task, self._drain_task)
+        tasks = (
+            self._watch_task,
+            self._drain_task,
+            *self._fallback_tasks.values(),
+        )
         self._watch_task = None
         self._drain_task = None
+        self._fallback_tasks.clear()
         pending_tasks = [
             task
             for task in tasks
@@ -181,6 +196,80 @@ class CodexDesktopRolloutIngress:
         self._pending_files.clear()
         self._cursors.clear()
         self._rollouts.clear()
+
+    def record_primary_event(
+        self,
+        session_id: str,
+        turn_id: str,
+        event_kind: str,
+    ) -> None:
+        key = (session_id, turn_id, event_kind)
+        self._cancel_fallback(key)
+        if event_kind == "completed":
+            self._cancel_fallback((session_id, turn_id, "started"))
+        for state in self._rollouts.values():
+            if state.session_id != session_id:
+                continue
+            if event_kind == "started":
+                state.started_turn_id = turn_id
+            elif event_kind == "completed":
+                state.terminal_turn_ids.add(turn_id)
+
+    def _cancel_fallback(self, key: tuple[str, str, str]) -> None:
+        task = self._fallback_tasks.pop(key, None)
+        if task is not None and not task.done():
+            task.cancel()
+
+    def _schedule_fallback(
+        self,
+        key: tuple[str, str, str],
+        payload: dict[str, Any],
+        state: _RolloutState,
+    ) -> None:
+        if self._closed or key in self._fallback_tasks:
+            return
+        loop = self._loop or asyncio.get_running_loop()
+        task = loop.create_task(
+            self._emit_fallback(key, payload, state),
+            name=f"codex-rollout-fallback-{key[2]}",
+        )
+        self._fallback_tasks[key] = task
+
+    async def _emit_fallback(
+        self,
+        key: tuple[str, str, str],
+        payload: dict[str, Any],
+        state: _RolloutState,
+    ) -> None:
+        try:
+            await asyncio.sleep(self._fallback_grace_seconds)
+            if self._closed or not self._should_publish_session(state.session_id):
+                return
+            if self._fallback_tasks.get(key) is not asyncio.current_task():
+                return
+            self._fallback_tasks.pop(key, None)
+            result = await self._adapter.ingest_external_hook_payload(payload)
+            if isinstance(result, dict) and result.get("accepted") is False:
+                return
+            if key[2] == "started":
+                state.started_turn_id = key[1]
+            else:
+                state.terminal_turn_ids.add(key[1])
+                logger.info(
+                    "[codex-external-ingress] rollout fallback 已接收 completion session=%s turn=%s",
+                    state.session_id[:12],
+                    key[1][:12],
+                )
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.warning(
+                "[codex-external-ingress] rollout fallback 发布失败",
+                exc_info=True,
+            )
+        finally:
+            if self._fallback_tasks.get(key) is asyncio.current_task():
+                self._fallback_tasks.pop(key, None)
 
     def _seed_existing_rollouts(self) -> None:
         for root, dirnames, filenames in os.walk(self._sessions_dir, followlinks=False):
@@ -403,7 +492,9 @@ class CodexDesktopRolloutIngress:
         if row_type == "response_item" and str(payload.get("role") or "") == "user":
             if not state.prompt or not state.turn_id or state.started_turn_id == state.turn_id:
                 return
-            result = await self._adapter.ingest_external_hook_payload(
+            key = (state.session_id, state.turn_id, "started")
+            self._schedule_fallback(
+                key,
                 {
                     "hook_event_name": "UserPromptSubmit",
                     "session_id": state.session_id,
@@ -411,10 +502,9 @@ class CodexDesktopRolloutIngress:
                     "cwd": state.cwd,
                     "prompt": state.prompt,
                     "source": "codex_rollout",
-                }
+                },
+                state,
             )
-            if not isinstance(result, dict) or result.get("accepted") is not False:
-                state.started_turn_id = state.turn_id
             return
 
         if row_type != "event_msg":
@@ -428,26 +518,23 @@ class CodexDesktopRolloutIngress:
         if not turn_id or turn_id in state.terminal_turn_ids:
             return
         final_text = _task_complete_text(payload) or state.final_text
-        hook_event_name = "Stop" if state.started_turn_id == turn_id else "AgentTurnComplete"
+        self._cancel_fallback((state.session_id, turn_id, "started"))
         hook_payload: dict[str, Any] = {
-            "hook_event_name": hook_event_name,
+            "hook_event_name": "AgentTurnComplete",
             "session_id": state.session_id,
             "turn_id": turn_id,
             "cwd": state.cwd,
             "last_assistant_message": final_text,
             "source": "codex_rollout",
         }
-        if hook_event_name == "AgentTurnComplete" and state.prompt:
+        if state.prompt:
             hook_payload["input_messages"] = [state.prompt]
-        result = await self._adapter.ingest_external_hook_payload(hook_payload)
-        if not isinstance(result, dict) or result.get("accepted") is not False:
-            state.terminal_turn_ids.add(turn_id)
-            state.turn_id = turn_id
-            logger.info(
-                "[codex-external-ingress] 已接收 Desktop completion session=%s turn=%s",
-                state.session_id[:12],
-                turn_id[:12],
-            )
+        state.turn_id = turn_id
+        self._schedule_fallback(
+            (state.session_id, turn_id, "completed"),
+            hook_payload,
+            state,
+        )
 
     def _should_publish_session(self, session_id: str) -> bool:
         live_check = getattr(self._adapter, "has_authoritative_live_session", None)

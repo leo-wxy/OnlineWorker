@@ -73,6 +73,7 @@ class CodexAdapter:
         self._external_hook_status: dict[str, Any] = {
             "state": "disabled",
             "detail": "",
+            "trustState": "unknown",
         }
         self._external_hook_sessions: dict[str, dict[str, Any]] = {}
         self._desktop_rollout_ingress = None
@@ -81,6 +82,7 @@ class CodexAdapter:
             "detail": "",
         }
         self._authoritative_live_sessions: set[str] = set()
+        self._hidden_live_sessions: set[str] = set()
         # 最近协议收发摘要，用于 1006 / EOF 断线诊断
         self._recent_inbound_messages: deque[str] = deque(maxlen=6)
         self._recent_outbound_messages: deque[str] = deque(maxlen=6)
@@ -304,20 +306,78 @@ class CodexAdapter:
             }
             return dict(self._external_hook_status)
         from plugins.providers.builtin.codex.python.hook_bridge import (
+            install_onlineworker_codex_hooks,
             install_onlineworker_codex_notify,
         )
 
-        result = install_onlineworker_codex_notify(self._hook_data_dir)
+        hooks_result = install_onlineworker_codex_hooks(self._hook_data_dir)
+        notify_result = install_onlineworker_codex_notify(self._hook_data_dir)
+        hooks_state = str(hooks_result.get("state") or "install_failed")
+        notify_state = str(notify_result.get("state") or "install_failed")
+        if hooks_state == "installed":
+            state = "installed"
+        elif notify_state == "installed":
+            state = "degraded"
+        else:
+            state = "install_failed"
+        details = [
+            str(result.get("detail") or "").strip()
+            for result in (hooks_result, notify_result)
+            if str(result.get("detail") or "").strip()
+        ]
         self._external_hook_status = {
-            "state": str(result.get("state") or "disabled"),
-            "detail": str(result.get("detail") or ""),
-            "configPath": str(result.get("configPath") or ""),
-            "forwardPath": str(result.get("forwardPath") or ""),
-            "hooksPath": str(result.get("hooksPath") or ""),
-            "removedEvents": list(result.get("removedEvents") or []),
-            "changed": bool(result.get("changed")),
+            "state": state,
+            "detail": "；".join(details),
+            "configPath": str(notify_result.get("configPath") or ""),
+            "forwardPath": str(notify_result.get("forwardPath") or ""),
+            "hooksPath": str(hooks_result.get("hooksPath") or ""),
+            "installedEvents": list(hooks_result.get("installedEvents") or []),
+            "notifyState": notify_state,
+            "trustState": str(hooks_result.get("trustState") or "unknown"),
+            "trustPath": str(hooks_result.get("trustPath") or ""),
+            "trustDetail": str(hooks_result.get("trustDetail") or ""),
+            "removedEvents": [],
+            "changed": bool(
+                hooks_result.get("changed") or notify_result.get("changed")
+            ),
         }
         return dict(self._external_hook_status)
+
+    def _mark_external_hook_verified(self, payload: dict[str, Any]) -> None:
+        if self._external_payload_source(payload) != "codex_hook" or not self._hook_data_dir:
+            return
+        from plugins.providers.builtin.codex.python.hook_bridge import (
+            mark_onlineworker_codex_hooks_verified,
+        )
+
+        result = mark_onlineworker_codex_hooks_verified(self._hook_data_dir)
+        self._external_hook_status["trustState"] = str(
+            result.get("state") or "unknown"
+        )
+        self._external_hook_status["trustPath"] = str(
+            result.get("trustPath") or self._external_hook_status.get("trustPath") or ""
+        )
+        self._external_hook_status["trustDetail"] = str(
+            result.get("detail") or ""
+        )
+
+    @staticmethod
+    def _external_payload_source(payload: dict[str, Any]) -> str:
+        return str(payload.get("source") or "codex_hook").strip().lower()
+
+    def _record_external_primary_event(
+        self,
+        payload: dict[str, Any],
+        session_id: str,
+        turn_id: str,
+        event_kind: str,
+    ) -> None:
+        if self._external_payload_source(payload) == "codex_rollout":
+            return
+        ingress = self._desktop_rollout_ingress
+        recorder = getattr(ingress, "record_primary_event", None)
+        if callable(recorder):
+            recorder(session_id, turn_id, event_kind)
 
     def _external_hook_workspace_id(self, payload: dict[str, Any]) -> str:
         cwd_text = str(payload.get("cwd") or "").strip()
@@ -362,19 +422,32 @@ class CodexAdapter:
             "UserPromptSubmit",
             "Stop",
             "AgentTurnComplete",
+            "SessionEnd",
         }:
             return {"accepted": False, "reason": "unsupported_hook_event"}
+
+        self._mark_external_hook_verified(payload)
 
         session_id = str(payload.get("session_id") or "").strip()
         if not session_id:
             return {"accepted": False, "reason": "missing_session_id"}
         if not self._event_callbacks:
             return {"accepted": False, "reason": "event_callback_unavailable"}
+        if self.has_authoritative_live_session(session_id):
+            return {
+                "accepted": True,
+                "emitted": 0,
+                "suppressed": "authoritative_live_source",
+            }
 
         workspace_id = self._external_hook_workspace_id(payload)
         self._thread_workspace_map[session_id] = workspace_id
         session = self._external_hook_sessions.setdefault(session_id, {})
         session["workspace_id"] = workspace_id
+
+        if event_name == "SessionEnd":
+            self._external_hook_sessions.pop(session_id, None)
+            return {"accepted": True, "emitted": 0}
 
         if event_name == "SessionStart":
             if not session.get("session_created_emitted"):
@@ -397,6 +470,15 @@ class CodexAdapter:
                 or ""
             ).strip()
             turn_id = str(payload.get("turn_id") or "").strip() or str(uuid.uuid4())
+            self._record_external_primary_event(
+                payload,
+                session_id,
+                turn_id,
+                "started",
+            )
+            if str(session.get("started_turn_id") or "").strip() == turn_id:
+                return {"accepted": True, "emitted": 0, "deduped": True}
+            emitted = 0
             if not session.get("session_created_emitted"):
                 await self._emit_external_hook_event(
                     workspace_id,
@@ -408,10 +490,11 @@ class CodexAdapter:
                     },
                 )
                 session["session_created_emitted"] = True
+                emitted += 1
             session["turn_id"] = turn_id
+            session["started_turn_id"] = turn_id
             session["turn_open"] = True
             session.pop("terminal_emitted_turn_id", None)
-            emitted = 1
             if prompt:
                 await self._emit_external_hook_event(
                     workspace_id,
@@ -440,7 +523,24 @@ class CodexAdapter:
 
         notify_prefix_emitted = 0
         if event_name == "AgentTurnComplete":
+            external_source = self._external_payload_source(payload)
             turn_id = str(payload.get("turn_id") or "").strip() or str(uuid.uuid4())
+            already_started = (
+                str(session.get("started_turn_id") or "").strip() == turn_id
+            )
+            if not already_started:
+                self._record_external_primary_event(
+                    payload,
+                    session_id,
+                    turn_id,
+                    "started",
+                )
+            self._record_external_primary_event(
+                payload,
+                session_id,
+                turn_id,
+                "completed",
+            )
             if str(session.get("terminal_emitted_turn_id") or "").strip() == turn_id:
                 return {"accepted": True, "emitted": 0, "deduped": True}
             input_messages = payload.get("input_messages")
@@ -455,7 +555,7 @@ class CodexAdapter:
             else:
                 prompts = []
             prompt = "\n\n".join(prompts)
-            if not session.get("session_created_emitted"):
+            if not already_started and not session.get("session_created_emitted"):
                 await self._emit_external_hook_event(
                     workspace_id,
                     "session.created",
@@ -463,38 +563,40 @@ class CodexAdapter:
                         "threadId": session_id,
                         "title": prompt[:120],
                         "_mirroredOnly": True,
-                        "_externalSource": "codex_notify",
+                        "_externalSource": external_source,
                     },
                 )
                 session["session_created_emitted"] = True
                 notify_prefix_emitted += 1
-            if prompt:
+            if not already_started:
+                if prompt:
+                    await self._emit_external_hook_event(
+                        workspace_id,
+                        "message.user.submitted",
+                        {
+                            "threadId": session_id,
+                            "turnId": turn_id,
+                            "text": prompt,
+                            "_mirroredOnly": True,
+                            "_externalSource": external_source,
+                        },
+                    )
+                    notify_prefix_emitted += 1
                 await self._emit_external_hook_event(
                     workspace_id,
-                    "message.user.submitted",
+                    "turn/started",
                     {
                         "threadId": session_id,
-                        "turnId": turn_id,
-                        "text": prompt,
+                        "turn": {
+                            "id": turn_id,
+                            "threadId": session_id,
+                        },
                         "_mirroredOnly": True,
-                        "_externalSource": "codex_notify",
+                        "_externalSource": external_source,
                     },
                 )
                 notify_prefix_emitted += 1
-            await self._emit_external_hook_event(
-                workspace_id,
-                "turn/started",
-                {
-                    "threadId": session_id,
-                    "turn": {
-                        "id": turn_id,
-                        "threadId": session_id,
-                    },
-                    "_mirroredOnly": True,
-                    "_externalSource": "codex_notify",
-                },
-            )
-            notify_prefix_emitted += 1
+                session["started_turn_id"] = turn_id
             session["turn_id"] = turn_id
             session["turn_open"] = True
             session.pop("terminal_emitted_turn_id", None)
@@ -506,6 +608,13 @@ class CodexAdapter:
         )
         if str(session.get("terminal_emitted_turn_id") or "").strip() == turn_id:
             return {"accepted": True, "emitted": 0, "deduped": True}
+        if event_name == "Stop":
+            self._record_external_primary_event(
+                payload,
+                session_id,
+                turn_id,
+                "completed",
+            )
 
         final_text = str(
             payload.get("last_assistant_message")
@@ -607,14 +716,28 @@ class CodexAdapter:
         else:
             threads = result if isinstance(result, list) else []
 
-        if workspace_id and isinstance(threads, list):
+        from plugins.providers.builtin.codex.python.storage_runtime import (
+            is_codex_user_visible_session,
+        )
+
+        visible_threads: list[dict] = []
+        if isinstance(threads, list):
             for thread in threads:
                 if not isinstance(thread, dict):
                     continue
                 thread_id = self._extract_thread_id_from_result(thread)
-                if thread_id:
+                thread_source = thread.get("thread_source") or thread.get("threadSource")
+                if not is_codex_user_visible_session(
+                    thread.get("source"),
+                    thread_source=thread_source,
+                ):
+                    if thread_id:
+                        self._hidden_live_sessions.add(thread_id)
+                    continue
+                visible_threads.append(thread)
+                if thread_id and workspace_id:
                     self._thread_workspace_map[thread_id] = workspace_id
-        return threads
+        return visible_threads
 
     async def start_thread(self, workspace_id: str) -> dict:
         cwd = self._workspace_cwd_map.get(workspace_id)
@@ -1281,6 +1404,36 @@ class CodexAdapter:
             # 先维护 thread_id → workspace_id 映射，再包装事件信封。
             # 这样像 turn/started 这类首个事件，如果携带 cwd，也能在当前事件内解析到 workspace。
             thread_id = self._extract_thread_id_from_event_params(params)
+            from plugins.providers.builtin.codex.python.storage_runtime import (
+                is_codex_user_visible_session,
+                list_codex_subagent_thread_ids,
+            )
+
+            if thread_id in self._hidden_live_sessions:
+                return
+            source = params.get("source")
+            thread_source = params.get("thread_source") or params.get("threadSource")
+            for nested_key in ("thread", "item", "turn"):
+                nested = params.get(nested_key)
+                if not isinstance(nested, dict):
+                    continue
+                if source is None and "source" in nested:
+                    source = nested.get("source")
+                if not thread_source:
+                    thread_source = nested.get("thread_source") or nested.get("threadSource")
+            if not is_codex_user_visible_session(source, thread_source=thread_source):
+                if thread_id:
+                    self._hidden_live_sessions.add(thread_id)
+                return
+            if (
+                thread_id
+                and not source
+                and not thread_source
+                and thread_id not in self._authoritative_live_sessions
+                and thread_id in list_codex_subagent_thread_ids([thread_id])
+            ):
+                self._hidden_live_sessions.add(thread_id)
+                return
             if thread_id:
                 self._authoritative_live_sessions.add(thread_id)
             self._update_thread_workspace_map(method, params)

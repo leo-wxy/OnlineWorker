@@ -433,3 +433,68 @@ async def test_existing_completed_rollout_is_not_replayed_on_start(tmp_path: Pat
         await ingress.close()
 
     adapter.ingest_external_hook_payload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_rollout_fallback_is_cancelled_when_primary_event_claims_turn(tmp_path: Path):
+    session_id = "55555555-6666-4777-8888-999999999999"
+    turn_id = "dddddddd-eeee-4fff-8000-111111111111"
+    rollout_path = str(
+        tmp_path / f"rollout-2026-08-11T10-00-00-{session_id}.jsonl"
+    )
+    adapter = SimpleNamespace(
+        ingest_external_hook_payload=AsyncMock(
+            return_value={"accepted": True, "emitted": 5}
+        ),
+        has_authoritative_live_session=MagicMock(return_value=False),
+    )
+    ingress = CodexDesktopRolloutIngress(
+        adapter=adapter,
+        state=AppState(storage=AppStorage()),
+        sessions_dir=str(tmp_path),
+        fallback_grace_seconds=0.05,
+    )
+    ingress._loop = asyncio.get_running_loop()
+    ingress._closed = False
+
+    rows = [
+        {
+            "type": "session_meta",
+            "payload": {
+                "id": session_id,
+                "cwd": "/Users/example/Projects/desktop-workspace",
+            },
+        },
+        {"type": "turn_context", "payload": {"turn_id": turn_id}},
+        {
+            "type": "response_item",
+            "payload": {
+                "role": "user",
+                "content": [{"type": "input_text", "text": "验证 Hook 主链"}],
+            },
+        },
+        {
+            "type": "event_msg",
+            "payload": {
+                "type": "task_complete",
+                "turn_id": turn_id,
+                "last_agent_message": "Hook 主链验证完成。",
+            },
+        },
+    ]
+
+    try:
+        for row in rows:
+            await ingress._process_rollout_line(
+                rollout_path,
+                json.dumps(row, ensure_ascii=False).encode("utf-8"),
+            )
+        adapter.ingest_external_hook_payload.assert_not_awaited()
+
+        ingress.record_primary_event(session_id, turn_id, "started")
+        ingress.record_primary_event(session_id, turn_id, "completed")
+        await asyncio.sleep(0.08)
+    finally:
+        await ingress.close()
+
+    adapter.ingest_external_hook_payload.assert_not_awaited()

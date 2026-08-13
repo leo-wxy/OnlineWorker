@@ -1,4 +1,7 @@
 import json
+import subprocess
+import sys
+import time
 import tomllib
 from io import BytesIO
 from unittest.mock import AsyncMock, Mock
@@ -9,6 +12,7 @@ from plugins.providers.builtin.codex.python.hook_bridge import (
     default_codex_hook_response,
     install_onlineworker_codex_hooks,
     install_onlineworker_codex_notify,
+    mark_onlineworker_codex_hooks_verified,
     run_codex_notify_bridge_once,
     run_codex_hook_bridge_once,
 )
@@ -30,6 +34,7 @@ def test_codex_hook_bridge_once_returns_empty_response(monkeypatch, capsys):
 
 def test_install_onlineworker_codex_hooks_preserves_existing_entries(tmp_path):
     hooks_path = tmp_path / "hooks.json"
+    data_dir = tmp_path / "data"
     hooks_path.write_text(
         json.dumps(
             {
@@ -62,15 +67,21 @@ def test_install_onlineworker_codex_hooks_preserves_existing_entries(tmp_path):
     )
 
     result = install_onlineworker_codex_hooks(
-        "/tmp/onlineworker",
+        str(data_dir),
         hooks_path=str(hooks_path),
     )
 
     assert result["state"] == "installed"
-    assert result["installedEvents"] == ["SessionStart", "UserPromptSubmit", "Stop"]
+    assert result["trustState"] == "review_required"
+    assert result["installedEvents"] == [
+        "SessionStart",
+        "UserPromptSubmit",
+        "Stop",
+        "SessionEnd",
+    ]
     payload = json.loads(hooks_path.read_text(encoding="utf-8"))
     assert payload["hooks"]["Stop"][0]["hooks"][0]["command"] == "/usr/local/bin/existing-stop-hook"
-    for event_name in ("SessionStart", "UserPromptSubmit", "Stop"):
+    for event_name in ("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"):
         onlineworker_entries = [
             entry
             for entry in payload["hooks"][event_name]
@@ -82,13 +93,60 @@ def test_install_onlineworker_codex_hooks_preserves_existing_entries(tmp_path):
         ]
         assert len(onlineworker_entries) == 1
         assert "--codex-hook-bridge" in onlineworker_entries[0]["hooks"][0]["command"]
-        assert onlineworker_entries[0]["hooks"][0]["timeout"] == 86400
+        assert "codex_hook_forwarder.py" in onlineworker_entries[0]["hooks"][0]["command"]
+        assert onlineworker_entries[0]["hooks"][0]["timeout"] == 3
 
     second = install_onlineworker_codex_hooks(
-        "/tmp/onlineworker",
+        str(data_dir),
         hooks_path=str(hooks_path),
     )
     assert second["changed"] is False
+    assert second["trustState"] == "review_required"
+
+    verified = mark_onlineworker_codex_hooks_verified(str(data_dir))
+    assert verified["state"] == "verified"
+    third = install_onlineworker_codex_hooks(
+        str(data_dir),
+        hooks_path=str(hooks_path),
+    )
+    assert third["trustState"] == "verified"
+
+
+def test_codex_hook_forwarder_returns_before_background_target_finishes(tmp_path):
+    hooks_path = tmp_path / "hooks.json"
+    data_dir = tmp_path / "data"
+    captured_path = tmp_path / "captured.json"
+    target_path = tmp_path / "capture.py"
+    target_path.write_text(
+        "import pathlib, sys, time\n"
+        "payload = sys.stdin.buffer.read()\n"
+        "time.sleep(0.8)\n"
+        "pathlib.Path(sys.argv[1]).write_bytes(payload)\n",
+        encoding="utf-8",
+    )
+    result = install_onlineworker_codex_hooks(
+        str(data_dir),
+        hooks_path=str(hooks_path),
+    )
+    payload = b'{"hook_event_name":"Stop","session_id":"smoke"}'
+
+    subprocess.run(
+        [
+            "/usr/bin/python3",
+            result["forwarderPath"],
+            sys.executable,
+            str(target_path),
+            str(captured_path),
+        ],
+        input=payload,
+        check=True,
+        timeout=0.5,
+    )
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and not captured_path.exists():
+        time.sleep(0.02)
+
+    assert captured_path.read_bytes() == payload
 
 
 def test_codex_hook_bridge_relays_desktop_stop_event(monkeypatch, capsys):
@@ -118,7 +176,7 @@ def test_codex_hook_bridge_relays_desktop_stop_event(monkeypatch, capsys):
     assert capsys.readouterr().out == "{}"
 
 
-def test_install_onlineworker_codex_notify_preserves_forwarder_and_removes_event_hooks(tmp_path):
+def test_install_onlineworker_codex_notify_preserves_forwarder_and_event_hooks(tmp_path):
     config_path = tmp_path / "config.toml"
     hooks_path = tmp_path / "hooks.json"
     forward_path = tmp_path / "codex_notify_forward.json"
@@ -189,8 +247,9 @@ localeOverride = \"zh-CN\"
         ]
     }
     hooks = json.loads(hooks_path.read_text(encoding="utf-8"))["hooks"]
-    assert hooks["UserPromptSubmit"] == []
-    assert hooks["Stop"][0]["hooks"][0]["command"] == "/usr/local/bin/keep-stop-hook"
+    assert ONLINEWORKER_CODEX_HOOK_MARKER in hooks["UserPromptSubmit"][0]["hooks"][0]["command"]
+    assert ONLINEWORKER_CODEX_HOOK_MARKER in hooks["Stop"][0]["hooks"][0]["command"]
+    assert hooks["Stop"][1]["hooks"][0]["command"] == "/usr/local/bin/keep-stop-hook"
 
     second = install_onlineworker_codex_notify(
         "/tmp/onlineworker",
@@ -207,8 +266,10 @@ localeOverride = \"zh-CN\"
 def test_codex_notify_bridge_relays_agent_turn_complete_and_forwards_existing_handler(
     monkeypatch,
 ):
-    relay = AsyncMock(return_value={"ok": True})
-    forward = Mock()
+    order = []
+    relay = AsyncMock(side_effect=lambda *_: order.append("relay") or {"ok": True})
+    forward = Mock(side_effect=lambda *_: order.append("forward"))
+    delay = Mock(side_effect=lambda *_: order.append("delay"))
     monkeypatch.setattr(
         "plugins.providers.builtin.codex.python.hook_bridge.relay_codex_hook_payload",
         relay,
@@ -216,6 +277,10 @@ def test_codex_notify_bridge_relays_agent_turn_complete_and_forwards_existing_ha
     monkeypatch.setattr(
         "plugins.providers.builtin.codex.python.hook_bridge.forward_codex_notify_payload",
         forward,
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.hook_bridge.time.sleep",
+        delay,
     )
     raw_payload = json.dumps(
         {
@@ -243,6 +308,8 @@ def test_codex_notify_bridge_relays_agent_turn_complete_and_forwards_existing_ha
         },
     )
     forward.assert_called_once_with("/tmp/onlineworker", raw_payload)
+    delay.assert_called_once_with(0.5)
+    assert order == ["forward", "delay", "relay"]
 
 
 def test_codex_hook_bridge_leaves_user_prompt_submit_pass_through_without_permission_mirror(

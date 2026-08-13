@@ -16,6 +16,34 @@ def _fake_create_task(coro, name=None):
 
 
 @pytest.mark.asyncio
+async def test_real_codex_hook_event_marks_installed_definition_verified():
+    callback = AsyncMock()
+    adapter = CodexAdapter()
+    adapter.configure_external_event_bridge("/tmp/onlineworker")
+    adapter.on_event(callback)
+
+    with patch(
+        "plugins.providers.builtin.codex.python.hook_bridge.mark_onlineworker_codex_hooks_verified",
+        return_value={
+            "state": "verified",
+            "trustPath": "/tmp/onlineworker/codex_hook_trust.json",
+            "detail": "",
+        },
+    ) as mark_verified:
+        result = await adapter.ingest_external_hook_payload(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": "desktop-session",
+                "cwd": "/Users/example/Projects/demo",
+            }
+        )
+
+    assert result["accepted"] is True
+    mark_verified.assert_called_once_with("/tmp/onlineworker")
+    assert adapter.external_event_status["trustState"] == "verified"
+
+
+@pytest.mark.asyncio
 async def test_app_server_event_marks_session_as_authoritative_live_source():
     adapter = CodexAdapter()
 
@@ -32,6 +60,21 @@ async def test_app_server_event_marks_session_as_authoritative_live_source():
     )
 
     assert adapter.has_authoritative_live_session("owned-session") is True
+    callback = AsyncMock()
+    adapter.on_event(callback)
+    result = await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "Stop",
+            "session_id": "owned-session",
+            "turn_id": "owned-turn",
+        }
+    )
+    assert result == {
+        "accepted": True,
+        "emitted": 0,
+        "suppressed": "authoritative_live_source",
+    }
+    callback.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -138,6 +181,89 @@ async def test_desktop_notify_turn_enters_message_event_bus_as_single_ordered_se
     )
     assert duplicate == {"accepted": True, "emitted": 0, "deduped": True}
     assert len(bus.recent_events()) == 5
+
+
+@pytest.mark.asyncio
+async def test_external_event_ingress_installs_hook_primary_and_notify_fallback(monkeypatch):
+    hook_install = MagicMock(
+        return_value={
+            "state": "installed",
+            "hooksPath": "/tmp/hooks.json",
+            "installedEvents": ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"],
+            "detail": "",
+            "changed": True,
+        }
+    )
+    notify_install = MagicMock(
+        return_value={
+            "state": "installed",
+            "configPath": "/tmp/config.toml",
+            "forwardPath": "/tmp/codex_notify_forward.json",
+            "detail": "",
+            "changed": True,
+        }
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.hook_bridge.install_onlineworker_codex_hooks",
+        hook_install,
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.hook_bridge.install_onlineworker_codex_notify",
+        notify_install,
+    )
+    adapter = CodexAdapter()
+    adapter.configure_external_event_bridge("/tmp/onlineworker")
+
+    result = await adapter.install_external_event_ingress()
+
+    hook_install.assert_called_once_with("/tmp/onlineworker")
+    notify_install.assert_called_once_with("/tmp/onlineworker")
+    assert result["state"] == "installed"
+    assert result["installedEvents"] == [
+        "SessionStart",
+        "UserPromptSubmit",
+        "Stop",
+        "SessionEnd",
+    ]
+    assert result["notifyState"] == "installed"
+
+
+@pytest.mark.asyncio
+async def test_hook_start_and_notify_completion_share_one_turn_sequence():
+    callback = AsyncMock()
+    rollout = MagicMock()
+    adapter = CodexAdapter()
+    adapter.on_event(callback)
+    adapter._desktop_rollout_ingress = rollout
+
+    started = await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "UserPromptSubmit",
+            "session_id": "desktop-session",
+            "turn_id": "desktop-turn",
+            "cwd": "/Users/example/Projects/demo",
+            "prompt": "检查主链去重",
+        }
+    )
+    completed = await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "AgentTurnComplete",
+            "session_id": "desktop-session",
+            "turn_id": "desktop-turn",
+            "cwd": "/Users/example/Projects/demo",
+            "input_messages": ["检查主链去重"],
+            "last_assistant_message": "主链去重完成。",
+            "source": "codex_notify",
+        }
+    )
+
+    assert started == {"accepted": True, "emitted": 3}
+    assert completed == {"accepted": True, "emitted": 2}
+    assert callback.await_count == 5
+    assert [item.args for item in rollout.record_primary_event.call_args_list] == [
+        ("desktop-session", "desktop-turn", "started"),
+        ("desktop-session", "desktop-turn", "completed"),
+    ]
 
 
 @pytest.mark.asyncio

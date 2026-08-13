@@ -630,6 +630,23 @@ export const enTexts: AppTexts = {
       subsystemsTitle: "Subsystems",
       subsystemsDescription:
         "Use an aggregated view to inspect the bot and each configured provider.",
+      needsActionLabel: "Action needed",
+      viewGuide: "View guide",
+      codexHookGuide: {
+        title: "Trust the Codex hooks",
+        description:
+          "After one trust review, OnlineWorker can receive Codex lifecycle events automatically.",
+        steps: [
+          "Open Codex",
+          "Enter /hooks",
+          "Trust the 4 OnlineWorker lifecycle hooks",
+        ],
+        note:
+          "Fallback remains active until setup is complete. The first real hook event verifies the connection automatically.",
+        copyCommand: "Copy command",
+        primaryAction: "Done, recheck",
+        secondaryAction: "Later",
+      },
       telegramBotTitle: "Telegram Bot",
       telegramBotDescription: "Main service process and Telegram connectivity summary",
       telegramLabel: "Telegram",

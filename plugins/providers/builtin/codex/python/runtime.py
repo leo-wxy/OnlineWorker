@@ -2152,6 +2152,30 @@ def _mode_label(state) -> str:
     }.get(codex_mode, codex_mode)
 
 
+def _codex_hook_status_line(state) -> str | None:
+    adapter = state.get_adapter("codex")
+    if adapter is None:
+        return None
+    status = getattr(adapter, "external_event_status", None)
+    if not isinstance(status, dict):
+        return None
+    install_state = str(status.get("state") or "").strip()
+    trust_state = str(status.get("trustState") or "").strip()
+    if install_state == "install_failed":
+        detail = str(status.get("detail") or "").strip()
+        suffix = f"：{detail}" if detail else ""
+        return f"• Codex hook ingress：❌ 安装失败{suffix}"
+    if trust_state == "review_required":
+        return "• Codex hook ingress：⚠️ 待信任：请在 Codex 输入 /hooks"
+    if trust_state == "verified":
+        return "• Codex hook ingress：✅ 已验证"
+    if install_state in {"installed", "degraded"}:
+        detail = str(status.get("trustDetail") or "").strip()
+        suffix = f"：{detail}" if detail else ""
+        return f"• Codex hook ingress：⚠️ 状态待确认{suffix}"
+    return None
+
+
 def build_status_lines(state) -> list[str]:
     lines: list[str] = []
     codex_mode_label = _mode_label(state)
@@ -2160,6 +2184,9 @@ def build_status_lines(state) -> list[str]:
 
     if state.is_adapter_connected("codex"):
         lines.append(f"• codex app-server：✅ 已连接 ({codex_mode_label})")
+        hook_status_line = _codex_hook_status_line(state)
+        if hook_status_line:
+            lines.append(hook_status_line)
         return lines
 
     if control_mode == "tui":

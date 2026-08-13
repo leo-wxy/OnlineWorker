@@ -496,6 +496,17 @@ export interface AppTexts {
     noWorkspace: string;
     subsystemsTitle: string;
     subsystemsDescription: string;
+    needsActionLabel: string;
+    viewGuide: string;
+    codexHookGuide: {
+      title: string;
+      description: string;
+      steps: string[];
+      note: string;
+      copyCommand: string;
+      primaryAction: string;
+      secondaryAction: string;
+    };
     telegramBotTitle: string;
     telegramBotDescription: string;
     telegramLabel: string;

@@ -11,7 +11,7 @@ interface UseDashboardStateReturn {
   dashboardState: DashboardState | null;
   loading: boolean;
   error: string | null;
-  refresh: () => void;
+  refresh: () => Promise<void>;
   providers: ReturnType<typeof resolveProviders>;
   serviceControlStatus: ReturnType<typeof buildServiceControlStatus>;
   canOpenProviderTuiHost: boolean;

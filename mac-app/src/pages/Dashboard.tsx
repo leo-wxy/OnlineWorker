@@ -2,6 +2,7 @@ import { startTransition, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useDashboardState } from "../hooks";
 import { useI18n } from "../i18n";
+import { ActionGuideDialog } from "../components/ActionGuideDialog";
 import {
   DashboardAlerts,
   DashboardError,
@@ -32,6 +33,8 @@ export function Dashboard({ onOpenLogs, onOpenSetup, onOpenSessions }: Props) {
   } = useDashboardState();
   const [savingProviderId, setSavingProviderId] = useState<string | null>(null);
   const [serviceAction, setServiceAction] = useState<ServiceAction | null>(null);
+  const [activeGuideId, setActiveGuideId] = useState<string | null>(null);
+  const [checkingGuide, setCheckingGuide] = useState(false);
 
   const overall = getOverallStyles(t)[dashboardState?.overall ?? "unknown"];
   const controlStatus = serviceControlStatus;
@@ -104,6 +107,16 @@ export function Dashboard({ onOpenLogs, onOpenSetup, onOpenSessions }: Props) {
     }
   };
 
+  const handleGuideCheck = async () => {
+    setCheckingGuide(true);
+    try {
+      await refresh();
+      setActiveGuideId(null);
+    } finally {
+      setCheckingGuide(false);
+    }
+  };
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <DashboardHero
@@ -149,8 +162,26 @@ export function Dashboard({ onOpenLogs, onOpenSetup, onOpenSessions }: Props) {
             void handleProviderFlagsChange(provider, nextManaged, nextAutostart);
           }}
           onRefresh={() => void refresh()}
+          onOpenActionGuide={setActiveGuideId}
         />
       </div>
+
+      <ActionGuideDialog
+        open={activeGuideId === "codex-hook-trust"}
+        title={t.dashboard.codexHookGuide.title}
+        description={t.dashboard.codexHookGuide.description}
+        steps={t.dashboard.codexHookGuide.steps}
+        command="/hooks"
+        note={t.dashboard.codexHookGuide.note}
+        copyLabel={t.dashboard.codexHookGuide.copyCommand}
+        copiedLabel={t.common.copied}
+        closeLabel={t.common.close}
+        primaryLabel={t.dashboard.codexHookGuide.primaryAction}
+        secondaryLabel={t.dashboard.codexHookGuide.secondaryAction}
+        busy={checkingGuide}
+        onPrimary={() => void handleGuideCheck()}
+        onClose={() => setActiveGuideId(null)}
+      />
     </div>
   );
 }
