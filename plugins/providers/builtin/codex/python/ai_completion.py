@@ -22,6 +22,8 @@ def build_completion_argv(codex_bin: str, model: str = "") -> list[str]:
     argv = [
         str(codex_bin or "codex"),
         "exec",
+        "--disable",
+        "hooks",
         "--ephemeral",
         "--ignore-user-config",
         "--ignore-rules",

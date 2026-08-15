@@ -172,6 +172,7 @@ def test_codex_login_completion_is_ephemeral_and_read_only():
     argv = build_codex_completion_argv("/opt/example/bin/codex", "gpt-example")
 
     assert argv[0:2] == ["/opt/example/bin/codex", "exec"]
+    assert argv[argv.index("--disable") + 1] == "hooks"
     assert "--ephemeral" in argv
     assert "--ignore-user-config" in argv
     assert "--skip-git-repo-check" in argv

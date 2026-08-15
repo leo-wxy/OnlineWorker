@@ -31,6 +31,10 @@ from plugins.providers.builtin.codex.python.transport import (
 logger = logging.getLogger(__name__)
 DEFAULT_APPROVALS_REVIEWER = "user"
 PENDING_THREAD_START_TTL_SECONDS = 120.0
+_INTERNAL_HOOK_PROMPT_PREFIXES = (
+    "You write the one-line activity update displayed beneath an existing Codex task title.",
+    "You are a helpful assistant. You will be presented with a user prompt, and your job is to provide a short title for a task",
+)
 
 # 回调类型，必须与 daemon.py 完全一致
 EventCallback = Callable[[str, Any], Awaitable[None]]
@@ -431,6 +435,71 @@ class CodexAdapter:
         session_id = str(payload.get("session_id") or "").strip()
         if not session_id:
             return {"accepted": False, "reason": "missing_session_id"}
+        if session_id in self._hidden_live_sessions:
+            return {
+                "accepted": True,
+                "emitted": 0,
+                "suppressed": "non_user_visible_session",
+            }
+
+        from plugins.providers.builtin.codex.python.storage_runtime import (
+            is_codex_user_visible_session,
+            list_codex_subagent_thread_ids,
+        )
+
+        source = payload.get("source")
+        thread_source = payload.get("thread_source") or payload.get("threadSource")
+        transcript_path = str(
+            payload.get("transcript_path") or payload.get("transcriptPath") or ""
+        ).strip()
+        if source is None and not thread_source and transcript_path:
+            try:
+                with open(transcript_path, encoding="utf-8", errors="ignore") as transcript:
+                    session_meta = json.loads(transcript.readline())
+                if session_meta.get("type") == "session_meta":
+                    meta_payload = session_meta.get("payload")
+                    if isinstance(meta_payload, dict):
+                        source = meta_payload.get("source")
+                        thread_source = meta_payload.get("thread_source") or meta_payload.get(
+                            "threadSource"
+                        )
+            except (OSError, json.JSONDecodeError):
+                pass
+        if not is_codex_user_visible_session(
+            source,
+            thread_source=thread_source,
+        ) or session_id in list_codex_subagent_thread_ids([session_id]):
+            self._hidden_live_sessions.add(session_id)
+            return {
+                "accepted": True,
+                "emitted": 0,
+                "suppressed": "non_user_visible_session",
+            }
+
+        prompt_candidates = [
+            payload.get("prompt"),
+            payload.get("user_prompt"),
+            payload.get("userPrompt"),
+        ]
+        input_messages = payload.get("input_messages")
+        if isinstance(input_messages, list):
+            prompt_candidates.extend(input_messages)
+        elif input_messages is not None:
+            prompt_candidates.append(input_messages)
+        # ponytail: Codex currently exposes no source flag for these ephemeral
+        # internal tasks; replace these prefixes when the hook schema gains one.
+        if any(
+            str(prompt or "").strip().startswith(_INTERNAL_HOOK_PROMPT_PREFIXES)
+            for prompt in prompt_candidates
+        ):
+            self._hidden_live_sessions.add(session_id)
+            self._external_hook_sessions.pop(session_id, None)
+            self._thread_workspace_map.pop(session_id, None)
+            return {
+                "accepted": True,
+                "emitted": 0,
+                "suppressed": "non_user_visible_session",
+            }
         if not self._event_callbacks:
             return {"accepted": False, "reason": "event_callback_unavailable"}
         if self.has_authoritative_live_session(session_id):
@@ -450,17 +519,7 @@ class CodexAdapter:
             return {"accepted": True, "emitted": 0}
 
         if event_name == "SessionStart":
-            if not session.get("session_created_emitted"):
-                await self._emit_external_hook_event(
-                    workspace_id,
-                    "session.created",
-                    {
-                        "threadId": session_id,
-                        "_mirroredOnly": True,
-                    },
-                )
-                session["session_created_emitted"] = True
-            return {"accepted": True, "emitted": 1}
+            return {"accepted": True, "emitted": 0}
 
         if event_name == "UserPromptSubmit":
             prompt = str(

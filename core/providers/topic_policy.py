@@ -20,5 +20,5 @@ def provider_allows_unbound_thread_topic_materialization(
         else None
     )
     if not callable(policy):
-        return True
+        return False
     return bool(policy(state, ws_info, thread_info))

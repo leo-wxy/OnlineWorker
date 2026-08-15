@@ -44,6 +44,115 @@ async def test_real_codex_hook_event_marks_installed_definition_verified():
 
 
 @pytest.mark.asyncio
+async def test_external_hook_suppresses_subagent_session_and_later_notify(tmp_path):
+    transcript_path = tmp_path / "subagent.jsonl"
+    transcript_path.write_text(
+        json.dumps(
+            {
+                "type": "session_meta",
+                "payload": {
+                    "id": "subagent-session",
+                    "source": {"subagent": {"thread_spawn": {}}},
+                    "thread_source": "subagent",
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    callback = AsyncMock()
+    adapter = CodexAdapter()
+    adapter.on_event(callback)
+
+    started = await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "SessionStart",
+            "session_id": "subagent-session",
+            "transcript_path": str(transcript_path),
+        }
+    )
+    completed = await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "AgentTurnComplete",
+            "session_id": "subagent-session",
+            "turn_id": "subagent-turn",
+            "last_assistant_message": "内部结果",
+            "source": "codex_notify",
+        }
+    )
+
+    assert started == {
+        "accepted": True,
+        "emitted": 0,
+        "suppressed": "non_user_visible_session",
+    }
+    assert completed == started
+    callback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_external_notify_suppresses_subagent_found_in_codex_state():
+    callback = AsyncMock()
+    adapter = CodexAdapter()
+    adapter.on_event(callback)
+
+    with patch(
+        "plugins.providers.builtin.codex.python.storage_runtime.list_codex_subagent_thread_ids",
+        return_value={"subagent-session"},
+    ):
+        completed = await adapter.ingest_external_hook_payload(
+            {
+                "hook_event_name": "AgentTurnComplete",
+                "session_id": "subagent-session",
+                "turn_id": "subagent-turn",
+                "last_assistant_message": "内部结果",
+                "source": "codex_notify",
+            }
+        )
+
+    assert completed == {
+        "accepted": True,
+        "emitted": 0,
+        "suppressed": "non_user_visible_session",
+    }
+    callback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_external_hook_defers_start_and_suppresses_internal_notify_prompt():
+    callback = AsyncMock()
+    adapter = CodexAdapter()
+    adapter.on_event(callback)
+
+    started = await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "SessionStart",
+            "session_id": "internal-session",
+            "cwd": "/Users/example/Projects/demo",
+        }
+    )
+    completed = await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "AgentTurnComplete",
+            "session_id": "internal-session",
+            "turn_id": "internal-turn",
+            "input_messages": [
+                "You write the one-line activity update displayed beneath an existing Codex task title. Fill the structured summary field."
+            ],
+            "last_assistant_message": "内部结果",
+        }
+    )
+
+    assert started == {"accepted": True, "emitted": 0}
+    assert completed == {
+        "accepted": True,
+        "emitted": 0,
+        "suppressed": "non_user_visible_session",
+    }
+    callback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_app_server_event_marks_session_as_authoritative_live_source():
     adapter = CodexAdapter()
 

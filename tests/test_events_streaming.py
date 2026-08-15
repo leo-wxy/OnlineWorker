@@ -1089,7 +1089,7 @@ async def test_customprovider_streaming_reply_does_not_emit_duplicate_or_touch_c
 
 
 @pytest.mark.asyncio
-async def test_turn_started_materializes_missing_topic_for_registered_customprovider_thread():
+async def test_turn_started_does_not_materialize_topic_without_provider_opt_in():
     ws = WorkspaceInfo(
         name="onlineWorker",
         path="/Users/example/Projects/onlineWorker",
@@ -1129,18 +1129,17 @@ async def test_turn_started_materializes_missing_topic_for_registered_customprov
             },
         )
 
-    bot.create_forum_topic.assert_awaited_once()
-    replay_mock.assert_awaited_once()
-    bot.send_message.assert_awaited_once()
-    assert bot.send_message.await_args.kwargs["message_thread_id"] == 6201
-    assert ws.threads["ses-123"].topic_id == 6201
-    assert ws.threads["ses-123"].history_sync_cursor == "cursor-1"
-    assert state.streaming_turns["ses-123"].topic_id == 6201
-    assert save_storage_mock.call_count >= 2
+    bot.create_forum_topic.assert_not_awaited()
+    replay_mock.assert_not_awaited()
+    bot.send_message.assert_not_awaited()
+    assert ws.threads["ses-123"].topic_id is None
+    assert ws.threads["ses-123"].history_sync_cursor is None
+    assert "ses-123" not in state.streaming_turns
+    save_storage_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_turn_started_materializes_imported_thread_without_replaying_history_when_cursor_exists():
+async def test_turn_started_does_not_materialize_unbound_codex_thread():
     ws = WorkspaceInfo(
         name="onlineWorker",
         path="/Users/example/Projects/onlineWorker",
@@ -1182,13 +1181,13 @@ async def test_turn_started_materializes_imported_thread_without_replaying_histo
             },
         )
 
-    bot.create_forum_topic.assert_awaited_once()
+    bot.create_forum_topic.assert_not_awaited()
     replay_mock.assert_not_awaited()
-    bot.send_message.assert_awaited_once()
-    assert ws.threads["tid-imported"].topic_id == 6202
+    bot.send_message.assert_not_awaited()
+    assert ws.threads["tid-imported"].topic_id is None
     assert ws.threads["tid-imported"].history_sync_cursor == "cursor-current"
-    assert state.streaming_turns["tid-imported"].topic_id == 6202
-    assert save_storage_mock.call_count >= 1
+    assert "tid-imported" not in state.streaming_turns
+    save_storage_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
