@@ -2,17 +2,18 @@
 gsd_state_version: 1.0
 milestone: general-ai-capability-and-session-operations
 milestone_name: General AI Capability and Session Operations
-current_phase: 20
-current_phase_name: One-Click Diagnostics And Support Bundle
+current_phase: 20 — One-Click Diagnostics And Support Bundle
 current_plan: Phase 20 complete
 status: Phase 20 complete and installed-app verified
-last_updated: "2026-07-11T12:18:00.000Z"
+stopped_at: Phase 22 context gathered
+last_updated: "2026-08-15T15:23:14.141Z"
 progress:
-  total_phases: 15
-  completed_phases: 15
+  total_phases: 17
+  completed_phases: 11
   total_plans: 31
-  completed_plans: 21
-  percent: 68
+  completed_plans: 19
+  percent: 61
+current_phase_name: One-Click Diagnostics And Support Bundle
 ---
 
 # Project State
@@ -209,6 +210,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 ## Session Continuity
 
-Last session: 2026-07-11
-Stopped at: Phase 20 complete and installed-app verified
-Resume file: None
+Last session: 2026-08-15T15:23:14.128Z
+Stopped at: Phase 22 context gathered
+Resume file: .planning/phases/22-dark-mode-support/22-CONTEXT.md
