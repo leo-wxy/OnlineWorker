@@ -205,6 +205,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-11)
 - Phase 21 `21-01` source and installed Desktop verification completed on 2026-08-07: child rollout ingress is suppressed before EventBus publication, the affected workspace renders only parent sessions, and real Telegram workspace visual UAT remains unverified.
 - Phase 21 `21-02` source and packaged-runtime verification completed on 2026-08-08: Codex app-server `Thread.name` and offline `session_index.jsonl.thread_name` now drive user-facing titles, rollout/SQLite content remains preview text, and Telegram list/workspace/topic labels share the provider title priority. Focused red/green tests, a broader `200 passed` regression, and a real local two-session replay passed. `bash verify-packaged-fast.sh` built and installed `OnlineWorker_1.8.1_aarch64.dmg`, then relaunched the installed App and bot successfully; live Telegram visual UAT remains unverified.
 - Phase 21 `21-03` source and packaged-runtime verification completed on 2026-08-10: Codex Desktop ingress no longer holds one kqueue FD per historical rollout. One recursive FSEvents watcher plus transient reads reduced the installed main bot from `255/256` FDs to `29` with `531` tracked rollouts. Focused ingress tests passed `6`, broader Codex/EventBus/Telegram regressions passed `276`, packaged `1.8.2` verification passed, no new resource errors appeared, and Telegram polling repeatedly returned `200 OK`.
+- Phase 22 added: Dark Mode Support.
 
 ## Session Continuity
 
