@@ -853,11 +853,32 @@ Planning status:
 
 ### Phase 22: Dark Mode Support
 
-**Goal:** [To be planned]
+**Goal:** 为 macOS App 建立可持久化的 `System / Light / Dark` 主题，让主窗口、全部现有 UI 状态与 menubar 展开面板共享同一套和谐的明暗视觉、运行时同步和可复用语义 token，同时保持当前布局与业务行为不变。
 **Requirements**: TBD
+**Decision source:** Phase context D-01–D-14
 **Depends on:** Phase 21
-**Plans:** 0 plans
+**Plans:** 6 plans
+
+Success Criteria (what must be TRUE):
+
+  1. 首次默认 `System`，Light/Dark 选择可持久化；首帧无亮色闪屏，System 在运行期间实时跟随 macOS。
+  2. 主窗口与 menubar 立即同步，menubar 保留透明外壳、现有信息结构、尺寸与操作。
+  3. 所有现有页面、设置、表单、菜单、弹窗、滚动区和交互状态在 Light/Dark 下可读，布局、数据流与业务行为不变。
+  4. 新 UI 只消费 `index.css` 语义 token 或既有 `ow-*` 类，不引入主题库、ThemeProvider、Tailwind dark 配置或完整组件库。
+  5. `docs/UI-THEME.md`、CSS token 与可运行契约测试保持一致；源级/构建验证通过，安装态验证仅在用户明确授权后执行。
 
 Plans:
+**Wave 1**
 
-- [ ] TBD (run /gsd-plan-phase 22 to break down)
+- [ ] 22-01-PLAN.md — 建立主题运行时、首帧与双窗口同步
+- [ ] 22-02-PLAN.md — 建立语义 token 与正式主题规范
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 22-03-PLAN.md — 统一 App shell 与 menubar 主题体验
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 22-04-PLAN.md — 迁移 Dashboard 与 Task Board 主题表面
+- [ ] 22-05-PLAN.md — 迁移 Sessions、Usage 与 Commands 主题表面
+- [ ] 22-06-PLAN.md — 迁移 Setup、Settings、表单与弹窗主题表面

@@ -2,27 +2,27 @@
 gsd_state_version: 1.0
 milestone: general-ai-capability-and-session-operations
 milestone_name: General AI Capability and Session Operations
-current_phase: 20 — One-Click Diagnostics And Support Bundle
-current_plan: Phase 20 complete
-status: Phase 20 complete and installed-app verified
-stopped_at: Phase 22 context gathered
-last_updated: "2026-08-15T15:23:14.141Z"
+current_phase: 22 — Dark Mode Support
+current_plan: Wave 1 ready — 22-01 and 22-02
+status: Ready to execute
+stopped_at: Phase 22 planned — Wave 1 ready
+last_updated: "2026-08-15T16:10:34.521Z"
 progress:
   total_phases: 17
   completed_phases: 11
   total_plans: 31
   completed_plans: 19
   percent: 61
-current_phase_name: One-Click Diagnostics And Support Bundle
+current_phase_name: Dark Mode Support
 ---
 
 # Project State
 
-**Updated:** 2026-07-11
+**Updated:** 2026-08-16
 **Current milestone:** General AI Capability and Session Operations
-**Current phase:** 20 — One-Click Diagnostics And Support Bundle
-**Status:** Phase 20 complete and installed-app verified
-**Current plan:** Phase 20 complete
+**Current phase:** 22 — Dark Mode Support
+**Status:** Ready to execute
+**Current plan:** Wave 1 ready — `22-01` and `22-02`
 **Last archived milestone:** v1.2.1
 
 ## Current Status
@@ -75,13 +75,15 @@ current_phase_name: One-Click Diagnostics And Support Bundle
 | 18. Provider Session New Flow | Completed; canonical verification passed and packaged App real-session materialization verified | None; live Telegram `/new` UAT was waived and remains unclaimed |
 | 19. Attention Center And Session Interrupt/Resume | Completed; source and installed core UAT passed | None; installed narrow-width visual check was explicitly waived and remains unclaimed |
 | 20. One-Click Diagnostics And Support Bundle | Completed and installed-app verified | None |
+| 21. Provider-Owned Session Visibility | Source and packaged-runtime verified through `21-03`; live Telegram visual UAT remains unverified | Close remaining UAT when desired |
+| 22. Dark Mode Support | Planned; 6 plans across 3 waves | Execute `22-01` and `22-02` in parallel after the capability confirmation gate |
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 **Core value:** Developers can reliably control local AI coding CLI workflows from an installed Mac app while receiving timely remote notifications and final results through supported notification channels.
-**Current focus:** Phase 20 — One-Click Diagnostics And Support Bundle
+**Current focus:** Phase 22 — reusable System/Light/Dark themes for the main App and menubar
 
 ## Key Preserved Decisions
 
@@ -207,9 +209,10 @@ See: `.planning/PROJECT.md` (updated 2026-07-11)
 - Phase 21 `21-02` source and packaged-runtime verification completed on 2026-08-08: Codex app-server `Thread.name` and offline `session_index.jsonl.thread_name` now drive user-facing titles, rollout/SQLite content remains preview text, and Telegram list/workspace/topic labels share the provider title priority. Focused red/green tests, a broader `200 passed` regression, and a real local two-session replay passed. `bash verify-packaged-fast.sh` built and installed `OnlineWorker_1.8.1_aarch64.dmg`, then relaunched the installed App and bot successfully; live Telegram visual UAT remains unverified.
 - Phase 21 `21-03` source and packaged-runtime verification completed on 2026-08-10: Codex Desktop ingress no longer holds one kqueue FD per historical rollout. One recursive FSEvents watcher plus transient reads reduced the installed main bot from `255/256` FDs to `29` with `531` tracked rollouts. Focused ingress tests passed `6`, broader Codex/EventBus/Telegram regressions passed `276`, packaged `1.8.2` verification passed, no new resource errors appeared, and Telegram polling repeatedly returned `200 OK`.
 - Phase 22 added: Dark Mode Support.
+- Phase 22 planned on 2026-08-16: 6 plans across 3 waves cover theme runtime/first frame, reusable tokens and `docs/UI-THEME.md`, App shell/menubar parity, and full existing UI surface migration. Plan structure passed for all 6 plans; CONTEXT decision coverage and post-planning gap analysis both passed 14/14.
 
 ## Session Continuity
 
-Last session: 2026-08-15T15:23:14.128Z
-Stopped at: Phase 22 context gathered
-Resume file: .planning/phases/22-dark-mode-support/22-CONTEXT.md
+Last session: 2026-08-15T16:10:34.521Z
+Stopped at: Phase 22 planned — Wave 1 ready
+Resume file: .planning/phases/22-dark-mode-support/22-01-PLAN.md

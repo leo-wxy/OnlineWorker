@@ -31,6 +31,10 @@
 - **D-11:** 在 React 首帧渲染前应用持久化主题或系统主题，避免亮色闪屏。
 - **D-12:** 手动切换时仅对颜色、背景、边框和阴影使用约 `150ms` 的轻微淡变；不做整窗淡入淡出，并尊重减少动态效果偏好。
 
+### 可复用主题契约与开发文档
+- **D-13:** 建立一套轻量、可复用的语义主题结构。新 UI 只消费背景、表面、边框、文字、交互、状态和阴影 token 或既有 `ow-*` 语义类，不再直接写死浅色/暗色值；不引入主题库或完整组件库。
+- **D-14:** 将主题模型、token、组件消费规则、禁止硬编码、可访问性、menubar 例外和验证要求写入稳定开发文档 `docs/UI-THEME.md`，由 `docs/README.md` 索引，并在贡献指南中提供入口。文档与实际 token 必须有可运行契约检查，供后续 UI 开发复用。
+
 ### the agent's Discretion
 - 在上述视觉方向内确定精确 token 数值、存储键名称和最小代码组织方式。
 - 选择 Tauri 已有 app/window 主题 API 与浏览器系统主题监听的最小可靠组合，但不得新增主题依赖。
@@ -53,6 +57,8 @@
 - `mac-app/src/main.tsx` — 主窗口与 menubar 窗口的共同 React 启动入口；首帧防闪必须在此入口之前或之中完成。
 - `mac-app/src/index.css` — 现有 `--ow-*` 色彩/表面 token、共享玻璃表面和全局状态样式。
 - `mac-app/tailwind.config.js` — 当前 Tailwind 配置；不得为主题支持引入额外依赖。
+- `docs/README.md` — 现有开发文档索引；Phase 22 应从这里链接稳定主题规范。
+- `CONTRIBUTING.md` — 后续 UI 贡献者的开发入口；只增加主题规范链接，不复制 token 内容。
 
 ### Menubar 与原生窗口
 - `mac-app/src/components/menubar-popover/MenubarPopover.tsx` — menubar 展开面板的现有信息结构与硬编码浅色样式。
