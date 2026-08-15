@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -374,6 +375,39 @@ def test_main_uses_stable_default_data_dir_when_flag_missing(monkeypatch, tmp_pa
     assert observed["set_data_dir"] == [default_dir]
     assert observed["load_config"] == [default_dir]
     assert observed["flock"] == [f"{default_dir}/onlineworker.lock"]
+
+
+def test_main_redacts_telegram_token_from_http_client_logs(monkeypatch, tmp_path):
+    run_polling_calls = []
+    dummy_filter = _DummyFilter()
+    cfg = SimpleNamespace(
+        telegram_token="configured-token",
+        allowed_user_id=123,
+        group_chat_id=456,
+        log_level="INFO",
+    )
+
+    monkeypatch.setattr(
+        main.sys,
+        "argv",
+        ["main.py", "--data-dir", str(tmp_path)],
+    )
+    monkeypatch.setattr(main, "HTTPXRequest", lambda **kwargs: object())
+    _stub_main_dependencies(monkeypatch, run_polling_calls, cfg, dummy_filter)
+
+    main.main()
+
+    fake_token = "123456:VERY_SECRET_TOKEN"
+    logging.getLogger("httpx").warning(
+        "HTTP Request: POST https://api.telegram.org/bot%s/getUpdates",
+        fake_token,
+    )
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+
+    log_text = (tmp_path / "onlineworker.log").read_text(encoding="utf-8")
+    assert fake_token not in log_text
+    assert "https://api.telegram.org/bot<redacted>/getUpdates" in log_text
 
 
 def test_main_has_no_codex_hook_install_one_shot():

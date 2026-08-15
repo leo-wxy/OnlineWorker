@@ -5,6 +5,7 @@ import json
 import logging
 import logging.handlers
 import os
+import re
 import sys
 import time
 from telegram import Update
@@ -42,6 +43,15 @@ from bot.handlers.message import make_message_handler, make_callback_handler
 logger = logging.getLogger(__name__)
 
 _DEFAULT_LOCK_FILE = "/tmp/onlineworker_bot.lock"
+_TELEGRAM_BOT_URL_RE = re.compile(r"(https://api\.telegram\.org/bot)[^/\s]+")
+
+
+class _RedactingFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return _TELEGRAM_BOT_URL_RE.sub(
+            r"\1<redacted>",
+            super().format(record),
+        )
 
 # 持有文件锁的文件对象，进程退出时 OS 自动释放
 _lock_fh = None
@@ -399,20 +409,23 @@ def main() -> None:
 
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     # 清除已有 handler（防止崩溃重启后重复添加）
     root_logger.handlers.clear()
+
+    log_formatter = _RedactingFormatter(log_format)
 
     # RotatingFileHandler: 10MB per file, keep 3 backups
     file_handler = logging.handlers.RotatingFileHandler(
         log_file, maxBytes=10 * 1024 * 1024, backupCount=3,
         encoding="utf-8",
     )
-    file_handler.setFormatter(logging.Formatter(log_format))
+    file_handler.setFormatter(log_formatter)
     root_logger.addHandler(file_handler)
 
     # 同时输出到 stdout（方便 launchd 抓取和调试）
     stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setFormatter(logging.Formatter(log_format))
+    stream_handler.setFormatter(log_formatter)
     root_logger.addHandler(stream_handler)
 
     rapid_crashes = 0

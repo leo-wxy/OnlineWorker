@@ -234,3 +234,39 @@ Feedback loop and verification:
 Remaining validation:
 
 - End-to-end trust completion still requires the user to accept the current Hook definition in Codex and then trigger one real lifecycle event.
+
+## Implementation Record — 2026-08-15 (Codex Hook Topic Pollution Repair)
+
+Closed the remaining live-Hook bypass that allowed Codex child and internal sessions to pollute OnlineWorker state and Telegram Topics.
+
+Verified root cause:
+
+- Stored-session listing already filtered Codex `thread_source=subagent`, but official Hook and `notify` completion events entered the adapter independently of that listing path.
+- `notify` marks its transport as `source=codex_notify`; the adapter previously queried Codex SQLite by session id only when `source` was absent, so a real subagent completion could still publish `session.created` and turn events.
+- `turn/started` could then materialize an unbound Telegram Topic because providers without an explicit Topic policy inherited a fail-open default.
+- OnlineWorker login-backed Codex AI helpers also launched `codex exec` without disabling Hooks, so Codex's internal activity-summary and short-title tasks could re-enter the same lifecycle path.
+
+Implemented behavior:
+
+- Every external Codex Hook/notify event now reuses the canonical SQLite-backed child-session decision by session id, regardless of transport source, before EventBus publication.
+- Transcript metadata and exact internal activity/title prompt prefixes remain early suppression signals; `SessionStart` alone no longer creates a visible session.
+- Login-backed Codex AI completion invokes `codex exec --disable hooks`, preventing OnlineWorker-owned helper tasks from generating lifecycle events.
+- Unbound Topic materialization is now fail-closed unless the provider explicitly opts in. User-triggered `/list` and workspace-open Topic creation remain unchanged.
+- Root logging suppresses `httpx` request-level INFO output and redacts Telegram Bot URL credentials at the shared file/stdout formatter boundary.
+
+Cleanup and reconciliation:
+
+- Deleted `71` classified abnormal Telegram Topics: `42` known Codex subagent Topics, `25` activity-summary Topics, `3` short-title Topics, and `1` final residual child Topic.
+- Removed the matching routes plus `78` stale local Codex child/internal thread records without modifying Codex SQLite, rollout, transcript, or provider history.
+- Preserved two genuine parent sessions and refreshed their state/route titles to `修复工程编译错误` and `接入 mediautils 鸿蒙源码依赖`.
+- Cleanup backups are retained under `/tmp/onlineworker-topic-cleanup-20260815-*` and `/tmp/onlineworker-state-before-topic-cleanup-20260815-1045.json`.
+- Redacted `94,084` historical Telegram Bot URL occurrences in the active and rotated local logs without copying the sensitive originals.
+
+Verification:
+
+- Focused login, adapter, and streaming regression passed: `96 passed`.
+- Hook bridge, TUI, workspace-open, and provider-boundary regression passed: `102 passed`.
+- A real post-install Codex subagent completed with `emitted=0`; it produced no `session.created`, local thread, or Telegram route.
+- After restart, live inventory reported `0` Codex child threads in OnlineWorker state, `0` internal activity/title threads, and `0` classified abnormal Telegram routes.
+- Logging regression passed `13` tests; the installed runtime produced `0` new `httpx` request lines and all local log generations contained `0` unredacted Telegram Bot URLs.
+- `OnlineWorker_1.8.3_aarch64.dmg` was rebuilt and installed; DMG SHA-256: `f45e6ee501337b9ba33288177abd9b8d2832931938d0d807ff55eb62939629a1`.
