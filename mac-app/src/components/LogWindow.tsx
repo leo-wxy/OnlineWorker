@@ -9,24 +9,24 @@ const FILTERS: LogLevel[] = ["ALL", "DEBUG", "INFO", "WARNING", "ERROR"];
 
 const LEVEL_STYLES: Record<string, { badge: string; row: string }> = {
   DEBUG: {
-    badge: "border-slate-200 bg-slate-100 text-slate-600",
-    row: "border-slate-200/80 bg-slate-50/78",
+    badge: "border-[var(--ow-line)] bg-[var(--ow-panel-soft)] text-[var(--ow-muted)]",
+    row: "border-[var(--ow-line)] bg-[var(--ow-panel-soft)]",
   },
   INFO: {
-    badge: "border-blue-100 bg-blue-50 text-blue-700",
-    row: "border-blue-100/80 bg-blue-50/68",
+    badge: "border-[var(--ow-blue)] bg-[var(--ow-blue-soft)] text-[var(--ow-blue)]",
+    row: "border-[var(--ow-blue)] bg-[var(--ow-blue-soft)]",
   },
   WARNING: {
-    badge: "border-amber-100 bg-amber-50 text-amber-700",
-    row: "border-amber-100/80 bg-amber-50/74",
+    badge: "border-[var(--ow-amber)] bg-[var(--ow-amber-soft)] text-[var(--ow-warning-text)]",
+    row: "border-[var(--ow-amber)] bg-[var(--ow-amber-soft)]",
   },
   ERROR: {
-    badge: "border-rose-100 bg-rose-50 text-rose-700",
-    row: "border-rose-100/80 bg-rose-50/74",
+    badge: "border-[var(--ow-red)] bg-[var(--ow-red-soft)] text-[var(--ow-error-text)]",
+    row: "border-[var(--ow-red)] bg-[var(--ow-red-soft)]",
   },
   UNKNOWN: {
-    badge: "border-slate-200 bg-slate-100 text-slate-500",
-    row: "border-slate-200/80 bg-white/84",
+    badge: "border-[var(--ow-line)] bg-[var(--ow-panel-soft)] text-[var(--ow-muted)]",
+    row: "border-[var(--ow-line)] bg-[var(--ow-panel)]",
   },
 };
 
@@ -101,27 +101,27 @@ export function LogWindow({ onClose }: Props) {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <div className="flex items-start gap-3">
-                <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-blue-50 text-blue-600 shadow-[inset_0_0_0_1px_rgba(37,99,235,0.08)]">
+                <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[var(--ow-blue-soft)] text-[var(--ow-blue)] [box-shadow:var(--ow-shadow-sm)]">
                   <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17v-6m3 6V7m3 10v-3m3 6H6a2 2 0 01-2-2V6a2 2 0 012-2h9.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V18a2 2 0 01-2 2z" />
                   </svg>
                 </div>
                 <div className="min-w-0">
-                  <h2 className="truncate text-base font-semibold text-slate-950 sm:text-lg">
+                  <h2 className="truncate text-base font-semibold text-[var(--ow-text)] sm:text-lg">
                     {t.logs.title(logPath)}
                   </h2>
-                  <p className="mt-1 break-all text-xs leading-5 text-slate-500">
+                  <p className="mt-1 break-all text-xs leading-5 text-[var(--ow-muted)]">
                     {logPath}
                   </p>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <span className={`ow-badge rounded-full border px-2.5 py-1 text-[10px] ${
                       running
-                        ? "border-emerald-100 bg-emerald-50 text-emerald-700"
-                        : "border-slate-200 bg-slate-100 text-slate-600"
+                        ? "border-[var(--ow-green)] bg-[var(--ow-green-soft)] text-[var(--ow-green)]"
+                        : "border-[var(--ow-line)] bg-[var(--ow-panel-soft)] text-[var(--ow-muted)]"
                     }`}>
                       {running ? t.logs.live : t.logs.paused}
                     </span>
-                    <span className="ow-badge rounded-full border border-slate-200 bg-white/88 px-2.5 py-1 text-[10px] text-slate-600">
+                    <span className="ow-badge rounded-full border border-[var(--ow-line)] bg-[var(--ow-panel)] px-2.5 py-1 text-[10px] text-[var(--ow-muted)]">
                       {countSummary}
                     </span>
                   </div>
@@ -132,19 +132,19 @@ export function LogWindow({ onClose }: Props) {
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               <button
                 onClick={running ? stop : start}
-                className="ow-btn rounded-xl px-3.5 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-white"
+                className="ow-btn rounded-xl px-3.5 py-2 text-xs font-semibold text-[var(--ow-text)] transition-colors hover:bg-[var(--ow-panel)]"
               >
                 {running ? t.logs.pause : t.logs.resume}
               </button>
               <button
                 onClick={clear}
-                className="ow-btn rounded-xl px-3.5 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-white"
+                className="ow-btn rounded-xl px-3.5 py-2 text-xs font-semibold text-[var(--ow-text)] transition-colors hover:bg-[var(--ow-panel)]"
               >
                 {t.logs.clear}
               </button>
               <button
                 onClick={onClose}
-                className="ow-btn rounded-xl px-3.5 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-white"
+                className="ow-btn rounded-xl px-3.5 py-2 text-xs font-semibold text-[var(--ow-text)] transition-colors hover:bg-[var(--ow-panel)]"
               >
                 {t.common.close}
               </button>
@@ -155,14 +155,14 @@ export function LogWindow({ onClose }: Props) {
         <div className="border-b border-[var(--ow-line-soft)] px-5 py-3 sm:px-6">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+              <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ow-muted)]">
                 {t.logs.filter}
               </span>
               {FILTERS.map((level) => (
                 <button
                   key={level}
                   onClick={() => setFilter(level)}
-                  className={`ow-log-filter-chip rounded-full px-3 py-1.5 text-[11px] font-semibold transition-all ${
+                  className={`ow-log-filter-chip rounded-full px-3 py-1.5 text-[11px] font-semibold transition-colors ${
                     filter === level ? "ow-log-filter-chip-active" : ""
                   }`}
                 >
@@ -171,12 +171,12 @@ export function LogWindow({ onClose }: Props) {
               ))}
             </div>
 
-            <label className="flex select-none items-center gap-2 text-xs font-medium text-slate-500">
+            <label className="flex select-none items-center gap-2 text-xs font-medium text-[var(--ow-muted)]">
               <input
                 type="checkbox"
                 checked={autoScroll}
                 onChange={(event) => setAutoScroll(event.target.checked)}
-                className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                className="h-3.5 w-3.5 rounded border-[var(--ow-line)] text-[var(--ow-blue)] focus:ring-[var(--ow-focus)]"
               />
               {t.logs.autoScroll}
             </label>
@@ -187,12 +187,12 @@ export function LogWindow({ onClose }: Props) {
           {filteredLines.length === 0 ? (
             <div className="flex h-full min-h-[260px] items-center justify-center">
               <div className="ow-page-frame-soft max-w-md rounded-3xl px-6 py-8 text-center shadow-none">
-                <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-slate-500">
+                <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-[var(--ow-panel-soft)] text-[var(--ow-muted)]">
                   <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                 </div>
-                <p className="text-sm font-semibold text-slate-800">
+                <p className="text-sm font-semibold text-[var(--ow-text)]">
                   {running ? t.logs.waiting : t.logs.noEntries}
                 </p>
               </div>
@@ -209,7 +209,7 @@ export function LogWindow({ onClose }: Props) {
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       {line.timestamp && (
-                        <span className="text-[11px] font-medium text-slate-500">
+                        <span className="text-[11px] font-medium text-[var(--ow-muted)]">
                           {line.timestamp}
                         </span>
                       )}
@@ -217,7 +217,7 @@ export function LogWindow({ onClose }: Props) {
                         {line.level}
                       </span>
                     </div>
-                    <p className="mt-2 break-words font-mono text-[12px] leading-6 text-slate-700">
+                    <p className="mt-2 break-words font-mono text-[12px] leading-6 text-[var(--ow-text)]">
                       {line.message || line.raw}
                     </p>
                   </div>

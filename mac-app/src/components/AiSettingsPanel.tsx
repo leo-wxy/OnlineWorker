@@ -224,18 +224,18 @@ export function AiSettingsPanel() {
   return (
     <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col gap-5">
       <div className="shrink-0">
-        <h2 className="text-xl font-extrabold tracking-[-0.02em] text-gray-950">{labels.title}</h2>
-        <p className="mt-1 max-w-3xl text-sm font-medium text-slate-500">{labels.description}</p>
+        <h2 className="text-xl font-extrabold tracking-[-0.02em] text-[var(--ow-text)]">{labels.title}</h2>
+        <p className="mt-1 max-w-3xl text-sm font-medium text-[var(--ow-muted)]">{labels.description}</p>
       </div>
 
       {loading && (
-        <div className="ow-page-frame-soft rounded-[24px] p-5 text-sm font-medium text-slate-500">
+        <div className="ow-page-frame-soft rounded-[24px] p-5 text-sm font-medium text-[var(--ow-muted)]">
           {labels.loading}
         </div>
       )}
 
       {error && (
-        <div className="ow-page-frame-soft rounded-[24px] border-rose-200 bg-rose-50/85 p-4 text-sm font-medium text-rose-700">
+        <div className="ow-page-frame-soft rounded-[24px] border-[var(--ow-red)] bg-[var(--ow-red-soft)] p-4 text-sm font-medium text-[var(--ow-error-text)]">
           {error}
         </div>
       )}

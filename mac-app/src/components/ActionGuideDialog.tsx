@@ -87,13 +87,13 @@ export function ActionGuideDialog({
             <div className="min-w-0">
               <h2
                 id="action-guide-title"
-                className="text-xl font-extrabold tracking-[-0.025em] text-slate-950"
+                className="text-xl font-extrabold tracking-[-0.025em] text-[var(--ow-text)]"
               >
                 {title}
               </h2>
               <p
                 id="action-guide-description"
-                className="mt-2 text-sm leading-6 text-slate-500"
+                className="mt-2 text-sm leading-6 text-[var(--ow-muted)]"
               >
                 {description}
               </p>
@@ -102,7 +102,7 @@ export function ActionGuideDialog({
               ref={closeButtonRef}
               type="button"
               onClick={onClose}
-              className="ow-btn shrink-0 rounded-xl px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-white"
+              className="ow-btn shrink-0 rounded-xl px-3 py-2 text-xs font-semibold text-[var(--ow-muted)] hover:bg-[var(--ow-panel)]"
             >
               {closeLabel}
             </button>
@@ -111,23 +111,23 @@ export function ActionGuideDialog({
           <ol className="mt-5 space-y-3">
             {steps.map((step, index) => (
               <li key={`${index}-${step}`} className="flex items-center gap-3">
-                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-blue-50 text-xs font-extrabold text-blue-600 ring-1 ring-inset ring-blue-100">
+                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[var(--ow-blue-soft)] text-xs font-extrabold text-[var(--ow-blue)] ring-1 ring-inset ring-[var(--ow-focus)]">
                   {index + 1}
                 </span>
-                <span className="text-sm font-semibold leading-6 text-slate-800">{step}</span>
+                <span className="text-sm font-semibold leading-6 text-[var(--ow-text)]">{step}</span>
               </li>
             ))}
           </ol>
 
           {command ? (
-            <div className="mt-5 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-2.5 pl-4">
-              <code className="min-w-0 flex-1 select-all font-mono text-base font-semibold text-slate-900">
+            <div className="mt-5 flex items-center gap-3 rounded-2xl border border-[var(--ow-line)] bg-[var(--ow-panel-soft)] p-2.5 pl-4">
+              <code className="min-w-0 flex-1 select-all font-mono text-base font-semibold text-[var(--ow-text)]">
                 {command}
               </code>
               <button
                 type="button"
                 onClick={() => void copyCommand()}
-                className="ow-btn shrink-0 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-white"
+                className="ow-btn shrink-0 rounded-xl px-3.5 py-2 text-xs font-bold text-[var(--ow-text)] hover:bg-[var(--ow-panel)]"
               >
                 {copied ? copiedLabel : copyLabel}
               </button>
@@ -135,7 +135,7 @@ export function ActionGuideDialog({
           ) : null}
 
           {note ? (
-            <p className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-xs font-medium leading-5 text-blue-700">
+            <p className="mt-4 rounded-2xl border border-[var(--ow-blue)] bg-[var(--ow-blue-soft)] px-4 py-3 text-xs font-medium leading-5 text-[var(--ow-blue)]">
               {note}
             </p>
           ) : null}
@@ -145,14 +145,14 @@ export function ActionGuideDialog({
               type="button"
               disabled={busy}
               onClick={onPrimary}
-              className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white shadow-[0_10px_24px_rgba(37,99,235,0.22)] transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-xl bg-[var(--ow-blue)] px-5 py-2.5 text-sm font-bold text-[var(--ow-on-accent)] [box-shadow:var(--ow-shadow-md)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 disabled:brightness-100"
             >
               {primaryLabel}
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="ow-btn rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-white"
+              className="ow-btn rounded-xl px-4 py-2.5 text-sm font-bold text-[var(--ow-muted)] hover:bg-[var(--ow-panel)]"
             >
               {secondaryLabel}
             </button>

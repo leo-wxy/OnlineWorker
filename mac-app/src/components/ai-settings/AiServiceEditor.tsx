@@ -59,29 +59,29 @@ export function AiServiceEditor({
       <div className="border-b border-[var(--ow-line-soft)] px-6 py-5">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-400">{labels.serviceConfigTitle}</p>
-            <h3 id={`ai-service-${service.id}-title`} className="mt-1 text-xl font-extrabold tracking-[-0.02em] text-gray-950">
+            <p className="text-xs font-bold uppercase tracking-wider text-[var(--ow-subtle)]">{labels.serviceConfigTitle}</p>
+            <h3 id={`ai-service-${service.id}-title`} className="mt-1 text-xl font-extrabold tracking-[-0.02em] text-[var(--ow-text)]">
               {serviceTitle(service, labels)}
             </h3>
-            <p className="mt-3 max-w-2xl text-sm font-medium leading-6 text-slate-500">
+            <p className="mt-3 max-w-2xl text-sm font-medium leading-6 text-[var(--ow-muted)]">
               {serviceDescription(service, labels)}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-3">
-            {saved && <span className="text-xs font-bold text-emerald-700">{common.saved}</span>}
-            {saving && <span className="text-xs font-bold text-blue-600">{common.saving}</span>}
+            {saved && <span className="text-xs font-bold text-[var(--ow-green)]">{common.saved}</span>}
+            {saving && <span className="text-xs font-bold text-[var(--ow-blue)]">{common.saving}</span>}
             {!service.pluginOwned && (
               <button
                 type="button"
                 onClick={() => onDelete(service.id)}
                 disabled={saving}
-                className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-xl border border-[var(--ow-red)] bg-[var(--ow-red-soft)] px-3 py-2 text-sm font-semibold text-[var(--ow-error-text)] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {labels.deleteService}
               </button>
             )}
-            <label className={`flex items-center gap-3 rounded-xl border border-[var(--ow-line-soft)] bg-slate-50 px-3 py-2 ${saving ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
-              <span className="text-sm font-semibold text-slate-700">{labels.enableService}</span>
+            <label className={`flex items-center gap-3 rounded-xl border border-[var(--ow-line-soft)] bg-[var(--ow-panel-soft)] px-3 py-2 ${saving ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
+              <span className="text-sm font-semibold text-[var(--ow-text)]">{labels.enableService}</span>
               <Toggle
                 checked={service.enabled}
                 disabled={saving}
@@ -97,8 +97,8 @@ export function AiServiceEditor({
         <div className="ow-page-frame-soft divide-y divide-[var(--ow-line-soft)] overflow-hidden rounded-[24px] shadow-none">
           {providerLogin ? (
             <div className="grid gap-4 px-5 py-5 md:grid-cols-[220px_minmax(0,1fr)]">
-              <span className="text-sm font-bold text-gray-950">{labels.authentication}</span>
-              <div className="rounded-2xl border border-[var(--ow-line)] bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+              <span className="text-sm font-bold text-[var(--ow-text)]">{labels.authentication}</span>
+              <div className="rounded-2xl border border-[var(--ow-line)] bg-[var(--ow-panel-soft)] px-4 py-3 text-sm font-semibold text-[var(--ow-text)]">
                 {labels.providerLoginAuthentication(service.label || service.name)}
               </div>
             </div>
@@ -136,7 +136,7 @@ export function AiServiceEditor({
                 }}
               />
               <div className="grid gap-4 px-5 py-5 md:grid-cols-[220px_minmax(0,1fr)]">
-                <label htmlFor={`ai-service-${service.id}-model`} className="text-sm font-bold text-gray-950">
+                <label htmlFor={`ai-service-${service.id}-model`} className="text-sm font-bold text-[var(--ow-text)]">
                   {labels.defaultModel}
                 </label>
                 <select
@@ -144,7 +144,7 @@ export function AiServiceEditor({
                   value={service.defaultModel}
                   disabled={saving}
                   onChange={(event) => onUpdate(service.id, { defaultModel: event.target.value })}
-                  className="block w-full rounded-2xl border border-[var(--ow-line)] bg-white/92 px-4 py-3 text-sm font-medium text-gray-900 outline-none transition-colors focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                  className="block w-full rounded-2xl border border-[var(--ow-line)] bg-[var(--ow-panel)] px-4 py-3 text-sm font-medium text-[var(--ow-text)] outline-none transition-colors focus:border-[var(--ow-blue)] focus:ring-4 focus:ring-[var(--ow-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ow-panel-soft)] disabled:text-[var(--ow-subtle)]"
                 >
                   {service.models.map((model) => (
                     <option key={model} value={model}>{model}</option>
@@ -171,8 +171,8 @@ export function AiServiceEditor({
               <div
                 className={`rounded-xl border px-4 py-3 text-sm font-semibold ${
                   testResult.ok
-                    ? "border-emerald-100 bg-emerald-50 text-emerald-800"
-                    : "border-rose-100 bg-rose-50 text-rose-800"
+                    ? "border-[var(--ow-green)] bg-[var(--ow-green-soft)] text-[var(--ow-green)]"
+                    : "border-[var(--ow-red)] bg-[var(--ow-red-soft)] text-[var(--ow-error-text)]"
                 }`}
               >
                 {testResultText}
@@ -184,7 +184,7 @@ export function AiServiceEditor({
               type="button"
               onClick={() => onTestConnection(service)}
               disabled={testingServiceId === service.id}
-              className="rounded-xl border border-[var(--ow-line)] bg-white px-5 py-2.5 text-sm font-semibold text-gray-900 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-xl border border-[var(--ow-line)] bg-[var(--ow-panel)] px-5 py-2.5 text-sm font-semibold text-[var(--ow-text)] shadow-sm transition-colors hover:bg-[var(--ow-panel-soft)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {testingServiceId === service.id ? testingLabel : testButtonLabel}
             </button>

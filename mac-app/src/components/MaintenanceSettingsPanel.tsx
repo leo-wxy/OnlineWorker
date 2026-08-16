@@ -187,21 +187,21 @@ export function MaintenanceSettingsPanel() {
   };
 
   const statusTone = (status: DiagnosticCheck["status"]) => {
-    if (status === "pass") return "bg-emerald-500";
-    if (status === "warning") return "bg-amber-500";
-    return "bg-rose-500";
+    if (status === "pass") return "bg-[var(--ow-green)]";
+    if (status === "warning") return "bg-[var(--ow-amber)]";
+    return "bg-[var(--ow-red)]";
   };
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6">
       <div>
-        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+        <p className="text-xs font-bold uppercase tracking-wider text-[var(--ow-subtle)]">
           {setup.maintenanceEyebrow}
         </p>
-        <h2 className="mt-1 text-[28px] font-extrabold tracking-[-0.03em] text-gray-950">
+        <h2 className="mt-1 text-[28px] font-extrabold tracking-[-0.03em] text-[var(--ow-text)]">
           {setup.maintenanceTitle}
         </h2>
-        <p className="mt-2 text-sm font-medium text-slate-500">
+        <p className="mt-2 text-sm font-medium text-[var(--ow-muted)]">
           {setup.maintenanceDescription}
         </p>
       </div>
@@ -209,16 +209,16 @@ export function MaintenanceSettingsPanel() {
       <div className="ow-page-frame rounded-[26px] p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+            <p className="text-xs font-bold uppercase tracking-wider text-[var(--ow-subtle)]">
               {setup.storageTitle}
             </p>
-            <h3 className="mt-1 text-base font-bold text-gray-900">
+            <h3 className="mt-1 text-base font-bold text-[var(--ow-text)]">
               {setup.attachmentCacheTitle}
             </h3>
-            <p className="mt-1 max-w-2xl text-sm text-slate-500">
+            <p className="mt-1 max-w-2xl text-sm text-[var(--ow-muted)]">
               {setup.attachmentCacheDescription}
             </p>
-            <p className="mt-3 text-sm font-semibold text-slate-700">
+            <p className="mt-3 text-sm font-semibold text-[var(--ow-text)]">
               {cacheLoading
                 ? common.loading
                 : setup.attachmentCacheSize(
@@ -229,7 +229,7 @@ export function MaintenanceSettingsPanel() {
             {(cacheMessage || cacheError) && (
               <p
                 className={`mt-2 text-sm font-medium ${
-                  cacheError ? "text-rose-600" : "text-emerald-700"
+                  cacheError ? "text-[var(--ow-error-text)]" : "text-[var(--ow-green)]"
                 }`}
               >
                 {cacheError || cacheMessage}
@@ -240,7 +240,7 @@ export function MaintenanceSettingsPanel() {
             <button
               onClick={() => void loadAttachmentCacheStats()}
               disabled={cacheLoading || cacheClearing}
-              className="ow-btn rounded-xl px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
+              className="ow-btn rounded-xl px-4 py-2 text-sm font-semibold text-[var(--ow-text)] disabled:opacity-50"
             >
               {common.recheck}
             </button>
@@ -258,13 +258,13 @@ export function MaintenanceSettingsPanel() {
       <section className="ow-page-frame rounded-[26px] p-6" aria-labelledby="diagnostics-title">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <h3 id="diagnostics-title" className="text-base font-bold text-gray-900">
+            <h3 id="diagnostics-title" className="text-base font-bold text-[var(--ow-text)]">
               {setup.diagnosticsTitle}
             </h3>
-            <p className="mt-1 max-w-2xl text-sm text-slate-500">
+            <p className="mt-1 max-w-2xl text-sm text-[var(--ow-muted)]">
               {setup.diagnosticsDescription}
             </p>
-            <p className="mt-2 max-w-2xl text-xs text-slate-500">
+            <p className="mt-2 max-w-2xl text-xs text-[var(--ow-muted)]">
               {setup.supportBundlePrivacy}
             </p>
           </div>
@@ -280,12 +280,12 @@ export function MaintenanceSettingsPanel() {
 
         <div className="mt-5" aria-live="polite">
           {!diagnostics && !diagnosticsBusy && !diagnosticsError ? (
-            <p className="text-sm text-slate-400">{setup.diagnosticsNeverRun}</p>
+            <p className="text-sm text-[var(--ow-subtle)]">{setup.diagnosticsNeverRun}</p>
           ) : null}
 
           {groupedDiagnostics.map((group) => (
             <div key={group.status} className="border-t border-[var(--ow-line-soft)] py-3 first:border-t-0">
-              <p className="mb-2 text-xs font-semibold text-slate-500">
+              <p className="mb-2 text-xs font-semibold text-[var(--ow-muted)]">
                 {statusLabel(group.status)} · {group.checks.length}
               </p>
               <ul className="divide-y divide-[var(--ow-line-soft)]">
@@ -298,10 +298,10 @@ export function MaintenanceSettingsPanel() {
                         <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${statusTone(check.status)}`} aria-hidden="true" />
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                            <p className="text-sm font-semibold text-slate-800">{check.label}</p>
-                            <span className="text-xs text-slate-400">{check.durationMs} ms</span>
+                            <p className="text-sm font-semibold text-[var(--ow-text)]">{check.label}</p>
+                            <span className="text-xs text-[var(--ow-subtle)]">{check.durationMs} ms</span>
                           </div>
-                          <p className="mt-0.5 text-sm text-slate-600">{check.summary}</p>
+                          <p className="mt-0.5 text-sm text-[var(--ow-muted)]">{check.summary}</p>
                           {hasDetails ? (
                             <button
                               type="button"
@@ -311,16 +311,16 @@ export function MaintenanceSettingsPanel() {
                                   ? current.filter((id) => id !== check.id)
                                   : [...current, check.id]
                               ))}
-                              className="mt-1 text-xs font-semibold text-slate-500 hover:text-slate-900"
+                              className="mt-1 text-xs font-semibold text-[var(--ow-muted)] hover:text-[var(--ow-text)]"
                             >
                               {expanded ? setup.diagnosticsHideDetails : setup.diagnosticsShowDetails}
                             </button>
                           ) : null}
                           {expanded ? (
-                            <div className="mt-2 space-y-1 text-xs leading-5 text-slate-500">
+                            <div className="mt-2 space-y-1 text-xs leading-5 text-[var(--ow-muted)]">
                               {check.detail ? <p className="break-words">{check.detail}</p> : null}
                               {check.remediation ? (
-                                <p><span className="font-semibold text-slate-600">{setup.diagnosticsRemediation}：</span>{check.remediation}</p>
+                                <p><span className="font-semibold text-[var(--ow-muted)]">{setup.diagnosticsRemediation}：</span>{check.remediation}</p>
                               ) : null}
                             </div>
                           ) : null}
@@ -333,8 +333,8 @@ export function MaintenanceSettingsPanel() {
             </div>
           ))}
 
-          {diagnosticsError ? <p className="mt-3 text-sm font-medium text-rose-600">{diagnosticsError}</p> : null}
-          {diagnosticsMessage ? <p className="mt-3 break-words text-sm font-medium text-emerald-700">{diagnosticsMessage}</p> : null}
+          {diagnosticsError ? <p className="mt-3 text-sm font-medium text-[var(--ow-error-text)]">{diagnosticsError}</p> : null}
+          {diagnosticsMessage ? <p className="mt-3 break-words text-sm font-medium text-[var(--ow-green)]">{diagnosticsMessage}</p> : null}
         </div>
 
         <div className="mt-5 flex flex-wrap gap-2 border-t border-[var(--ow-line-soft)] pt-4">
@@ -342,7 +342,7 @@ export function MaintenanceSettingsPanel() {
             type="button"
             onClick={() => void copyDiagnostics()}
             disabled={!diagnostics || diagnosticsBusy || exportBusy}
-            className="ow-btn h-9 rounded-lg px-4 text-sm font-semibold text-slate-700 disabled:opacity-50"
+            className="ow-btn h-9 rounded-lg px-4 text-sm font-semibold text-[var(--ow-text)] disabled:opacity-50"
           >
             {setup.copyDiagnostics}
           </button>
@@ -350,7 +350,7 @@ export function MaintenanceSettingsPanel() {
             type="button"
             onClick={() => void exportSupportBundle()}
             disabled={diagnosticsBusy || exportBusy}
-            className="ow-btn h-9 rounded-lg px-4 text-sm font-semibold text-slate-700 disabled:opacity-50"
+            className="ow-btn h-9 rounded-lg px-4 text-sm font-semibold text-[var(--ow-text)] disabled:opacity-50"
           >
             {exportBusy ? setup.supportBundleExporting : setup.exportSupportBundle}
           </button>
@@ -359,7 +359,7 @@ export function MaintenanceSettingsPanel() {
               type="button"
               onClick={() => void revealSupportBundle()}
               disabled={diagnosticsBusy || exportBusy}
-              className="ow-btn h-9 rounded-lg px-4 text-sm font-semibold text-slate-700 disabled:opacity-50"
+              className="ow-btn h-9 rounded-lg px-4 text-sm font-semibold text-[var(--ow-text)] disabled:opacity-50"
             >
               {setup.revealSupportBundle}
             </button>

@@ -8,7 +8,7 @@ type PanelMode = "view" | "edit";
 
 function RawCodeBlock({ value }: { value: string }) {
   return (
-    <pre className="max-h-[62vh] min-h-[420px] overflow-auto bg-slate-950 px-5 py-4 font-mono text-xs leading-6 text-slate-100">
+    <pre className="max-h-[62vh] min-h-[420px] overflow-auto bg-[var(--ow-code)] px-5 py-4 font-mono text-xs leading-6 text-[var(--ow-text)]">
       {value || "\n"}
     </pre>
   );
@@ -25,7 +25,7 @@ function RawTextarea({
     <textarea
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      className="block h-[62vh] min-h-[420px] w-full resize-none border-0 bg-white px-5 py-4 font-mono text-xs leading-6 text-gray-900 outline-none focus:ring-0"
+      className="block h-[62vh] min-h-[420px] w-full resize-none border-0 bg-[var(--ow-panel)] px-5 py-4 font-mono text-xs leading-6 text-[var(--ow-text)] outline-none focus:ring-0"
       spellCheck={false}
     />
   );
@@ -48,23 +48,23 @@ function FileChoiceRow({
 
   return (
     <div className={`rounded-xl border px-4 py-4 transition-colors ${
-      active ? "border-blue-200 bg-blue-50/70" : "border-gray-200 bg-white"
+      active ? "border-[var(--ow-blue)] bg-[var(--ow-blue-soft)]" : "border-[var(--ow-line)] bg-[var(--ow-panel)]"
     }`}>
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-gray-900">{title}</p>
-          <p className="mt-1 text-sm leading-6 text-gray-600">{description}</p>
+          <p className="text-sm font-semibold text-[var(--ow-text)]">{title}</p>
+          <p className="mt-1 text-sm leading-6 text-[var(--ow-muted)]">{description}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
             onClick={onView}
-            className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            className="rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-3 py-1.5 text-xs font-medium text-[var(--ow-text)] transition-colors hover:bg-[var(--ow-panel-soft)]"
           >
             {t.common.view}
           </button>
           <button
             onClick={onEdit}
-            className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            className="rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-3 py-1.5 text-xs font-medium text-[var(--ow-text)] transition-colors hover:bg-[var(--ow-panel-soft)]"
           >
             {t.common.edit}
           </button>
@@ -103,19 +103,19 @@ function PanelShell({
 
   return (
     <div className="flex h-full min-h-[620px] flex-col">
-      <div className="border-b border-gray-200 bg-white px-5 py-4">
+      <div className="border-b border-[var(--ow-line)] bg-[var(--ow-panel)] px-5 py-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
-            <p className="text-base font-semibold text-gray-950">{title}</p>
-            <p className="mt-1 text-sm leading-6 text-gray-600">{description}</p>
-            <p className="mt-2 truncate font-mono text-xs text-gray-400">{path}</p>
+            <p className="text-base font-semibold text-[var(--ow-text)]">{title}</p>
+            <p className="mt-1 text-sm leading-6 text-[var(--ow-muted)]">{description}</p>
+            <p className="mt-2 truncate font-mono text-xs text-[var(--ow-subtle)]">{path}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
+            <div className="inline-flex rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel-soft)] p-1">
               <button
                 onClick={() => onModeChange("view")}
                 className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                  mode === "view" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
+                  mode === "view" ? "bg-[var(--ow-panel)] text-[var(--ow-text)] shadow-sm" : "text-[var(--ow-muted)] hover:text-[var(--ow-text)]"
                 }`}
               >
                 {t.common.view}
@@ -123,7 +123,7 @@ function PanelShell({
               <button
                 onClick={() => onModeChange("edit")}
                 className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                  mode === "edit" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
+                  mode === "edit" ? "bg-[var(--ow-panel)] text-[var(--ow-text)] shadow-sm" : "text-[var(--ow-muted)] hover:text-[var(--ow-text)]"
                 }`}
               >
                 {t.common.edit}
@@ -133,20 +133,20 @@ function PanelShell({
               <button
                 onClick={onSave}
                 disabled={saving}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg bg-[var(--ow-blue)] px-4 py-2 text-xs font-semibold text-[var(--ow-on-accent)] transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 disabled:brightness-100"
               >
                 {saving ? t.common.saving : saved ? t.common.saved : t.common.save}
               </button>
             )}
             <button
               onClick={onClose}
-              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
+              className="rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-3 py-2 text-xs font-medium text-[var(--ow-muted)] transition-colors hover:bg-[var(--ow-panel-soft)] hover:text-[var(--ow-text)]"
             >
               {t.common.close}
             </button>
           </div>
         </div>
-        {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{error}</p>}
+        {error && <p className="mt-3 rounded-lg bg-[var(--ow-red-soft)] px-3 py-2 text-xs text-[var(--ow-error-text)]">{error}</p>}
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
     </div>
@@ -157,10 +157,10 @@ function EmptyPanel() {
   const { t } = useI18n();
 
   return (
-    <div className="flex h-full min-h-[620px] items-center justify-center bg-white px-8">
+    <div className="flex h-full min-h-[620px] items-center justify-center bg-[var(--ow-panel)] px-8">
       <div className="max-w-sm text-center">
-        <p className="text-base font-semibold text-gray-900">{t.config.emptyTitle}</p>
-        <p className="mt-2 text-sm leading-6 text-gray-600">{t.config.emptyDescription}</p>
+        <p className="text-base font-semibold text-[var(--ow-text)]">{t.config.emptyTitle}</p>
+        <p className="mt-2 text-sm leading-6 text-[var(--ow-muted)]">{t.config.emptyDescription}</p>
       </div>
     </div>
   );
@@ -230,7 +230,7 @@ function YamlPanel({
   };
 
   if (loading) {
-    return <div className="py-10 text-center text-sm text-gray-400">{t.common.loading}</div>;
+    return <div className="py-10 text-center text-sm text-[var(--ow-subtle)]">{t.common.loading}</div>;
   }
 
   return (
@@ -325,7 +325,7 @@ function EnvPanel({
   };
 
   if (loading) {
-    return <div className="py-10 text-center text-sm text-gray-400">{t.common.loading}</div>;
+    return <div className="py-10 text-center text-sm text-[var(--ow-subtle)]">{t.common.loading}</div>;
   }
 
   return (
@@ -344,22 +344,22 @@ function EnvPanel({
       {mode === "edit" ? (
         <RawTextarea value={editContent} onChange={setEditContent} />
       ) : (
-        <div className="h-full overflow-auto bg-white">
-          <div className="border-b border-gray-100 px-5 py-3 text-xs leading-5 text-gray-500">
+        <div className="h-full overflow-auto bg-[var(--ow-panel)]">
+          <div className="border-b border-[var(--ow-line-soft)] px-5 py-3 text-xs leading-5 text-[var(--ow-muted)]">
             {t.config.envMaskedHint}
           </div>
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-[var(--ow-line-soft)]">
             {envContent?.lines.map((line, index) => {
               if (!line.value && line.key) {
                 return (
-                  <div key={index} className="bg-gray-50 px-5 py-2">
-                    <span className="font-mono text-xs text-gray-400">{line.key}</span>
+                  <div key={index} className="bg-[var(--ow-panel-soft)] px-5 py-2">
+                    <span className="font-mono text-xs text-[var(--ow-subtle)]">{line.key}</span>
                   </div>
                 );
               }
 
               if (!line.key && !line.value) {
-                return <div key={index} className="h-2 bg-white" />;
+                return <div key={index} className="h-2 bg-[var(--ow-panel)]" />;
               }
 
               return (
@@ -367,13 +367,13 @@ function EnvPanel({
                   key={index}
                   className="grid grid-cols-[minmax(180px,220px)_minmax(0,1fr)] items-center gap-4 px-5 py-3"
                 >
-                  <span className="truncate font-mono text-xs font-semibold text-gray-700">
+                  <span className="truncate font-mono text-xs font-semibold text-[var(--ow-text)]">
                     {line.key}
                   </span>
                   <span className={`truncate font-mono text-xs ${
-                    line.masked ? "text-gray-400 tracking-widest" : "text-gray-800"
+                    line.masked ? "text-[var(--ow-subtle)] tracking-widest" : "text-[var(--ow-text)]"
                   }`}>
-                    {line.value || <span className="italic text-gray-300">{t.common.empty}</span>}
+                    {line.value || <span className="italic text-[var(--ow-disabled)]">{t.common.empty}</span>}
                   </span>
                 </div>
               );
@@ -398,17 +398,17 @@ export function ConfigEditor() {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4">
       <div className="space-y-1">
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Advanced</p>
-        <h2 className="text-2xl font-semibold text-gray-950">{t.setup.advancedConfigTitle}</h2>
-        <p className="max-w-2xl text-sm leading-6 text-gray-600">{t.setup.advancedConfigDescription}</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ow-muted)]">Advanced</p>
+        <h2 className="text-2xl font-semibold text-[var(--ow-text)]">{t.setup.advancedConfigTitle}</h2>
+        <p className="max-w-2xl text-sm leading-6 text-[var(--ow-muted)]">{t.setup.advancedConfigDescription}</p>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-xl border border-[var(--ow-line)] bg-[var(--ow-panel)] shadow-sm">
         <div className="grid min-h-[620px] md:grid-cols-[340px_minmax(0,1fr)]">
-          <aside className="border-b border-gray-200 bg-gray-50/70 p-4 md:border-b-0 md:border-r">
+          <aside className="border-b border-[var(--ow-line)] bg-[var(--ow-panel-soft)] p-4 md:border-b-0 md:border-r">
             <div className="mb-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{t.config.rawFilesTitle}</p>
-              <p className="mt-1 text-sm leading-6 text-gray-600">{t.config.rawFilesDescription}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ow-muted)]">{t.config.rawFilesTitle}</p>
+              <p className="mt-1 text-sm leading-6 text-[var(--ow-muted)]">{t.config.rawFilesDescription}</p>
             </div>
 
             <div className="space-y-2">
@@ -428,12 +428,12 @@ export function ConfigEditor() {
               />
             </div>
 
-            <div className="mt-4 rounded-xl border border-gray-200 bg-white px-4 py-3 text-xs leading-5 text-gray-500">
+            <div className="mt-4 rounded-xl border border-[var(--ow-line)] bg-[var(--ow-panel)] px-4 py-3 text-xs leading-5 text-[var(--ow-muted)]">
               {t.config.providerHint}
             </div>
           </aside>
 
-          <section className="min-w-0 bg-white">
+          <section className="min-w-0 bg-[var(--ow-panel)]">
             {activePanel === "yaml" ? (
               <YamlPanel
                 mode={panelMode}

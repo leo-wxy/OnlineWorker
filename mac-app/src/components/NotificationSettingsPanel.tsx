@@ -37,12 +37,12 @@ function ChannelIcon({
       <img
         src={iconUrl}
         alt=""
-        className={`${sizeClass} rounded-2xl border border-[var(--ow-line-soft)] bg-white object-contain p-1.5 shadow-sm`}
+        className={`${sizeClass} rounded-2xl border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] object-contain p-1.5 shadow-sm`}
       />
     );
   }
   return (
-    <span className={`${sizeClass} grid place-items-center rounded-2xl border border-[var(--ow-line-soft)] bg-white text-sm font-bold text-slate-500 shadow-sm`}>
+    <span className={`${sizeClass} grid place-items-center rounded-2xl border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] text-sm font-bold text-[var(--ow-muted)] shadow-sm`}>
       {channel.label.trim().slice(0, 1).toUpperCase() || "N"}
     </span>
   );
@@ -68,11 +68,11 @@ function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`relative inline-flex h-6 w-10 shrink-0 rounded-full transition-colors ${
-        checked ? "bg-blue-500" : "bg-slate-300"
+        checked ? "bg-[var(--ow-blue)]" : "bg-[var(--ow-disabled-surface)]"
       } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
     >
       <span
-        className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+        className={`absolute top-1 h-4 w-4 rounded-full bg-[var(--ow-panel)] shadow transition-transform ${
           checked ? "translate-x-5" : "translate-x-1"
         }`}
       />
@@ -130,7 +130,7 @@ function FieldInput({
   labels: Pick<NotificationTexts, "enabled" | "disabled" | "optionLabels">;
 }) {
   const id = `notification-${channelId}-${field.key}`;
-  const baseClass = "block w-full rounded-2xl border border-[var(--ow-line)] bg-white/92 px-4 py-3 text-sm font-medium text-gray-900 outline-none transition-colors placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400";
+  const baseClass = "block w-full rounded-2xl border border-[var(--ow-line)] bg-[var(--ow-panel)] px-4 py-3 text-sm font-medium text-[var(--ow-text)] outline-none transition-colors placeholder:text-[var(--ow-subtle)] focus:border-[var(--ow-blue)] focus:ring-4 focus:ring-[var(--ow-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ow-panel-soft)] disabled:text-[var(--ow-subtle)]";
 
   if (field.type === "boolean") {
     return (
@@ -140,7 +140,7 @@ function FieldInput({
           disabled={disabled}
           onChange={onChange}
         />
-        <span className="text-sm font-semibold text-slate-700">{Boolean(value) ? labels.enabled : labels.disabled}</span>
+        <span className="text-sm font-semibold text-[var(--ow-text)]">{Boolean(value) ? labels.enabled : labels.disabled}</span>
       </label>
     );
   }
@@ -287,26 +287,26 @@ export function NotificationSettingsPanel() {
   return (
     <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col gap-5">
       <div className="shrink-0">
-        <h2 className="text-xl font-extrabold tracking-[-0.02em] text-gray-950">{notifications.title}</h2>
-        <p className="mt-1 max-w-3xl text-sm font-medium text-slate-500">{notifications.description}</p>
+        <h2 className="text-xl font-extrabold tracking-[-0.02em] text-[var(--ow-text)]">{notifications.title}</h2>
+        <p className="mt-1 max-w-3xl text-sm font-medium text-[var(--ow-muted)]">{notifications.description}</p>
       </div>
 
       {loading && (
-        <div className="ow-page-frame-soft rounded-[24px] p-5 text-sm font-medium text-slate-500">
+        <div className="ow-page-frame-soft rounded-[24px] p-5 text-sm font-medium text-[var(--ow-muted)]">
           {notifications.loading}
         </div>
       )}
 
       {error && (
-        <div className="ow-page-frame-soft rounded-[24px] border-rose-200 bg-rose-50/85 p-4 text-sm font-medium text-rose-700">
+        <div className="ow-page-frame-soft rounded-[24px] border-[var(--ow-red)] bg-[var(--ow-red-soft)] p-4 text-sm font-medium text-[var(--ow-error-text)]">
           {error}
         </div>
       )}
 
       {!loading && channels.length === 0 && (
         <div className="ow-page-frame rounded-[26px] p-6">
-          <h3 className="text-base font-bold text-gray-950">{notifications.noChannelsTitle}</h3>
-          <p className="mt-1 text-sm font-medium text-slate-500">{notifications.noChannelsDescription}</p>
+          <h3 className="text-base font-bold text-[var(--ow-text)]">{notifications.noChannelsTitle}</h3>
+          <p className="mt-1 text-sm font-medium text-[var(--ow-muted)]">{notifications.noChannelsDescription}</p>
         </div>
       )}
 
@@ -316,10 +316,10 @@ export function NotificationSettingsPanel() {
             <div className="border-b border-[var(--ow-line-soft)] px-5 py-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h3 className="text-base font-bold text-gray-950">{notifications.channelsTitle}</h3>
-                  <p className="mt-1 text-xs font-medium leading-5 text-slate-500">{notifications.channelsDescription}</p>
+                  <h3 className="text-base font-bold text-[var(--ow-text)]">{notifications.channelsTitle}</h3>
+                  <p className="mt-1 text-xs font-medium leading-5 text-[var(--ow-muted)]">{notifications.channelsDescription}</p>
                 </div>
-                <span className="shrink-0 rounded-xl bg-white/80 px-2.5 py-1 text-xs font-bold text-slate-500">
+                <span className="shrink-0 rounded-xl bg-[var(--ow-panel)] px-2.5 py-1 text-xs font-bold text-[var(--ow-muted)]">
                   {notifications.channelCount(channels.length)}
                 </span>
               </div>
@@ -338,25 +338,25 @@ export function NotificationSettingsPanel() {
                     className={`grid w-full grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl border px-3 py-3 text-left transition-colors ${
                       selected
                         ? channel.enabled
-                          ? "border-emerald-200 bg-emerald-50/80 shadow-sm"
-                          : "border-blue-200 bg-white shadow-sm"
+                          ? "border-[var(--ow-green)] bg-[var(--ow-green-soft)] shadow-sm"
+                          : "border-[var(--ow-blue)] bg-[var(--ow-panel)] shadow-sm"
                         : channel.enabled
-                          ? "border-emerald-100 bg-emerald-50/45 hover:border-emerald-200 hover:bg-emerald-50/75"
-                          : "border-transparent bg-white/45 hover:border-[var(--ow-line)] hover:bg-white/82"
+                          ? "border-[var(--ow-green)] bg-[var(--ow-green-soft)] hover:brightness-105"
+                          : "border-transparent bg-[var(--ow-panel)] hover:border-[var(--ow-line)] hover:bg-[var(--ow-hover)]"
                     }`}
                   >
                     <ChannelIcon channel={channel} size="sm" />
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-bold text-gray-950">{channel.label}</span>
+                      <span className="block truncate text-sm font-bold text-[var(--ow-text)]">{channel.label}</span>
                       <span className="mt-1 flex flex-wrap items-center gap-1.5">
-                        <span className="text-xs font-medium text-slate-500">
+                        <span className="text-xs font-medium text-[var(--ow-muted)]">
                           {channel.builtin ? notifications.builtin : notifications.custom}
                         </span>
                         {needsKey && (
                           <span className={`rounded-lg px-2 py-0.5 text-[11px] font-bold ${
                             keyReady
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-amber-50 text-amber-700"
+                              ? "bg-[var(--ow-green-soft)] text-[var(--ow-green)]"
+                              : "bg-[var(--ow-amber-soft)] text-[var(--ow-warning-text)]"
                           }`}>
                             {keyReady ? notifications.configured : notifications.needsConfig}
                           </span>
@@ -365,8 +365,8 @@ export function NotificationSettingsPanel() {
                     </span>
                     <span className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold ${
                       channel.enabled
-                        ? "bg-emerald-600 text-white shadow-sm shadow-emerald-200"
-                        : "bg-slate-100 text-slate-500"
+                        ? "bg-[var(--ow-green)] text-[var(--ow-on-accent)] shadow-sm"
+                        : "bg-[var(--ow-panel-soft)] text-[var(--ow-muted)]"
                     }`}>
                       {channel.enabled ? notifications.enabled : notifications.disabled}
                     </span>
@@ -390,26 +390,26 @@ export function NotificationSettingsPanel() {
                         <div className="flex items-center gap-4">
                           <ChannelIcon channel={channel} size="lg" />
                           <div>
-                            <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                            <p className="text-xs font-bold uppercase tracking-wider text-[var(--ow-subtle)]">
                               {notifications.configTitle}
                             </p>
-                            <h3 id={`notification-${channel.id}-title`} className="mt-1 text-xl font-extrabold tracking-[-0.02em] text-gray-950">
+                            <h3 id={`notification-${channel.id}-title`} className="mt-1 text-xl font-extrabold tracking-[-0.02em] text-[var(--ow-text)]">
                               {channel.label}
                             </h3>
                           </div>
                         </div>
-                        <p className="mt-4 max-w-2xl text-sm font-medium leading-6 text-slate-500">
+                        <p className="mt-4 max-w-2xl text-sm font-medium leading-6 text-[var(--ow-muted)]">
                           {descriptionForChannel(channel)}
                         </p>
-                        <p className="mt-2 text-xs font-mono text-slate-400">
+                        <p className="mt-2 text-xs font-mono text-[var(--ow-subtle)]">
                           {notifications.pluginIdLabel}: {channel.id}
                         </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-3">
-                        {saved && <span className="text-xs font-bold text-emerald-700">{common.saved}</span>}
-                        {busy && <span className="text-xs font-bold text-blue-600">{common.saving}</span>}
-                        <label className={`flex items-center gap-3 rounded-xl border border-[var(--ow-line-soft)] bg-slate-50 px-3 py-2 ${busy ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
-                          <span className="text-sm font-semibold text-slate-700">{notifications.enableChannel}</span>
+                        {saved && <span className="text-xs font-bold text-[var(--ow-green)]">{common.saved}</span>}
+                        {busy && <span className="text-xs font-bold text-[var(--ow-blue)]">{common.saving}</span>}
+                        <label className={`flex items-center gap-3 rounded-xl border border-[var(--ow-line-soft)] bg-[var(--ow-panel-soft)] px-3 py-2 ${busy ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
+                          <span className="text-sm font-semibold text-[var(--ow-text)]">{notifications.enableChannel}</span>
                           <Toggle
                             checked={channel.enabled}
                             disabled={busy}
@@ -437,7 +437,7 @@ export function NotificationSettingsPanel() {
                             className={`rounded-xl px-4 py-1.5 text-sm font-semibold transition-colors ${
                               detailTab === tab
                                 ? "ow-segment-button-active"
-                                : "ow-segment-button hover:text-gray-700"
+                                : "ow-segment-button hover:text-[var(--ow-text)]"
                             }`}
                           >
                             {label}
@@ -450,8 +450,8 @@ export function NotificationSettingsPanel() {
                       <div className="min-h-0 flex-1 overflow-y-auto p-6">
                         {channel.settingsFields.length === 0 ? (
                           <div className="ow-page-frame-soft rounded-[24px] p-5 shadow-none">
-                            <h4 className="text-sm font-bold text-gray-950">{notifications.noFieldsTitle}</h4>
-                            <p className="mt-1 text-sm font-medium text-slate-500">{notifications.noFieldsDescription}</p>
+                            <h4 className="text-sm font-bold text-[var(--ow-text)]">{notifications.noFieldsTitle}</h4>
+                            <p className="mt-1 text-sm font-medium text-[var(--ow-muted)]">{notifications.noFieldsDescription}</p>
                           </div>
                         ) : (
                           <div className="ow-page-frame-soft divide-y divide-[var(--ow-line-soft)] overflow-hidden rounded-[24px] shadow-none">
@@ -465,13 +465,13 @@ export function NotificationSettingsPanel() {
                                   <div>
                                     <label
                                       htmlFor={`notification-${channel.id}-${field.key}`}
-                                      className="text-sm font-bold text-gray-950"
+                                      className="text-sm font-bold text-[var(--ow-text)]"
                                     >
                                       {labelForField(channel, field)}
-                                      {field.required && <span className="ml-1 text-rose-600">*</span>}
+                                      {field.required && <span className="ml-1 text-[var(--ow-error-text)]">*</span>}
                                     </label>
                                     {fieldDescription && (
-                                      <p className="mt-1 text-xs font-medium leading-5 text-slate-500">{fieldDescription}</p>
+                                      <p className="mt-1 text-xs font-medium leading-5 text-[var(--ow-muted)]">{fieldDescription}</p>
                                     )}
                                   </div>
                                   <FieldInput
@@ -517,12 +517,12 @@ export function NotificationSettingsPanel() {
                             title={`${channel.label} ${notifications.guideTab}`}
                             srcDoc={guideHtml}
                             sandbox=""
-                            className="h-full min-h-[420px] w-full rounded-2xl border border-[var(--ow-line-soft)] bg-white"
+                            className="h-full min-h-[420px] w-full rounded-2xl border border-[var(--ow-line-soft)] bg-[var(--ow-panel)]"
                           />
                         ) : (
                           <div className="ow-page-frame-soft rounded-[24px] p-5 shadow-none">
-                            <h4 className="text-sm font-bold text-gray-950">{notifications.noGuideTitle}</h4>
-                            <p className="mt-1 text-sm font-medium text-slate-500">{notifications.noGuideDescription}</p>
+                            <h4 className="text-sm font-bold text-[var(--ow-text)]">{notifications.noGuideTitle}</h4>
+                            <p className="mt-1 text-sm font-medium text-[var(--ow-muted)]">{notifications.noGuideDescription}</p>
                           </div>
                         )}
                       </div>

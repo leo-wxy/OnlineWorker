@@ -18,11 +18,11 @@ export function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`relative inline-flex h-6 w-10 shrink-0 rounded-full transition-colors ${
-        checked ? "bg-blue-500" : "bg-slate-300"
+        checked ? "bg-[var(--ow-blue)]" : "bg-[var(--ow-disabled-surface)]"
       } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
     >
       <span
-        className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+        className={`absolute top-1 h-4 w-4 rounded-full bg-[var(--ow-panel)] shadow transition-transform ${
           checked ? "translate-x-5" : "translate-x-1"
         }`}
       />
@@ -47,7 +47,7 @@ export function TextField({
 }) {
   return (
     <div className="grid gap-4 px-5 py-5 md:grid-cols-[220px_minmax(0,1fr)]">
-      <label htmlFor={id} className="text-sm font-bold text-gray-950">
+      <label htmlFor={id} className="text-sm font-bold text-[var(--ow-text)]">
         {label}
       </label>
       <input
@@ -56,7 +56,7 @@ export function TextField({
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="block w-full rounded-2xl border border-[var(--ow-line)] bg-white/92 px-4 py-3 text-sm font-medium text-gray-900 outline-none transition-colors placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+        className="block w-full rounded-2xl border border-[var(--ow-line)] bg-[var(--ow-panel)] px-4 py-3 text-sm font-medium text-[var(--ow-text)] outline-none transition-colors placeholder:text-[var(--ow-subtle)] focus:border-[var(--ow-blue)] focus:ring-4 focus:ring-[var(--ow-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ow-panel-soft)] disabled:text-[var(--ow-subtle)]"
       />
     </div>
   );
@@ -77,7 +77,7 @@ export function NumberField({
 }) {
   return (
     <div className="grid gap-4 px-5 py-5 md:grid-cols-[220px_minmax(0,1fr)]">
-      <label htmlFor={id} className="text-sm font-bold text-gray-950">
+      <label htmlFor={id} className="text-sm font-bold text-[var(--ow-text)]">
         {label}
       </label>
       <input
@@ -87,7 +87,7 @@ export function NumberField({
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(Math.max(1, Number(event.target.value || 1)))}
-        className="block w-full rounded-2xl border border-[var(--ow-line)] bg-white/92 px-4 py-3 text-sm font-medium text-gray-900 outline-none transition-colors focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+        className="block w-full rounded-2xl border border-[var(--ow-line)] bg-[var(--ow-panel)] px-4 py-3 text-sm font-medium text-[var(--ow-text)] outline-none transition-colors focus:border-[var(--ow-blue)] focus:ring-4 focus:ring-[var(--ow-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ow-panel-soft)] disabled:text-[var(--ow-subtle)]"
       />
     </div>
   );

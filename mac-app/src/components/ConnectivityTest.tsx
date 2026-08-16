@@ -106,10 +106,10 @@ export function ConnectivityTest({ token, chatId, compact }: Props) {
 
   const statusIcon = (s: TestStatus) => {
     switch (s) {
-      case "idle": return <span className="w-3 h-3 rounded-full bg-gray-200 inline-block" />;
-      case "running": return <span className="w-3 h-3 rounded-full bg-blue-400 animate-pulse inline-block" />;
-      case "pass": return <span className="text-green-500">✓</span>;
-      case "fail": return <span className="text-red-500">✗</span>;
+      case "idle": return <span className="w-3 h-3 rounded-full bg-[var(--ow-disabled-surface)] inline-block" />;
+      case "running": return <span className="w-3 h-3 rounded-full bg-[var(--ow-blue)] animate-pulse inline-block" />;
+      case "pass": return <span className="text-[var(--ow-green)]">✓</span>;
+      case "fail": return <span className="text-[var(--ow-error-text)]">✗</span>;
     }
   };
 
@@ -117,7 +117,7 @@ export function ConnectivityTest({ token, chatId, compact }: Props) {
     <div className={compact ? "space-y-2" : "space-y-3"}>
       {/* Header + button */}
       <div className="flex items-center justify-between">
-        <span className={`font-medium ${compact ? "text-xs text-gray-600" : "text-sm text-gray-700"}`}>
+        <span className={`font-medium ${compact ? "text-xs text-[var(--ow-muted)]" : "text-sm text-[var(--ow-text)]"}`}>
           {texts.title}
         </span>
         <button
@@ -125,8 +125,8 @@ export function ConnectivityTest({ token, chatId, compact }: Props) {
           disabled={!canTest || testing}
           className={`text-sm px-3 py-1.5 rounded-lg transition-colors ${
             allPassed
-              ? "bg-green-100 text-green-700 hover:bg-green-200"
-              : "bg-blue-600 text-white hover:bg-blue-700"
+              ? "bg-[var(--ow-green-soft)] text-[var(--ow-green)] hover:brightness-105"
+              : "bg-[var(--ow-blue)] text-[var(--ow-on-accent)] hover:brightness-110"
           } disabled:opacity-40`}
         >
           {testing ? texts.testing : allPassed ? texts.allPassed : texts.runTests}
@@ -135,15 +135,15 @@ export function ConnectivityTest({ token, chatId, compact }: Props) {
 
       {/* Results */}
       {(botTest.status !== "idle" || groupTest.status !== "idle" || permTest.status !== "idle") && (
-        <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 overflow-hidden">
+        <div className="border border-[var(--ow-line)] rounded-lg divide-y divide-[var(--ow-line-soft)] overflow-hidden">
           {tests.map(({ label, result }) => (
             result.status !== "idle" && (
               <div key={label} className="flex items-center px-3 py-2 gap-2">
                 <span className="flex-shrink-0 w-4 text-center">{statusIcon(result.status)}</span>
-                <span className={`font-medium flex-shrink-0 ${compact ? "text-xs w-28" : "text-sm w-32"} text-gray-700`}>
+                <span className={`font-medium flex-shrink-0 ${compact ? "text-xs w-28" : "text-sm w-32"} text-[var(--ow-text)]`}>
                   {label}
                 </span>
-                <span className="text-xs text-gray-500 truncate flex-1" title={result.detail}>
+                <span className="text-xs text-[var(--ow-muted)] truncate flex-1" title={result.detail}>
                   {result.detail}
                 </span>
               </div>
@@ -154,7 +154,7 @@ export function ConnectivityTest({ token, chatId, compact }: Props) {
 
       {/* Hint when cannot test */}
       {!canTest && botTest.status === "idle" && (
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-[var(--ow-subtle)]">
           {texts.fillRequiredFields}
         </p>
       )}

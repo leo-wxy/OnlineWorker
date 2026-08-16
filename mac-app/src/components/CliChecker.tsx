@@ -34,7 +34,7 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={copy}
-      className="text-xs text-gray-400 hover:text-gray-600 flex-shrink-0 ml-2 transition-colors"
+      className="text-xs text-[var(--ow-subtle)] hover:text-[var(--ow-muted)] flex-shrink-0 ml-2 transition-colors"
       title={copied ? t.common.copied : t.common.copy}
     >
       {copied ? "✓" : "⎘"}
@@ -86,17 +86,17 @@ export function CliChecker({ configRaw }: { configRaw: string }) {
   const allOk = statuses.every((s) => s.installed === true);
 
   return (
-    <div className="border border-gray-200 rounded-xl overflow-hidden">
+    <div className="border border-[var(--ow-line)] rounded-xl overflow-hidden">
       {/* Header */}
-      <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+      <div className="px-4 py-3 bg-[var(--ow-panel-soft)] border-b border-[var(--ow-line-soft)] flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-gray-700">{t.cliChecker.title}</span>
-          {checking && <span className="text-xs text-gray-400">{t.common.checking}</span>}
+          <span className="text-sm font-medium text-[var(--ow-text)]">{t.cliChecker.title}</span>
+          {checking && <span className="text-xs text-[var(--ow-subtle)]">{t.common.checking}</span>}
           {!checking && allOk && (
-            <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">{t.cliChecker.allInstalled}</span>
+            <span className="text-xs bg-[var(--ow-green-soft)] text-[var(--ow-green)] px-2 py-0.5 rounded-full font-medium">{t.cliChecker.allInstalled}</span>
           )}
           {!checking && missing.length > 0 && (
-            <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">
+            <span className="text-xs bg-[var(--ow-red-soft)] text-[var(--ow-error-text)] px-2 py-0.5 rounded-full font-medium">
               {t.cliChecker.missingCount(missing.length)}
             </span>
           )}
@@ -104,14 +104,14 @@ export function CliChecker({ configRaw }: { configRaw: string }) {
         <button
           onClick={() => void check(configRaw)}
           disabled={checking}
-          className="text-xs text-gray-400 hover:text-gray-600 disabled:opacity-40"
+          className="text-xs text-[var(--ow-subtle)] hover:text-[var(--ow-muted)] disabled:opacity-40"
         >
           ↻ {t.common.recheck}
         </button>
       </div>
 
       {/* Status rows */}
-      <div className="divide-y divide-gray-100">
+      <div className="divide-y divide-[var(--ow-line-soft)]">
         {statuses.map((s) => {
           const info = getCliInstallInfo(s.name, s.bin, t.cliChecker as AppTexts["cliChecker"], s.install ?? null);
           return (
@@ -121,38 +121,38 @@ export function CliChecker({ configRaw }: { configRaw: string }) {
                 {/* Status indicator */}
                 <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
                   {s.installed === null ? (
-                    <span className="w-3 h-3 rounded-full bg-gray-200 animate-pulse" />
+                    <span className="w-3 h-3 rounded-full bg-[var(--ow-disabled-surface)] animate-pulse" />
                   ) : s.installed ? (
-                    <span className="text-green-500 text-base leading-none">✓</span>
+                    <span className="text-[var(--ow-green)] text-base leading-none">✓</span>
                   ) : (
-                    <span className="text-red-400 text-base leading-none">✗</span>
+                    <span className="text-[var(--ow-error-text)] text-base leading-none">✗</span>
                   )}
                 </span>
 
                 {/* Name + bin */}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800">{s.name}</p>
-                  <p className="text-xs text-gray-400 font-mono truncate">{s.bin}</p>
+                  <p className="text-sm font-medium text-[var(--ow-text)]">{s.name}</p>
+                  <p className="text-xs text-[var(--ow-subtle)] font-mono truncate">{s.bin}</p>
                 </div>
 
                 {/* Installed badge */}
                 {s.installed === true && (
-                  <span className="text-xs text-green-600 flex-shrink-0">{t.common.installed}</span>
+                  <span className="text-xs text-[var(--ow-green)] flex-shrink-0">{t.common.installed}</span>
                 )}
                 {s.installed === false && (
-                  <span className="text-xs text-red-500 flex-shrink-0">{t.common.notFound}</span>
+                  <span className="text-xs text-[var(--ow-error-text)] flex-shrink-0">{t.common.notFound}</span>
                 )}
               </div>
 
               {/* Install instructions — only shown when missing */}
               {s.installed === false && (
-                <div className="mx-4 mb-3 bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
-                  <p className="text-xs font-medium text-amber-800">{t.cliChecker.installInstructions(info.label)}</p>
+                <div className="mx-4 mb-3 bg-[var(--ow-amber-soft)] border border-[var(--ow-amber)] rounded-lg p-3 space-y-2">
+                  <p className="text-xs font-medium text-[var(--ow-warning-text)]">{t.cliChecker.installInstructions(info.label)}</p>
                   {info.steps.map((step, i) => (
                     <div key={i}>
-                      <p className="text-xs text-amber-700 mb-1">{step.desc}</p>
-                      <div className="flex items-center bg-gray-900 rounded px-3 py-2">
-                        <code className="text-xs text-green-400 font-mono flex-1 select-all break-all">
+                      <p className="text-xs text-[var(--ow-warning-text)] mb-1">{step.desc}</p>
+                      <div className="flex items-center bg-[var(--ow-code)] rounded px-3 py-2">
+                        <code className="text-xs text-[var(--ow-green)] font-mono flex-1 select-all break-all">
                           {step.cmd}
                         </code>
                         <CopyButton text={step.cmd} />
@@ -160,7 +160,7 @@ export function CliChecker({ configRaw }: { configRaw: string }) {
                     </div>
                   ))}
                   {info.docsUrl && (
-                    <p className="text-xs text-amber-600">
+                    <p className="text-xs text-[var(--ow-warning-text)]">
                       {t.cliChecker.docs}: <span className="font-mono">{info.docsUrl}</span>
                     </p>
                   )}
