@@ -8,11 +8,11 @@ const SessionMarkdownContent = lazy(() =>
 
 export function SessionMarkdown({ content }: { content: string }) {
   return (
-    <div className="ow-session-markdown text-[15px] text-slate-800">
+    <div className="ow-session-markdown text-[15px] text-[var(--ow-text)]">
       <Suspense
         fallback={
           <div className="grid min-h-10 place-items-center">
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--ow-line)] border-t-[var(--ow-blue)]" />
           </div>
         }
       >

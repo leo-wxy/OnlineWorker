@@ -33,15 +33,15 @@ function describeUnknownError(error: unknown, fallback: string) {
 }
 
 function chartBackground(providerId: string) {
-  const gradients = [
-    "linear-gradient(180deg, rgba(139,92,246,0.95) 0%, rgba(167,139,250,0.82) 100%)",
-    "linear-gradient(180deg, rgba(14,165,233,0.95) 0%, rgba(125,211,252,0.82) 100%)",
-    "linear-gradient(180deg, rgba(16,185,129,0.95) 0%, rgba(110,231,183,0.82) 100%)",
-    "linear-gradient(180deg, rgba(245,158,11,0.95) 0%, rgba(252,211,77,0.82) 100%)",
-    "linear-gradient(180deg, rgba(71,85,105,0.95) 0%, rgba(148,163,184,0.82) 100%)",
+  const colors = [
+    "var(--ow-purple)",
+    "var(--ow-blue)",
+    "var(--ow-green)",
+    "var(--ow-amber)",
+    "var(--ow-muted)",
   ];
   const hash = providerId.split("").reduce((value, char) => ((value * 31) + char.charCodeAt(0)) >>> 0, 0);
-  return gradients[hash % gradients.length];
+  return colors[hash % colors.length];
 }
 
 export function UsageBrowser() {
@@ -188,8 +188,8 @@ export function UsageBrowser() {
     <div className="flex min-h-0 flex-1 flex-col gap-5">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-extrabold tracking-[-0.03em] text-gray-950">{t.usage.title}</h1>
-          <p className="mt-1 text-sm text-slate-500">{t.usage.description}</p>
+          <h1 className="text-xl font-extrabold tracking-[-0.03em] text-[var(--ow-text)]">{t.usage.title}</h1>
+          <p className="mt-1 text-sm text-[var(--ow-muted)]">{t.usage.description}</p>
         </div>
         <button
           type="button"
@@ -213,8 +213,8 @@ export function UsageBrowser() {
                 hasLoadedRef.current = false;
                 setActiveProviderId(provider.sourceId);
               }}
-              className={`shrink-0 rounded-xl px-3 py-2 text-sm font-bold transition-all ${
-                selected ? "ow-segment-button-active" : "ow-segment-button hover:text-gray-700"
+              className={`shrink-0 rounded-xl px-3 py-2 text-sm font-bold transition-colors ${
+                selected ? "ow-segment-button-active" : "ow-segment-button hover:text-[var(--ow-text)]"
               }`}
             >
               {ui.label}
@@ -227,8 +227,8 @@ export function UsageBrowser() {
         <div className="flex items-center gap-3">
           <span className={`h-2.5 w-2.5 rounded-full ${providerUi.dot}`}></span>
           <div>
-            <p className="text-sm font-semibold text-gray-900">{providerUi.label}</p>
-            <p className="text-xs text-slate-500">
+            <p className="text-sm font-semibold text-[var(--ow-text)]">{providerUi.label}</p>
+            <p className="text-xs text-[var(--ow-muted)]">
               {summary ? t.usage.updatedAt(t.common.secondsAgo(Math.max(0, Math.floor(Date.now() / 1000 - summary.updatedAtEpoch)))) : t.common.noData}
             </p>
           </div>
@@ -241,7 +241,7 @@ export function UsageBrowser() {
             setDraftQuery(next);
             setQuery(next);
           }}
-          className="rounded-xl border border-[var(--ow-line-soft)] bg-white px-3 py-2 text-xs font-semibold text-slate-600"
+          className="rounded-xl border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] px-3 py-2 text-xs font-semibold text-[var(--ow-muted)]"
         >
           {t.usage.rangeLast7Days}
         </button>
@@ -249,9 +249,9 @@ export function UsageBrowser() {
 
       <div className="relative">
         {(loading || refreshing) && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-[28px] bg-white/78 backdrop-blur-[2px]">
-            <div className="ow-page-frame-soft flex items-center gap-3 rounded-2xl border border-[var(--ow-line-soft)] bg-white/96 px-4 py-3 text-sm font-semibold text-slate-700 shadow-[0_18px_40px_rgba(15,23,42,0.08)]">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
+          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-[28px] bg-[var(--ow-panel)] backdrop-blur-[2px]">
+            <div className="ow-page-frame-soft flex items-center gap-3 rounded-2xl border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] px-4 py-3 text-sm font-semibold text-[var(--ow-text)] [box-shadow:var(--ow-shadow-md)]">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--ow-line)] border-t-[var(--ow-text)]" />
               <span>{t.usage.applying}</span>
             </div>
           </div>
@@ -261,13 +261,13 @@ export function UsageBrowser() {
           <div className="ow-page-frame-soft rounded-2xl p-4">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <p className="text-sm font-semibold text-gray-900">{t.usage.chartTitle}</p>
-              <p className="text-xs text-slate-500">{query.startDate} - {query.endDate}</p>
+              <p className="text-sm font-semibold text-[var(--ow-text)]">{t.usage.chartTitle}</p>
+              <p className="text-xs text-[var(--ow-muted)]">{query.startDate} - {query.endDate}</p>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-            <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-slate-500">
+            <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[var(--ow-muted)]">
               <span>{t.usage.startDate}</span>
               <input
                 type="date"
@@ -277,10 +277,10 @@ export function UsageBrowser() {
                   autoRangeRef.current = false;
                   setDraftQuery((current) => ({ ...current, startDate: event.target.value }));
                 }}
-                className="rounded-xl border border-[var(--ow-line-soft)] bg-white px-3 py-2 text-sm font-medium text-gray-900"
+                className="rounded-xl border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] px-3 py-2 text-sm font-medium text-[var(--ow-text)]"
               />
             </label>
-            <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-slate-500">
+            <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[var(--ow-muted)]">
               <span>{t.usage.endDate}</span>
               <input
                 type="date"
@@ -290,7 +290,7 @@ export function UsageBrowser() {
                   autoRangeRef.current = false;
                   setDraftQuery((current) => ({ ...current, endDate: event.target.value }));
                 }}
-                className="rounded-xl border border-[var(--ow-line-soft)] bg-white px-3 py-2 text-sm font-medium text-gray-900"
+                className="rounded-xl border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] px-3 py-2 text-sm font-medium text-[var(--ow-text)]"
               />
             </label>
             <div className="flex items-end">
@@ -301,7 +301,7 @@ export function UsageBrowser() {
                   setQuery(draftQuery);
                 }}
                 disabled={loading || refreshing || draftQuery.startDate > draftQuery.endDate}
-                className="w-full rounded-xl border border-[var(--ow-line-soft)] bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-full rounded-xl border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] px-3 py-2 text-sm font-semibold text-[var(--ow-text)] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {t.usage.applyFilters}
               </button>
@@ -310,20 +310,20 @@ export function UsageBrowser() {
 
           {!loading && !error && summary && !summary.unsupportedReason && summary.days.length > 0 && (
             <div className="mt-5">
-              <div className="flex h-56 items-end gap-3 rounded-2xl bg-slate-50/80 px-4 pb-4 pt-6">
+              <div className="flex h-56 items-end gap-3 rounded-2xl bg-[var(--ow-panel-soft)] px-4 pb-4 pt-6">
                 {summary.days.slice().reverse().map((day) => {
                   const height = Math.max(12, Math.round((day.totalTokens / maxTokens) * 180));
                   return (
                     <div key={day.date} className="flex min-w-0 flex-1 flex-col items-center gap-2">
-                      <div className="text-[11px] font-bold text-slate-400">{formatNumber(day.totalTokens)}</div>
+                      <div className="text-[11px] font-bold text-[var(--ow-subtle)]">{formatNumber(day.totalTokens)}</div>
                       <div
-                        className="w-full rounded-t-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.32)]"
+                        className="w-full rounded-t-xl [box-shadow:var(--ow-shadow-sm)]"
                         style={{
                           height: `${height}px`,
                           background: chartBackground(activeProvider?.sourceId ?? ""),
                         }}
                       />
-                      <div className="text-[11px] font-medium text-slate-500">{day.date.slice(5)}</div>
+                      <div className="text-[11px] font-medium text-[var(--ow-muted)]">{day.date.slice(5)}</div>
                     </div>
                   );
                 })}
@@ -334,16 +334,16 @@ export function UsageBrowser() {
 
           <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
             <div className="ow-page-frame-soft rounded-2xl p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">{t.usage.summaryTotalTokens}</p>
-              <p className="mt-2 text-2xl font-extrabold tracking-[-0.03em] text-gray-950">{formatNumber(totals.totalTokens)}</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ow-muted)]">{t.usage.summaryTotalTokens}</p>
+              <p className="mt-2 text-2xl font-extrabold tracking-[-0.03em] text-[var(--ow-text)]">{formatNumber(totals.totalTokens)}</p>
             </div>
             <div className="ow-page-frame-soft rounded-2xl p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">{t.usage.summaryInputTokens}</p>
-              <p className="mt-2 text-2xl font-extrabold tracking-[-0.03em] text-gray-950">{formatNumber(totals.inputTokens)}</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ow-muted)]">{t.usage.summaryInputTokens}</p>
+              <p className="mt-2 text-2xl font-extrabold tracking-[-0.03em] text-[var(--ow-text)]">{formatNumber(totals.inputTokens)}</p>
             </div>
             <div className="ow-page-frame-soft rounded-2xl p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">{t.usage.summaryOutputTokens}</p>
-              <p className="mt-2 text-2xl font-extrabold tracking-[-0.03em] text-gray-950">{formatNumber(totals.outputTokens)}</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ow-muted)]">{t.usage.summaryOutputTokens}</p>
+              <p className="mt-2 text-2xl font-extrabold tracking-[-0.03em] text-[var(--ow-text)]">{formatNumber(totals.outputTokens)}</p>
             </div>
           </div>
         </div>
@@ -362,10 +362,10 @@ export function UsageBrowser() {
           <StatePanel message={t.usage.empty} />
         )}
         {!providersLoading && !loading && !error && summary && !summary.unsupportedReason && summary.days.length > 0 && (
-          <div className="min-h-0 flex-1 overflow-auto rounded-2xl border border-[var(--ow-line-soft)] bg-white">
+          <div className="min-h-0 flex-1 overflow-auto rounded-2xl border border-[var(--ow-line-soft)] bg-[var(--ow-panel)]">
             <table className="min-w-full border-collapse text-sm">
-              <thead className="sticky top-0 z-[1] bg-slate-50/95">
-                <tr className="text-left text-slate-500">
+                  <thead className="sticky top-0 z-[1] bg-[var(--ow-toolbar)]">
+                <tr className="text-left text-[var(--ow-muted)]">
                   <th className="px-4 py-3 font-semibold">{t.usage.today}</th>
                   <th className="px-4 py-3 font-semibold">{t.usage.inputTokens}</th>
                   <th className="px-4 py-3 font-semibold">{t.usage.outputTokens}</th>
@@ -377,7 +377,7 @@ export function UsageBrowser() {
               </thead>
               <tbody>
                 {summary.days.map((day) => (
-                  <tr key={day.date} className="border-t border-slate-100 text-gray-800">
+                  <tr key={day.date} className="border-t border-[var(--ow-line-soft)] text-[var(--ow-text)]">
                     <td className="px-4 py-3 font-semibold">{day.date}</td>
                     <td className="px-4 py-3">{formatNumber(day.inputTokens)}</td>
                     <td className="px-4 py-3">{formatNumber(day.outputTokens)}</td>

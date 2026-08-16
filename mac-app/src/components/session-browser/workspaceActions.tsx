@@ -27,7 +27,7 @@ export function WorkspaceActionMenu({
   return createPortal(
     <div
       role="menu"
-      className="fixed z-[1000] min-w-[188px] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-[0_18px_48px_rgba(15,23,42,0.22)]"
+      className="fixed z-[1000] min-w-[188px] overflow-hidden rounded-xl border border-[var(--ow-line)] bg-[var(--ow-panel)] p-1 [box-shadow:var(--ow-shadow-md)]"
       style={{ left: menu.x, top: menu.y }}
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
@@ -67,7 +67,7 @@ function WorkspaceActionMenuButton({
       role="menuitem"
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-100"
+      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-[var(--ow-text)] transition-colors hover:bg-[var(--ow-panel-soft)]"
     >
       {children}
     </button>

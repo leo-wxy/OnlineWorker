@@ -476,15 +476,15 @@ export function GenericProviderChat({
   };
 
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/60 bg-white/58 shadow-[0_18px_40px_rgba(15,23,42,0.06)] backdrop-blur-xl">
+    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] [box-shadow:var(--ow-shadow-md)] backdrop-blur-xl">
       <SessionChatHeader
         title={activeSession.title}
         shortId={activeSession.id.slice(0, 12)}
         loading={loading}
         reloadTitle={t.sessions.reloadMessages}
         badge={(
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-700">
-            <span className="h-1.5 w-1.5 rounded-full bg-slate-500"></span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--ow-line)] bg-[var(--ow-panel-soft)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ow-text)]">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--ow-muted)]"></span>
             {providerLabel}
           </span>
         )}

@@ -47,7 +47,7 @@ export function SessionActionMenu({
   return createPortal(
     <div
       role="menu"
-      className="fixed z-[1000] min-w-[176px] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-[0_18px_48px_rgba(15,23,42,0.22)]"
+      className="fixed z-[1000] min-w-[176px] overflow-hidden rounded-xl border border-[var(--ow-line)] bg-[var(--ow-panel)] p-1 [box-shadow:var(--ow-shadow-md)]"
       style={{ left: menu.x, top: menu.y }}
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
@@ -56,7 +56,7 @@ export function SessionActionMenu({
         role="menuitem"
         disabled={menu.session.archived || archivingSessionId !== null}
         onClick={() => onArchive(menu.session)}
-        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent"
+        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-[var(--ow-text)] transition-colors hover:bg-[var(--ow-panel-soft)] disabled:cursor-not-allowed disabled:text-[var(--ow-subtle)] disabled:hover:bg-transparent"
       >
         <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M5 8h14M7 8v10a2 2 0 002 2h6a2 2 0 002-2V8M9 4h6l1 4H8l1-4z"></path>
@@ -77,8 +77,8 @@ export function ArchiveNoticeBanner({ notice }: { notice: ArchiveNotice | null }
     <div className="border-b border-[var(--ow-line-soft)] px-3 py-2">
       <div className={`rounded-2xl border px-3 py-2 text-xs font-medium leading-5 ${
         notice.tone === "error"
-          ? "border-rose-200/80 bg-rose-50/92 text-rose-700"
-          : "border-emerald-200/80 bg-emerald-50/92 text-emerald-700"
+          ? "border-[var(--ow-red)] bg-[var(--ow-red-soft)] text-[var(--ow-error-text)]"
+          : "border-[var(--ow-green)] bg-[var(--ow-green-soft)] text-[var(--ow-green)]"
       }`}>
         {notice.text}
       </div>

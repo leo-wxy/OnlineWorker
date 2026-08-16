@@ -24,7 +24,7 @@ export function ProviderSessionBadges({
       {badges.map((badge) => (
         <span
           key={badge}
-          className="inline-flex items-center rounded-full border border-slate-200 bg-white/88 px-2.5 py-1 text-[10px] font-semibold tracking-[0.04em] text-slate-500"
+          className="inline-flex items-center rounded-full border border-[var(--ow-line)] bg-[var(--ow-panel)] px-2.5 py-1 text-[10px] font-semibold tracking-[0.04em] text-[var(--ow-muted)]"
         >
           {badge}
         </span>

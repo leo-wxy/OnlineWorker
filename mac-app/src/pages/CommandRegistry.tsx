@@ -227,33 +227,33 @@ export function CommandRegistryView({
     let providerLabel = "";
 
     if (isSkill) {
-      iconContainerClass = "bg-orange-50 border-orange-100";
-      icon = <svg className="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>;
-      providerTextClass = "text-orange-600";
+      iconContainerClass = "bg-[var(--ow-amber-soft)] border-[var(--ow-amber)]";
+      icon = <svg className="w-4 h-4 text-[var(--ow-warning-text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>;
+      providerTextClass = "text-[var(--ow-warning-text)]";
       providerLabel = "Skill";
     } else if (command.source === "bot") {
-      iconContainerClass = "bg-gray-100 border-gray-200";
-      icon = <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>;
-      providerTextClass = "text-gray-500";
+      iconContainerClass = "bg-[var(--ow-panel-soft)] border-[var(--ow-line)]";
+      icon = <svg className="w-4 h-4 text-[var(--ow-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>;
+      providerTextClass = "text-[var(--ow-muted)]";
       providerLabel = "Bot Built-in";
     } else {
-      iconContainerClass = "bg-sky-50 border-sky-100";
-      icon = <svg className="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>;
-      providerTextClass = "text-sky-600";
+      iconContainerClass = "bg-[var(--ow-blue-soft)] border-[var(--ow-blue)]";
+      icon = <svg className="w-4 h-4 text-[var(--ow-blue)]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>;
+      providerTextClass = "text-[var(--ow-blue)]";
       providerLabel = backendLabel(command.backend, backendLabels);
     }
 
     let scopeClass = "";
     if (command.scope === "global") {
-      scopeClass = "bg-blue-50 text-blue-600 border-blue-100";
+      scopeClass = "bg-[var(--ow-blue-soft)] text-[var(--ow-blue)] border-[var(--ow-blue)]";
     } else if (command.scope === "thread") {
-      scopeClass = "bg-green-50 text-green-600 border-green-100";
+      scopeClass = "bg-[var(--ow-green-soft)] text-[var(--ow-green)] border-[var(--ow-green)]";
     } else {
-      scopeClass = "bg-gray-100 text-gray-600 border-gray-200";
+      scopeClass = "bg-[var(--ow-panel-soft)] text-[var(--ow-muted)] border-[var(--ow-line)]";
     }
 
     return (
-      <div key={command.id} className={`flex items-center justify-between px-5 py-4 hover:bg-blue-50/50 transition-colors row-hover group ${!command.enabledForTelegram ? 'opacity-75 hover:opacity-100' : ''}`}>
+      <div key={command.id} className={`flex items-center justify-between px-5 py-4 hover:bg-[var(--ow-blue-soft)] transition-colors row-hover group ${!command.enabledForTelegram ? 'opacity-75 hover:opacity-100' : ''}`}>
         <div className="flex items-center gap-4 w-1/3">
           <input 
             type="checkbox" 
@@ -270,11 +270,11 @@ export function CommandRegistryView({
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <p className="font-mono text-[13px] font-bold text-gray-900 group-hover:text-blue-700 transition-colors">
+                <p className="font-mono text-[13px] font-bold text-[var(--ow-text)] group-hover:text-[var(--ow-blue)] transition-colors">
                   {isSkill ? `@${command.name}` : `/${command.name}`}
                 </p>
                 {command.status === "missing" && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-400" title={t.commands.missingBadge}></span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--ow-red)]" title={t.commands.missingBadge}></span>
                 )}
               </div>
               <p className={`text-[10px] font-semibold uppercase tracking-wide mt-0.5 ${providerTextClass}`}>
@@ -285,11 +285,11 @@ export function CommandRegistryView({
         </div>
         
         <div className="w-1/2 pr-4">
-          <p className="text-[13px] text-gray-600 leading-relaxed line-clamp-2">
+          <p className="text-[13px] text-[var(--ow-muted)] leading-relaxed line-clamp-2">
             {command.description || t.commands.emptyDescription}
           </p>
           {command.telegramName !== command.name && (
-            <p className="text-[11px] text-amber-600 mt-1">{t.commands.telegramAliasLabel(`/${command.telegramName}`)}</p>
+            <p className="text-[11px] text-[var(--ow-warning-text)] mt-1">{t.commands.telegramAliasLabel(`/${command.telegramName}`)}</p>
           )}
         </div>
         
@@ -297,7 +297,7 @@ export function CommandRegistryView({
           <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border uppercase tracking-wider ${scopeClass}`}>
             {scopeLabels[command.scope]}
           </span>
-          <button className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-200 hover:text-gray-800 transition-all opacity-0 row-action" title="Edit Command">
+          <button className="w-7 h-7 rounded-lg flex items-center justify-center text-[var(--ow-subtle)] hover:bg-[var(--ow-disabled-surface)] hover:text-[var(--ow-text)] transition-colors opacity-0 row-action" title="Edit Command">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
           </button>
         </div>
@@ -310,17 +310,17 @@ export function CommandRegistryView({
       <style>{`
         .mac-checkbox {
           appearance: none;
-          background-color: #fff;
+          background-color: var(--ow-input);
           margin: 0;
           font: inherit;
           color: currentColor;
           width: 1.15em;
           height: 1.15em;
-          border: 1px solid #d1d5db;
+          border: 1px solid var(--ow-line);
           border-radius: 0.25em;
           display: grid;
           place-content: center;
-          transition: all 0.1s ease-in-out;
+          transition: background-color 0.1s ease-in-out, border-color 0.1s ease-in-out, box-shadow 0.1s ease-in-out;
           cursor: pointer;
         }
         .mac-checkbox::before {
@@ -329,14 +329,14 @@ export function CommandRegistryView({
           height: 0.65em;
           transform: scale(0);
           transition: 120ms transform ease-in-out;
-          box-shadow: inset 1em 1em white;
+          box-shadow: inset 1em 1em var(--ow-inverse);
           background-color: transparent;
           transform-origin: center;
           clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
         }
         .mac-checkbox:checked {
-          background-color: #3b82f6;
-          border-color: #3b82f6;
+          background-color: var(--ow-blue);
+          border-color: var(--ow-blue);
         }
         .mac-checkbox:checked::before {
           transform: scale(1);
@@ -351,16 +351,16 @@ export function CommandRegistryView({
         <div className="ow-toolbar mx-auto flex max-w-5xl flex-col gap-3 rounded-[24px] px-4 py-4">
           <div className="flex justify-between items-start gap-4">
             <div>
-              <h2 className="text-[24px] font-extrabold tracking-[-0.03em] text-gray-950">{t.commands.title}</h2>
-              <p className="mt-1 text-sm text-slate-500">{t.commands.browserSectionDescription}</p>
+              <h2 className="text-[24px] font-extrabold tracking-[-0.03em] text-[var(--ow-text)]">{t.commands.title}</h2>
+              <p className="mt-1 text-sm text-[var(--ow-muted)]">{t.commands.browserSectionDescription}</p>
             </div>
             <div className="flex items-center gap-3">
               <button 
                 onClick={() => void handleRefresh()}
                 disabled={loading || refreshing || publishing}
-                className="ow-btn inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-slate-700 transition-all group disabled:opacity-50"
+                className="ow-btn inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-[var(--ow-text)] transition-colors group disabled:opacity-50"
               >
-                <svg className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                <svg className="w-4 h-4 text-[var(--ow-subtle)] group-hover:text-[var(--ow-blue)] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                 {refreshing ? t.commands.refreshing : t.commands.refresh}
               </button>
               <button 
@@ -377,17 +377,17 @@ export function CommandRegistryView({
           {/* Big Search Bar */}
           <div className="relative group">
             <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-              <svg className="w-5 h-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+              <svg className="w-5 h-5 text-[var(--ow-subtle)] group-focus-within:text-[var(--ow-blue)] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
             </div>
             <input 
               type="text" 
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              className="w-full rounded-2xl border border-[var(--ow-line)] bg-white/90 py-2.5 pl-11 pr-4 text-base text-gray-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10 transition-all shadow-sm" 
+              className="w-full rounded-2xl border border-[var(--ow-line)] bg-[var(--ow-panel)] py-2.5 pl-11 pr-4 text-base text-[var(--ow-text)] placeholder:text-[var(--ow-subtle)] focus:outline-none focus:border-[var(--ow-blue)] focus:ring-4 focus:ring-[var(--ow-focus)] transition-colors shadow-sm"
               placeholder={t.commands.searchPlaceholder}
             />
             <div className="absolute inset-y-0 right-0 pr-4 flex items-center">
-              <kbd className="hidden sm:inline-flex items-center rounded border border-slate-200 bg-white px-2 py-0.5 text-xs font-mono text-slate-400">⌘K</kbd>
+              <kbd className="hidden sm:inline-flex items-center rounded border border-[var(--ow-line)] bg-[var(--ow-panel)] px-2 py-0.5 text-xs font-mono text-[var(--ow-subtle)]">⌘K</kbd>
             </div>
           </div>
 
@@ -409,10 +409,10 @@ export function CommandRegistryView({
                     }}
                     className={backendView === value 
                       ? "ow-segment-button-active px-4 py-1.5 text-sm font-semibold rounded-xl whitespace-nowrap"
-                      : "ow-segment-button px-4 py-1.5 text-sm font-semibold rounded-xl transition-colors whitespace-nowrap hover:text-gray-700"}
+                      : "ow-segment-button px-4 py-1.5 text-sm font-semibold rounded-xl transition-colors whitespace-nowrap hover:text-[var(--ow-text)]"}
                   >
                     {label}
-                    <span className={`ml-1.5 rounded px-1.5 text-xs font-semibold ${backendView === value ? 'bg-slate-100 text-slate-500' : 'bg-white/60 text-slate-400'}`}>
+                    <span className={`ml-1.5 rounded px-1.5 text-xs font-semibold ${backendView === value ? 'bg-[var(--ow-panel-soft)] text-[var(--ow-muted)]' : 'bg-[var(--ow-panel)] text-[var(--ow-subtle)]'}`}>
                       {backendCounts[value]}
                     </span>
                   </button>
@@ -427,10 +427,10 @@ export function CommandRegistryView({
                       onClick={() => setSecondaryView(value)}
                       className={secondaryView === value
                         ? "ow-segment-button-active px-4 py-1.5 text-sm font-semibold rounded-xl whitespace-nowrap"
-                        : "ow-segment-button px-4 py-1.5 text-sm font-semibold rounded-xl transition-colors whitespace-nowrap hover:text-gray-700"}
+                        : "ow-segment-button px-4 py-1.5 text-sm font-semibold rounded-xl transition-colors whitespace-nowrap hover:text-[var(--ow-text)]"}
                     >
                       {value === "command" ? t.commands.secondaryCommand : t.commands.secondarySkill}
-                      <span className={`ml-1.5 rounded px-1.5 text-xs font-semibold ${secondaryView === value ? 'bg-slate-100 text-slate-500' : 'bg-white/60 text-slate-400'}`}>
+                      <span className={`ml-1.5 rounded px-1.5 text-xs font-semibold ${secondaryView === value ? 'bg-[var(--ow-panel-soft)] text-[var(--ow-muted)]' : 'bg-[var(--ow-panel)] text-[var(--ow-subtle)]'}`}>
                         {secondaryCounts[value]}
                       </span>
                     </button>
@@ -439,11 +439,11 @@ export function CommandRegistryView({
               )}
             </div>
             
-            <div className="flex items-center gap-2 text-sm text-slate-500 font-medium">
+            <div className="flex items-center gap-2 text-sm text-[var(--ow-muted)] font-medium">
               {registry?.hasUnpublishedChanges && (
-                <span className="w-2 h-2 rounded-full bg-amber-400 mr-2" title={t.commands.unpublishedChanges}></span>
+                <span className="w-2 h-2 rounded-full bg-[var(--ow-amber)] mr-2" title={t.commands.unpublishedChanges}></span>
               )}
-              <span className="w-2 h-2 rounded-full bg-green-500"></span>
+              <span className="w-2 h-2 rounded-full bg-[var(--ow-green)]"></span>
               <span>{enabledCount} Selected</span>
             </div>
           </div>
@@ -455,17 +455,17 @@ export function CommandRegistryView({
         <div className="max-w-5xl mx-auto w-full">
           
           {/* Warnings */}
-          {notice && <div className="ow-page-frame-soft mb-4 rounded-2xl px-4 py-3 text-sm text-sky-800 border-sky-200 bg-sky-50/85">{notice}</div>}
-          {aliasedSelectedNames.length > 0 && <div className="ow-page-frame-soft mb-4 rounded-2xl px-4 py-3 text-sm text-sky-800 border-sky-200 bg-sky-50/85">{t.commands.aliasedNamesWarning(aliasedSelectedNames.join(", "))}</div>}
-          {duplicateSelectedNames.length > 0 && <div className="ow-page-frame-soft mb-4 rounded-2xl px-4 py-3 text-sm text-amber-800 border-amber-200 bg-amber-50/85">{t.commands.duplicateNamesWarning(duplicateSelectedNames.join(", "))}</div>}
-          {publishMessage && <div className="ow-page-frame-soft mb-4 rounded-2xl px-4 py-3 text-sm text-emerald-800 border-emerald-200 bg-emerald-50/85">{publishMessage}</div>}
-          {error && <div className="ow-page-frame-soft mb-4 rounded-2xl px-4 py-3 text-sm text-rose-800 border-rose-200 bg-rose-50/85">{t.commands.publishError(error)}</div>}
+          {notice && <div className="ow-page-frame-soft mb-4 rounded-2xl px-4 py-3 text-sm text-[var(--ow-blue)] border-[var(--ow-blue)] bg-[var(--ow-blue-soft)]">{notice}</div>}
+          {aliasedSelectedNames.length > 0 && <div className="ow-page-frame-soft mb-4 rounded-2xl px-4 py-3 text-sm text-[var(--ow-blue)] border-[var(--ow-blue)] bg-[var(--ow-blue-soft)]">{t.commands.aliasedNamesWarning(aliasedSelectedNames.join(", "))}</div>}
+          {duplicateSelectedNames.length > 0 && <div className="ow-page-frame-soft mb-4 rounded-2xl px-4 py-3 text-sm text-[var(--ow-warning-text)] border-[var(--ow-amber)] bg-[var(--ow-amber-soft)]">{t.commands.duplicateNamesWarning(duplicateSelectedNames.join(", "))}</div>}
+          {publishMessage && <div className="ow-page-frame-soft mb-4 rounded-2xl px-4 py-3 text-sm text-[var(--ow-green)] border-[var(--ow-green)] bg-[var(--ow-green-soft)]">{publishMessage}</div>}
+          {error && <div className="ow-page-frame-soft mb-4 rounded-2xl px-4 py-3 text-sm text-[var(--ow-error-text)] border-[var(--ow-red)] bg-[var(--ow-red-soft)]">{t.commands.publishError(error)}</div>}
 
           {/* Modern List Container */}
           <div className="ow-page-frame-soft overflow-hidden rounded-[26px]">
             
             {/* List Header */}
-            <div className="hidden sm:flex items-center justify-between border-b border-[var(--ow-line-soft)] bg-white/55 px-5 py-3 text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
+            <div className="hidden sm:flex items-center justify-between border-b border-[var(--ow-line-soft)] bg-[var(--ow-panel)] px-5 py-3 text-xs font-bold uppercase tracking-[0.12em] text-[var(--ow-muted)]">
               <div className="flex items-center gap-4 w-1/3">
                 <span className="ml-7">Command / Source</span>
               </div>
@@ -476,11 +476,11 @@ export function CommandRegistryView({
             {/* List Items */}
             <div className="divide-y divide-[var(--ow-line-soft)]">
               {loading ? (
-                <div className="flex min-h-[240px] items-center justify-center py-10 text-center text-sm text-slate-500">
+                <div className="flex min-h-[240px] items-center justify-center py-10 text-center text-sm text-[var(--ow-muted)]">
                   {t.common.loading}
                 </div>
               ) : currentViewCommands.length === 0 ? (
-                <div className="flex min-h-[240px] items-center justify-center py-10 text-center text-sm text-slate-500">
+                <div className="flex min-h-[240px] items-center justify-center py-10 text-center text-sm text-[var(--ow-muted)]">
                   {t.commands.noResults}
                 </div>
               ) : (
@@ -490,7 +490,7 @@ export function CommandRegistryView({
           </div>
           
           <div className="mt-6 text-center pb-8">
-            <p className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
+            <p className="flex items-center justify-center gap-1.5 text-xs text-[var(--ow-subtle)]">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
               {t.commands.telegramRulesHint}
             </p>

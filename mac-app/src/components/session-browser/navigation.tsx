@@ -35,10 +35,10 @@ export function SessionProviderToolbar({
               <button
                 key={p}
                 onClick={() => onProviderChange(p)}
-                className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-all ${
+                className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-colors ${
                   providerFilter === p
                     ? `${ui.tabActive}`
-                    : "text-slate-500 hover:text-gray-800"
+                    : "text-[var(--ow-muted)] hover:text-[var(--ow-text)]"
                 }`}
               >
                 <span className={`h-2 w-2 rounded-full ${ui.dot}`}></span>
@@ -50,7 +50,7 @@ export function SessionProviderToolbar({
 
         <button
           onClick={onRefresh}
-          className="ow-btn inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold text-slate-600 transition-colors hover:text-gray-900"
+          className="ow-btn inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold text-[var(--ow-muted)] transition-colors hover:text-[var(--ow-text)]"
         >
           <svg className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
@@ -88,10 +88,10 @@ export function WorkspaceSidebar({
       <div className="border-b border-[var(--ow-line-soft)] px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Workspaces</p>
-            <p className="mt-1 text-xs text-slate-400">Filter by project path</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ow-muted)]">Workspaces</p>
+            <p className="mt-1 text-xs text-[var(--ow-subtle)]">Filter by project path</p>
           </div>
-          <span className="rounded-full border border-white/80 bg-white/85 px-2.5 py-1 text-[11px] font-semibold text-slate-500 shadow-sm">
+          <span className="rounded-full border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] px-2.5 py-1 text-[11px] font-semibold text-[var(--ow-muted)] shadow-sm">
             {workspaces.length}
           </span>
         </div>
@@ -109,32 +109,32 @@ export function WorkspaceSidebar({
           const providerUi = getProviderUi(providerFilter, providerLabels[providerFilter]);
           const activeClasses = isActive
             ? providerUi.workspaceActive
-            : "border-transparent bg-white/50 hover:border-[var(--ow-line)] hover:bg-white/88";
+            : "border-transparent bg-[var(--ow-panel)] hover:border-[var(--ow-line)] hover:bg-[var(--ow-panel)]";
 
           return (
             <button
               key={ws}
               onClick={() => onSelectWorkspace(isActive ? null : ws)}
               onContextMenu={(event) => onOpenWorkspaceContextMenu?.(event, ws)}
-              className={`group flex w-full items-center gap-3 rounded-[20px] border px-3 py-3 text-left transition-all ${activeClasses}`}
+              className={`group flex w-full items-center gap-3 rounded-[20px] border px-3 py-3 text-left transition-colors ${activeClasses}`}
             >
               <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-2xl ${
                 isActive
                   ? providerUi.iconActive
-                  : "bg-white/88 text-slate-400 group-hover:text-slate-600"
+                  : "bg-[var(--ow-panel)] text-[var(--ow-subtle)] group-hover:text-[var(--ow-muted)]"
               }`}>
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
                 </svg>
               </span>
               <span className="min-w-0 flex-1">
-                <span className={`block truncate text-sm ${isActive ? "font-semibold text-gray-950" : "font-medium text-gray-700"}`}>{name}</span>
-                <span className="mt-1 block truncate text-[11px] text-slate-400">{ws}</span>
+                <span className={`block truncate text-sm ${isActive ? "font-semibold text-[var(--ow-text)]" : "font-medium text-[var(--ow-text)]"}`}>{name}</span>
+                <span className="mt-1 block truncate text-[11px] text-[var(--ow-subtle)]">{ws}</span>
               </span>
               <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                 isActive
-                  ? "border border-white/80 bg-white/92 text-slate-700 shadow-sm"
-                  : "bg-slate-100/90 text-slate-500"
+                  ? "border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] text-[var(--ow-text)] shadow-sm"
+                  : "bg-[var(--ow-panel-soft)] text-[var(--ow-muted)]"
               }`}>
                 {count}
               </span>
@@ -206,8 +206,8 @@ export function SessionListPanel({
       <div className="border-b border-[var(--ow-line-soft)] px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Sessions</p>
-            <p className="mt-1 text-xs text-slate-400">Keep the reading path unchanged</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ow-muted)]">Sessions</p>
+            <p className="mt-1 text-xs text-[var(--ow-subtle)]">Keep the reading path unchanged</p>
           </div>
           <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${providerUi.chip}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${providerUi.dot}`}></span>
@@ -218,20 +218,20 @@ export function SessionListPanel({
         <div className="ow-segment mt-3 grid grid-cols-2 rounded-2xl p-1">
           <button
             onClick={() => onArchiveFilterChange("active")}
-            className={`rounded-xl px-3 py-2 text-xs font-semibold transition-all ${
+            className={`rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
               archiveFilter === "active"
                 ? "ow-segment-button-active"
-                : "ow-segment-button hover:text-gray-700"
+                : "ow-segment-button hover:text-[var(--ow-text)]"
             }`}
           >
             {labels.active}
           </button>
           <button
             onClick={() => onArchiveFilterChange("archived")}
-            className={`rounded-xl px-3 py-2 text-xs font-semibold transition-all ${
+            className={`rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
               archiveFilter === "archived"
                 ? "ow-segment-button-active"
-                : "ow-segment-button hover:text-gray-700"
+                : "ow-segment-button hover:text-[var(--ow-text)]"
             }`}
           >
             {labels.archived}
@@ -248,22 +248,22 @@ export function SessionListPanel({
             type="button"
             onClick={onStartNewSession}
             disabled={newSessionForm?.creating}
-            className="group flex w-full items-center gap-3 rounded-[22px] border border-dashed border-slate-200 bg-white/58 px-4 py-4 text-left transition-colors hover:border-sky-200 hover:bg-sky-50/45 disabled:cursor-progress disabled:opacity-70"
+            className="group flex w-full items-center gap-3 rounded-[22px] border border-dashed border-[var(--ow-line)] bg-[var(--ow-panel)] px-4 py-4 text-left transition-colors hover:border-[var(--ow-blue)] hover:bg-[var(--ow-blue-soft)] disabled:cursor-progress disabled:opacity-70"
           >
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-white text-sky-600 shadow-sm transition-colors group-hover:text-sky-700">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[var(--ow-panel)] text-[var(--ow-blue)] shadow-sm transition-colors group-hover:text-[var(--ow-blue)]">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 5v14m-7-7h14" />
               </svg>
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block text-sm font-semibold text-gray-800">
+              <span className="block text-sm font-semibold text-[var(--ow-text)]">
                 {newSessionForm?.creating ? labels.creatingSession : labels.newSession}
               </span>
-              <span className="mt-1 block truncate text-xs text-slate-400">{labels.newSessionHint}</span>
+              <span className="mt-1 block truncate text-xs text-[var(--ow-subtle)]">{labels.newSessionHint}</span>
             </span>
           </button>
           {newSessionForm?.error ? (
-            <p className="px-4 text-xs font-medium leading-5 text-rose-600">{newSessionForm.error}</p>
+            <p className="px-4 text-xs font-medium leading-5 text-[var(--ow-error-text)]">{newSessionForm.error}</p>
           ) : null}
           </>
         ) : null}
@@ -296,14 +296,14 @@ export function SessionListPanel({
                 }
               }}
               onContextMenu={(event) => onOpenContextMenu(event, session)}
-              className={`relative flex w-full cursor-pointer flex-col rounded-[22px] border px-4 py-4 text-left transition-all focus:outline-none focus:ring-2 focus:ring-blue-300/70 ${
+              className={`relative flex w-full cursor-pointer flex-col rounded-[22px] border px-4 py-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--ow-focus)] ${
                 isArchiving
                   ? "cursor-progress opacity-70"
                   : ""
               } ${
                 isActive
-                  ? `${ui.sessionActive} shadow-[0_12px_28px_rgba(15,23,42,0.08)]`
-                  : "border-transparent bg-white/72 hover:border-[var(--ow-line)] hover:bg-white"
+                  ? `${ui.sessionActive} [box-shadow:var(--ow-shadow-md)]`
+                  : "border-transparent bg-[var(--ow-panel)] hover:border-[var(--ow-line)] hover:bg-[var(--ow-panel)]"
               }`}
             >
               {isActive && (
@@ -316,7 +316,7 @@ export function SessionListPanel({
                 </span>
                 <div className="flex items-center gap-2">
                   {isArchiving ? (
-                    <span className="rounded-full bg-white/88 px-2 py-1 text-[10px] font-semibold text-slate-500">
+                    <span className="rounded-full bg-[var(--ow-panel)] px-2 py-1 text-[10px] font-semibold text-[var(--ow-muted)]">
                       {labels.archivingSession}
                     </span>
                   ) : null}
@@ -334,8 +334,8 @@ export function SessionListPanel({
                       title={isPinned ? labels.unpinSession : labels.pinSession}
                       className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border transition-colors disabled:cursor-progress disabled:opacity-50 ${
                         isPinned
-                          ? "border-violet-200 bg-violet-50 text-violet-600"
-                          : "border-transparent text-slate-400 hover:border-slate-200 hover:bg-white hover:text-slate-700"
+                          ? "border-[var(--ow-purple)] bg-[var(--ow-purple-soft)] text-[var(--ow-purple)]"
+                          : "border-transparent text-[var(--ow-subtle)] hover:border-[var(--ow-line)] hover:bg-[var(--ow-panel)] hover:text-[var(--ow-text)]"
                       }`}
                     >
                       <svg className={`h-4 w-4 ${isPinned ? "fill-current" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -349,7 +349,7 @@ export function SessionListPanel({
                     disabled={isArchiving}
                     aria-label={labels.sessionActions}
                     title={labels.sessionActions}
-                    className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-transparent text-slate-400 transition-colors hover:border-slate-200 hover:bg-white hover:text-slate-700 disabled:cursor-progress disabled:opacity-50"
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-transparent text-[var(--ow-subtle)] transition-colors hover:border-[var(--ow-line)] hover:bg-[var(--ow-panel)] hover:text-[var(--ow-text)] disabled:cursor-progress disabled:opacity-50"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6.75 12h.01M12 12h.01M17.25 12h.01"></path>
@@ -357,16 +357,16 @@ export function SessionListPanel({
                   </button>
                 </div>
               </div>
-              <h4 className={`line-clamp-2 pl-1 text-sm leading-6 ${isActive ? "font-semibold text-gray-950" : "font-medium text-gray-700"}`}>
+              <h4 className={`line-clamp-2 pl-1 text-sm leading-6 ${isActive ? "font-semibold text-[var(--ow-text)]" : "font-medium text-[var(--ow-text)]"}`}>
                 {session.title}
               </h4>
               {preview ? (
-                <p className="mt-2 line-clamp-3 pl-1 text-xs leading-5 text-slate-500">
+                <p className="mt-2 line-clamp-3 pl-1 text-xs leading-5 text-[var(--ow-muted)]">
                   {preview}
                 </p>
               ) : null}
               {renderSessionMeta?.(session)}
-              <p className="mt-2 truncate pl-1 font-mono text-[11px] text-slate-400">
+              <p className="mt-2 truncate pl-1 font-mono text-[11px] text-[var(--ow-subtle)]">
                 {session.id.slice(0, 12)}
               </p>
             </div>

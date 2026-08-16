@@ -110,5 +110,5 @@ test("renderSessionMarkdownToStaticMarkup exposes P0 markdown usability affordan
   assert.match(html, /<span class="ow-session-md-code-lang[^"]*">ts<\/span>/);
   assert.match(html, /ow-session-md-code-scroll[^"]*max-h-\[420px\]/);
   assert.match(html, /ow-session-md-inline-code[^"]*break-words/);
-  assert.match(html, /ow-session-md-table-wrap[^"]*shadow-\[inset_-16px_0_18px_-20px_rgba\(15,23,42,0\.45\)\]/);
+  assert.match(html, /ow-session-md-table-wrap[^"]*\[box-shadow:var\(--ow-shadow-sm\)\]/);
 });

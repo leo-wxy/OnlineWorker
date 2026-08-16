@@ -8,6 +8,34 @@ import { buildDefaultUsageQuery } from "../src/utils/usageDateRange.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
+const fixedThemeColor = /\b(?:bg|text|border|ring|divide|from|via|to|decoration|marker)-(?:white|black|gray|slate|red|rose|orange|amber|green|emerald|sky|blue|violet|purple)(?:-\d+)?(?:\/[^\s"'`}]+)?/;
+
+test("sessions usage and commands consume semantic theme colors", () => {
+  const files = [
+    "src/pages/UsageBrowser.tsx",
+    "src/pages/CommandRegistry.tsx",
+    "src/components/session-browser/GenericProviderChat.tsx",
+    "src/components/session-browser/SessionMarkdown.tsx",
+    "src/components/session-browser/archive.tsx",
+    "src/components/session-browser/badges.tsx",
+    "src/components/session-browser/navigation.tsx",
+    "src/components/session-browser/presentation.tsx",
+    "src/components/session-browser/shared.tsx",
+    "src/components/session-browser/workspaceActions.tsx",
+    "src/utils/sessionMarkdown.js",
+  ];
+
+  for (const file of files) {
+    const source = readFileSync(join(root, file), "utf8");
+    assert.match(source, /var\(--ow-/);
+    assert.doesNotMatch(source, fixedThemeColor, file);
+    assert.doesNotMatch(source, /transition-all|transition:\s*all|#[0-9a-f]{3,8}\b|rgba?\(/i, file);
+  }
+
+  const shared = readFileSync(join(root, "src", "components", "session-browser", "shared.tsx"), "utf8");
+  assert.match(shared, /\[background:var\(--ow-primary-surface\)\]/);
+  assert.match(shared, /\[box-shadow:var\(--ow-shadow-md\)\]/);
+});
 
 test("usage browser discovers all usage sources from the usage catalog", () => {
   const page = readFileSync(join(root, "src", "pages", "UsageBrowser.tsx"), "utf8");
@@ -84,6 +112,6 @@ test("usage token detail table keeps its own bounded scroll area", () => {
   const page = readFileSync(join(root, "src", "pages", "UsageBrowser.tsx"), "utf8");
 
   assert.match(page, /<div className="flex min-h-0 flex-1 flex-col">/);
-  assert.match(page, /<div className="min-h-0 flex-1 overflow-auto rounded-2xl border border-\[var\(--ow-line-soft\)\] bg-white">/);
-  assert.match(page, /<thead className="sticky top-0 z-\[1\] bg-slate-50\/95">/);
+  assert.match(page, /<div className="min-h-0 flex-1 overflow-auto rounded-2xl border border-\[var\(--ow-line-soft\)\] bg-\[var\(--ow-panel\)\]">/);
+  assert.match(page, /<thead className="sticky top-0 z-\[1\] bg-\[var\(--ow-toolbar\)\]">/);
 });

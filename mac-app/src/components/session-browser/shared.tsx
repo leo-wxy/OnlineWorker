@@ -13,7 +13,7 @@ export { limitSessionTurns, mergeSessionTurns, overlayPendingUserTurn, SESSION_B
 
 function AssistantAvatar({ label }: { label: string }) {
   return (
-    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-blue-600 via-blue-500 to-sky-500 text-white shadow-[0_12px_28px_rgba(37,99,235,0.24)]">
+    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl [background:var(--ow-primary-surface)] text-[var(--ow-inverse)] [box-shadow:var(--ow-shadow-md)]">
       <span className="text-[11px] font-extrabold uppercase tracking-[0.08em]">
         {label.slice(0, 2)}
       </span>
@@ -38,7 +38,7 @@ export function TurnBubble({
     return (
       <div className="flex justify-end">
         <div className="max-w-[78%]">
-          <div className="rounded-[22px] rounded-br-md bg-gradient-to-br from-blue-600 to-blue-500 px-5 py-3.5 text-white shadow-[0_16px_32px_rgba(37,99,235,0.18)]">
+          <div className="rounded-[22px] rounded-br-md [background:var(--ow-primary-surface)] px-5 py-3.5 text-[var(--ow-inverse)] [box-shadow:var(--ow-shadow-md)]">
             <p className="text-[15px] leading-relaxed whitespace-pre-wrap break-words">{turn.content}</p>
           </div>
         </div>
@@ -54,18 +54,18 @@ export function TurnBubble({
         <AssistantAvatar label={assistantLabel} />
         <div className="max-w-[82%]">
           <div className="mb-1.5 pl-1">
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-600">
+            <span className="rounded-full bg-[var(--ow-panel-soft)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ow-muted)]">
               {assistantLabel}
             </span>
           </div>
-          <div className="rounded-[22px] rounded-bl-md border border-slate-200/80 bg-white/92 px-4 py-3 shadow-sm">
+          <div className="rounded-[22px] rounded-bl-md border border-[var(--ow-line)] bg-[var(--ow-panel)] px-4 py-3 shadow-sm">
             {pendingText ? (
-              <p className="text-[15px] leading-relaxed text-gray-800 whitespace-pre-wrap break-words">{pendingText}</p>
+              <p className="text-[15px] leading-relaxed text-[var(--ow-text)] whitespace-pre-wrap break-words">{pendingText}</p>
             ) : null}
             <div className={`flex items-center gap-1.5 ${pendingText ? "mt-3" : "h-5"}`}>
-              <div className="h-2 w-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: "0ms" }}></div>
-              <div className="h-2 w-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: "150ms" }}></div>
-              <div className="h-2 w-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: "300ms" }}></div>
+              <div className="h-2 w-2 rounded-full bg-[var(--ow-muted)] animate-bounce" style={{ animationDelay: "0ms" }}></div>
+              <div className="h-2 w-2 rounded-full bg-[var(--ow-muted)] animate-bounce" style={{ animationDelay: "150ms" }}></div>
+              <div className="h-2 w-2 rounded-full bg-[var(--ow-muted)] animate-bounce" style={{ animationDelay: "300ms" }}></div>
             </div>
           </div>
         </div>
@@ -78,15 +78,15 @@ export function TurnBubble({
       <AssistantAvatar label={assistantLabel} />
       <div className="max-w-[82%]">
         <div className="mb-1.5 pl-1">
-          <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-blue-700">
+          <span className="rounded-full bg-[var(--ow-blue-soft)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ow-blue)]">
             {assistantLabel}
           </span>
         </div>
-        <div className="rounded-[22px] rounded-bl-md border border-slate-200/80 bg-white/94 px-5 py-4 shadow-sm backdrop-blur">
+        <div className="rounded-[22px] rounded-bl-md border border-[var(--ow-line)] bg-[var(--ow-panel)] px-5 py-4 shadow-sm backdrop-blur">
           {turn.displayMode === "markdown" ? (
             <SessionMarkdown content={turn.content} />
           ) : (
-            <p className="text-[15px] leading-relaxed text-gray-800 whitespace-pre-wrap break-words">{turn.content}</p>
+            <p className="text-[15px] leading-relaxed text-[var(--ow-text)] whitespace-pre-wrap break-words">{turn.content}</p>
           )}
         </div>
       </div>
@@ -164,9 +164,9 @@ export function SessionComposer({
   };
 
   return (
-    <div className="border-t border-slate-200/70 bg-white/68 p-4 backdrop-blur">
+    <div className="border-t border-[var(--ow-line)] bg-[var(--ow-panel)] p-4 backdrop-blur">
       <div className="ow-page-frame-soft rounded-[24px] p-3">
-        <div className="rounded-[20px] border border-slate-200/80 bg-white/92 shadow-sm transition-all focus-within:border-blue-200 focus-within:shadow-[0_10px_24px_rgba(37,99,235,0.08)]">
+        <div className="rounded-[20px] border border-[var(--ow-line)] bg-[var(--ow-panel)] shadow-sm transition-colors focus-within:border-[var(--ow-blue)] focus-within:[box-shadow:var(--ow-shadow-sm)]">
           <textarea
             ref={textareaRef}
             value={draft}
@@ -178,25 +178,25 @@ export function SessionComposer({
               }
             }}
             disabled={sending || disabled}
-            className="min-h-[56px] max-h-48 w-full resize-none bg-transparent px-4 py-3.5 text-[15px] text-gray-800 outline-none placeholder:text-slate-400 disabled:opacity-50"
+            className="min-h-[56px] max-h-48 w-full resize-none bg-transparent px-4 py-3.5 text-[15px] text-[var(--ow-text)] outline-none placeholder:text-[var(--ow-subtle)] disabled:opacity-50"
             placeholder={placeholder}
             rows={1}
           ></textarea>
 
           {attachments.length > 0 ? (
-            <div className="flex flex-wrap gap-2 border-t border-slate-100 px-3 py-3">
+            <div className="flex flex-wrap gap-2 border-t border-[var(--ow-line-soft)] px-3 py-3">
               {attachments.map((attachment) => (
                 <div
                   key={attachment.id}
-                  className="inline-flex max-w-full items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+                  className="inline-flex max-w-full items-center gap-2 rounded-xl border border-[var(--ow-line)] bg-[var(--ow-panel-soft)] px-3 py-2 text-xs text-[var(--ow-muted)]"
                 >
-                  <span className="truncate font-medium text-slate-700">{attachment.name}</span>
-                  <span className="shrink-0 text-[11px] text-slate-400">
+                  <span className="truncate font-medium text-[var(--ow-text)]">{attachment.name}</span>
+                  <span className="shrink-0 text-[11px] text-[var(--ow-subtle)]">
                     {attachment.kind === "image" ? "image" : "file"}
                   </span>
                   <button
                     type="button"
-                    className="shrink-0 rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-700"
+                    className="shrink-0 rounded-md p-1 text-[var(--ow-subtle)] transition-colors hover:bg-[var(--ow-disabled-surface)] hover:text-[var(--ow-text)]"
                     title={attachment.name}
                     onClick={() =>
                       onAttachmentsChange(attachments.filter((item) => item.id !== attachment.id))
@@ -212,15 +212,15 @@ export function SessionComposer({
             </div>
           ) : null}
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-3 py-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--ow-line-soft)] px-3 py-2.5">
             <div className="flex items-center gap-1.5">
               {supportsAttachments ? (
                 <>
                   <label
-                    className={`rounded-xl p-2 text-slate-400 transition-colors ${
+                    className={`rounded-xl p-2 text-[var(--ow-subtle)] transition-colors ${
                       sending || stagingAttachments || disabled
                         ? "cursor-not-allowed opacity-40"
-                        : "cursor-pointer hover:bg-slate-100 hover:text-slate-700"
+                        : "cursor-pointer hover:bg-[var(--ow-panel-soft)] hover:text-[var(--ow-text)]"
                     }`}
                     title={attachmentButtonLabel}
                   >
@@ -241,10 +241,10 @@ export function SessionComposer({
                     <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
                   </label>
                   <label
-                    className={`rounded-xl p-2 text-slate-400 transition-colors ${
+                    className={`rounded-xl p-2 text-[var(--ow-subtle)] transition-colors ${
                       sending || stagingAttachments || disabled
                         ? "cursor-not-allowed opacity-40"
-                        : "cursor-pointer hover:bg-slate-100 hover:text-slate-700"
+                        : "cursor-pointer hover:bg-[var(--ow-panel-soft)] hover:text-[var(--ow-text)]"
                     }`}
                     title={imageButtonLabel}
                   >
@@ -268,7 +268,7 @@ export function SessionComposer({
                 </>
               ) : null}
               {assistantLabel && (
-                <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-blue-700">
+                <span className="rounded-full bg-[var(--ow-blue-soft)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ow-blue)]">
                   {assistantLabel}
                 </span>
               )}
@@ -285,8 +285,8 @@ export function SessionComposer({
           </div>
         </div>
       </div>
-      <p className="mt-2 text-center text-[10px] text-slate-400">
-        Press <kbd className="rounded border border-slate-200 bg-white px-1 py-0.5 font-mono">Enter</kbd> to send, <kbd className="rounded border border-slate-200 bg-white px-1 py-0.5 font-mono">Shift+Enter</kbd> for new line
+      <p className="mt-2 text-center text-[10px] text-[var(--ow-subtle)]">
+        Press <kbd className="rounded border border-[var(--ow-line)] bg-[var(--ow-panel)] px-1 py-0.5 font-mono">Enter</kbd> to send, <kbd className="rounded border border-[var(--ow-line)] bg-[var(--ow-panel)] px-1 py-0.5 font-mono">Shift+Enter</kbd> for new line
       </p>
     </div>
   );
@@ -363,23 +363,23 @@ export function SessionChatHeader({
   onReload: () => void;
 }) {
   return (
-    <div className="border-b border-[var(--ow-line-soft)] bg-white/74 px-5 py-4 backdrop-blur-xl">
+    <div className="border-b border-[var(--ow-line-soft)] bg-[var(--ow-panel)] px-5 py-4 backdrop-blur-xl">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="mb-2 flex flex-wrap items-center gap-2">
             {badge}
-            <span className="rounded-full border border-slate-200 bg-white/88 px-2.5 py-1 font-mono text-[10px] text-slate-500">
+            <span className="rounded-full border border-[var(--ow-line)] bg-[var(--ow-panel)] px-2.5 py-1 font-mono text-[10px] text-[var(--ow-muted)]">
               {shortId}
             </span>
           </div>
-          <h3 className="truncate text-base font-bold tracking-[-0.02em] text-gray-950">{title}</h3>
+          <h3 className="truncate text-base font-bold tracking-[-0.02em] text-[var(--ow-text)]">{title}</h3>
           {children}
         </div>
 
         <button
           onClick={onReload}
           disabled={loading}
-          className="ow-btn inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-slate-600 transition-colors hover:text-gray-900 disabled:opacity-50"
+          className="ow-btn inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-[var(--ow-muted)] transition-colors hover:text-[var(--ow-text)] disabled:opacity-50"
           title={reloadTitle}
         >
           <svg className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -428,7 +428,7 @@ export function SessionMessages({
         ) : (
           <>
             {error ? (
-              <p className="px-3 text-center text-xs text-amber-600">{error}</p>
+              <p className="px-3 text-center text-xs text-[var(--ow-warning-text)]">{error}</p>
             ) : null}
             {messages.map((turn, index) => (
               <TurnBubble
@@ -440,7 +440,7 @@ export function SessionMessages({
           </>
         )}
         {replyWatchText && (
-          <p className={`px-3 pb-1 text-center text-xs ${replyWatchState === "expired" ? "text-amber-600" : "text-slate-400"}`}>
+          <p className={`px-3 pb-1 text-center text-xs ${replyWatchState === "expired" ? "text-[var(--ow-warning-text)]" : "text-[var(--ow-subtle)]"}`}>
             {replyWatchText}
           </p>
         )}
