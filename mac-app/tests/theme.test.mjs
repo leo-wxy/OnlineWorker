@@ -1,20 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const root = join(__dirname, "..");
-const theme = readFileSync(join(root, "src", "utils", "theme.ts"), "utf8");
-const html = readFileSync(join(root, "index.html"), "utf8");
-const main = readFileSync(join(root, "src", "main.tsx"), "utf8");
-const menubar = readFileSync(
-  join(root, "src", "components", "menubar-popover", "MenubarPopover.tsx"),
-  "utf8",
-);
+const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+const theme = read("../src/utils/theme.ts");
+const html = read("../index.html");
+const main = read("../src/main.tsx");
+const menubar = read("../src/components/menubar-popover/MenubarPopover.tsx");
 const capability = JSON.parse(
-  readFileSync(join(root, "src-tauri", "capabilities", "default.json"), "utf8"),
+  read("../src-tauri/capabilities/default.json"),
 );
 
 test("theme runtime keeps one validated system/light/dark preference", () => {
@@ -55,7 +49,7 @@ test("theme sync separates System changes from explicit preferences", () => {
   assert.match(theme, /addEventListener\("storage"/);
   assert.match(theme, /removeEventListener\("storage"/);
   assert.match(theme, /removeEventListener\("change"/);
-  assert.match(theme, /Promise\.resolve\(pending\)\.catch/);
+  assert.match(theme, /Promise\.resolve\(unlisten\(\)\)\.catch/);
   assert.match(theme, /event\.key !== null/);
   assert.match(theme, /if \(activeCleanup\)/);
   assert.match(theme, /return cleanup/);

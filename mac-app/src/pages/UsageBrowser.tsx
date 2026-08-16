@@ -45,17 +45,6 @@ function chartBackground(providerId: string) {
 }
 
 const usageSummaryCache = new Map<string, UsageSourceSummary>();
-const USAGE_SUMMARY_CACHE_LIMIT = 24;
-
-function cacheUsageSummary(key: string, summary: UsageSourceSummary) {
-  usageSummaryCache.set(key, summary);
-  if (usageSummaryCache.size > USAGE_SUMMARY_CACHE_LIMIT) {
-    const oldestKey = usageSummaryCache.keys().next().value;
-    if (oldestKey !== undefined) {
-      usageSummaryCache.delete(oldestKey);
-    }
-  }
-}
 
 function usageSummaryCacheKey(source: UsageSourceCatalogEntry, query: UsageQuery) {
   return `${source.pluginId}:${source.sourceId}:${query.startDate}:${query.endDate}`;
@@ -134,7 +123,10 @@ export function UsageBrowser() {
         return;
       }
       setSummary(next);
-      cacheUsageSummary(cacheKey, next);
+      usageSummaryCache.set(cacheKey, next);
+      if (usageSummaryCache.size > 24) {
+        usageSummaryCache.delete(usageSummaryCache.keys().next().value!);
+      }
       summaryCacheKeyRef.current = cacheKey;
       setError(null);
       hasLoadedRef.current = true;

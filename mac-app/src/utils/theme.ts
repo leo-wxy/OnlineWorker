@@ -36,13 +36,9 @@ function getSystemMedia(): MediaQueryList | null {
   }
 }
 
-function readSystemTheme(): ResolvedTheme {
-  return getSystemMedia()?.matches ? "dark" : "light";
-}
-
 export function resolveTheme(
   preference: ThemePreference,
-  systemTheme: ResolvedTheme = readSystemTheme(),
+  systemTheme: ResolvedTheme = getSystemMedia()?.matches ? "dark" : "light",
 ): ResolvedTheme {
   return preference === "system" ? systemTheme : preference;
 }
@@ -102,8 +98,7 @@ function registerAsyncCleanup(
 
 function runCleanup(unlisten: UnlistenFn) {
   try {
-    const pending = unlisten();
-    void Promise.resolve(pending).catch(() => undefined);
+    void Promise.resolve(unlisten()).catch(() => undefined);
   } catch {
     // Cleanup must not surface during WebView teardown.
   }

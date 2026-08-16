@@ -54,7 +54,6 @@ def test_ccusage_runtime_reuses_unchanged_builtin_source(monkeypatch, tmp_path: 
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
     monkeypatch.setattr(ccusage_runtime.subprocess, "run", fake_run)
     clear_usage_cache()
-    ccusage_runtime.clear_ccusage_summary_cache()
 
     first = get_usage_source_summary(
         "ccusage", "codex", "2026-07-11", "2026-07-11", force_refresh=True,

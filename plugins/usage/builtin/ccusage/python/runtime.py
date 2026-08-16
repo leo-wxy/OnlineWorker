@@ -150,15 +150,10 @@ def _run_ccusage_summary(request: UsageSummaryRequest) -> dict[str, Any]:
 @lru_cache(maxsize=32)
 def _cached_ccusage_summary(
     request: UsageSummaryRequest,
-    binary_identity: str,
-    data_identity: str,
+    _binary_identity: str,
+    _data_identity: str,
 ) -> dict[str, Any]:
-    del binary_identity, data_identity
     return _run_ccusage_summary(request)
-
-
-def clear_ccusage_summary_cache() -> None:
-    _cached_ccusage_summary.cache_clear()
 
 
 def run_ccusage_summary(request: UsageSummaryRequest) -> dict[str, Any]:

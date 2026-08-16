@@ -115,32 +115,13 @@
   }
 }
 
-:where(
-  html[data-ow-theme] body,
-  html[data-ow-theme] #root,
-  html[data-ow-theme] button,
-  html[data-ow-theme] input,
-  html[data-ow-theme] select,
-  html[data-ow-theme] textarea,
-  html[data-ow-theme] [class^="ow-"],
-  html[data-ow-theme] [class*=" ow-"]
-) {
+:where(html[data-ow-theme] :is(body, #root, button, input, select, textarea, [class^="ow-"], [class*=" ow-"])) {
   transition-property: color, background-color, border-color, box-shadow, fill, stroke;
   transition-duration: 150ms;
-  transition-timing-function: ease;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :where(
-    html[data-ow-theme] body,
-    html[data-ow-theme] #root,
-    html[data-ow-theme] button,
-    html[data-ow-theme] input,
-    html[data-ow-theme] select,
-    html[data-ow-theme] textarea,
-    html[data-ow-theme] [class^="ow-"],
-    html[data-ow-theme] [class*=" ow-"]
-  ) {
+  :where(html[data-ow-theme] :is(body, #root, button, input, select, textarea, [class^="ow-"], [class*=" ow-"])) {
     transition: none !important;
   }
 }

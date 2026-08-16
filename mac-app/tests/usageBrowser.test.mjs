@@ -71,10 +71,9 @@ test("usage browser discovers all usage sources from the usage catalog", () => {
   assert.match(page, /const refreshUsage = useCallback/);
   assert.match(page, /const summaryRequestIdRef = useRef\(0\)/);
   assert.match(page, /const usageSummaryCache = new Map<string, UsageSourceSummary>\(\)/);
-  assert.match(page, /const USAGE_SUMMARY_CACHE_LIMIT = 24/);
-  assert.match(page, /usageSummaryCache\.size > USAGE_SUMMARY_CACHE_LIMIT/);
   assert.match(page, /usageSummaryCache\.get\(cacheKey\)/);
-  assert.match(page, /cacheUsageSummary\(cacheKey, next\)/);
+  assert.match(page, /usageSummaryCache\.set\(cacheKey, next\)/);
+  assert.match(page, /usageSummaryCache\.size > 24/);
   assert.match(page, /const forceNextLoadRef = useRef\(false\)/);
   assert.match(page, /requestId !== summaryRequestIdRef\.current/);
   assert.doesNotMatch(page, /if \(next\.startDate === query\.startDate/);

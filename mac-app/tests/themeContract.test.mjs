@@ -63,13 +63,10 @@ function themeBlock(name) {
 }
 
 function readSourceTree(directory) {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      return readSourceTree(path);
-    }
-    return /\.(?:js|ts|tsx)$/.test(entry.name) ? [readFileSync(path, "utf8")] : [];
-  }).join("\n");
+  return readdirSync(directory, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && /\.(?:js|ts|tsx)$/.test(entry.name))
+    .map((entry) => readFileSync(join(entry.parentPath, entry.name), "utf8"))
+    .join("\n");
 }
 
 test("light and dark expose the same documented semantic token contract", () => {
