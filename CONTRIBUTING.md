@@ -24,6 +24,9 @@ repository.
 3. Match the existing code style and module boundaries.
 4. Prefer tests next to the code you change.
 
+UI changes must follow the reusable theme contract in
+[`docs/UI-THEME.md`](docs/UI-THEME.md).
+
 ## Development Setup
 
 Requirements:

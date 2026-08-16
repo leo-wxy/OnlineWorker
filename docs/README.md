@@ -4,6 +4,8 @@ This directory keeps lightweight public-facing support materials for the reposit
 
 ## Contents
 
+- [UI Theme Development Guide](UI-THEME.md)
+  - Semantic tokens, component consumption, accessibility, and verification rules.
 - `screenshots/`
   - Current product screenshots used by the top-level README files.
 

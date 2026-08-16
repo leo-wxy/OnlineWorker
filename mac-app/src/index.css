@@ -3,14 +3,32 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
+  :root,
+  :root[data-ow-theme="light"] {
+    color-scheme: light;
+    --ow-bg: #eef3f8;
+    --ow-canvas:
+      radial-gradient(circle at 8% 0%, rgba(49, 104, 164, 0.13), transparent 28%),
+      radial-gradient(circle at 92% 12%, rgba(40, 126, 116, 0.09), transparent 24%),
+      linear-gradient(180deg, #edf3fa 0%, #f7f9fc 46%, #eef2f7 100%);
+    --ow-shell: rgba(255, 255, 255, 0.6);
     --ow-sidebar: rgba(242, 246, 250, 0.92);
     --ow-panel: rgba(255, 255, 255, 0.9);
     --ow-panel-soft: rgba(248, 250, 252, 0.84);
+    --ow-toolbar: rgba(255, 255, 255, 0.76);
+    --ow-input: rgba(255, 255, 255, 0.86);
+    --ow-code: rgba(241, 245, 249, 0.9);
+    --ow-hover: rgba(100, 116, 139, 0.09);
+    --ow-selected: rgba(37, 99, 235, 0.11);
+    --ow-disabled-surface: rgba(226, 232, 240, 0.66);
     --ow-line: rgba(148, 163, 184, 0.22);
     --ow-line-soft: rgba(148, 163, 184, 0.14);
     --ow-text: #172033;
     --ow-muted: #64748b;
+    --ow-subtle: #8795a9;
+    --ow-disabled: #9aa7b8;
+    --ow-inverse: #f8fafc;
+    --ow-focus: rgba(37, 99, 235, 0.38);
     --ow-blue: #2563eb;
     --ow-blue-soft: rgba(37, 99, 235, 0.1);
     --ow-green: #059669;
@@ -21,9 +39,67 @@
     --ow-red-soft: rgba(225, 29, 72, 0.1);
     --ow-purple: #7c3aed;
     --ow-purple-soft: rgba(124, 58, 237, 0.11);
+    --ow-overlay: rgba(15, 23, 42, 0.2);
+    --ow-scrollbar: rgba(148, 163, 184, 0.5);
+    --ow-scrollbar-hover: rgba(100, 116, 139, 0.66);
+    --ow-pattern: rgba(148, 163, 184, 0.24);
+    --ow-glass-highlight: rgba(255, 255, 255, 0.74);
+    --ow-panel-elevated: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 248, 252, 0.9));
+    --ow-primary-surface: linear-gradient(180deg, #2563eb, #1d4ed8);
+    --ow-warning-text: #92400e;
+    --ow-error-text: #9f1239;
     --ow-shadow-sm: 0 8px 24px rgba(15, 23, 42, 0.05);
     --ow-shadow-md: 0 18px 40px rgba(15, 23, 42, 0.08);
     --ow-shadow-lg: 0 30px 80px rgba(15, 23, 42, 0.12);
+  }
+
+  :root[data-ow-theme="dark"] {
+    color-scheme: dark;
+    --ow-bg: #101a2a;
+    --ow-canvas:
+      radial-gradient(circle at 8% 0%, rgba(72, 115, 170, 0.18), transparent 30%),
+      radial-gradient(circle at 92% 12%, rgba(51, 121, 113, 0.12), transparent 26%),
+      linear-gradient(180deg, #0e1827 0%, #142033 48%, #111c2d 100%);
+    --ow-shell: rgba(12, 22, 36, 0.66);
+    --ow-sidebar: rgba(18, 31, 48, 0.9);
+    --ow-panel: rgba(25, 40, 60, 0.88);
+    --ow-panel-soft: rgba(30, 45, 66, 0.72);
+    --ow-toolbar: rgba(30, 45, 66, 0.76);
+    --ow-input: rgba(12, 24, 39, 0.78);
+    --ow-code: rgba(8, 17, 29, 0.84);
+    --ow-hover: rgba(148, 183, 221, 0.08);
+    --ow-selected: rgba(96, 165, 250, 0.14);
+    --ow-disabled-surface: rgba(51, 65, 85, 0.45);
+    --ow-line: rgba(148, 163, 184, 0.24);
+    --ow-line-soft: rgba(148, 163, 184, 0.15);
+    --ow-text: #e8eef6;
+    --ow-muted: #a8b6c8;
+    --ow-subtle: #8293a9;
+    --ow-disabled: #697a90;
+    --ow-inverse: #f8fafc;
+    --ow-focus: rgba(123, 170, 247, 0.48);
+    --ow-blue: #7baaf7;
+    --ow-blue-soft: rgba(123, 170, 247, 0.14);
+    --ow-green: #67cbb1;
+    --ow-green-soft: rgba(103, 203, 177, 0.13);
+    --ow-amber: #f2bd74;
+    --ow-amber-soft: rgba(242, 189, 116, 0.14);
+    --ow-red: #f092a6;
+    --ow-red-soft: rgba(240, 146, 166, 0.14);
+    --ow-purple: #b8a1f2;
+    --ow-purple-soft: rgba(184, 161, 242, 0.14);
+    --ow-overlay: rgba(5, 10, 18, 0.56);
+    --ow-scrollbar: rgba(148, 163, 184, 0.32);
+    --ow-scrollbar-hover: rgba(168, 182, 200, 0.5);
+    --ow-pattern: rgba(148, 183, 221, 0.2);
+    --ow-glass-highlight: rgba(226, 232, 240, 0.09);
+    --ow-panel-elevated: linear-gradient(180deg, rgba(34, 52, 75, 0.96), rgba(20, 35, 54, 0.92));
+    --ow-primary-surface: linear-gradient(180deg, #3d6daf, #315f9f);
+    --ow-warning-text: #f2c486;
+    --ow-error-text: #f3a4b5;
+    --ow-shadow-sm: 0 8px 24px rgba(2, 8, 18, 0.2);
+    --ow-shadow-md: 0 18px 40px rgba(2, 8, 18, 0.3);
+    --ow-shadow-lg: 0 30px 80px rgba(2, 8, 18, 0.4);
   }
 
   html,
@@ -32,11 +108,38 @@
     height: 100%;
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background:
-      radial-gradient(circle at 8% 0%, rgba(37, 99, 235, 0.13), transparent 28%),
-      radial-gradient(circle at 92% 12%, rgba(5, 150, 105, 0.09), transparent 24%),
-      linear-gradient(180deg, #edf3fa 0%, #f7f9fc 46%, #eef2f7 100%);
+    background: var(--ow-canvas);
     color: var(--ow-text);
+  }
+}
+
+:where(
+  html[data-ow-theme] body,
+  html[data-ow-theme] #root,
+  html[data-ow-theme] button,
+  html[data-ow-theme] input,
+  html[data-ow-theme] select,
+  html[data-ow-theme] textarea,
+  html[data-ow-theme] [class^="ow-"],
+  html[data-ow-theme] [class*=" ow-"]
+) {
+  transition-property: color, background-color, border-color, box-shadow, fill, stroke;
+  transition-duration: 150ms;
+  transition-timing-function: ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(
+    html[data-ow-theme] body,
+    html[data-ow-theme] #root,
+    html[data-ow-theme] button,
+    html[data-ow-theme] input,
+    html[data-ow-theme] select,
+    html[data-ow-theme] textarea,
+    html[data-ow-theme] [class^="ow-"],
+    html[data-ow-theme] [class*=" ow-"]
+  ) {
+    transition: none !important;
   }
 }
 
@@ -49,24 +152,24 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+  background: var(--ow-scrollbar);
   border-radius: 4px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+  background: var(--ow-scrollbar-hover);
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
 .chat-bg {
-  background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
+  background-image: radial-gradient(var(--ow-pattern) 1px, transparent 1px);
   background-size: 20px 20px;
 }
 
 .ow-app-shell {
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--ow-shell);
   backdrop-filter: blur(20px);
 }
 
@@ -74,23 +177,23 @@
   position: relative;
   background: var(--ow-sidebar);
   border-right: 1px solid var(--ow-line-soft);
-  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.35);
+  box-shadow: inset -1px 0 0 var(--ow-glass-highlight);
 }
 
 .ow-brand-card {
-  border: 1px solid rgba(255, 255, 255, 0.74);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(246, 249, 252, 0.86));
+  border: 1px solid var(--ow-glass-highlight);
+  background: var(--ow-panel-elevated);
   box-shadow: var(--ow-shadow-sm);
 }
 
 .ow-sidebar-toggle {
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  box-shadow: var(--ow-shadow-sm);
   font-size: 0.75rem;
   font-weight: 700;
 }
 
 .ow-main-surface {
-  background: rgba(255, 255, 255, 0.34);
+  background: var(--ow-shell);
 }
 
 .ow-page-frame {
@@ -124,14 +227,14 @@
 
 .ow-toolbar {
   border: 1px solid var(--ow-line-soft);
-  background: rgba(255, 255, 255, 0.76);
+  background: var(--ow-toolbar);
   box-shadow: var(--ow-shadow-sm);
   backdrop-filter: blur(16px);
 }
 
 .ow-segment {
-  background: rgba(148, 163, 184, 0.11);
-  border: 1px solid rgba(148, 163, 184, 0.08);
+  background: var(--ow-hover);
+  border: 1px solid var(--ow-line-soft);
 }
 
 .ow-segment-button {
@@ -140,21 +243,21 @@
 
 .ow-segment-button-active {
   color: var(--ow-text);
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+  background: var(--ow-panel);
+  box-shadow: var(--ow-shadow-sm);
 }
 
 .ow-btn {
   border: 1px solid var(--ow-line);
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+  background: var(--ow-input);
+  box-shadow: var(--ow-shadow-sm);
 }
 
 .ow-btn-primary {
   border-color: transparent;
-  background: linear-gradient(180deg, #2563eb, #1d4ed8);
-  color: white;
-  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.18);
+  background: var(--ow-primary-surface);
+  color: var(--ow-inverse);
+  box-shadow: var(--ow-shadow-md);
 }
 
 .ow-badge {
@@ -181,7 +284,7 @@
 }
 
 .ow-inline-alert + .ow-inline-alert {
-  border-top: 1px dashed rgba(148, 163, 184, 0.2);
+  border-top: 1px dashed var(--ow-line);
 }
 
 .ow-inline-alert-mark {
@@ -201,7 +304,7 @@
 }
 
 .ow-inline-alert-warning {
-  color: #92400e;
+  color: var(--ow-warning-text);
 }
 
 .ow-inline-alert-error .ow-inline-alert-mark {
@@ -210,27 +313,26 @@
 }
 
 .ow-inline-alert-error {
-  color: #9f1239;
+  color: var(--ow-error-text);
 }
 
 .ow-floating-dock {
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--ow-panel);
   backdrop-filter: blur(18px);
   box-shadow: var(--ow-shadow-md);
 }
 
 .ow-modal-backdrop {
   background:
-    radial-gradient(circle at top, rgba(37, 99, 235, 0.12), transparent 32%),
-    rgba(15, 23, 42, 0.2);
+    radial-gradient(circle at top, var(--ow-blue-soft), transparent 32%),
+    var(--ow-overlay);
   backdrop-filter: blur(22px);
   -webkit-backdrop-filter: blur(22px);
 }
 
 .ow-modal-panel {
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 248, 252, 0.92));
+  border: 1px solid var(--ow-glass-highlight);
+  background: var(--ow-panel-elevated);
   box-shadow: var(--ow-shadow-lg);
   backdrop-filter: blur(28px);
   -webkit-backdrop-filter: blur(28px);
@@ -238,34 +340,33 @@
 
 .ow-log-filter-chip {
   border: 1px solid var(--ow-line-soft);
-  background: rgba(255, 255, 255, 0.74);
+  background: var(--ow-toolbar);
   color: var(--ow-muted);
 }
 
 .ow-log-filter-chip:hover {
-  border-color: rgba(37, 99, 235, 0.16);
-  background: rgba(255, 255, 255, 0.94);
+  border-color: var(--ow-focus);
+  background: var(--ow-hover);
   color: var(--ow-text);
 }
 
 .ow-log-filter-chip-active {
-  border-color: rgba(37, 99, 235, 0.18);
-  background: rgba(37, 99, 235, 0.1);
+  border-color: var(--ow-focus);
+  background: var(--ow-blue-soft);
   color: var(--ow-blue);
-  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.1);
+  box-shadow: var(--ow-shadow-sm);
 }
 
 .ow-log-stream {
-  background:
-    linear-gradient(180deg, rgba(248, 250, 252, 0.78), rgba(255, 255, 255, 0.58));
+  background: var(--ow-panel-soft);
 }
 
 .ow-log-entry {
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.035);
+  box-shadow: var(--ow-shadow-sm);
   transition: transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
 }
 
 .ow-log-entry:hover {
   transform: translateY(-1px);
-  box-shadow: 0 16px 28px rgba(15, 23, 42, 0.06);
+  box-shadow: var(--ow-shadow-md);
 }
