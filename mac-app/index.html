@@ -4,6 +4,28 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (() => {
+        const key = "onlineworker.theme";
+        const allowed = ["system", "light", "dark"];
+        let preference = "system";
+        try {
+          const stored = window.localStorage.getItem(key);
+          if (allowed.includes(stored)) preference = stored;
+        } catch {}
+        let systemDark = false;
+        try {
+          systemDark =
+            window.matchMedia?.("(prefers-color-scheme: dark)")?.matches === true;
+        } catch {}
+        const resolved =
+          preference === "dark" || (preference === "system" && systemDark)
+            ? "dark"
+            : "light";
+        document.documentElement.dataset.owTheme = resolved;
+        document.documentElement.style.colorScheme = resolved;
+      })();
+    </script>
     <title>OnlineWorker</title>
   </head>
   <body>
