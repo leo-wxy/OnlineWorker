@@ -15,6 +15,11 @@ import {
   PRIMARY_APP_TABS,
   type AppTab,
 } from "./utils/appTabs.js";
+import {
+  readThemePreference,
+  setThemePreference,
+  type ThemePreference,
+} from "./utils/theme";
 
 const APP_NAVIGATE_TAB_EVENT = "app:navigate-tab";
 const APP_OPEN_SESSION_EVENT = "app:open-session";
@@ -66,6 +71,8 @@ export default function App() {
   const { locale, setLocale, t } = useI18n();
   const [activeTab, setActiveTab] = useState<AppTab>("dashboard");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [themePreference, setThemePreferenceState] =
+    useState<ThemePreference>(readThemePreference);
   const [settingsSection, setSettingsSection] = useState<"onlineworker" | "agents" | "extensions" | "maintenance" | "advanced">("onlineworker");
   const [showLogs, setShowLogs] = useState(false);
   const [isFirstRun, setIsFirstRun] = useState(false);
@@ -76,6 +83,9 @@ export default function App() {
     const status = String(activity.status || "").trim().toLowerCase();
     return status === "needs_attention";
   }).length;
+  const themeLabels = locale === "zh"
+    ? { label: "主题", system: "系统", light: "浅色", dark: "深色" }
+    : { label: "Theme", system: "System", light: "Light", dark: "Dark" };
 
   // First-run detection: auto-switch to Guide tab on first launch
   useEffect(() => {
@@ -258,8 +268,8 @@ export default function App() {
               sidebarCollapsed ? "w-0 opacity-0" : "flex-1 opacity-100"
             }`}
           >
-            <span className="block truncate text-[17px] font-extrabold tracking-[-0.03em] text-gray-950">{t.app.title}</span>
-            <span className="mt-0.5 block truncate text-[11px] font-semibold text-slate-500">Local AI workbench</span>
+            <span className="block truncate text-[17px] font-extrabold tracking-[-0.03em] text-[var(--ow-text)]">{t.app.title}</span>
+            <span className="mt-0.5 block truncate text-[11px] font-semibold text-[var(--ow-muted)]">Local AI workbench</span>
           </div>
         </div>
 
@@ -268,13 +278,11 @@ export default function App() {
             type="button"
             onClick={() => setSidebarCollapsed((current) => !current)}
             title={sidebarCollapsed ? t.app.sidebar.expand : t.app.sidebar.collapse}
-            className={`ow-sidebar-toggle flex w-full items-center rounded-2xl px-3 py-2.5 text-sm font-bold transition-all ${
-              sidebarCollapsed
-                ? "justify-center border border-[var(--ow-line-soft)] bg-white/72 text-slate-600 hover:text-gray-900"
-                : "gap-3 border border-[var(--ow-line-soft)] bg-white/72 text-slate-600 hover:bg-white/90 hover:text-gray-900"
+            className={`ow-sidebar-toggle flex w-full items-center rounded-2xl border border-[var(--ow-line-soft)] bg-[var(--ow-panel-soft)] px-3 py-2.5 text-sm font-bold text-[var(--ow-muted)] transition-colors hover:bg-[var(--ow-hover)] hover:text-[var(--ow-text)] ${
+              sidebarCollapsed ? "justify-center" : "gap-3"
             }`}
           >
-            <span className="grid h-8 w-8 place-items-center rounded-xl bg-white/60 text-slate-500">
+            <span className="grid h-8 w-8 place-items-center rounded-xl bg-[var(--ow-hover)] text-[var(--ow-muted)]">
               <svg
                 className={`h-4 w-4 shrink-0 transition-transform ${sidebarCollapsed ? "rotate-180" : ""}`}
                 fill="none"
@@ -294,19 +302,21 @@ export default function App() {
               key={key}
               onClick={() => setActiveTab(key)}
               title={t.app.tabs[key]}
-              className={`ow-tab-button w-full flex items-center rounded-2xl px-3 py-2.5 text-sm font-bold transition-all ${
+              className={`ow-tab-button w-full flex items-center rounded-2xl px-3 py-2.5 text-sm font-bold transition-colors ${
                 activeTab === key
-                  ? "ow-tab-button-active bg-white/90 text-gray-950 shadow-[0_8px_24px_rgba(15,23,42,0.06)]"
-                  : "text-slate-500 hover:bg-white/55 hover:text-gray-900"
+                  ? "ow-tab-button-active bg-[var(--ow-panel)] text-[var(--ow-text)] shadow-[var(--ow-shadow-sm)]"
+                  : "text-[var(--ow-muted)] hover:bg-[var(--ow-hover)] hover:text-[var(--ow-text)]"
               } ${sidebarCollapsed ? "justify-center" : "gap-3"}`}
             >
               <span className={`relative grid h-8 w-8 place-items-center rounded-xl ${
-                activeTab === key ? "bg-blue-50 text-blue-600" : "bg-white/60 text-slate-400"
+                activeTab === key
+                  ? "bg-[var(--ow-blue-soft)] text-[var(--ow-blue)]"
+                  : "bg-[var(--ow-hover)] text-[var(--ow-subtle)]"
               }`}>
                 {getTabIcon(key)}
                 {key === "tasks" && taskAttentionCount > 0 && (
                   <span
-                    className="absolute -right-1 -top-1 grid min-h-[18px] min-w-[18px] place-items-center rounded-full border-2 border-white bg-rose-500 px-1 text-[10px] font-black leading-none text-white shadow-[0_6px_16px_rgba(244,63,94,0.35)]"
+                    className="absolute -right-1 -top-1 grid min-h-[18px] min-w-[18px] place-items-center rounded-full border-2 border-[var(--ow-panel)] bg-[var(--ow-red)] px-1 text-[10px] font-black leading-none text-[var(--ow-inverse)] shadow-[var(--ow-shadow-sm)]"
                     aria-label={`${taskAttentionCount} sessions need attention`}
                   >
                     {taskAttentionCount > 9 ? "9+" : taskAttentionCount}
@@ -317,7 +327,7 @@ export default function App() {
                 <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
                   <span className="truncate">{t.app.tabs[key]}</span>
                   {key === "tasks" && taskAttentionCount > 0 && (
-                    <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black leading-none text-white shadow-[0_6px_16px_rgba(244,63,94,0.22)]">
+                    <span className="rounded-full bg-[var(--ow-red)] px-2 py-0.5 text-[10px] font-black leading-none text-[var(--ow-inverse)] shadow-[var(--ow-shadow-sm)]">
                       {taskAttentionCount > 99 ? "99+" : taskAttentionCount}
                     </span>
                   )}
@@ -331,7 +341,7 @@ export default function App() {
           {!sidebarCollapsed ? (
             <>
               <div className="ow-page-frame-soft rounded-2xl p-3">
-                <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ow-muted)]">
                   {t.app.locale.label}
                 </p>
                 <div className="ow-segment grid w-full grid-cols-2 rounded-xl p-1">
@@ -339,10 +349,10 @@ export default function App() {
                     <button
                       key={value}
                       onClick={() => setLocale(value)}
-                      className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
+                      className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${
                         locale === value
                           ? "ow-segment-button-active"
-                          : "ow-segment-button hover:text-gray-700"
+                          : "ow-segment-button hover:text-[var(--ow-text)]"
                       }`}
                       title={value === "en" ? t.app.locale.en : t.app.locale.zh}
                     >
@@ -350,13 +360,41 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+
+                <p className="mb-2 mt-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ow-muted)]">
+                  {themeLabels.label}
+                </p>
+                <div
+                  className="ow-segment grid w-full grid-cols-3 rounded-xl p-1"
+                  role="group"
+                  aria-label={themeLabels.label}
+                >
+                  {(["system", "light", "dark"] as ThemePreference[]).map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => {
+                        setThemePreference(value);
+                        setThemePreferenceState(value);
+                      }}
+                      className={`rounded-lg px-1.5 py-1.5 text-[11px] font-bold transition-colors ${
+                        themePreference === value
+                          ? "ow-segment-button-active"
+                          : "ow-segment-button hover:text-[var(--ow-text)]"
+                      }`}
+                      aria-pressed={themePreference === value}
+                    >
+                      {themeLabels[value]}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="ow-page-frame-soft flex items-center gap-3 rounded-2xl p-3">
-                <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.13)]"></div>
+                <div className="h-2.5 w-2.5 rounded-full bg-[var(--ow-green)] shadow-[0_0_0_4px_var(--ow-green-soft)]"></div>
                 <div className="flex-1">
-                  <p className="text-xs font-bold text-emerald-800">Service Active</p>
-                  <p className="text-[10px] font-medium text-emerald-600">OnlineWorker</p>
+                  <p className="text-xs font-bold text-[var(--ow-green)]">Service Active</p>
+                  <p className="text-[10px] font-medium text-[var(--ow-muted)]">OnlineWorker</p>
                 </div>
               </div>
             </>
@@ -365,7 +403,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setLocale(locale === "en" ? "zh" : "en")}
-                className="ow-page-frame-soft flex h-10 w-10 items-center justify-center rounded-2xl text-[11px] font-bold text-slate-600"
+                className="ow-page-frame-soft flex h-10 w-10 items-center justify-center rounded-2xl text-[11px] font-bold text-[var(--ow-muted)]"
                 title={locale === "en" ? t.app.locale.zh : t.app.locale.en}
               >
                 {locale === "en" ? "EN" : "中"}
@@ -385,13 +423,13 @@ export default function App() {
 
         {/* First-Run Banner */}
         {isFirstRun && (
-          <div className="mx-5 mb-2 rounded-2xl border border-blue-100 bg-blue-50/85 px-4 py-2.5 flex items-center justify-between text-sm z-20 relative shadow-sm">
-            <div className="flex items-center gap-2 text-blue-800">
+          <div className="relative z-20 mx-5 mb-2 flex items-center justify-between rounded-2xl border border-[var(--ow-focus)] bg-[var(--ow-blue-soft)] px-4 py-2.5 text-sm shadow-[var(--ow-shadow-sm)]">
+            <div className="flex items-center gap-2 text-[var(--ow-text)]">
               <span><strong>{t.app.firstRun.title}:</strong> {t.app.firstRun.description}</span>
             </div>
             <button
               onClick={() => setIsFirstRun(false)}
-              className="text-blue-600 font-semibold hover:text-blue-800 underline"
+              className="font-semibold text-[var(--ow-blue)] underline hover:text-[var(--ow-text)]"
               title={t.app.firstRun.dismiss}
             >
               {t.app.firstRun.dismiss}
@@ -455,10 +493,10 @@ export default function App() {
                     <button
                       key={key}
                       onClick={() => setSettingsSection(key)}
-                      className={`rounded-xl px-3 py-2 text-sm font-bold transition-all ${
+                      className={`rounded-xl px-3 py-2 text-sm font-bold transition-colors ${
                         settingsSection === key
                           ? "ow-segment-button-active"
-                          : "ow-segment-button hover:text-gray-700"
+                          : "ow-segment-button hover:text-[var(--ow-text)]"
                       }`}
                     >
                       {label}
@@ -520,7 +558,7 @@ export default function App() {
 function PageLoadingState() {
   return (
     <div className="grid min-h-0 flex-1 place-items-center">
-      <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-200 border-t-blue-500" />
+      <span className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--ow-line)] border-t-[var(--ow-blue)]" />
     </div>
   );
 }

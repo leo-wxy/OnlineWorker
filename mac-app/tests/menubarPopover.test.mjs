@@ -9,6 +9,10 @@ const source = readFileSync(
   join(__dirname, "..", "src", "components", "menubar-popover", "MenubarPopover.tsx"),
   "utf8",
 );
+const helperSource = readFileSync(
+  join(__dirname, "..", "src", "utils", "menubarPopover.ts"),
+  "utf8",
+);
 const rustSource = readFileSync(
   join(__dirname, "..", "src-tauri", "src", "menubar.rs"),
   "utf8",
@@ -26,6 +30,19 @@ test("menubar popover keeps dynamic provider tabs and existing navigation action
   assert.match(source, /label="Tasks"/);
   assert.match(source, /label="Sessions"/);
   assert.match(source, /label="Usage"/);
+});
+
+test("menubar consumes shared semantic colors without owning theme preference", () => {
+  assert.match(source, /bg-transparent/);
+  assert.match(source, /var\(--ow-panel\)/);
+  assert.match(source, /var\(--ow-text\)/);
+  assert.match(source, /var\(--ow-line\)/);
+  assert.equal(source.includes("setThemePreference"), false);
+  assert.equal(source.includes('"system", "light", "dark"'), false);
+  assert.doesNotMatch(source, /\bbg-white\b/);
+  assert.doesNotMatch(source, /\b(?:text|border|bg)-slate-\d+\b/);
+  assert.doesNotMatch(helperSource, /rgba\(/);
+  assert.doesNotMatch(helperSource, /\b(?:text|border|bg)-(?:slate|blue|emerald|amber|purple)-\d+\b/);
 });
 
 test("menubar overview prioritizes session rows before the compact usage summary", () => {

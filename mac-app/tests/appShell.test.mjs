@@ -22,6 +22,21 @@ test("app shell wires a collapsible narrow sidebar state", () => {
   assert.match(app, /<span className="truncate">\{t\.app\.tabs\[key\]\}<\/span>/);
 });
 
+test("expanded sidebar owns the only System Light Dark preference control", () => {
+  const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
+
+  assert.match(app, /readThemePreference/);
+  assert.match(app, /setThemePreference\(value\)/);
+  assert.match(app, /\["system", "light", "dark"\] as ThemePreference\[\]/);
+  assert.match(app, /!sidebarCollapsed \? \([\s\S]*t\.app\.locale\.label[\s\S]*themeLabels\.label[\s\S]*\) : \(/);
+  assert.match(app, /aria-label=\{themeLabels\.label\}/);
+  assert.match(app, /role="group"[\s\S]*aria-label=\{themeLabels\.label\}/);
+  assert.match(app, /aria-pressed=\{themePreference === value\}/);
+  assert.doesNotMatch(app, /\bbg-white(?:\/\d+)?\b/);
+  assert.doesNotMatch(app, /\btext-(?:slate|gray)-\d+\b/);
+  assert.doesNotMatch(app, /transition-all/);
+});
+
 test("app shell removes the visual drag strip while keeping drag regions", () => {
   const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
   const css = readFileSync(join(root, "src", "index.css"), "utf8");

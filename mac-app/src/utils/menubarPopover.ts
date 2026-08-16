@@ -38,56 +38,28 @@ export function formatRelativeAge(updatedAtEpoch: number | null, nowMs: number) 
 export function providerAccent(providerId: string) {
   const accents = [
     {
-      laneBorder: "border-[rgba(37,99,235,0.18)]",
       laneDot: "bg-[var(--ow-blue)]",
       laneText: "text-[var(--ow-blue)]",
-      laneHint: "text-[rgba(37,99,235,0.7)]",
-      tileBg: "bg-[var(--ow-blue-soft)]",
-      tileText: "text-[var(--ow-blue)]",
-      tileValue: "text-[var(--ow-text)]",
-      cardBorder: "border-[rgba(37,99,235,0.16)]",
-      cardBg: "bg-[rgba(37,99,235,0.052)]",
-      actionText: "text-[var(--ow-blue)]",
-      avatarBg: "bg-[var(--ow-blue-soft)]",
+      cardBorder: "border-[var(--ow-line)]",
+      cardBg: "bg-[var(--ow-blue-soft)]",
     },
     {
-      laneBorder: "border-[rgba(124,58,237,0.18)]",
       laneDot: "bg-[var(--ow-purple)]",
       laneText: "text-[var(--ow-purple)]",
-      laneHint: "text-[rgba(124,58,237,0.7)]",
-      tileBg: "bg-[var(--ow-purple-soft)]",
-      tileText: "text-[var(--ow-purple)]",
-      tileValue: "text-[var(--ow-text)]",
-      cardBorder: "border-[rgba(124,58,237,0.16)]",
-      cardBg: "bg-[rgba(124,58,237,0.055)]",
-      actionText: "text-[var(--ow-purple)]",
-      avatarBg: "bg-[var(--ow-purple-soft)]",
+      cardBorder: "border-[var(--ow-line)]",
+      cardBg: "bg-[var(--ow-purple-soft)]",
     },
     {
-      laneBorder: "border-[rgba(5,150,105,0.18)]",
       laneDot: "bg-[var(--ow-green)]",
       laneText: "text-[var(--ow-green)]",
-      laneHint: "text-[rgba(5,150,105,0.72)]",
-      tileBg: "bg-[var(--ow-green-soft)]",
-      tileText: "text-[var(--ow-green)]",
-      tileValue: "text-[var(--ow-text)]",
-      cardBorder: "border-[rgba(5,150,105,0.16)]",
-      cardBg: "bg-[rgba(5,150,105,0.052)]",
-      actionText: "text-[var(--ow-green)]",
-      avatarBg: "bg-[var(--ow-green-soft)]",
+      cardBorder: "border-[var(--ow-line)]",
+      cardBg: "bg-[var(--ow-green-soft)]",
     },
     {
-      laneBorder: "border-[rgba(217,119,6,0.18)]",
       laneDot: "bg-[var(--ow-amber)]",
       laneText: "text-[var(--ow-amber)]",
-      laneHint: "text-[rgba(217,119,6,0.72)]",
-      tileBg: "bg-[var(--ow-amber-soft)]",
-      tileText: "text-[var(--ow-amber)]",
-      tileValue: "text-[var(--ow-text)]",
-      cardBorder: "border-[rgba(217,119,6,0.16)]",
-      cardBg: "bg-[rgba(217,119,6,0.052)]",
-      actionText: "text-[var(--ow-amber)]",
-      avatarBg: "bg-[var(--ow-amber-soft)]",
+      cardBorder: "border-[var(--ow-line)]",
+      cardBg: "bg-[var(--ow-amber-soft)]",
     },
   ];
 
@@ -106,22 +78,22 @@ export function statusTone(status: string | null) {
   const normalized = String(status || "").trim().toLowerCase();
   if (normalized.includes("need")) {
     return {
-      badge: "bg-amber-50 text-amber-700 border border-amber-100",
-      chip: "bg-amber-50 text-amber-700",
-      text: "text-amber-600",
+      badge: "border border-[var(--ow-amber-soft)] bg-[var(--ow-amber-soft)] text-[var(--ow-warning-text)]",
+      chip: "bg-[var(--ow-amber-soft)] text-[var(--ow-warning-text)]",
+      text: "text-[var(--ow-amber)]",
     };
   }
   if (normalized.includes("run")) {
     return {
-      badge: "bg-blue-50 text-blue-700 border border-blue-100",
-      chip: "bg-emerald-50 text-emerald-700",
-      text: "text-emerald-600",
+      badge: "border border-[var(--ow-blue-soft)] bg-[var(--ow-blue-soft)] text-[var(--ow-blue)]",
+      chip: "bg-[var(--ow-green-soft)] text-[var(--ow-green)]",
+      text: "text-[var(--ow-green)]",
     };
   }
   return {
-    badge: "bg-slate-100 text-slate-700 border border-slate-200",
-    chip: "bg-slate-100 text-slate-700",
-    text: "text-slate-500",
+    badge: "border border-[var(--ow-line)] bg-[var(--ow-panel-soft)] text-[var(--ow-muted)]",
+    chip: "bg-[var(--ow-panel-soft)] text-[var(--ow-muted)]",
+    text: "text-[var(--ow-muted)]",
   };
 }
 
