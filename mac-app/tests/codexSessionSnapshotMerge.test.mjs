@@ -64,7 +64,7 @@ test("session browser keeps existing messages visible during reloads", () => {
 
   assert.match(shared, /const showLoadingPanel = loading && messages\.length === 0;/);
   assert.match(shared, /const showErrorPanel = Boolean\(error\) && messages\.length === 0;/);
-  assert.match(shared, /\{error \? \(\s*<p className="px-3 text-center text-xs text-amber-600">\{error\}<\/p>\s*\) : null\}/s);
+  assert.match(shared, /\{error \? \(\s*<p className="px-3 text-center text-xs text-\[var\(--ow-warning-text\)\]">\{error\}<\/p>\s*\) : null\}/s);
 });
 
 test("session browser only uses smooth scroll for user-authored appends", () => {
