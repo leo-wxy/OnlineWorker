@@ -12,10 +12,10 @@ export function DashboardError({ error, texts }: Props) {
 
   return (
     <div className="ow-page-frame-soft rounded-[26px] p-5">
-      <h3 className="text-base font-extrabold tracking-[-0.02em] text-gray-950">
+      <h3 className="text-base font-extrabold tracking-[-0.02em] text-[var(--ow-text)]">
         {texts.dashboard.alertsTitle}
       </h3>
-      <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50/85 px-4 py-3 text-sm text-rose-700">
+      <div className="mt-3 rounded-2xl border border-[var(--ow-red)] bg-[var(--ow-red-soft)] px-4 py-3 text-sm text-[var(--ow-error-text)]">
         {texts.dashboard.failedToLoad(error)}
       </div>
     </div>

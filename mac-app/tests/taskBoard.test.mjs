@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   buildTaskBoardModel,
@@ -8,6 +11,30 @@ import {
 } from "../src/utils/taskBoard.js";
 
 const nowEpochMs = 1_800_000_000_000;
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const root = join(__dirname, "..");
+
+const fixedThemeColor = /\b(?:bg|text|border|ring|divide|from|via|to)-(?:white|black|gray|slate|red|rose|orange|amber|green|emerald|sky|blue|violet|purple)(?:-\d+)?(?:\/[^\s"'`}]+)?/;
+
+test("dashboard and task board surfaces use the shared theme contract", () => {
+  const files = [
+    "src/pages/TaskBoard.tsx",
+    "src/components/dashboard/DashboardAlerts.tsx",
+    "src/components/dashboard/DashboardError.tsx",
+    "src/components/dashboard/DashboardHero.tsx",
+    "src/components/dashboard/DashboardSidebar.tsx",
+    "src/components/dashboard/ProviderStatusList.tsx",
+    "src/components/dashboard/SettingSwitch.tsx",
+    "src/components/dashboard/model.ts",
+  ];
+
+  for (const file of files) {
+    const source = readFileSync(join(root, file), "utf8");
+    assert.match(source, /var\(--ow-/);
+    assert.doesNotMatch(source, fixedThemeColor, file);
+    assert.doesNotMatch(source, /transition-all|#[0-9a-f]{3,8}\b|rgba?\(/i, file);
+  }
+});
 
 function session(overrides) {
   return {

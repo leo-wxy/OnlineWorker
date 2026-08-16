@@ -31,7 +31,7 @@ export function DashboardHero({
       <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
         <div className="min-w-0">
           <div className="flex items-start gap-4">
-            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-white/70 bg-white/85 shadow-sm">
+            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] shadow-sm">
               <svg
                 className={`w-6 h-6 ${overall.badge.split(" ")[1]}`}
                 fill="none"
@@ -48,24 +48,24 @@ export function DashboardHero({
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-[24px] font-extrabold tracking-[-0.03em] text-gray-950">
+                <h2 className="text-[24px] font-extrabold tracking-[-0.03em] text-[var(--ow-text)]">
                   {overall.title}
                 </h2>
                 <span className={`ow-badge rounded-full px-2.5 py-1 text-[10px] ${overall.badge}`}>
                   {dashboardState?.overall ?? "unknown"}
                 </span>
               </div>
-              <p className="mt-1 text-sm font-medium text-slate-600">{overall.detail}</p>
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 font-semibold">
+              <p className="mt-1 text-sm font-medium text-[var(--ow-muted)]">{overall.detail}</p>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--ow-muted)]">
+                <span className="rounded-full border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] px-3 py-1 font-semibold">
                   {texts.dashboard.snapshot}: {formatEpochAge(dashboardState?.generatedAtEpoch, texts)}
                 </span>
                 {controlStatus?.pid && (
-                  <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 font-mono font-semibold">
+                  <span className="rounded-full border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] px-3 py-1 font-mono font-semibold">
                     PID {controlStatus.pid}
                   </span>
                 )}
-                <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 font-semibold">
+                <span className="rounded-full border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] px-3 py-1 font-semibold">
                   {controlStatus?.running ? "Running" : texts.common.stopped}
                 </span>
               </div>
@@ -76,7 +76,7 @@ export function DashboardHero({
         <div className="flex flex-wrap gap-2">
           <button
             onClick={onOpenLogs}
-            className="ow-btn rounded-xl px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
+            className="ow-btn rounded-xl px-4 py-2 text-sm font-semibold text-[var(--ow-text)] hover:bg-[var(--ow-panel)]"
           >
             {texts.serviceControl?.logs ?? "Logs"}
           </button>
@@ -85,8 +85,8 @@ export function DashboardHero({
             disabled={serviceBusy || loading}
             className={`ow-btn rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-50 ${
               controlStatus?.running
-                ? "text-rose-700 hover:border-rose-200 hover:bg-rose-50/80"
-                : "text-emerald-700 hover:border-emerald-200 hover:bg-emerald-50/80"
+                ? "text-[var(--ow-error-text)] hover:border-[var(--ow-red)] hover:bg-[var(--ow-red-soft)]"
+                : "text-[var(--ow-green)] hover:border-[var(--ow-green)] hover:bg-[var(--ow-green-soft)]"
             }`}
           >
             {serviceBusy && serviceAction !== "restart"

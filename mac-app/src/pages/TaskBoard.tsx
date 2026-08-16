@@ -198,29 +198,29 @@ async function hydrateTaskBoardSessionPreviews(
 function taskAccent(providerId: string) {
   const accents = [
     {
-      dot: "bg-violet-500",
-      chip: "border-violet-100 bg-violet-50 text-violet-700",
-      card: "hover:border-violet-200 hover:bg-violet-50/50",
+      dot: "bg-[var(--ow-purple)]",
+      chip: "border-[var(--ow-purple)] bg-[var(--ow-purple-soft)] text-[var(--ow-purple)]",
+      card: "hover:border-[var(--ow-purple)] hover:bg-[var(--ow-purple-soft)]",
     },
     {
-      dot: "bg-sky-500",
-      chip: "border-sky-100 bg-sky-50 text-sky-700",
-      card: "hover:border-sky-200 hover:bg-sky-50/50",
+      dot: "bg-[var(--ow-blue)]",
+      chip: "border-[var(--ow-blue)] bg-[var(--ow-blue-soft)] text-[var(--ow-blue)]",
+      card: "hover:border-[var(--ow-blue)] hover:bg-[var(--ow-blue-soft)]",
     },
     {
-      dot: "bg-emerald-500",
-      chip: "border-emerald-100 bg-emerald-50 text-emerald-700",
-      card: "hover:border-emerald-200 hover:bg-emerald-50/50",
+      dot: "bg-[var(--ow-green)]",
+      chip: "border-[var(--ow-green)] bg-[var(--ow-green-soft)] text-[var(--ow-green)]",
+      card: "hover:border-[var(--ow-green)] hover:bg-[var(--ow-green-soft)]",
     },
     {
-      dot: "bg-amber-500",
-      chip: "border-amber-100 bg-amber-50 text-amber-700",
-      card: "hover:border-amber-200 hover:bg-amber-50/50",
+      dot: "bg-[var(--ow-amber)]",
+      chip: "border-[var(--ow-amber)] bg-[var(--ow-amber-soft)] text-[var(--ow-warning-text)]",
+      card: "hover:border-[var(--ow-amber)] hover:bg-[var(--ow-amber-soft)]",
     },
     {
-      dot: "bg-slate-500",
-      chip: "border-slate-200 bg-slate-100 text-slate-700",
-      card: "hover:border-slate-300 hover:bg-slate-50/70",
+      dot: "bg-[var(--ow-muted)]",
+      chip: "border-[var(--ow-line)] bg-[var(--ow-panel-soft)] text-[var(--ow-text)]",
+      card: "hover:border-[var(--ow-line)] hover:bg-[var(--ow-panel-soft)]",
     },
   ];
   const hash = providerId.split("").reduce((value, char) => ((value * 31) + char.charCodeAt(0)) >>> 0, 0);
@@ -230,25 +230,25 @@ function taskAccent(providerId: string) {
 function laneTone(tone: "needsAttention" | "running" | "pinned") {
   if (tone === "needsAttention") {
     return {
-      dot: "bg-amber-500",
-      header: "text-amber-800",
-      lane: "bg-amber-50/35",
-      card: "border-amber-200 bg-amber-50/60",
+      dot: "bg-[var(--ow-amber)]",
+      header: "text-[var(--ow-warning-text)]",
+      lane: "bg-[var(--ow-amber-soft)]",
+      card: "border-[var(--ow-amber)] bg-[var(--ow-amber-soft)]",
     };
   }
   if (tone === "running") {
     return {
-      dot: "bg-blue-500",
-      header: "text-blue-800",
-      lane: "bg-blue-50/35",
-      card: "border-blue-200 bg-blue-50/56",
+      dot: "bg-[var(--ow-blue)]",
+      header: "text-[var(--ow-blue)]",
+      lane: "bg-[var(--ow-blue-soft)]",
+      card: "border-[var(--ow-blue)] bg-[var(--ow-blue-soft)]",
     };
   }
   return {
-    dot: "bg-emerald-500",
-    header: "text-emerald-800",
-    lane: "bg-emerald-50/32",
-    card: "border-[var(--ow-line-soft)] bg-white/86",
+    dot: "bg-[var(--ow-green)]",
+    header: "text-[var(--ow-green)]",
+    lane: "bg-[var(--ow-green-soft)]",
+    card: "border-[var(--ow-line-soft)] bg-[var(--ow-panel)]",
   };
 }
 
@@ -309,14 +309,14 @@ function TaskCard({
         }
       }}
       aria-selected={active}
-      className={`group flex min-h-[132px] flex-col border-b border-[var(--ow-line-soft)] px-3 py-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-300/70 ${active ? "bg-blue-50/80 shadow-[inset_3px_0_0_var(--ow-blue)]" : `${toneClasses.card} ${accent.card}`}`}
+      className={`group flex min-h-[132px] flex-col border-b border-[var(--ow-line-soft)] px-3 py-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--ow-focus)] ${active ? "bg-[var(--ow-blue-soft)] shadow-[inset_3px_0_0_var(--ow-blue)]" : `${toneClasses.card} ${accent.card}`}`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="line-clamp-2 text-sm font-extrabold leading-5 text-slate-950">
+          <p className="line-clamp-2 text-sm font-extrabold leading-5 text-[var(--ow-text)]">
             {task.title}
           </p>
-          <p className="mt-1 truncate text-xs font-semibold text-slate-500">
+          <p className="mt-1 truncate text-xs font-semibold text-[var(--ow-muted)]">
             {task.workspace || t.sessions.workspaceFallback}
           </p>
         </div>
@@ -333,8 +333,8 @@ function TaskCard({
               title={selected ? t.taskBoard.clearSelection : t.taskBoard.selectedApprovals(1)}
               className={`inline-flex h-7 w-7 items-center justify-center rounded-md border text-xs font-extrabold transition-colors ${
                 selected
-                  ? "border-blue-500 bg-blue-600 text-white"
-                  : "border-slate-200 bg-white/78 text-slate-500 hover:text-slate-900"
+                  ? "border-[var(--ow-blue)] bg-[var(--ow-blue)] text-[var(--ow-on-accent)]"
+                  : "border-[var(--ow-line)] bg-[var(--ow-panel)] text-[var(--ow-muted)] hover:text-[var(--ow-text)]"
               }`}
             >
               {selected ? "✓" : "+"}
@@ -349,7 +349,7 @@ function TaskCard({
             aria-pressed={task.pinned}
             aria-label={pinLabel}
             title={pinLabel}
-            className={`inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white/78 text-slate-500 transition-colors hover:text-slate-900 ${
+            className={`inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-[var(--ow-line)] bg-[var(--ow-panel)] text-[var(--ow-muted)] transition-colors hover:text-[var(--ow-text)] ${
               showPinText ? "gap-1.5 px-2" : "w-7"
             }`}
           >
@@ -368,7 +368,7 @@ function TaskCard({
           <span className={`h-1.5 w-1.5 rounded-full ${accent.dot}`} />
           <span className="truncate">{task.providerLabel}</span>
         </span>
-        <span className="inline-flex max-w-full rounded-full border border-slate-200 bg-white/75 px-2 py-1 text-[10px] font-bold text-slate-500">
+        <span className="inline-flex max-w-full rounded-full border border-[var(--ow-line)] bg-[var(--ow-panel)] px-2 py-1 text-[10px] font-bold text-[var(--ow-muted)]">
           <span className="truncate">{statusLabel(task, t)}</span>
         </span>
       </div>
@@ -376,7 +376,7 @@ function TaskCard({
       {task.preview ? (
         <div className="mt-2 overflow-hidden">
           <p
-            className="overflow-hidden text-xs font-medium leading-5 text-slate-600"
+            className="overflow-hidden text-xs font-medium leading-5 text-[var(--ow-muted)]"
             style={{
               display: "-webkit-box",
               WebkitBoxOrient: "vertical",
@@ -398,7 +398,7 @@ function TaskCard({
               event.stopPropagation();
               onApprovalAction(task, "exec_allow");
             }}
-            className="inline-flex h-8 items-center rounded-md bg-emerald-600 px-3 text-xs font-extrabold text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-emerald-300"
+            className="inline-flex h-8 items-center rounded-md bg-[var(--ow-green)] px-3 text-xs font-extrabold text-[var(--ow-on-accent)] transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 disabled:brightness-100"
           >
             {t.taskBoard.approve}
           </button>
@@ -409,14 +409,14 @@ function TaskCard({
               event.stopPropagation();
               onApprovalAction(task, "exec_deny");
             }}
-            className="inline-flex h-8 items-center rounded-md border border-rose-200 bg-white px-3 text-xs font-extrabold text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-rose-100 disabled:text-rose-300"
+            className="inline-flex h-8 items-center rounded-md border border-[var(--ow-red)] bg-[var(--ow-panel)] px-3 text-xs font-extrabold text-[var(--ow-error-text)] transition-colors hover:bg-[var(--ow-red-soft)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t.taskBoard.deny}
           </button>
         </div>
       ) : null}
 
-      <div className="mt-auto flex items-center justify-between gap-2 pt-3 text-[11px] font-semibold text-slate-400">
+      <div className="mt-auto flex items-center justify-between gap-2 pt-3 text-[11px] font-semibold text-[var(--ow-subtle)]">
         {task.statusReason ? (
           <span className="truncate" title={task.statusReason}>
             {task.statusReason}
@@ -465,19 +465,19 @@ function BoardLane({
 
   return (
     <section className={`border-b border-[var(--ow-line-soft)] last:border-b-0 ${toneClasses.lane}`}>
-      <div className="flex h-10 items-center justify-between gap-2 border-b border-[var(--ow-line-soft)] bg-slate-50/82 px-3">
+      <div className="flex h-10 items-center justify-between gap-2 border-b border-[var(--ow-line-soft)] bg-[var(--ow-panel-soft)] px-3">
         <h2 className={`flex min-w-0 items-center gap-2 truncate text-sm font-extrabold ${toneClasses.header}`}>
           <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${toneClasses.dot}`} />
           <span className="truncate">{title}</span>
         </h2>
-        <span className="shrink-0 rounded-full border border-slate-200 bg-white/78 px-2 py-1 text-[11px] font-extrabold text-slate-500">
+        <span className="shrink-0 rounded-full border border-[var(--ow-line)] bg-[var(--ow-panel)] px-2 py-1 text-[11px] font-extrabold text-[var(--ow-muted)]">
           {count}
         </span>
       </div>
 
       <div>
         {tasks.length === 0 ? (
-          <div className="flex min-h-[68px] items-center justify-center px-4 text-center text-xs font-semibold text-slate-400">
+          <div className="flex min-h-[68px] items-center justify-center px-4 text-center text-xs font-semibold text-[var(--ow-subtle)]">
             {empty}
           </div>
         ) : (
@@ -963,10 +963,10 @@ export function TaskBoard({
     <div className="ow-page-frame flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[30px]">
       <div className="flex shrink-0 flex-col gap-4 border-b border-[var(--ow-line-soft)] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
-          <h1 className="truncate text-base font-bold text-gray-950">
+          <h1 className="truncate text-base font-bold text-[var(--ow-text)]">
             {t.taskBoard.title}
           </h1>
-          <p className="mt-1 text-xs font-medium text-slate-500">集中处理需要你介入的 Agent 工作，并查看真实 Session 状态。</p>
+          <p className="mt-1 text-xs font-medium text-[var(--ow-muted)]">集中处理需要你介入的 Agent 工作，并查看真实 Session 状态。</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -978,10 +978,10 @@ export function TaskBoard({
             ].map(([label, count]) => (
               <div
                 key={label}
-                className="rounded-xl px-3 py-1.5 text-center text-xs font-extrabold text-slate-600"
+                className="rounded-xl px-3 py-1.5 text-center text-xs font-extrabold text-[var(--ow-muted)]"
               >
                 <span>{label}</span>
-                <span className="ml-1 text-slate-400">{count}</span>
+                <span className="ml-1 text-[var(--ow-subtle)]">{count}</span>
               </div>
             ))}
           </div>
@@ -989,7 +989,7 @@ export function TaskBoard({
             type="button"
             onClick={() => void refresh({ includeActivities: true, forceProviderRefresh: true })}
             disabled={refreshing}
-            className="ow-btn inline-flex h-10 items-center gap-2 rounded-2xl px-4 text-sm font-extrabold text-slate-700 disabled:opacity-60"
+            className="ow-btn inline-flex h-10 items-center gap-2 rounded-2xl px-4 text-sm font-extrabold text-[var(--ow-text)] disabled:opacity-60"
             title={t.taskBoard.refresh}
           >
             <svg
@@ -1006,13 +1006,13 @@ export function TaskBoard({
       </div>
 
       {selectedApprovalTaskIds.length > 0 ? (
-        <div className="mx-5 mt-4 flex flex-wrap items-center gap-2 rounded-2xl border border-blue-100 bg-blue-50/85 px-4 py-3 text-sm font-semibold text-blue-900">
+        <div className="mx-5 mt-4 flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--ow-blue)] bg-[var(--ow-blue-soft)] px-4 py-3 text-sm font-semibold text-[var(--ow-blue)]">
           <span className="mr-auto">{t.taskBoard.selectedApprovals(selectedApprovalTaskIds.length)}</span>
           <button
             type="button"
             disabled={busyApprovalTaskIds.length > 0}
             onClick={() => handleBatchApprovalAction("exec_allow")}
-            className="inline-flex h-9 items-center rounded-xl bg-emerald-600 px-4 text-sm font-extrabold text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-emerald-300"
+            className="inline-flex h-9 items-center rounded-xl bg-[var(--ow-green)] px-4 text-sm font-extrabold text-[var(--ow-on-accent)] transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 disabled:brightness-100"
           >
             {t.taskBoard.approve}
           </button>
@@ -1020,7 +1020,7 @@ export function TaskBoard({
             type="button"
             disabled={busyApprovalTaskIds.length > 0}
             onClick={() => handleBatchApprovalAction("exec_deny")}
-            className="inline-flex h-9 items-center rounded-xl border border-rose-200 bg-white px-4 text-sm font-extrabold text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-rose-100 disabled:text-rose-300"
+            className="inline-flex h-9 items-center rounded-xl border border-[var(--ow-red)] bg-[var(--ow-panel)] px-4 text-sm font-extrabold text-[var(--ow-error-text)] transition-colors hover:bg-[var(--ow-red-soft)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t.taskBoard.deny}
           </button>
@@ -1028,7 +1028,7 @@ export function TaskBoard({
             type="button"
             disabled={busyApprovalTaskIds.length > 0}
             onClick={() => setSelectedApprovalTaskIds([])}
-            className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-extrabold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+            className="inline-flex h-9 items-center rounded-xl border border-[var(--ow-line)] bg-[var(--ow-panel)] px-4 text-sm font-extrabold text-[var(--ow-text)] transition-colors hover:bg-[var(--ow-panel-soft)] disabled:cursor-not-allowed disabled:text-[var(--ow-disabled)]"
           >
             {t.taskBoard.clearSelection}
           </button>
@@ -1036,24 +1036,24 @@ export function TaskBoard({
       ) : null}
 
       {actionError ? (
-        <div className="mx-5 mt-4 rounded-2xl border border-amber-200 bg-amber-50/85 px-4 py-3 text-sm font-semibold text-amber-800">
+        <div className="mx-5 mt-4 rounded-2xl border border-[var(--ow-amber)] bg-[var(--ow-amber-soft)] px-4 py-3 text-sm font-semibold text-[var(--ow-warning-text)]">
           {actionError}
         </div>
       ) : null}
 
       {error ? (
-        <div className="mx-5 mt-4 rounded-2xl border border-rose-200 bg-rose-50/85 px-4 py-3 text-sm font-semibold text-rose-700">
+        <div className="mx-5 mt-4 rounded-2xl border border-[var(--ow-red)] bg-[var(--ow-red-soft)] px-4 py-3 text-sm font-semibold text-[var(--ow-error-text)]">
           {t.taskBoard.failedToLoad(formatLoadError(error, t))}
         </div>
       ) : null}
 
       {loading ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center text-sm font-semibold text-slate-500">
+        <div className="flex min-h-0 flex-1 items-center justify-center text-sm font-semibold text-[var(--ow-muted)]">
           {t.common.loading}
         </div>
       ) : (
         <div className="min-h-0 flex-1 p-4">
-          <div className="grid h-full min-h-0 overflow-hidden rounded-lg border border-[var(--ow-line-soft)] bg-white/72 lg:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.25fr)]">
+          <div className="grid h-full min-h-0 overflow-hidden rounded-lg border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] lg:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.25fr)]">
             <div className={`${mobileDetailOpen ? "hidden lg:block" : "block"} min-h-0 overflow-y-auto border-b border-[var(--ow-line-soft)] lg:border-b-0 lg:border-r`}>
               <BoardLane
                 title="需要你"
@@ -1105,32 +1105,32 @@ export function TaskBoard({
             <aside className={`${mobileDetailOpen ? "block" : "hidden lg:block"} min-h-0 overflow-y-auto bg-[var(--ow-panel)] p-4`} aria-live="polite">
               {selectedTask ? (
                 <div className="mx-auto max-w-3xl">
-                  <button type="button" onClick={() => setMobileDetailOpen(false)} className="ow-btn mb-3 h-9 rounded-lg px-3 text-sm font-semibold text-slate-700 lg:hidden">← 返回列表</button>
+                  <button type="button" onClick={() => setMobileDetailOpen(false)} className="ow-btn mb-3 h-9 rounded-lg px-3 text-sm font-semibold text-[var(--ow-text)] lg:hidden">← 返回列表</button>
                   <div className="flex items-start justify-between gap-4 border-b border-[var(--ow-line-soft)] pb-4">
                     <div className="min-w-0">
-                      <p className="text-xs font-semibold text-slate-500">{selectedTask.providerLabel} · {selectedTask.workspace || t.sessions.workspaceFallback}</p>
-                      <h2 className="mt-1 line-clamp-2 text-base font-bold text-slate-950">{selectedTask.title}</h2>
-                      <p className="mt-2 text-sm text-slate-600">
+                      <p className="text-xs font-semibold text-[var(--ow-muted)]">{selectedTask.providerLabel} · {selectedTask.workspace || t.sessions.workspaceFallback}</p>
+                      <h2 className="mt-1 line-clamp-2 text-base font-bold text-[var(--ow-text)]">{selectedTask.title}</h2>
+                      <p className="mt-2 text-sm text-[var(--ow-muted)]">
                         {selectedTask.statusReason || selectedTask.preview || (selectedTask.running ? "正在执行" : "Session 最近已结束")}
                       </p>
                     </div>
-                    <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">
+                    <span className="shrink-0 rounded-full border border-[var(--ow-line)] bg-[var(--ow-panel)] px-2.5 py-1 text-xs font-semibold text-[var(--ow-muted)]">
                       {selectedTask.interrupted ? "已中断" : selectedTask.needsAttention ? "需要你" : selectedTask.running ? "运行中" : "已结束"}
                     </span>
                   </div>
 
                   <dl className="grid grid-cols-[92px_minmax(0,1fr)] gap-x-3 gap-y-2 border-b border-[var(--ow-line-soft)] py-4 text-xs">
-                    <dt className="font-semibold text-slate-400">Provider</dt><dd className="truncate text-slate-700">{selectedTask.providerLabel}</dd>
-                    <dt className="font-semibold text-slate-400">Workspace</dt><dd className="truncate text-slate-700">{selectedTask.workspace || "—"}</dd>
-                    <dt className="font-semibold text-slate-400">Session</dt><dd className="truncate font-mono text-slate-700">{selectedTask.sessionId}</dd>
-                    <dt className="font-semibold text-slate-400">控制模式</dt><dd className="text-slate-700">{selectedTask.controlMode === "owned" ? "OnlineWorker 托管" : "外部客户端"}</dd>
-                    <dt className="font-semibold text-slate-400">更新时间</dt><dd className="text-slate-700">{formatRelativeTime(selectedTask.updatedAtEpochMs, nowMs, t)}</dd>
+                    <dt className="font-semibold text-[var(--ow-subtle)]">Provider</dt><dd className="truncate text-[var(--ow-text)]">{selectedTask.providerLabel}</dd>
+                    <dt className="font-semibold text-[var(--ow-subtle)]">Workspace</dt><dd className="truncate text-[var(--ow-text)]">{selectedTask.workspace || "—"}</dd>
+                    <dt className="font-semibold text-[var(--ow-subtle)]">Session</dt><dd className="truncate font-mono text-[var(--ow-text)]">{selectedTask.sessionId}</dd>
+                    <dt className="font-semibold text-[var(--ow-subtle)]">控制模式</dt><dd className="text-[var(--ow-text)]">{selectedTask.controlMode === "owned" ? "OnlineWorker 托管" : "外部客户端"}</dd>
+                    <dt className="font-semibold text-[var(--ow-subtle)]">更新时间</dt><dd className="text-[var(--ow-text)]">{formatRelativeTime(selectedTask.updatedAtEpochMs, nowMs, t)}</dd>
                   </dl>
 
                   <section className="border-b border-[var(--ow-line-soft)] py-4">
                     <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-sm font-bold text-slate-900">会话片段</h3>
-                      <span className="text-xs text-slate-400">最近 {TASK_BOARD_DETAIL_TURN_LIMIT} 条</span>
+                      <h3 className="text-sm font-bold text-[var(--ow-text)]">会话片段</h3>
+                      <span className="text-xs text-[var(--ow-subtle)]">最近 {TASK_BOARD_DETAIL_TURN_LIMIT} 条</span>
                     </div>
                     {selectedConversationTurns.length > 0 ? (
                       <ol className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
@@ -1139,56 +1139,56 @@ export function TaskBoard({
                             key={`${turn.role}:${turn.timestamp ?? ""}:${index}`}
                             className={`grid grid-cols-[42px_minmax(0,1fr)] gap-3 rounded-md border px-3 py-2 text-sm ${
                               turn.role === "user"
-                                ? "border-slate-200 bg-white"
-                                : "border-slate-200/80 bg-slate-50"
+                                ? "border-[var(--ow-line)] bg-[var(--ow-panel)]"
+                                : "border-[var(--ow-line)] bg-[var(--ow-panel-soft)]"
                             }`}
                           >
-                            <span className="pt-0.5 text-xs font-semibold text-slate-500">
+                            <span className="pt-0.5 text-xs font-semibold text-[var(--ow-muted)]">
                               {turn.role === "user" ? "你" : "Agent"}
                             </span>
-                            <p className="line-clamp-3 whitespace-pre-wrap break-words leading-5 text-slate-700">{turn.content}</p>
+                            <p className="line-clamp-3 whitespace-pre-wrap break-words leading-5 text-[var(--ow-text)]">{turn.content}</p>
                           </li>
                         ))}
                       </ol>
                     ) : selectedConversationLoading ? (
-                      <p className="mt-3 text-xs text-slate-400">正在读取会话内容…</p>
+                      <p className="mt-3 text-xs text-[var(--ow-subtle)]">正在读取会话内容…</p>
                     ) : selectedConversationError ? (
-                      <p className="mt-3 text-xs text-slate-400">暂时无法读取会话内容。</p>
+                      <p className="mt-3 text-xs text-[var(--ow-subtle)]">暂时无法读取会话内容。</p>
                     ) : (
-                      <p className="mt-3 text-xs text-slate-400">暂无可显示的会话内容。</p>
+                      <p className="mt-3 text-xs text-[var(--ow-subtle)]">暂无可显示的会话内容。</p>
                     )}
                   </section>
 
                   <section className="border-b border-[var(--ow-line-soft)] py-4">
-                    <h3 className="text-sm font-bold text-slate-900">最近事件</h3>
+                    <h3 className="text-sm font-bold text-[var(--ow-text)]">最近事件</h3>
                     {selectedTask.recentEvents.length > 0 ? (
                       <ol className="mt-3 space-y-3">
                         {selectedTask.recentEvents.map((event, index) => (
                           <li key={`${event.kind}:${event.createdAt}:${index}`} className="flex gap-3 text-xs">
-                            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" />
+                            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--ow-muted)]" />
                             <div className="min-w-0">
-                              <p className="font-semibold text-slate-700">{event.kind}</p>
-                              {event.summary ? <p className="mt-0.5 line-clamp-2 text-slate-500">{event.summary}</p> : null}
+                              <p className="font-semibold text-[var(--ow-text)]">{event.kind}</p>
+                              {event.summary ? <p className="mt-0.5 line-clamp-2 text-[var(--ow-muted)]">{event.summary}</p> : null}
                             </div>
                           </li>
                         ))}
                       </ol>
                     ) : (
-                      <p className="mt-2 text-xs text-slate-400">暂无更多生命周期事件。</p>
+                      <p className="mt-2 text-xs text-[var(--ow-subtle)]">暂无更多生命周期事件。</p>
                     )}
                   </section>
 
                   {selectedTask.mirroredOnly ? (
-                    <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">请在原终端处理。</p>
+                    <p className="mt-4 rounded-lg border border-[var(--ow-amber)] bg-[var(--ow-amber-soft)] px-3 py-2 text-sm text-[var(--ow-warning-text)]">请在原终端处理。</p>
                   ) : selectedTask.controlReason && !selectedTask.canInterrupt && !selectedTask.canRecover ? (
-                    <p className="mt-4 text-sm text-slate-500">{selectedTask.controlReason}</p>
+                    <p className="mt-4 text-sm text-[var(--ow-muted)]">{selectedTask.controlReason}</p>
                   ) : null}
 
                   <div className="mt-4 flex flex-wrap items-center gap-2">
                     {isApprovalTask(selectedTask) ? (
                       <>
                         <button type="button" disabled={busyApprovalTaskIdSet.has(selectedTask.id)} onClick={() => handleSingleApprovalAction(selectedTask, "exec_allow")} className="ow-btn-primary h-9 rounded-lg px-4 text-sm font-semibold disabled:opacity-50">{t.taskBoard.approve}</button>
-                        <button type="button" disabled={busyApprovalTaskIdSet.has(selectedTask.id)} onClick={() => handleSingleApprovalAction(selectedTask, "exec_deny")} className="ow-btn h-9 rounded-lg px-4 text-sm font-semibold text-rose-700 disabled:opacity-50">{t.taskBoard.deny}</button>
+                        <button type="button" disabled={busyApprovalTaskIdSet.has(selectedTask.id)} onClick={() => handleSingleApprovalAction(selectedTask, "exec_deny")} className="ow-btn h-9 rounded-lg px-4 text-sm font-semibold text-[var(--ow-error-text)] disabled:opacity-50">{t.taskBoard.deny}</button>
                       </>
                     ) : null}
                     {selectedTask.canRecover ? (
@@ -1198,14 +1198,14 @@ export function TaskBoard({
                       <button type="button" onClick={() => handleContinue(selectedTask)} className="ow-btn-primary h-9 rounded-lg px-4 text-sm font-semibold">继续</button>
                     ) : null}
                     {selectedTask.canInterrupt ? (
-                      <button type="button" disabled={pendingControl?.taskId === selectedTask.id} onClick={() => void handleControlAction(selectedTask, "interrupt")} className="ow-btn h-9 rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700 disabled:opacity-50">{pendingControl?.taskId === selectedTask.id && pendingControl.action === "interrupt" ? "正在中断…" : "中断"}</button>
+                      <button type="button" disabled={pendingControl?.taskId === selectedTask.id} onClick={() => void handleControlAction(selectedTask, "interrupt")} className="ow-btn h-9 rounded-lg border border-[var(--ow-line)] px-4 text-sm font-semibold text-[var(--ow-text)] disabled:opacity-50">{pendingControl?.taskId === selectedTask.id && pendingControl.action === "interrupt" ? "正在中断…" : "中断"}</button>
                     ) : null}
-                    <button type="button" onClick={() => handleOpen(selectedTask)} className="ow-btn h-9 rounded-lg px-4 text-sm font-semibold text-slate-700">打开 Session</button>
-                    <button type="button" onClick={() => handleTogglePin(selectedTask)} aria-pressed={selectedTask.pinned} className="ml-auto text-xs font-semibold text-slate-500 hover:text-slate-900">{selectedTask.pinned ? t.taskBoard.unpin : t.taskBoard.pin}</button>
+                    <button type="button" onClick={() => handleOpen(selectedTask)} className="ow-btn h-9 rounded-lg px-4 text-sm font-semibold text-[var(--ow-text)]">打开 Session</button>
+                    <button type="button" onClick={() => handleTogglePin(selectedTask)} aria-pressed={selectedTask.pinned} className="ml-auto text-xs font-semibold text-[var(--ow-muted)] hover:text-[var(--ow-text)]">{selectedTask.pinned ? t.taskBoard.unpin : t.taskBoard.pin}</button>
                   </div>
                 </div>
               ) : (
-                <div className="flex h-full items-center justify-center text-sm text-slate-400">选择一个 Session 查看详情。</div>
+                <div className="flex h-full items-center justify-center text-sm text-[var(--ow-subtle)]">选择一个 Session 查看详情。</div>
               )}
             </aside>
           </div>

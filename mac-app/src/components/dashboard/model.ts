@@ -42,32 +42,32 @@ export const alertStyles: Record<AlertLevel, string> = {
 export function getOverallStyles(texts: AppTexts): Record<SystemHealth, OverallStyle> {
   return {
     healthy: {
-      badge: "bg-emerald-100 text-emerald-700",
-      panel: "border-emerald-200 bg-emerald-50/78",
+      badge: "bg-[var(--ow-green-soft)] text-[var(--ow-green)]",
+      panel: "border-[var(--ow-green)] bg-[var(--ow-green-soft)]",
       title: texts.dashboard.overallTitle.healthy,
       detail: texts.dashboard.overallDetail.healthy,
     },
     degraded: {
-      badge: "bg-amber-100 text-amber-700",
-      panel: "border-amber-200 bg-amber-50/78",
+      badge: "bg-[var(--ow-amber-soft)] text-[var(--ow-warning-text)]",
+      panel: "border-[var(--ow-amber)] bg-[var(--ow-amber-soft)]",
       title: texts.dashboard.overallTitle.degraded,
       detail: texts.dashboard.overallDetail.degraded,
     },
     misconfigured: {
-      badge: "bg-orange-100 text-orange-700",
-      panel: "border-orange-200 bg-orange-50/78",
+      badge: "bg-[var(--ow-amber-soft)] text-[var(--ow-warning-text)]",
+      panel: "border-[var(--ow-amber)] bg-[var(--ow-amber-soft)]",
       title: texts.dashboard.overallTitle.misconfigured,
       detail: texts.dashboard.overallDetail.misconfigured,
     },
     stopped: {
-      badge: "bg-rose-100 text-rose-700",
-      panel: "border-rose-200 bg-rose-50/78",
+      badge: "bg-[var(--ow-red-soft)] text-[var(--ow-error-text)]",
+      panel: "border-[var(--ow-red)] bg-[var(--ow-red-soft)]",
       title: texts.dashboard.overallTitle.stopped,
       detail: texts.dashboard.overallDetail.stopped,
     },
     unknown: {
-      badge: "bg-slate-100 text-slate-700",
-      panel: "border-slate-200 bg-slate-50/78",
+      badge: "bg-[var(--ow-panel-soft)] text-[var(--ow-text)]",
+      panel: "border-[var(--ow-line)] bg-[var(--ow-panel-soft)]",
       title: texts.dashboard.overallTitle.unknown,
       detail: texts.dashboard.overallDetail.unknown,
     },
@@ -77,23 +77,23 @@ export function getOverallStyles(texts: AppTexts): Record<SystemHealth, OverallS
 export function getServiceStyles(texts: AppTexts): Record<ServiceHealth, ServiceStyle> {
   return {
     healthy: {
-      badge: "bg-emerald-50 text-emerald-700 border-emerald-100",
-      dot: "bg-emerald-500",
+      badge: "bg-[var(--ow-green-soft)] text-[var(--ow-green)] border-[var(--ow-green)]",
+      dot: "bg-[var(--ow-green)]",
       label: texts.common.healthy,
     },
     degraded: {
-      badge: "bg-amber-50 text-amber-700 border-amber-100",
-      dot: "bg-amber-500",
+      badge: "bg-[var(--ow-amber-soft)] text-[var(--ow-warning-text)] border-[var(--ow-amber)]",
+      dot: "bg-[var(--ow-amber)]",
       label: texts.common.degraded,
     },
     stopped: {
-      badge: "bg-rose-50 text-rose-700 border-rose-100",
-      dot: "bg-rose-500",
+      badge: "bg-[var(--ow-red-soft)] text-[var(--ow-error-text)] border-[var(--ow-red)]",
+      dot: "bg-[var(--ow-red)]",
       label: texts.common.stopped,
     },
     unknown: {
-      badge: "bg-slate-100 text-slate-600 border-slate-200",
-      dot: "bg-slate-400",
+      badge: "bg-[var(--ow-panel-soft)] text-[var(--ow-muted)] border-[var(--ow-line)]",
+      dot: "bg-[var(--ow-muted)]",
       label: texts.common.unknown,
     },
   };
@@ -102,15 +102,15 @@ export function getServiceStyles(texts: AppTexts): Record<ServiceHealth, Service
 export function getTelegramStyles(texts: AppTexts): Record<ConnectionStatus, TelegramStyle> {
   return {
     connected: {
-      badge: "bg-emerald-100 text-emerald-700",
+      badge: "bg-[var(--ow-green-soft)] text-[var(--ow-green)]",
       label: texts.common.connected,
     },
     disconnected: {
-      badge: "bg-rose-100 text-rose-700",
+      badge: "bg-[var(--ow-red-soft)] text-[var(--ow-error-text)]",
       label: texts.common.disconnected,
     },
     unknown: {
-      badge: "bg-slate-100 text-slate-600",
+      badge: "bg-[var(--ow-panel-soft)] text-[var(--ow-muted)]",
       label: texts.common.unknown,
     },
   };
@@ -234,24 +234,24 @@ export function providerDetail(provider: ProviderDashboardStatus, texts: AppText
 
 const providerAccentOptions = [
   {
-    icon: "border-violet-100 bg-violet-50 text-violet-600",
-    bar: "bg-violet-500/70",
+    icon: "border-[var(--ow-purple)] bg-[var(--ow-purple-soft)] text-[var(--ow-purple)]",
+    bar: "bg-[var(--ow-purple)]",
   },
   {
-    icon: "border-sky-100 bg-sky-50 text-sky-600",
-    bar: "bg-sky-500/70",
+    icon: "border-[var(--ow-blue)] bg-[var(--ow-blue-soft)] text-[var(--ow-blue)]",
+    bar: "bg-[var(--ow-blue)]",
   },
   {
-    icon: "border-emerald-100 bg-emerald-50 text-emerald-600",
-    bar: "bg-emerald-500/70",
+    icon: "border-[var(--ow-green)] bg-[var(--ow-green-soft)] text-[var(--ow-green)]",
+    bar: "bg-[var(--ow-green)]",
   },
   {
-    icon: "border-amber-100 bg-amber-50 text-amber-700",
-    bar: "bg-amber-500/70",
+    icon: "border-[var(--ow-amber)] bg-[var(--ow-amber-soft)] text-[var(--ow-warning-text)]",
+    bar: "bg-[var(--ow-amber)]",
   },
   {
-    icon: "border-slate-200 bg-slate-50 text-slate-700",
-    bar: "bg-slate-400/70",
+    icon: "border-[var(--ow-line)] bg-[var(--ow-panel-soft)] text-[var(--ow-text)]",
+    bar: "bg-[var(--ow-muted)]",
   },
 ];
 

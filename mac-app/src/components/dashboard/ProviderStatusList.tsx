@@ -35,10 +35,10 @@ interface ParsedStatusItem {
 }
 
 const statusToneStyles: Record<StatusTone, string> = {
-  healthy: "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-100",
-  warning: "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-100",
-  error: "bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-100",
-  neutral: "bg-slate-100 text-slate-600 ring-1 ring-inset ring-slate-200",
+  healthy: "bg-[var(--ow-green-soft)] text-[var(--ow-green)] ring-1 ring-inset ring-[var(--ow-green)]",
+  warning: "bg-[var(--ow-amber-soft)] text-[var(--ow-warning-text)] ring-1 ring-inset ring-[var(--ow-amber)]",
+  error: "bg-[var(--ow-red-soft)] text-[var(--ow-error-text)] ring-1 ring-inset ring-[var(--ow-red)]",
+  neutral: "bg-[var(--ow-panel-soft)] text-[var(--ow-muted)] ring-1 ring-inset ring-[var(--ow-line)]",
 };
 
 function parseStatusTone(value: string): { tone: StatusTone; icon: string | null; content: string } {
@@ -141,15 +141,15 @@ export function ProviderStatusList({
     <div className="space-y-4">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h3 className="text-lg font-extrabold tracking-[-0.02em] text-gray-950">
+          <h3 className="text-lg font-extrabold tracking-[-0.02em] text-[var(--ow-text)]">
             {texts.dashboard.subsystemsTitle}
           </h3>
-          <p className="mt-1 text-sm text-slate-500">{texts.dashboard.subsystemsDescription}</p>
+          <p className="mt-1 text-sm text-[var(--ow-muted)]">{texts.dashboard.subsystemsDescription}</p>
         </div>
         <button
           onClick={onRefresh}
           disabled={loading}
-          className="ow-btn rounded-xl p-2 text-slate-600 hover:bg-white"
+          className="ow-btn rounded-xl p-2 text-[var(--ow-muted)] hover:bg-[var(--ow-panel)]"
           title={texts.common.refresh}
         >
           <svg
@@ -220,7 +220,7 @@ function ProviderStatusCard({
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h4 className="text-base font-extrabold tracking-[-0.02em] text-gray-950">
+              <h4 className="text-base font-extrabold tracking-[-0.02em] text-[var(--ow-text)]">
                 {provider.label ?? provider.id}
               </h4>
               <span
@@ -230,34 +230,34 @@ function ProviderStatusCard({
                 {needsAction ? texts.dashboard.needsActionLabel : statusStyle.label}
               </span>
             </div>
-            <p className="mt-1 text-sm text-slate-500">{describeProvider(provider, texts)}</p>
+            <p className="mt-1 text-sm text-[var(--ow-muted)]">{describeProvider(provider, texts)}</p>
           </div>
         </div>
         {providerBusy && (
-          <span className="text-xs font-semibold text-blue-600 animate-pulse">
+          <span className="text-xs font-semibold text-[var(--ow-blue)] animate-pulse">
             {texts.common.saving}
           </span>
         )}
       </div>
 
-      <div className="mt-4 grid gap-4 rounded-2xl border border-slate-200/70 bg-slate-50/75 p-4 md:grid-cols-[minmax(0,9rem)_minmax(0,1.1fr)_minmax(0,1.35fr)]">
+      <div className="mt-4 grid gap-4 rounded-2xl border border-[var(--ow-line)] bg-[var(--ow-panel-soft)] p-4 md:grid-cols-[minmax(0,9rem)_minmax(0,1.1fr)_minmax(0,1.35fr)]">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ow-subtle)]">
             {texts.dashboard.ownerTransportLabel}
           </p>
-          <p className="mt-1 text-sm font-mono text-gray-800">{provider.transport ?? "-"}</p>
+          <p className="mt-1 text-sm font-mono text-[var(--ow-text)]">{provider.transport ?? "-"}</p>
         </div>
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ow-subtle)]">
             {providerShowsPort(provider) ? (texts.dashboard.portLabel ?? "Port") : "Status"}
           </p>
           <div className="mt-2 space-y-2.5">
             {providerShowsPort(provider) && (
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700 ring-1 ring-inset ring-sky-100">
+                <span className="inline-flex items-center rounded-full bg-[var(--ow-blue-soft)] px-2.5 py-1 text-[11px] font-semibold text-[var(--ow-blue)] ring-1 ring-inset ring-[var(--ow-focus)]">
                   {texts.dashboard.portLabel ?? "Port"}
                 </span>
-                <span className="text-sm font-mono text-gray-800">
+                <span className="text-sm font-mono text-[var(--ow-text)]">
                   {providerStatusValue(provider, statusText)}
                 </span>
               </div>
@@ -286,7 +286,7 @@ function ProviderStatusCard({
                         <button
                           type="button"
                           onClick={() => onOpenActionGuide(actionGuideId)}
-                          className="shrink-0 rounded-lg bg-white/80 px-2.5 py-1.5 text-xs font-bold text-amber-700 ring-1 ring-inset ring-amber-200 transition hover:bg-white"
+                          className="shrink-0 rounded-lg bg-[var(--ow-panel)] px-2.5 py-1.5 text-xs font-bold text-[var(--ow-warning-text)] ring-1 ring-inset ring-[var(--ow-amber)] transition hover:bg-[var(--ow-hover)]"
                         >
                           {texts.dashboard.viewGuide}
                         </button>
@@ -296,17 +296,17 @@ function ProviderStatusCard({
                 );
               })
             ) : (
-              <p className="text-sm leading-6 text-gray-800">{statusText}</p>
+              <p className="text-sm leading-6 text-[var(--ow-text)]">{statusText}</p>
             )}
           </div>
         </div>
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ow-subtle)]">
             {texts.dashboard.binaryLabel}
           </p>
-          <div className="mt-2 rounded-xl bg-white/80 px-3 py-2 ring-1 ring-inset ring-slate-200/80">
+          <div className="mt-2 rounded-xl bg-[var(--ow-panel)] px-3 py-2 ring-1 ring-inset ring-[var(--ow-line)]">
             <p
-              className="whitespace-normal break-words [overflow-wrap:anywhere] text-[13px] leading-6 font-mono text-gray-800 select-all"
+              className="whitespace-normal break-words [overflow-wrap:anywhere] text-[13px] leading-6 font-mono text-[var(--ow-text)] select-all"
               title={provider.bin ?? "-"}
             >
               {provider.bin ?? "-"}
@@ -330,7 +330,7 @@ function ProviderStatusCard({
                 onProviderFlagsChange(provider, checked, checked ? provider.autostart : false);
               }}
             />
-            <span className="text-sm font-semibold text-gray-700">{texts.dashboard.managedLabel}</span>
+            <span className="text-sm font-semibold text-[var(--ow-text)]">{texts.dashboard.managedLabel}</span>
           </label>
 
           <label
@@ -347,7 +347,7 @@ function ProviderStatusCard({
                 onProviderFlagsChange(provider, true, checked);
               }}
             />
-            <span className="text-sm font-semibold text-gray-700">
+            <span className="text-sm font-semibold text-[var(--ow-text)]">
               {texts.dashboard.autostartLabel}
             </span>
           </label>
