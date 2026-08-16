@@ -44,6 +44,23 @@ function chartBackground(providerId: string) {
   return colors[hash % colors.length];
 }
 
+const usageSummaryCache = new Map<string, UsageSourceSummary>();
+const USAGE_SUMMARY_CACHE_LIMIT = 24;
+
+function cacheUsageSummary(key: string, summary: UsageSourceSummary) {
+  usageSummaryCache.set(key, summary);
+  if (usageSummaryCache.size > USAGE_SUMMARY_CACHE_LIMIT) {
+    const oldestKey = usageSummaryCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      usageSummaryCache.delete(oldestKey);
+    }
+  }
+}
+
+function usageSummaryCacheKey(source: UsageSourceCatalogEntry, query: UsageQuery) {
+  return `${source.pluginId}:${source.sourceId}:${query.startDate}:${query.endDate}`;
+}
+
 export function UsageBrowser() {
   const { t } = useI18n();
   const [providers, setProviders] = useState<UsageSourceCatalogEntry[]>([]);
@@ -58,6 +75,7 @@ export function UsageBrowser() {
   const hasLoadedRef = useRef(false);
   const autoRangeRef = useRef(true);
   const summaryRequestIdRef = useRef(0);
+  const summaryCacheKeyRef = useRef<string | null>(null);
   const forceNextLoadRef = useRef(false);
 
   const usageProviders = providers;
@@ -103,6 +121,7 @@ export function UsageBrowser() {
 
   const loadSummary = useCallback(async (source: UsageSourceCatalogEntry, query: UsageQuery, forceRefresh = false) => {
     const requestId = ++summaryRequestIdRef.current;
+    const cacheKey = usageSummaryCacheKey(source, query);
     const hasLoadedBefore = hasLoadedRef.current;
     setLoading(!hasLoadedBefore);
     setRefreshing(hasLoadedBefore);
@@ -115,6 +134,8 @@ export function UsageBrowser() {
         return;
       }
       setSummary(next);
+      cacheUsageSummary(cacheKey, next);
+      summaryCacheKeyRef.current = cacheKey;
       setError(null);
       hasLoadedRef.current = true;
     } catch (loadError) {
@@ -149,7 +170,20 @@ export function UsageBrowser() {
       setLoading(false);
       setRefreshing(false);
       setSummary(null);
+      summaryCacheKeyRef.current = null;
       return;
+    }
+    const cacheKey = usageSummaryCacheKey(activeProvider, query);
+    const cached = usageSummaryCache.get(cacheKey);
+    if (cached) {
+      setSummary(cached);
+      summaryCacheKeyRef.current = cacheKey;
+      hasLoadedRef.current = true;
+      setLoading(false);
+    } else if (summaryCacheKeyRef.current !== cacheKey) {
+      setSummary(null);
+      summaryCacheKeyRef.current = null;
+      hasLoadedRef.current = false;
     }
     const forceRefresh = forceNextLoadRef.current;
     forceNextLoadRef.current = false;
@@ -248,7 +282,7 @@ export function UsageBrowser() {
       </div>
 
       <div className="relative">
-        {(loading || refreshing) && (
+        {loading && (
           <div className="absolute inset-0 z-10 flex items-center justify-center rounded-[28px] bg-[var(--ow-panel)] backdrop-blur-[2px]">
             <div className="ow-page-frame-soft flex items-center gap-3 rounded-2xl border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] px-4 py-3 text-sm font-semibold text-[var(--ow-text)] [box-shadow:var(--ow-shadow-md)]">
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--ow-line)] border-t-[var(--ow-text)]" />

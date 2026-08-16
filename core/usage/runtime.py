@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import Future
 from typing import Any
 
 from core.usage.contracts import UsageSummaryRequest
@@ -10,6 +11,7 @@ from core.usage.registry import resolve_usage_plugin
 
 _CACHE_TTL_SECONDS = 30
 _cache: dict[tuple[str, ...], tuple[float, dict[str, Any]]] = {}
+_inflight: dict[tuple[str, ...], Future[dict[str, Any]]] = {}
 _lock = threading.Lock()
 
 
@@ -35,24 +37,41 @@ def get_usage_source_summary(
         cached = _cache.get(key)
         if not force_refresh and cached and now - cached[0] < _CACHE_TTL_SECONDS:
             return dict(cached[1])
+        pending = _inflight.get(key)
+        owns_request = pending is None
+        if pending is None:
+            pending = Future()
+            _inflight[key] = pending
 
-    summary = descriptor.get_summary(UsageSummaryRequest(
-        plugin_id=plugin_id,
-        source_id=source_id,
-        start_date=str(start_date or "").strip(),
-        end_date=str(end_date or "").strip(),
-        timezone=str(timezone or "local").strip() or "local",
-    ))
-    if not isinstance(summary, dict):
-        raise TypeError(f"Usage plugin '{plugin_id}' returned an invalid summary")
-    normalized = {
-        "pluginId": plugin_id,
-        "sourceId": source_id,
-        "days": list(summary.get("days") or []),
-        "updatedAtEpoch": int(summary.get("updatedAtEpoch") or time.time()),
-        "unsupportedReason": summary.get("unsupportedReason"),
-    }
-    if not normalized["unsupportedReason"]:
+    if not owns_request:
+        return dict(pending.result())
+
+    try:
+        summary = descriptor.get_summary(UsageSummaryRequest(
+            plugin_id=plugin_id,
+            source_id=source_id,
+            start_date=str(start_date or "").strip(),
+            end_date=str(end_date or "").strip(),
+            timezone=str(timezone or "local").strip() or "local",
+        ))
+        if not isinstance(summary, dict):
+            raise TypeError(f"Usage plugin '{plugin_id}' returned an invalid summary")
+        normalized = {
+            "pluginId": plugin_id,
+            "sourceId": source_id,
+            "days": list(summary.get("days") or []),
+            "updatedAtEpoch": int(summary.get("updatedAtEpoch") or time.time()),
+            "unsupportedReason": summary.get("unsupportedReason"),
+        }
+        if not normalized["unsupportedReason"]:
+            with _lock:
+                _cache[key] = (time.monotonic(), dict(normalized))
+        pending.set_result(dict(normalized))
+        return normalized
+    except BaseException as exc:
+        pending.set_exception(exc)
+        raise
+    finally:
         with _lock:
-            _cache[key] = (now, dict(normalized))
-    return normalized
+            if _inflight.get(key) is pending:
+                _inflight.pop(key, None)

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 import sys
+import time
+from copy import deepcopy
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +35,64 @@ def runtime_identity() -> str:
     return f"{binary}:{stat.st_mtime_ns}:{stat.st_size}"
 
 
+def _source_data_roots(source_id: str) -> list[Path]:
+    home = Path.home()
+    if source_id == "codex":
+        raw_homes = str(os.environ.get("CODEX_HOME") or "").strip()
+        homes = [Path(value.strip()) for value in raw_homes.split(",") if value.strip()]
+        if not homes:
+            homes = [home / ".codex"]
+        roots = []
+        for codex_home in homes:
+            session_roots = [
+                path for path in (
+                    codex_home / "sessions",
+                    codex_home / "archived_sessions",
+                )
+                if path.is_dir()
+            ]
+            roots.extend(session_roots or [codex_home])
+        return roots
+
+    if source_id == "claude":
+        raw_homes = str(os.environ.get("CLAUDE_CONFIG_DIR") or "").strip()
+        if raw_homes:
+            homes = [Path(value.strip()).expanduser() for value in raw_homes.split(",") if value.strip()]
+        else:
+            xdg_home = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+            homes = [xdg_home / "claude", home / ".claude"]
+        return [
+            path if path.name == "projects" else path / "projects"
+            for path in homes
+            if (path if path.name == "projects" else path / "projects").is_dir()
+        ]
+
+    return []
+
+
+def _source_data_identity(source_id: str) -> str | None:
+    roots = _source_data_roots(source_id)
+    if not roots:
+        return None
+    digest = hashlib.blake2b(digest_size=16)
+    for root in roots:
+        digest.update(os.fsencode(root))
+        try:
+            paths = sorted(root.rglob("*.jsonl"))
+        except OSError:
+            continue
+        for path in paths:
+            try:
+                file_stat = path.stat()
+            except OSError:
+                continue
+            digest.update(os.fsencode(path))
+            digest.update(
+                f":{file_stat.st_ino}:{file_stat.st_mtime_ns}:{file_stat.st_size}".encode()
+            )
+    return digest.hexdigest()
+
+
 def _integer(row: dict[str, Any], key: str) -> int:
     try:
         return max(0, int(row.get(key) or 0))
@@ -46,7 +108,7 @@ def _cost(row: dict[str, Any]) -> float | None:
         return None
 
 
-def run_ccusage_summary(request: UsageSummaryRequest) -> dict[str, Any]:
+def _run_ccusage_summary(request: UsageSummaryRequest) -> dict[str, Any]:
     binary = resolve_ccusage_binary()
     args = [
         str(binary), request.source_id, "daily", "--json", "--no-cost", "--offline",
@@ -82,4 +144,27 @@ def run_ccusage_summary(request: UsageSummaryRequest) -> dict[str, Any]:
             "totalCostUsd": _cost(raw),
         })
     days.sort(key=lambda item: item["date"], reverse=True)
-    return {"days": days, "updatedAtEpoch": int(__import__("time").time())}
+    return {"days": days, "updatedAtEpoch": int(time.time())}
+
+
+@lru_cache(maxsize=32)
+def _cached_ccusage_summary(
+    request: UsageSummaryRequest,
+    binary_identity: str,
+    data_identity: str,
+) -> dict[str, Any]:
+    del binary_identity, data_identity
+    return _run_ccusage_summary(request)
+
+
+def clear_ccusage_summary_cache() -> None:
+    _cached_ccusage_summary.cache_clear()
+
+
+def run_ccusage_summary(request: UsageSummaryRequest) -> dict[str, Any]:
+    data_identity = _source_data_identity(request.source_id)
+    if data_identity is None:
+        return _run_ccusage_summary(request)
+    summary = deepcopy(_cached_ccusage_summary(request, runtime_identity(), data_identity))
+    summary["updatedAtEpoch"] = int(time.time())
+    return summary
