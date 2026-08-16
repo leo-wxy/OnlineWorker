@@ -260,7 +260,7 @@ export function MenubarPopover() {
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-transparent p-[1px] text-[var(--ow-text)]">
-      <div className="relative flex h-full flex-col overflow-hidden rounded-[16px] border border-[var(--ow-line)] bg-[var(--ow-panel)] shadow-[var(--ow-shadow-md)] backdrop-blur-2xl">
+      <div className="relative flex h-full flex-col overflow-hidden rounded-[16px] border border-[var(--ow-line)] bg-[var(--ow-panel)] [box-shadow:var(--ow-shadow-md)] backdrop-blur-2xl">
         <header className="flex h-[84px] shrink-0 items-center justify-between gap-4 border-b border-[var(--ow-line)] bg-[var(--ow-panel)] px-5">
           <div className="min-w-0">
             <div className="flex items-center gap-2.5">

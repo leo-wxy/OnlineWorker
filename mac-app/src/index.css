@@ -28,6 +28,7 @@
     --ow-subtle: #8795a9;
     --ow-disabled: #9aa7b8;
     --ow-inverse: #f8fafc;
+    --ow-on-accent: #ffffff;
     --ow-focus: rgba(37, 99, 235, 0.38);
     --ow-blue: #2563eb;
     --ow-blue-soft: rgba(37, 99, 235, 0.1);
@@ -77,6 +78,7 @@
     --ow-subtle: #8293a9;
     --ow-disabled: #697a90;
     --ow-inverse: #f8fafc;
+    --ow-on-accent: #0b1422;
     --ow-focus: rgba(123, 170, 247, 0.48);
     --ow-blue: #7baaf7;
     --ow-blue-soft: rgba(123, 170, 247, 0.14);

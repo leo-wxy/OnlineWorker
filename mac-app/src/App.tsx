@@ -304,7 +304,7 @@ export default function App() {
               title={t.app.tabs[key]}
               className={`ow-tab-button w-full flex items-center rounded-2xl px-3 py-2.5 text-sm font-bold transition-colors ${
                 activeTab === key
-                  ? "ow-tab-button-active bg-[var(--ow-panel)] text-[var(--ow-text)] shadow-[var(--ow-shadow-sm)]"
+                  ? "ow-tab-button-active bg-[var(--ow-panel)] text-[var(--ow-text)] [box-shadow:var(--ow-shadow-sm)]"
                   : "text-[var(--ow-muted)] hover:bg-[var(--ow-hover)] hover:text-[var(--ow-text)]"
               } ${sidebarCollapsed ? "justify-center" : "gap-3"}`}
             >
@@ -316,7 +316,7 @@ export default function App() {
                 {getTabIcon(key)}
                 {key === "tasks" && taskAttentionCount > 0 && (
                   <span
-                    className="absolute -right-1 -top-1 grid min-h-[18px] min-w-[18px] place-items-center rounded-full border-2 border-[var(--ow-panel)] bg-[var(--ow-red)] px-1 text-[10px] font-black leading-none text-[var(--ow-inverse)] shadow-[var(--ow-shadow-sm)]"
+                    className="absolute -right-1 -top-1 grid min-h-[18px] min-w-[18px] place-items-center rounded-full border-2 border-[var(--ow-panel)] bg-[var(--ow-red)] px-1 text-[10px] font-black leading-none text-[var(--ow-on-accent)] [box-shadow:var(--ow-shadow-sm)]"
                     aria-label={`${taskAttentionCount} sessions need attention`}
                   >
                     {taskAttentionCount > 9 ? "9+" : taskAttentionCount}
@@ -327,7 +327,7 @@ export default function App() {
                 <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
                   <span className="truncate">{t.app.tabs[key]}</span>
                   {key === "tasks" && taskAttentionCount > 0 && (
-                    <span className="rounded-full bg-[var(--ow-red)] px-2 py-0.5 text-[10px] font-black leading-none text-[var(--ow-inverse)] shadow-[var(--ow-shadow-sm)]">
+                    <span className="rounded-full bg-[var(--ow-red)] px-2 py-0.5 text-[10px] font-black leading-none text-[var(--ow-on-accent)] [box-shadow:var(--ow-shadow-sm)]">
                       {taskAttentionCount > 99 ? "99+" : taskAttentionCount}
                     </span>
                   )}
@@ -423,7 +423,7 @@ export default function App() {
 
         {/* First-Run Banner */}
         {isFirstRun && (
-          <div className="relative z-20 mx-5 mb-2 flex items-center justify-between rounded-2xl border border-[var(--ow-focus)] bg-[var(--ow-blue-soft)] px-4 py-2.5 text-sm shadow-[var(--ow-shadow-sm)]">
+          <div className="relative z-20 mx-5 mb-2 flex items-center justify-between rounded-2xl border border-[var(--ow-focus)] bg-[var(--ow-blue-soft)] px-4 py-2.5 text-sm [box-shadow:var(--ow-shadow-sm)]">
             <div className="flex items-center gap-2 text-[var(--ow-text)]">
               <span><strong>{t.app.firstRun.title}:</strong> {t.app.firstRun.description}</span>
             </div>

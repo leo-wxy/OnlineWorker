@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,6 +31,7 @@ const requiredTokenNames = [
   "--ow-subtle",
   "--ow-disabled",
   "--ow-inverse",
+  "--ow-on-accent",
   "--ow-focus",
   "--ow-blue",
   "--ow-blue-soft",
@@ -59,6 +60,16 @@ function themeBlock(name) {
   const match = css.match(pattern);
   assert.ok(match, `missing ${name} token block`);
   return match[1];
+}
+
+function readSourceTree(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      return readSourceTree(path);
+    }
+    return /\.(?:js|ts|tsx)$/.test(entry.name) ? [readFileSync(path, "utf8")] : [];
+  }).join("\n");
 }
 
 test("light and dark expose the same documented semantic token contract", () => {
@@ -106,4 +117,12 @@ test("the stable guide is discoverable and bans new hardcoded theme colors", () 
   assert.match(guide, /rgba/i);
   assert.match(guide, /System/);
   assert.match(guide, /menubar/i);
+  assert.match(guide, /--ow-on-accent/);
+});
+
+test("gradient and shadow tokens use CSS-property-safe Tailwind utilities", () => {
+  const source = readSourceTree(join(appRoot, "src"));
+  assert.doesNotMatch(source, /shadow-\[var\(--ow-shadow-/);
+  assert.doesNotMatch(source, /bg-\[var\(--ow-(?:primary-surface|panel-elevated)\)\]/);
+  assert.match(source, /\[box-shadow:var\(--ow-shadow-md\)\]/);
 });

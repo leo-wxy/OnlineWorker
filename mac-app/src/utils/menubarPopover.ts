@@ -57,7 +57,7 @@ export function providerAccent(providerId: string) {
     },
     {
       laneDot: "bg-[var(--ow-amber)]",
-      laneText: "text-[var(--ow-amber)]",
+      laneText: "text-[var(--ow-warning-text)]",
       cardBorder: "border-[var(--ow-line)]",
       cardBg: "bg-[var(--ow-amber-soft)]",
     },
@@ -80,7 +80,7 @@ export function statusTone(status: string | null) {
     return {
       badge: "border border-[var(--ow-amber-soft)] bg-[var(--ow-amber-soft)] text-[var(--ow-warning-text)]",
       chip: "bg-[var(--ow-amber-soft)] text-[var(--ow-warning-text)]",
-      text: "text-[var(--ow-amber)]",
+      text: "text-[var(--ow-warning-text)]",
     };
   }
   if (normalized.includes("run")) {

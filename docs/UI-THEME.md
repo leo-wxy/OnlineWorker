@@ -21,7 +21,7 @@ define the same roles:
 | Surfaces | `--ow-sidebar`, `--ow-panel`, `--ow-panel-soft`, `--ow-panel-elevated`, `--ow-toolbar`, `--ow-input`, `--ow-code`, `--ow-glass-highlight` |
 | Interaction surfaces | `--ow-hover`, `--ow-selected`, `--ow-disabled-surface` |
 | Structure | `--ow-line`, `--ow-line-soft` |
-| Text | `--ow-text`, `--ow-muted`, `--ow-subtle`, `--ow-disabled`, `--ow-inverse` |
+| Text | `--ow-text`, `--ow-muted`, `--ow-subtle`, `--ow-disabled`, `--ow-inverse`, `--ow-on-accent` |
 | Focus | `--ow-focus` |
 | Accent | `--ow-blue`, `--ow-blue-soft`, `--ow-purple`, `--ow-purple-soft`, `--ow-primary-surface` |
 | Status | `--ow-green`, `--ow-green-soft`, `--ow-amber`, `--ow-amber-soft`, `--ow-warning-text`, `--ow-red`, `--ow-red-soft`, `--ow-error-text` |
@@ -44,6 +44,8 @@ token for one screen or one component.
 - Cover normal, hover, focus-visible, selected, disabled, loading, empty,
   warning, and error states. Focus needs a visible ring, and status must also
   have text or an icon rather than relying on color alone.
+- Use `--ow-on-accent` for text on solid accent colors, `--ow-inverse` for text
+  on the primary gradient, and `--ow-text` for content on `--ow-code`.
 - Keep native controls and keyboard order intact. Inputs need labels or
   accessible names; async status remains available to assistive technology.
 - The menubar keeps a transparent outer window. Apply surface, border, and
