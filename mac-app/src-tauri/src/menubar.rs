@@ -1100,11 +1100,19 @@ fn build_popover_snapshot(
         .filter_map(|provider| provider.tokens_today)
         .reduce(u64::saturating_add);
 
-    let latest_sessions = providers
+    let mut latest_sessions = providers
         .iter()
-        .map(|provider| build_popover_session_lane(provider, &activities, &candidates))
+        .flat_map(|provider| build_active_popover_session_lanes(provider, &activities, &candidates))
         .collect::<Vec<_>>();
-    let active_session_count = count_active_snapshot_sessions(&latest_sessions);
+    latest_sessions.sort_by(|left, right| {
+        right
+            .updated_at_epoch
+            .unwrap_or(0)
+            .cmp(&left.updated_at_epoch.unwrap_or(0))
+            .then_with(|| left.provider_id.cmp(&right.provider_id))
+            .then_with(|| left.session_id.cmp(&right.session_id))
+    });
+    let active_session_count = latest_sessions.len();
 
     MenubarPopoverSnapshot {
         generated_at_epoch,
@@ -1118,67 +1126,50 @@ fn build_popover_snapshot(
     }
 }
 
-fn build_popover_session_lane(
+fn build_active_popover_session_lanes(
     provider: &MenubarPopoverUsageProvider,
     activities: &[TaskBoardSessionActivity],
     candidates: &[MenubarPopoverSessionCandidate],
-) -> MenubarPopoverSessionLane {
-    let latest_active_activity = activities
-        .iter()
-        .filter(|activity| {
-            activity.provider_id == provider.provider_id && activity_is_active(activity)
-        })
-        .max_by(|left, right| {
-            left.updated_at
-                .partial_cmp(&right.updated_at)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-    let latest_active_provider_candidate = candidates
+) -> Vec<MenubarPopoverSessionLane> {
+    let mut lanes = candidates
         .iter()
         .filter(|candidate| {
             candidate.provider_id == provider.provider_id
                 && candidate.source == MenubarPopoverSessionCandidateSource::Provider
                 && candidate.active
         })
-        .max_by_key(|candidate| candidate.sort_rank);
-    if let Some(candidate) = latest_active_provider_candidate {
-        if let Some(activity) = latest_active_activity {
-            if activity_rank_epoch(activity) > candidate_rank_epoch(candidate) {
-                let matching_candidate = matching_session_candidate(candidates, activity);
-                return build_activity_session_lane(provider, activity, matching_candidate);
-            }
-        }
-        let matching_activity = matching_session_activity(activities, candidate);
-        return build_candidate_session_lane(provider, candidate, matching_activity);
-    }
-
-    if let Some(activity) = latest_active_activity {
-        let matching_candidate = matching_session_candidate(candidates, activity);
-        return build_activity_session_lane(provider, activity, matching_candidate);
-    }
-
-    if let Some(candidate) = candidates
-        .iter()
-        .filter(|candidate| {
-            candidate.provider_id == provider.provider_id
-                && candidate.source == MenubarPopoverSessionCandidateSource::Provider
+        .map(|candidate| {
+            build_candidate_session_lane(
+                provider,
+                candidate,
+                matching_session_activity(activities, candidate),
+            )
         })
-        .max_by_key(|candidate| candidate.sort_rank)
-    {
-        return build_candidate_session_lane(provider, candidate, None);
-    }
+        .collect::<Vec<_>>();
 
-    MenubarPopoverSessionLane {
-        provider_id: provider.provider_id.clone(),
-        label: provider.label.clone(),
-        session_id: None,
-        workspace: None,
-        workspace_name: None,
-        title: None,
-        latest_preview: None,
-        status: None,
-        updated_at_epoch: None,
-    }
+    lanes.extend(
+        activities
+            .iter()
+            .filter(|activity| {
+                activity.provider_id == provider.provider_id
+                    && activity_is_active(activity)
+                    && !candidates.iter().any(|candidate| {
+                        candidate.provider_id == activity.provider_id
+                            && candidate.session_id == activity.session_id
+                            && candidate.source == MenubarPopoverSessionCandidateSource::Provider
+                            && candidate.active
+                    })
+            })
+            .map(|activity| {
+                build_activity_session_lane(
+                    provider,
+                    activity,
+                    matching_session_candidate(candidates, activity),
+                )
+            }),
+    );
+
+    lanes
 }
 
 fn matching_session_activity<'a>(
@@ -1206,14 +1197,6 @@ fn matching_session_candidate<'a>(
     candidates.iter().find(|candidate| {
         candidate.provider_id == activity.provider_id && candidate.session_id == activity.session_id
     })
-}
-
-fn candidate_rank_epoch(candidate: &MenubarPopoverSessionCandidate) -> u64 {
-    candidate.updated_at_epoch.unwrap_or(candidate.sort_rank)
-}
-
-fn activity_rank_epoch(activity: &TaskBoardSessionActivity) -> u64 {
-    activity.updated_at.max(0.0) as u64
 }
 
 fn build_activity_session_lane(
@@ -1273,20 +1256,10 @@ fn build_candidate_session_lane(
             .or_else(|| candidate.status.clone()),
         updated_at_epoch: candidate
             .updated_at_epoch
-            .or_else(|| activity.map(|row| row.updated_at.max(0.0) as u64)),
+            .into_iter()
+            .chain(activity.map(|row| row.updated_at.max(0.0) as u64))
+            .max(),
     }
-}
-
-fn count_active_snapshot_sessions(lanes: &[MenubarPopoverSessionLane]) -> usize {
-    lanes
-        .iter()
-        .filter(|lane| {
-            lane.status
-                .as_deref()
-                .map(|status| matches!(status, "Active" | "Running" | "Needs reply"))
-                .unwrap_or(false)
-        })
-        .count()
 }
 
 fn parse_provider_session_candidates(
@@ -1727,7 +1700,7 @@ mod tests {
     }
 
     #[test]
-    fn popover_snapshot_keeps_provider_lanes_and_sums_usage() {
+    fn popover_snapshot_sorts_active_sessions_by_recency_and_sums_usage() {
         let activities = vec![TaskBoardSessionActivity {
             provider_id: "codex".into(),
             workspace_id: "codex:/tmp/onlineworker-workspace".into(),
@@ -1759,20 +1732,70 @@ mod tests {
                 usage_provider("claude", "Claude", Some(36_300)),
             ],
             activities,
-            Vec::new(),
+            vec![
+                MenubarPopoverSessionCandidate {
+                    provider_id: "codex".into(),
+                    session_id: "codex-new".into(),
+                    workspace: Some("/tmp/codex-new".into()),
+                    title: Some("Newest Codex".into()),
+                    latest_preview: None,
+                    status: Some("Active".into()),
+                    updated_at_epoch: Some(80),
+                    sort_rank: 80,
+                    active: true,
+                    source: MenubarPopoverSessionCandidateSource::Provider,
+                },
+                MenubarPopoverSessionCandidate {
+                    provider_id: "claude".into(),
+                    session_id: "claude-new".into(),
+                    workspace: Some("/tmp/claude-new".into()),
+                    title: Some("Newest Claude".into()),
+                    latest_preview: None,
+                    status: Some("Active".into()),
+                    updated_at_epoch: Some(70),
+                    sort_rank: 70,
+                    active: true,
+                    source: MenubarPopoverSessionCandidateSource::Provider,
+                },
+                MenubarPopoverSessionCandidate {
+                    provider_id: "claude".into(),
+                    session_id: "claude-old".into(),
+                    workspace: Some("/tmp/claude-old".into()),
+                    title: Some("Older Claude".into()),
+                    latest_preview: None,
+                    status: Some("Active".into()),
+                    updated_at_epoch: Some(40),
+                    sort_rank: 40,
+                    active: true,
+                    source: MenubarPopoverSessionCandidateSource::Provider,
+                },
+            ],
         );
 
         assert_eq!(snapshot.usage.total_tokens_today, Some(128_400));
-        assert_eq!(snapshot.usage.active_session_count, 1);
+        assert_eq!(snapshot.usage.active_session_count, 4);
         assert_eq!(snapshot.usage.needs_attention_count, 1);
-        assert_eq!(snapshot.latest_sessions.len(), 2);
-        assert_eq!(snapshot.latest_sessions[0].provider_id, "codex");
-        assert_eq!(snapshot.latest_sessions[1].provider_id, "claude");
-        assert_eq!(snapshot.latest_sessions[1].session_id, None);
+        assert_eq!(snapshot.latest_sessions.len(), 4);
+        assert_eq!(
+            snapshot.latest_sessions[0].session_id.as_deref(),
+            Some("codex-new")
+        );
+        assert_eq!(
+            snapshot.latest_sessions[1].session_id.as_deref(),
+            Some("claude-new")
+        );
+        assert_eq!(
+            snapshot.latest_sessions[2].session_id.as_deref(),
+            Some("session-1")
+        );
+        assert_eq!(
+            snapshot.latest_sessions[3].session_id.as_deref(),
+            Some("claude-old")
+        );
     }
 
     #[test]
-    fn popover_snapshot_uses_latest_provider_sessions_when_idle() {
+    fn popover_snapshot_omits_inactive_provider_sessions() {
         let snapshot = build_popover_snapshot(
             1_720_000_000,
             vec![
@@ -1814,20 +1837,7 @@ mod tests {
         assert!(!snapshot.usage.providers[0].estimated);
         assert_eq!(snapshot.usage.providers[1].tokens_today, None);
         assert!(!snapshot.usage.providers[1].estimated);
-        assert_eq!(
-            snapshot.latest_sessions[0].session_id.as_deref(),
-            Some("codex-latest")
-        );
-        assert_eq!(
-            snapshot.latest_sessions[0].workspace_name.as_deref(),
-            Some("onlineworker-workspace")
-        );
-        assert_eq!(
-            snapshot.latest_sessions[0].latest_preview.as_deref(),
-            Some("实现 provider session fallback")
-        );
-        assert_eq!(snapshot.latest_sessions[0].status, None);
-        assert_eq!(snapshot.latest_sessions[1].session_id, None);
+        assert!(snapshot.latest_sessions.is_empty());
     }
 
     #[test]
@@ -1851,7 +1861,7 @@ mod tests {
         );
 
         assert_eq!(snapshot.usage.active_session_count, 0);
-        assert_eq!(snapshot.latest_sessions[0].session_id, None);
+        assert!(snapshot.latest_sessions.is_empty());
     }
 
     #[test]

@@ -204,9 +204,6 @@ export function MenubarPopover() {
 
   const providers = useMemo(() => snapshot?.usage.providers ?? [], [snapshot]);
   const lanes = useMemo(() => snapshot?.latestSessions ?? [], [snapshot]);
-  const laneByProviderId = useMemo(() => {
-    return new Map(lanes.map((lane) => [lane.providerId, lane]));
-  }, [lanes]);
 
   useEffect(() => {
     if (selectedTab === OVERVIEW_TAB_ID) {
@@ -324,7 +321,7 @@ export function MenubarPopover() {
           {selectedProvider ? (
             <ProviderRailPanel
               provider={selectedProvider}
-              lane={laneByProviderId.get(selectedProvider.providerId) ?? null}
+              lane={lanes.find((lane) => lane.providerId === selectedProvider.providerId) ?? null}
               iconUrl={providerIconUrls[selectedProvider.providerId]}
               busyKey={busyKey}
               nowMs={nowMs}
@@ -404,7 +401,7 @@ function OverviewRailPanel({
           {lanes.length > 0 ? (
             lanes.map((lane) => (
               <SessionRailRow
-                key={lane.providerId}
+                key={`${lane.providerId}:${lane.sessionId}`}
                 lane={lane}
                 iconUrl={providerIconUrls[lane.providerId]}
                 busyKey={busyKey}
