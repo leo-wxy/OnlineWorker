@@ -26,7 +26,7 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 17: Provider Session Core Isolation** - Provider-private parsing stays in provider/plugin code; shared surfaces consume generic owner-bridge facts. Full source gates and installed package/IPC/provider-facts checks passed; real Telegram visual UAT was explicitly waived and is not claimed as passed. (completed 2026-07-11)
 - [x] **Phase 18: Provider Session New Flow** - App and Telegram share `core/provider_session_new.py` for validation, real thread materialization, and first-message send while retaining separate transport shells. Packaged App materialization passed for Codex and Claude; real Telegram `/new` UAT was explicitly waived and is not claimed as passed. (completed 2026-07-11)
 - [x] **Phase 19: Attention Center And Session Interrupt/Resume** - Added the focused Task Board attention center and provider-owned Session interrupt/resume/recovery controls. Source and installed core UAT passed; narrow-width installed visual UAT was explicitly waived without claiming a pass. (completed 2026-07-11)
-- [ ] **Phase 21: Provider Child-Session Visibility** - Unify provider-owned child-session classification before EventBus publication so Desktop, Telegram, Task Board, notifications, and persisted runtime state expose the same top-level session set.
+- [x] **Phase 21: Provider Child-Session Visibility** - Provider-owned visibility now blocks child/internal sessions before EventBus and Topic creation, provider-native titles are shared across Desktop and Telegram, and the installed `v1.8.4` runtime passed real child-suppression verification. The remaining live Telegram visual comparison was explicitly waived at closeout and is not claimed as passed. (completed 2026-08-15)
 - [ ] **Phase 22: Dark Mode Support** - Add consistent dark-theme support across the macOS app while preserving existing light-mode behavior.
 
 ## Phase Details
@@ -808,7 +808,7 @@ Plans:
 **Requirements**: TBD
 **Depends on:** Phase 16, Phase 17
 **Scope Fence:** Provider plugins own provider-private child-session classification. Shared ingress, EventBus, owner bridge, Desktop, Telegram, and notification consumers receive only canonical user-visible sessions. This phase must not add provider-private source parsing to shared UI/bot code, delete provider transcript history, or hide normal parent sessions.
-**Plans:** 2 plans
+**Plans:** 3/3 plans complete
 
 Plans:
 
@@ -833,6 +833,10 @@ Plans:
   - [x] Preserve new-file discovery, append delivery, child filtering, and EventBus publication.
   - [x] Package, install, and verify FD usage plus Telegram polling recovery.
 
+Latest verification:
+
+- Phase 21 closed on 2026-08-15 with canonical `21-VERIFICATION.md` status `passed`. Focused Codex ingress, Hook, EventBus, workspace, logging, and version checks passed; the installed `v1.8.4` runtime suppressed a real child session before publication, retained zero classified child/internal state or routes, and ran with the provider IPC chain healthy. The final standalone Telegram visual comparison was explicitly waived by the user and is not represented as passed.
+
 Success Criteria (what must be TRUE):
 
   1. A single provider capability decides whether a session is user-visible; all provider-specific source parsing stays inside the provider plugin.
@@ -847,9 +851,10 @@ Planning status:
 - Phase 21 was added on 2026-08-04 after a real Codex child session appeared as a top-level Desktop session. Investigation confirmed provider storage already filtered the child source, while external rollout ingress discarded that source classification and published the rollout as an ordinary session, allowing shared state and downstream surfaces to diverge.
 - The architecture decision is explicit: Desktop and Telegram must not maintain separate child-session filters. They consume one provider-owned visibility result at the common session/event boundary.
 - Phase 21 inherits the session-related follow-up from `ea6ba8f`: keep Desktop external rollout ingress and shared EventBus delivery, but repair its source-metadata loss, top-level session projection, stale-state reconciliation, and multi-surface visibility parity. Login-state AI summary transport remains an upstream capability and is not reimplemented in this phase.
-- `21-01` reached source-verified and installed-Desktop-verified status on 2026-08-07. The red regression reproduced two provider-event publications for one child rollout; after the fix it passed, the focused ingress/storage/Telegram set passed `42` tests, and the broader Codex/event/owner-bridge set passed `167` tests. The packaged `1.8.1` app was installed and its Session Browser showed only the two parent sessions in the affected workspace. Real Telegram workspace visual UAT remains unverified, so Phase 21 is not closed.
+- `21-01` reached source-verified and installed-Desktop-verified status on 2026-08-07. The red regression reproduced two provider-event publications for one child rollout; after the fix it passed, the focused ingress/storage/Telegram set passed `42` tests, and the broader Codex/event/owner-bridge set passed `167` tests. The packaged `1.8.1` app was installed and its Session Browser showed only the two parent sessions in the affected workspace. At this checkpoint the real Telegram workspace visual UAT was still unverified, so Phase 21 remained open until the later closeout recorded below.
 - `21-02` reached source-verified and packaged-runtime-verified status on 2026-08-08. Investigation confirmed Codex app-server exposes the optional user-facing title as `Thread.name`, while `Thread.preview` is normally the first user message; the offline equivalent is `session_index.jsonl.thread_name`. OnlineWorker previously bypassed both title sources and truncated path-prefixed preview text. The repair preserves title and preview separately in provider facts, refreshes cached workspace labels from app-server names, and makes Telegram list/topic presentation prefer the canonical title. Focused red/green coverage, a `200 passed` broader regression, and a real local two-session replay returned the expected provider-native titles. `bash verify-packaged-fast.sh` built and installed `OnlineWorker_1.8.1_aarch64.dmg`, then relaunched the installed App and bot successfully. Live Telegram visual UAT remains unverified.
 - `21-03` reached source-verified and packaged-runtime-verified status on 2026-08-10. The old kqueue tree watcher opened every historical rollout and directory, filling `255` of the process's `256` FDs with `531` local rollouts and stopping Telegram, SQLite, and socket accept. The repair uses one recursive FSEvents watcher and transient rollout reads. The red FD regression moved from `85` added FDs to constant usage, the focused ingress suite passed `6` tests, and the broader Codex/EventBus/Telegram set passed `276` tests. The installed `1.8.2` main bot held `29` FDs, no historical rollout handles, no new resource errors, and repeated Telegram `getUpdates 200 OK` responses.
+- Phase 21 closed on 2026-08-15 after the official Hook/notify bypass, fail-open unbound Topic creation, and login-backed helper re-entry paths were removed at their shared boundaries. Real installed-runtime evidence showed one child lifecycle producing no EventBus/session/route output; classified child/internal state and routes reconciled to zero; abnormal Topics and stale local projections were removed without deleting provider history; logging contained no unredacted Telegram Bot URLs; and `v1.8.4` was built, installed, and released. The remaining standalone live Telegram visual comparison was explicitly waived and is not claimed as passed.
 
 ### Phase 22: Dark Mode Support
 

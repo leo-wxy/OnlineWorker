@@ -231,9 +231,10 @@ Feedback loop and verification:
 - Installed bot, app, and usage-sidecar hashes matched the mounted DMG, both staged private plugin manifests were present, and the main app, main bot, and Codex app-server remained running.
 - Installed-App UI verification confirmed the Codex card displays `需操作`, `查看引导` opens the reusable dialog, all expected instructions/actions are visible, and dismissal returns to Dashboard.
 
-Remaining validation:
+Validation status at this checkpoint:
 
 - End-to-end trust completion still requires the user to accept the current Hook definition in Codex and then trigger one real lifecycle event.
+- This checkpoint was superseded on 2026-08-15 by the later real installed lifecycle smoke and canonical `21-VERIFICATION.md` closeout.
 
 ## Implementation Record — 2026-08-15 (Codex Hook Topic Pollution Repair)
 
