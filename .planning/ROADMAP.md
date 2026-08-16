@@ -858,6 +858,7 @@ Planning status:
 **Decision source:** Phase context D-01–D-14
 **Depends on:** Phase 21
 **Plans:** 6 plans
+**Status:** Source-complete; installed-app visual and native-window verification pending explicit permission.
 
 Success Criteria (what must be TRUE):
 
@@ -870,15 +871,15 @@ Success Criteria (what must be TRUE):
 Plans:
 **Wave 1**
 
-- [ ] 22-01-PLAN.md — 建立主题运行时、首帧与双窗口同步
-- [ ] 22-02-PLAN.md — 建立语义 token 与正式主题规范
+- [x] 22-01-PLAN.md — 建立主题运行时、首帧与双窗口同步（source verified）
+- [x] 22-02-PLAN.md — 建立语义 token 与正式主题规范（source verified）
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 22-03-PLAN.md — 统一 App shell 与 menubar 主题体验
+- [x] 22-03-PLAN.md — 统一 App shell 与 menubar 主题体验（source verified）
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 22-04-PLAN.md — 迁移 Dashboard 与 Task Board 主题表面
-- [ ] 22-05-PLAN.md — 迁移 Sessions、Usage 与 Commands 主题表面
-- [ ] 22-06-PLAN.md — 迁移 Setup、Settings、表单与弹窗主题表面
+- [x] 22-04-PLAN.md — 迁移 Dashboard 与 Task Board 主题表面（source verified）
+- [x] 22-05-PLAN.md — 迁移 Sessions、Usage 与 Commands 主题表面（source verified）
+- [x] 22-06-PLAN.md — 迁移 Setup、Settings、表单与弹窗主题表面（source verified）

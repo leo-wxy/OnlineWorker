@@ -20,4 +20,4 @@ Implemented and source verified.
 
 ## Remaining Gate
 
-Native window appearance still awaits the explicitly confirmed `core:window:allow-set-theme` capability from Plan 22-01. Installed-app visual verification has not been run.
+The explicitly confirmed `core:window:allow-set-theme` capability landed in Plan 22-01. Installed-app visual verification has not been run.

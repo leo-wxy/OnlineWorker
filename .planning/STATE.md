@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: general-ai-capability-and-session-operations
 milestone_name: General AI Capability and Session Operations
 current_phase: 22 — Dark Mode Support
-current_plan: Wave 1 ready — 22-01 and 22-02
-status: Ready to execute
-stopped_at: Phase 22 planned — Wave 1 ready
-last_updated: "2026-08-15T16:10:34.521Z"
+current_plan: Installed-app visual verification pending
+status: Source verified; installed-app visual verification pending
+stopped_at: Phase 22 source complete — installed-app visual verification pending
+last_updated: "2026-08-16T02:28:16Z"
 progress:
   total_phases: 17
   completed_phases: 11
-  total_plans: 31
-  completed_plans: 19
-  percent: 61
+  total_plans: 37
+  completed_plans: 25
+  percent: 68
 current_phase_name: Dark Mode Support
 ---
 
@@ -21,8 +21,8 @@ current_phase_name: Dark Mode Support
 **Updated:** 2026-08-16
 **Current milestone:** General AI Capability and Session Operations
 **Current phase:** 22 — Dark Mode Support
-**Status:** Ready to execute
-**Current plan:** Wave 1 ready — `22-01` and `22-02`
+**Status:** Source verified; installed-app visual verification pending
+**Current plan:** Installed-app visual verification pending explicit permission
 **Last archived milestone:** v1.2.1
 
 ## Current Status
@@ -48,6 +48,7 @@ current_phase_name: Dark Mode Support
 - Phase 18 is complete. App and Telegram entry points share `core/provider_session_new.py` for provider validation, real-thread materialization, and first-message send while keeping App pending and Telegram topic-binding shells separate. Packaged App smoke materialized real Codex and Claude sessions with their first messages. Real Telegram `/new` UAT was explicitly waived and is not claimed as passed.
 - Phase 19 is complete. Source and installed desktop/live-provider behavior are verified. The existing Task Board uses grouped attention/running/recent-ended rows with a selected detail pane and recent conversation excerpts; provider-owned interrupt/recovery and same-Session Continue focus passed installed UAT. A recovery-created Claude process used the exact same Session id through `--resume` without replay. Concurrent Session list requests are coalesced and blocking owner-bridge I/O is isolated from Tauri async workers, preventing the observed request storm, log-pipe stall, owner-bridge refusal, and white screen. Claude sessions without source archive support use a reversible local archive overlay. The installed narrow-width visual check was explicitly waived at closeout and is not claimed as passed.
 - Phase 20 is complete and installed-app verified. Settings > Maintenance provides bounded diagnostics, compact independent results, summary copy, privacy-safe local ZIP export, and Finder reveal. Installed UAT fixed foreground save behavior, localized cancellation, macOS metadata leakage, and real environment-value leakage before final closure. The final ZIP whitelist and installed `.env` zero-match scan passed.
+- Phase 22 is source verified through 22-06. System/Light/Dark persistence, first-frame bootstrap, shared main/menubar synchronization, semantic tokens, all existing UI surfaces, and the stable theme development guide are implemented. Frontend regression passed 183 tests, TypeScript and Vite production build passed, and installed-app visual/native-window verification remains pending explicit permission.
 - Phase 17's intermediate preview/cache/hydration fixes and their earlier installed evidence are consolidated in `17-01-SUMMARY.md`; `17-VERIFICATION.md` is the canonical closure result.
 
 ## Archived Milestone
@@ -76,14 +77,14 @@ current_phase_name: Dark Mode Support
 | 19. Attention Center And Session Interrupt/Resume | Completed; source and installed core UAT passed | None; installed narrow-width visual check was explicitly waived and remains unclaimed |
 | 20. One-Click Diagnostics And Support Bundle | Completed and installed-app verified | None |
 | 21. Provider-Owned Session Visibility | Source and packaged-runtime verified through `21-03`; live Telegram visual UAT remains unverified | Close remaining UAT when desired |
-| 22. Dark Mode Support | Planned; 6 plans across 3 waves | Execute `22-01` and `22-02` in parallel after the capability confirmation gate |
+| 22. Dark Mode Support | Source verified through `22-06` | Await explicit permission for installed-app visual and native-window verification |
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 **Core value:** Developers can reliably control local AI coding CLI workflows from an installed Mac app while receiving timely remote notifications and final results through supported notification channels.
-**Current focus:** Phase 22 — reusable System/Light/Dark themes for the main App and menubar
+**Current focus:** Phase 22 — installed-app visual and native-window verification
 
 ## Key Preserved Decisions
 
@@ -210,9 +211,10 @@ See: `.planning/PROJECT.md` (updated 2026-07-11)
 - Phase 21 `21-03` source and packaged-runtime verification completed on 2026-08-10: Codex Desktop ingress no longer holds one kqueue FD per historical rollout. One recursive FSEvents watcher plus transient reads reduced the installed main bot from `255/256` FDs to `29` with `531` tracked rollouts. Focused ingress tests passed `6`, broader Codex/EventBus/Telegram regressions passed `276`, packaged `1.8.2` verification passed, no new resource errors appeared, and Telegram polling repeatedly returned `200 OK`.
 - Phase 22 added: Dark Mode Support.
 - Phase 22 planned on 2026-08-16: 6 plans across 3 waves cover theme runtime/first frame, reusable tokens and `docs/UI-THEME.md`, App shell/menubar parity, and full existing UI surface migration. Plan structure passed for all 6 plans; CONTEXT decision coverage and post-planning gap analysis both passed 14/14.
+- Phase 22 source verification completed on 2026-08-16: all 6 plans are implemented, frontend regression passed `183` tests, TypeScript and Vite build passed, and independent reviews found no remaining P0/P1 issue. Installed-app visual/native-window verification was not run and remains unclaimed pending explicit permission.
 
 ## Session Continuity
 
-Last session: 2026-08-15T16:10:34.521Z
-Stopped at: Phase 22 planned — Wave 1 ready
-Resume file: .planning/phases/22-dark-mode-support/22-01-PLAN.md
+Last session: 2026-08-16T02:28:16Z
+Stopped at: Phase 22 source complete — installed-app visual verification pending
+Resume file: .planning/phases/22-dark-mode-support/22-VALIDATION.md

@@ -1,9 +1,9 @@
 ---
 phase: 22
 slug: dark-mode-support
-status: ready
+status: source-complete
 nyquist_compliant: true
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-08-15
 ---
 
@@ -38,19 +38,19 @@ created: 2026-08-15
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 22-01-01 | 01 | 1 | D-01, D-02, D-10, D-11 | — | 非法/缺失偏好安全回退到 System | unit/source contract | `cd mac-app && node --test tests/theme.test.mjs` | ❌ W0 | ⬜ pending |
-| 22-01-02 | 01 | 1 | D-10 | — | 仅在用户确认后增加最小 window theme 权限 | confirmation checkpoint | `N/A — manual approval gate` | ✅ | ⬜ pending |
-| 22-01-03 | 01 | 1 | D-01, D-02, D-10, D-11 | — | 主题运行时失败不阻塞业务 | unit/source contract | `cd mac-app && node --test tests/theme.test.mjs tests/appShell.test.mjs tests/bundleSplitting.test.mjs && ./node_modules/.bin/tsc --noEmit` | ❌ W0 / ✅ | ⬜ pending |
-| 22-02-01 | 02 | 1 | D-07, D-12, D-13, D-14 | — | 文档与 CSS token 由同一可运行契约约束 | token/docs contract | `cd mac-app && node --test tests/themeContract.test.mjs` | ❌ W0 | ⬜ pending |
-| 22-02-02 | 02 | 1 | D-05, D-06, D-07, D-12, D-13 | — | N/A | token/docs contract + typecheck | `cd mac-app && node --test tests/themeContract.test.mjs && ./node_modules/.bin/tsc --noEmit` | ❌ W0 / ✅ | ⬜ pending |
-| 22-02-03 | 02 | 1 | D-13, D-14 | — | 规范只从稳定文档入口引用，不复制 token | docs contract | `cd mac-app && node --test tests/themeContract.test.mjs` | ❌ W0 | ⬜ pending |
-| 22-03-01 | 03 | 2 | D-03, D-04, D-06, D-08, D-10 | — | 透明 menubar 外壳不接受第二套偏好 writer | App/menubar contract | `cd mac-app && node --test tests/appShell.test.mjs tests/menubarPopover.test.mjs tests/theme.test.mjs` | ✅ / ❌ W0 | ⬜ pending |
-| 22-03-02 | 03 | 2 | D-01, D-03, D-04, D-06, D-09, D-12, D-13 | — | N/A | App shell contract + typecheck | `cd mac-app && node --test tests/appShell.test.mjs tests/theme.test.mjs && ./node_modules/.bin/tsc --noEmit` | ✅ / ❌ W0 | ⬜ pending |
-| 22-03-03 | 03 | 2 | D-05, D-06, D-08, D-09, D-10, D-13 | — | menubar 只消费共享主题，外壳保持透明 | menubar contract + typecheck | `cd mac-app && node --test tests/menubarPopover.test.mjs tests/theme.test.mjs && ./node_modules/.bin/tsc --noEmit` | ✅ / ❌ W0 | ⬜ pending |
-| 22-04-01..03 | 04 | 3 | D-05, D-06, D-07, D-09, D-13 | — | N/A | source contract + typecheck | `cd mac-app && node --test tests/taskBoard.test.mjs tests/dashboardProviderStatus.test.mjs && ./node_modules/.bin/tsc --noEmit` | ✅ | ⬜ pending |
-| 22-05-01..03 | 05 | 3 | D-05, D-06, D-07, D-09, D-13 | — | N/A | source contract + typecheck | `cd mac-app && node --test tests/usageBrowser.test.mjs tests/commandRegistryView.test.mjs tests/sessionArchiveContextMenu.test.mjs tests/sessionBrowserState.test.mjs tests/sessionComposerAttachments.test.mjs tests/sessionMarkdown.test.mjs && ./node_modules/.bin/tsc --noEmit` | ✅ | ⬜ pending |
-| 22-06-01..02 | 06 | 3 | D-05, D-06, D-07, D-09, D-12, D-13, D-14 | — | N/A | source contract + typecheck | `cd mac-app && node --test tests/configEditorCopy.test.mjs tests/settingsProviders.test.mjs tests/supportBundleMaintenance.test.mjs tests/themeContract.test.mjs && ./node_modules/.bin/tsc --noEmit` | ✅ / ❌ W0 | ⬜ pending |
-| 22-06-03 | 06 | 3 | D-06, D-07, D-09, D-12, D-13, D-14 | — | 未解释主题硬编码为零，安装态不越权执行 | full regression | `cd mac-app && node --test tests/*.test.mjs && ./node_modules/.bin/tsc --noEmit && pnpm build` | ✅ | ⬜ pending |
+| 22-01-01 | 01 | 1 | D-01, D-02, D-10, D-11 | — | 非法/缺失偏好安全回退到 System | unit/source contract | `cd mac-app && node --test tests/theme.test.mjs` | ✅ | ✅ green |
+| 22-01-02 | 01 | 1 | D-10 | — | 仅在用户确认后增加最小 window theme 权限 | confirmation checkpoint | `N/A — manual approval gate` | ✅ | ✅ green |
+| 22-01-03 | 01 | 1 | D-01, D-02, D-10, D-11 | — | 主题运行时失败不阻塞业务 | unit/source contract | `cd mac-app && node --test tests/theme.test.mjs tests/appShell.test.mjs tests/bundleSplitting.test.mjs && ./node_modules/.bin/tsc --noEmit` | ✅ | ✅ green |
+| 22-02-01 | 02 | 1 | D-07, D-12, D-13, D-14 | — | 文档与 CSS token 由同一可运行契约约束 | token/docs contract | `cd mac-app && node --test tests/themeContract.test.mjs` | ✅ | ✅ green |
+| 22-02-02 | 02 | 1 | D-05, D-06, D-07, D-12, D-13 | — | N/A | token/docs contract + typecheck | `cd mac-app && node --test tests/themeContract.test.mjs && ./node_modules/.bin/tsc --noEmit` | ✅ | ✅ green |
+| 22-02-03 | 02 | 1 | D-13, D-14 | — | 规范只从稳定文档入口引用，不复制 token | docs contract | `cd mac-app && node --test tests/themeContract.test.mjs` | ✅ | ✅ green |
+| 22-03-01 | 03 | 2 | D-03, D-04, D-06, D-08, D-10 | — | 透明 menubar 外壳不接受第二套偏好 writer | App/menubar contract | `cd mac-app && node --test tests/appShell.test.mjs tests/menubarPopover.test.mjs tests/theme.test.mjs` | ✅ | ✅ green |
+| 22-03-02 | 03 | 2 | D-01, D-03, D-04, D-06, D-09, D-12, D-13 | — | N/A | App shell contract + typecheck | `cd mac-app && node --test tests/appShell.test.mjs tests/theme.test.mjs && ./node_modules/.bin/tsc --noEmit` | ✅ | ✅ green |
+| 22-03-03 | 03 | 2 | D-05, D-06, D-08, D-09, D-10, D-13 | — | menubar 只消费共享主题，外壳保持透明 | menubar contract + typecheck | `cd mac-app && node --test tests/menubarPopover.test.mjs tests/theme.test.mjs && ./node_modules/.bin/tsc --noEmit` | ✅ | ✅ green |
+| 22-04-01..03 | 04 | 3 | D-05, D-06, D-07, D-09, D-13 | — | N/A | source contract + typecheck | `cd mac-app && node --test tests/taskBoard.test.mjs tests/dashboardProviderStatus.test.mjs && ./node_modules/.bin/tsc --noEmit` | ✅ | ✅ green |
+| 22-05-01..03 | 05 | 3 | D-05, D-06, D-07, D-09, D-13 | — | N/A | source contract + typecheck | `cd mac-app && node --test tests/usageBrowser.test.mjs tests/commandRegistryView.test.mjs tests/sessionArchiveContextMenu.test.mjs tests/sessionBrowserState.test.mjs tests/sessionComposerAttachments.test.mjs tests/sessionMarkdown.test.mjs && ./node_modules/.bin/tsc --noEmit` | ✅ | ✅ green |
+| 22-06-01..02 | 06 | 3 | D-05, D-06, D-07, D-09, D-12, D-13, D-14 | — | N/A | source contract + typecheck | `cd mac-app && node --test tests/configEditorCopy.test.mjs tests/settingsProviders.test.mjs tests/supportBundleMaintenance.test.mjs tests/themeContract.test.mjs && ./node_modules/.bin/tsc --noEmit` | ✅ | ✅ green |
+| 22-06-03 | 06 | 3 | D-06, D-07, D-09, D-12, D-13, D-14 | — | 未解释主题硬编码为零，安装态不越权执行 | full regression | `cd mac-app && node --test tests/*.test.mjs && ./node_modules/.bin/tsc --noEmit && pnpm build` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -60,10 +60,10 @@ created: 2026-08-15
 
 ## Wave 0 Requirements
 
-- [ ] `mac-app/tests/theme.test.mjs` — 偏好校验、System 解析、首帧 bootstrap、Tauri/window 与跨窗口事件同步契约。
-- [ ] `mac-app/tests/themeContract.test.mjs` — light/dark token、旧 alias、`docs/UI-THEME.md` 和禁止硬编码规则的契约。
-- [ ] 扩展 `mac-app/tests/appShell.test.mjs` — 选择器位置、侧栏折叠隐藏和 React 首帧前初始化。
-- [ ] 扩展 `mac-app/tests/menubarPopover.test.mjs` — 透明外壳、既有信息结构和共享主题同步。
+- [x] `mac-app/tests/theme.test.mjs` — 偏好校验、System 解析、首帧 bootstrap、Tauri/window 与跨窗口事件同步契约。
+- [x] `mac-app/tests/themeContract.test.mjs` — light/dark token、旧 alias、`docs/UI-THEME.md` 和禁止硬编码规则的契约。
+- [x] 扩展 `mac-app/tests/appShell.test.mjs` — 选择器位置、侧栏折叠隐藏和 React 首帧前初始化。
+- [x] 扩展 `mac-app/tests/menubarPopover.test.mjs` — 透明外壳、既有信息结构和共享主题同步。
 
 现有 Node/TypeScript/Vite 基础设施足够，不安装测试框架或主题依赖。
 
@@ -84,11 +84,11 @@ created: 2026-08-15
 
 ## Validation Sign-Off
 
-- [ ] 所有最终任务都有 `<automated>` verify 或 Wave 0 依赖
-- [ ] Sampling continuity：不存在连续 3 个任务没有自动验证
-- [ ] Wave 0 覆盖所有 MISSING 测试文件与现有契约扩展
-- [ ] 不使用 watch-mode flags
-- [ ] quick feedback latency 实测低于 60 秒
+- [x] 所有最终任务都有 `<automated>` verify 或 Wave 0 依赖
+- [x] Sampling continuity：不存在连续 3 个任务没有自动验证
+- [x] Wave 0 覆盖所有 MISSING 测试文件与现有契约扩展
+- [x] 不使用 watch-mode flags
+- [x] quick feedback latency 实测低于 60 秒
 - [x] `nyquist_compliant: true` 已在 PLAN.md 定稿后设置
 
-**Approval:** pending
+**Approval:** source checks passed; installed-app manual verification pending explicit permission
