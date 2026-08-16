@@ -52,7 +52,15 @@ attachments, and archive rows through provider-backed actions.
 The Usage page reads consumption through provider metadata and usage hooks. It
 supports provider switching, a default 7-day window, date filtering, summary
 cards, and daily charts without hard-coding provider-specific parsing into the
-React page.
+React page. Repeated refreshes reuse unchanged source data instead of parsing
+the full history again, while the current result stays visible during the
+background refresh.
+
+### Appearance
+
+Choose System, Light, or Dark from the app sidebar. System follows the macOS
+appearance, and the main window and menubar popover share the same preference
+so they stay in sync.
 
 ### AI Services and Scenarios
 
@@ -84,6 +92,8 @@ the main control surface.
 ## Core Capabilities
 
 - macOS desktop workspace for running and supervising local AI coding CLIs.
+- System, Light, and Dark theme preferences synchronized between the main
+  window and menubar popover.
 - Installed app first; Telegram is a lightweight remote entry point for task
   submission, context, approvals, status, and final replies.
 - Builtin providers in this repository: `codex` and `claude`; external provider

@@ -44,7 +44,11 @@ Sessions 是主要工作面。你可以浏览 provider 会话，按 Active / Arc
   <img src="./docs/screenshots/usage.png" alt="OnlineWorker 用量页" width="88%" />
 </p>
 
-Usage 页面通过 provider metadata 和 usage hooks 读取用量。它支持 provider 切换、默认近 7 天窗口、日期筛选、汇总卡和每日图表，同时避免把 provider-specific 解析逻辑硬编码到 React 页面里。
+Usage 页面通过 provider metadata 和 usage hooks 读取用量。它支持 provider 切换、默认近 7 天窗口、日期筛选、汇总卡和每日图表，同时避免把 provider-specific 解析逻辑硬编码到 React 页面里。重复刷新会复用未变化的数据源，避免再次解析完整历史记录；后台刷新期间保留当前结果，新的数据到达后再更新。
+
+### 外观
+
+可在 App 侧栏选择系统、浅色或深色主题。系统模式跟随 macOS 外观；主窗口与 menubar popover 共享同一主题偏好并保持同步。
 
 ### AI 服务与场景
 
@@ -69,6 +73,7 @@ Setup 处理首次运行时最实际的检查：必要 CLI 是否可见、Telegr
 ## 核心能力
 
 - 一个运行和监管本地 AI 编码 CLI 的 macOS 桌面工作区。
+- 支持系统、浅色和深色主题，主窗口与 menubar popover 使用共享偏好并保持同步。
 - 核心形态是已安装的 App；Telegram 是轻量远程入口，负责任务提交、补充上下文、审批、状态和最终回复。
 - 当前仓库内置 provider 为 `codex` 和 `claude`；外部 provider 可通过公开插件契约挂载。
 - 当前仓库内置通知渠道为 `telegram`；外部通知渠道可通过通知插件契约挂载。
