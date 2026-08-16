@@ -259,8 +259,8 @@ export default function App() {
         />
 
         <div className={`ow-brand-card mb-5 flex min-h-16 items-center rounded-[22px] p-3 ${sidebarCollapsed ? "justify-center" : "gap-3"}`}>
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 via-blue-500 to-sky-500 shadow-[0_12px_26px_rgba(37,99,235,0.22)]">
-            <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl [background:var(--ow-primary-surface)] [box-shadow:var(--ow-shadow-md)]">
+            <svg className="h-5 w-5 text-[var(--ow-inverse)]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
           </div>
           <div
             aria-hidden={sidebarCollapsed}

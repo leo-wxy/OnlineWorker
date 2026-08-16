@@ -135,7 +135,7 @@ function CopyCommandButton({ text }: { text: string }) {
     <button
       type="button"
       onClick={() => void copy()}
-      className="h-8 rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-2.5 text-xs font-bold text-[var(--ow-text)] transition hover:border-[var(--ow-blue)] hover:text-[var(--ow-blue)]"
+      className="h-8 rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-2.5 text-xs font-bold text-[var(--ow-text)] transition-colors hover:border-[var(--ow-blue)] hover:text-[var(--ow-blue)]"
       title={copied ? t.common.copied : t.common.copy}
     >
       {copied ? t.common.copied : t.common.copy}
@@ -491,7 +491,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
                     type="button"
                     disabled={Boolean(validatingProviderId)}
                     onClick={() => void validateProviderConfig(setting.id)}
-                    className="h-8 rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-2.5 text-xs font-bold text-[var(--ow-text)] transition hover:border-[var(--ow-blue)] hover:text-[var(--ow-blue)] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="h-8 rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-2.5 text-xs font-bold text-[var(--ow-text)] transition-colors hover:border-[var(--ow-blue)] hover:text-[var(--ow-blue)] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {validating ? texts.validatingConfig : texts.validateConfig}
                   </button>
@@ -607,7 +607,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
                                 launchCommands: event.currentTarget.value,
                                 bin: event.currentTarget.value.split("\n").map((line) => line.trim()).find(Boolean) ?? draft.bin,
                               })}
-                              className="min-h-[84px] resize-y rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-3 py-2 text-sm font-mono leading-5 text-[var(--ow-text)] outline-none transition focus:border-[var(--ow-blue)] focus:ring-2 focus:ring-[var(--ow-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ow-panel-soft)]"
+                              className="min-h-[84px] resize-y rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-3 py-2 text-sm font-mono leading-5 text-[var(--ow-text)] outline-none transition-colors focus:border-[var(--ow-blue)] focus:ring-2 focus:ring-[var(--ow-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ow-panel-soft)]"
                               placeholder={texts.launchMethodCommandsPlaceholder}
                             />
                           ) : (
@@ -615,7 +615,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
                               value={draft.bin}
                               disabled={cliBusy}
                               onChange={(event) => updateCliDraft(setting.id, { bin: event.currentTarget.value })}
-                              className="h-9 rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-3 text-sm font-mono text-[var(--ow-text)] outline-none transition focus:border-[var(--ow-blue)] focus:ring-2 focus:ring-[var(--ow-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ow-panel-soft)]"
+                              className="h-9 rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-3 text-sm font-mono text-[var(--ow-text)] outline-none transition-colors focus:border-[var(--ow-blue)] focus:ring-2 focus:ring-[var(--ow-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ow-panel-soft)]"
                             />
                           )}
                         </label>
@@ -633,7 +633,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
                                 value={draft.authToken}
                                 disabled={cliBusy}
                                 onChange={(event) => updateCliDraft(setting.id, { authToken: event.currentTarget.value })}
-                                className="h-9 rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-3 text-sm font-mono text-[var(--ow-text)] outline-none transition focus:border-[var(--ow-blue)] focus:ring-2 focus:ring-[var(--ow-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ow-panel-soft)]"
+                                className="h-9 rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-3 text-sm font-mono text-[var(--ow-text)] outline-none transition-colors focus:border-[var(--ow-blue)] focus:ring-2 focus:ring-[var(--ow-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ow-panel-soft)]"
                                 placeholder={texts.externalCliAuthTokenPlaceholder}
                                 autoComplete="off"
                                 spellCheck={false}
@@ -646,7 +646,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
                                 value={draft.baseUrl}
                                 disabled={cliBusy}
                                 onChange={(event) => updateCliDraft(setting.id, { baseUrl: event.currentTarget.value })}
-                                className="h-9 rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-3 text-sm font-mono text-[var(--ow-text)] outline-none transition focus:border-[var(--ow-blue)] focus:ring-2 focus:ring-[var(--ow-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ow-panel-soft)]"
+                                className="h-9 rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-3 text-sm font-mono text-[var(--ow-text)] outline-none transition-colors focus:border-[var(--ow-blue)] focus:ring-2 focus:ring-[var(--ow-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ow-panel-soft)]"
                                 placeholder={texts.externalCliBaseUrlPlaceholder}
                                 autoComplete="off"
                                 spellCheck={false}
@@ -659,7 +659,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
                                 value={draft.model}
                                 disabled={cliBusy}
                                 onChange={(event) => updateCliDraft(setting.id, { model: event.currentTarget.value })}
-                                className="h-9 rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-3 text-sm font-mono text-[var(--ow-text)] outline-none transition focus:border-[var(--ow-blue)] focus:ring-2 focus:ring-[var(--ow-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ow-panel-soft)]"
+                                className="h-9 rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] px-3 text-sm font-mono text-[var(--ow-text)] outline-none transition-colors focus:border-[var(--ow-blue)] focus:ring-2 focus:ring-[var(--ow-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ow-panel-soft)]"
                                 placeholder={texts.externalCliModelPlaceholder}
                                 autoComplete="off"
                                 spellCheck={false}
@@ -683,7 +683,7 @@ export function ProviderSettingsPanel({ mode }: Props) {
                           type="button"
                           disabled={cliBusy || !canSaveCliConfig}
                           onClick={() => void saveProviderCliConfig(provider)}
-                          className="h-9 rounded-lg bg-[var(--ow-code)] px-3 text-sm font-bold text-[var(--ow-text)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-[var(--ow-disabled-surface)] disabled:brightness-100"
+                          className="h-9 rounded-lg bg-[var(--ow-code)] px-3 text-sm font-bold text-[var(--ow-text)] transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:bg-[var(--ow-disabled-surface)] disabled:brightness-100"
                         >
                           {texts.externalCliSave}
                         </button>

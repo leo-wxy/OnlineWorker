@@ -286,7 +286,7 @@ function ProviderStatusCard({
                         <button
                           type="button"
                           onClick={() => onOpenActionGuide(actionGuideId)}
-                          className="shrink-0 rounded-lg bg-[var(--ow-panel)] px-2.5 py-1.5 text-xs font-bold text-[var(--ow-warning-text)] ring-1 ring-inset ring-[var(--ow-amber)] transition hover:bg-[var(--ow-hover)]"
+                          className="shrink-0 rounded-lg bg-[var(--ow-panel)] px-2.5 py-1.5 text-xs font-bold text-[var(--ow-warning-text)] ring-1 ring-inset ring-[var(--ow-amber)] transition-colors hover:bg-[var(--ow-hover)]"
                         >
                           {texts.dashboard.viewGuide}
                         </button>

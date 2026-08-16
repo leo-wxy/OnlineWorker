@@ -302,7 +302,7 @@ export function SetupWizard({ onComplete }: Props) {
                       value={editToken}
                       onChange={(e) => setEditToken(e.target.value)}
                       placeholder={setup.tokenPlaceholder} 
-                      className="w-full rounded-xl border border-[var(--ow-line)] bg-[var(--ow-panel-soft)] shadow-inner px-4 py-3 pr-10 text-sm font-mono focus:outline-none focus:ring-4 focus:ring-[var(--ow-focus)] focus:border-[var(--ow-blue)] focus:bg-[var(--ow-panel)] transition-colors placeholder-[var(--ow-subtle)] text-[var(--ow-text)]"
+                      className="w-full rounded-xl border border-[var(--ow-line)] bg-[var(--ow-panel-soft)] shadow-inner px-4 py-3 pr-10 text-sm font-mono focus:outline-none focus:ring-4 focus:ring-[var(--ow-focus)] focus:border-[var(--ow-blue)] focus:bg-[var(--ow-panel)] transition-colors placeholder:text-[var(--ow-subtle)] text-[var(--ow-text)]"
                     />
                     <button
                       type="button"
@@ -359,7 +359,7 @@ export function SetupWizard({ onComplete }: Props) {
                     value={editUserId}
                     onChange={(e) => setEditUserId(e.target.value.replace(/[^0-9]/g, ""))}
                     placeholder={setup.userIdPlaceholder} 
-                    className="w-full rounded-xl border border-[var(--ow-line)] bg-[var(--ow-panel-soft)] shadow-inner px-4 py-3 text-sm font-mono focus:outline-none focus:ring-4 focus:ring-[var(--ow-purple)] focus:border-[var(--ow-purple)] focus:bg-[var(--ow-panel)] transition-colors placeholder-[var(--ow-subtle)] text-[var(--ow-text)]"
+                    className="w-full rounded-xl border border-[var(--ow-line)] bg-[var(--ow-panel-soft)] shadow-inner px-4 py-3 text-sm font-mono focus:outline-none focus:ring-4 focus:ring-[var(--ow-purple)] focus:border-[var(--ow-purple)] focus:bg-[var(--ow-panel)] transition-colors placeholder:text-[var(--ow-subtle)] text-[var(--ow-text)]"
                   />
                   <p className="mt-2 text-xs text-[var(--ow-subtle)] ml-1">{setup.step2Hint}</p>
                 </div>
@@ -407,7 +407,7 @@ export function SetupWizard({ onComplete }: Props) {
                     value={editChatId}
                     onChange={(e) => setEditChatId(e.target.value.replace(/[^0-9-]/g, ""))}
                     placeholder={setup.groupChatIdPlaceholder} 
-                    className="w-full rounded-xl border border-[var(--ow-line)] bg-[var(--ow-panel-soft)] shadow-inner px-4 py-3 text-sm font-mono focus:outline-none focus:ring-4 focus:ring-[var(--ow-red)] focus:border-[var(--ow-red)] focus:bg-[var(--ow-panel)] transition-colors placeholder-[var(--ow-subtle)] text-[var(--ow-text)]"
+                    className="w-full rounded-xl border border-[var(--ow-line)] bg-[var(--ow-panel-soft)] shadow-inner px-4 py-3 text-sm font-mono focus:outline-none focus:ring-4 focus:ring-[var(--ow-red)] focus:border-[var(--ow-red)] focus:bg-[var(--ow-panel)] transition-colors placeholder:text-[var(--ow-subtle)] text-[var(--ow-text)]"
                   />
                 </div>
               </div>

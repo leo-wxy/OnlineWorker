@@ -124,5 +124,9 @@ test("gradient and shadow tokens use CSS-property-safe Tailwind utilities", () =
   const source = readSourceTree(join(appRoot, "src"));
   assert.doesNotMatch(source, /shadow-\[var\(--ow-shadow-/);
   assert.doesNotMatch(source, /bg-\[var\(--ow-(?:primary-surface|panel-elevated)\)\]/);
+  assert.doesNotMatch(source, /placeholder-\[var\(--ow-subtle\)\]/);
+  assert.doesNotMatch(source, /\btransition(?=[\s"'])/);
+  assert.doesNotMatch(source, /(?:from|via|to)-(?:blue|sky)-\d+/);
+  assert.doesNotMatch(source, /shadow-\[[^\]]*rgba\(/);
   assert.match(source, /\[box-shadow:var\(--ow-shadow-md\)\]/);
 });

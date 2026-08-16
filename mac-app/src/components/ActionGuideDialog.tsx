@@ -145,7 +145,7 @@ export function ActionGuideDialog({
               type="button"
               disabled={busy}
               onClick={onPrimary}
-              className="rounded-xl bg-[var(--ow-blue)] px-5 py-2.5 text-sm font-bold text-[var(--ow-on-accent)] [box-shadow:var(--ow-shadow-md)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 disabled:brightness-100"
+              className="rounded-xl bg-[var(--ow-blue)] px-5 py-2.5 text-sm font-bold text-[var(--ow-on-accent)] [box-shadow:var(--ow-shadow-md)] transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 disabled:brightness-100"
             >
               {primaryLabel}
             </button>

@@ -94,7 +94,7 @@ function CopyButton({ getText }) {
     {
       type: "button",
       className:
-        "ow-session-md-copy-button rounded-lg border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] px-2 py-1 text-[11px] font-semibold text-[var(--ow-disabled)] transition-colors hover:bg-[var(--ow-panel)] hover:text-[var(--ow-inverse)]",
+        "ow-session-md-copy-button rounded-lg border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] px-2 py-1 text-[11px] font-semibold text-[var(--ow-muted)] transition-colors hover:bg-[var(--ow-hover)] hover:text-[var(--ow-text)]",
       "aria-label": "Copy code block",
       onClick: handleCopy,
     },
