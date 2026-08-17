@@ -67,15 +67,15 @@ Audit disposition:
 
 ### 1. One generic feature descriptor, separate from Provider runtime
 
-在 manifest 中增加一个中性 account-feature declaration（例如 `features.account`，精确字段名由 plan 决定），最小字段只应包括：feature id/type、plugin display label/icon reference、backend action entrypoint、frontend entrypoint/schema version。不要向 `ProviderManifestCapabilities` 增加 Codex account 字段，也不要把 account feature 当作 `sessions`/`usage` capability。
+在 manifest 中增加一个中性 account-feature declaration（例如 `features.account`），最小字段只包括：feature id/type、enabled、plugin display label/icon reference、backend action entrypoint、frontend entrypoint/schema version。`enabled` 是 feature declaration 自身的静态开关，不读取 Provider runtime config。不要向 `ProviderManifestCapabilities` 增加 Codex account 字段，也不要把 account feature 当作 `sessions`/`usage` capability。
 
-Python 侧新增 generic feature registry/loader：复用 `iter_overlay_manifest_paths()`、manifest 校验和失败隔离，但输出中性 `AccountFeatureDescriptor`。Codex descriptor factory 放在 `plugins/providers/builtin/codex/python/account_feature.py`（或同级单一 feature module），内部再调用 `account_store.py`, `oauth.py`, `session_assets.py`, `compat.py`。Host 只看 `feature_id`, label, icon, frontend mount token, action transport；Codex 业务不进入 `core/`、Rust host 或 `App.tsx`。
+Python 侧新增独立的 generic feature loader：`core/account_features.py` 直接遍历仓内 builtin manifest，并只复用 `core/providers/manifest.py` 的无副作用 YAML helper；不得 import `core.providers.registry` 或 `_PROVIDERS`。它只返回 enabled、entry 文件真实存在且路径受限的中性 descriptor。Phase 23 不编译 overlay frontend；overlay manifest 声明 account frontend 时返回 isolated `unsupported_frontend_source` diagnostic，不进入 selector。Codex handler 放在 `plugins/providers/builtin/codex/python/account_feature.py`，内部再调用 plugin-owned modules。
 
 ### 2. Generic host shell and isolated action transport
 
 host 做四件事：发现 account-capable features；若至少一个则显示一个 `账号` sidebar entry；展示 selector；为每个 feature 建立 loading/error/retry/diagnostic boundary。所有业务请求通过一个 generic `invoke_account_feature(feature_id, action, payload)`（或等价 one-shot action）opaque 转发；host 不解析 Codex action、credential、session、OAuth 或 error vocabulary。
 
-这个 action transport 不应走 `provider_owner_bridge.sock`、`core/provider_owner_bridge.py`、Task Board、EventBus、notification 或 live app-server。可以通过现有 bundled Python sidecar 的一次性 stdin/stdout JSON 模式扩展一个独立 `--plugin-feature` operation；关键是它每次只加载 manifest/feature handler，不启动 runtime、不读写 OnlineWorker storage、不发布事件。若使用 Tauri command，则 command 只负责启动该 generic one-shot feature operation、超时、JSON 边界和通用错误。
+这个 action transport 不应走 `provider_owner_bridge.sock`、Task Board、EventBus、notification 或 live app-server。现有 bundled Python sidecar 可扩展独立 operation，但 `main.py` 必须在任何 Telegram/bot/lifecycle/state import 之前，用 stdlib-only argv bootstrap 识别 feature list/action 并直接退出；普通运行才继续现有 imports。测试用 subprocess/import marker 证明 one-shot 没有加载 `core.state`, `core.lifecycle`, `core.providers.registry`, bot/Telegram。Tauri 只负责 one-shot、超时、JSON 边界和通用错误。
 
 ### 3. Frontend packaging: build-time plugin entry, not runtime WebView
 
@@ -123,9 +123,20 @@ AccountFeatureActionRequest
 
 AccountFeatureActionResponse
   ok, data (opaque JSON), error { code, message, retryable, diagnosticId? }
+
+NativePathHandle
+  handleId, featureId, mode (open|save), displayName, expiresAt
+
+LoopbackCallbackSpec (generic native capability)
+  preferredPort?, callbackPath, timeoutMs
+
+LoopbackCallbackHandle
+  handleId, redirectUri, listening
 ```
 
-Host list response只返回 feature metadata 和 load error；不会返回 account detail、token、API key、OAuth verifier、session content。`featureId` 是 descriptor key，不应被 host 当作 Codex provider-id 做分支。
+Host list response只返回 feature metadata 和 load error；不会返回 account detail、token、API key、OAuth verifier、session content。`featureId` 是 descriptor key，不应被 host 当作 Codex provider-id 做分支。Native open/save dialog 返回一次性、短时、绑定 feature/mode 的 opaque handle；React 不获得真实路径。调用 action 时 handle 走独立 trusted capability context，由 Tauri 解析后传给 backend entry，不能放在普通 payload。cancel 不产生 handle且不写文件；handle 跨 feature、过期、重放、模式不符均拒绝。
+
+OAuth 不能让一次性 plugin action 自己在返回 auth URL 后继续持有 listener。最小可执行链是：Tauri generic capability 仅在 `127.0.0.1` 绑定受限端口/路径并返回 handle/redirect URI；Codex plugin 用该 URI 生成授权 URL；host 打开系统浏览器并对 handle 做 bounded await/cancel；捕获的完整 callback URL 只在 plugin-owned UI 内存中瞬时转交给 opaque complete action，host 不解析 code/state。若首选端口不可绑定，保留同一 redirect URI 并进入手工 callback fallback。listener 必须限制 request-target 大小、只接受精确 path、单次完成、超时清理，不写 callback query 到日志。
 
 ### Account internal model
 
@@ -154,9 +165,9 @@ Identity upsert 建议按稳定身份和认证模式定义 deterministic key：�
 
 ### OAuth contract
 
-`start_oauth` 返回 login/session id、auth URL、expires-at；backend 生成 random verifier/state，auth URL 带 `response_type=code`, `redirect_uri`, `code_challenge`, `code_challenge_method=S256`, `state`。Cockpit 行为证据：`cockpit-tools@3596316:src-tauri/src/modules/codex_oauth.rs:56-86`, `:376-443`, `:267-276`。
+UI 先请求 generic loopback handle（Codex 当前行为使用 preferred port `1455` 和 `/auth/callback`），再把 host 返回的 redirect URI 传给 `start_oauth`。Codex plugin 固定 `CLIENT_ID=app_EMoamEEZ73f0CkXaXp7hrann`、authorize endpoint `https://auth.openai.com/oauth/authorize`、token endpoint `https://auth.openai.com/oauth/token`；payload/config 不可覆盖 endpoint/client/issuer，redirect 只接受 localhost/1455/exact path。backend 生成 random verifier/state 和 PKCE URL。Cockpit 行为证据：`cockpit-tools@3596316:src-tauri/src/modules/codex_oauth.rs:14-23`, `:376-455`, `:656-689`。
 
-自动 callback 和手工 callback 都必须使用同一个 pending state 做 exact state comparison；callback 只接受非空 code/state。`oauth_server.rs:71-98` 是该校验形状，`:100-135` 支持完整 URL/path/query fragment manual input，`:137-235` 展示 request-target/path 限制。state/verifier 只在 plugin-owned temporary state dir，过期/取消清除；日志只写 login id/结果，不写 URL query、code、verifier/token。必须通过 system browser 打开 URL；不得嵌入 login WebView。
+自动 callback 由 generic host broker 捕获完整 URL 后瞬时交还 Codex plugin，手工 callback 直接交给同一 complete action；两者都使用同一个 pending state 做 exact comparison，只接受精确 redirect host/port/path 与非空 code/state。`oauth_server.rs:71-98` 是该校验形状，`:100-135` 支持完整 URL/path/query fragment manual input，`:137-235` 展示 request-target/path 限制。complete action 随后执行 bounded authorization-code exchange、验证 credential/identity、写入 account library，且不 auto-apply。state/verifier 只在 plugin-owned temporary state dir，成功/过期/取消清除；host/UI/plugin 日志均不得记录 URL query、code、verifier/token。必须通过 system browser；不得嵌入 login WebView。
 
 ### Session asset contract
 
@@ -166,7 +177,7 @@ Identity upsert 建议按稳定身份和认证模式定义 deterministic key：�
 - import 先读 manifest、target home、existing IDs；same ID + same hash 可 skip，different content 是 conflict，不能 overwrite；在写完临时文件并重新计算 size/SHA 后 rename，index update 失败恢复 index/written files（`:1214-1426`, `:1353-1365`, `:1848-1913`）。
 - ZIP path validation 拒绝 absolute/`.`/`..`/colon；manifest item 需 file path under `files/`, `.jsonl`, 64-hex SHA（`:1648-1677`）。`relative_rollout_path` 只允许 `sessions`/`archived_sessions` 第一段及 `rollout-*.jsonl`（`:1794-1823`）。
 - trash 是 app/plugin data 下 manifest-backed reversible move；Cockpit `get_session_trash_base_dir()` 使用 app data + `cockpit-tools-codex-session-trash`，legacy `~/.Trash` 仅 optional read（`:2148-2177`）；manifest 保存 session identity/index/original path，move 用 rename（`:2183-2248`）。Phase 23 可在自己的 plugin data 使用同一语义，但不提供 permanent delete/copy-to-instance/cross-instance。
-- restore 先验证 trash file 存在且 rollout session id 与 manifest 一致，目标冲突时不覆盖；成功后恢复 mtime/index，失败恢复 index，只有成功才清理 trash (`:2633-2750`)。visibility repair 要先备份、分阶段扫描/写入，失败自动 restore backup（`codex_session_visibility.rs:372-508`, `:537-677`, `:748-836`）；Phase 23 可提炼 Codex-owned local behavior，但不发布 EventBus/session/notification。
+- restore 先验证 trash file 存在且 rollout session id 与 manifest 一致，目标冲突时不覆盖；成功后恢复 mtime/index，失败恢复 index，只有成功才清理 trash (`:2633-2750`)。当前 Cockpit 默认 visibility repair 是 `official_state_db_only(Quick)`：target provider 读取 effective home 的 `config.toml.model_provider`，缺失时为 `openai`；只检查 `<home>/state_5.sqlite` 与 `<home>/sqlite/state_5.sqlite` 的既有 `threads` 表，只更新既有行的 `model_provider`，并修复这些行 `rollout_path` 引用文件首条 `session_meta`。它不修 `session_index.jsonl`、不扫描 `sqlite/codex-dev.db`、不改 timestamp、不建表/改 schema、不重建 metadata。Phase 23 逐项复刻这个 current quick 语义，并用 SQLite transaction/backup 与 rollout backup→atomic replace→rollback；不得 inspect process 或跨 instance（`codex_session_visibility.rs:273-302`, `:1400-1425`, `:3529-3560`）。
 
 ### Apply and file permission contract
 
@@ -181,7 +192,7 @@ Identity upsert 建议按稳定身份和认证模式定义 deterministic key：�
 5. **Encrypted details and plaintext index are distinct.** Cockpit secure storage documents plaintext summary/index, encrypted detail, legacy plaintext rewrite (`cockpit-tools@3596316:src-tauri/src/modules/secure_account_storage.rs:1-5`). Key is random 32 bytes, atomic, chmod 0600 (`:30-61`); AES-GCM envelope is versioned with 12-byte nonce (`:15-28`, `:68-120`). Tests use temp-dir overrides and verify ciphertext does not contain secret (`:136-175`).
 6. **Session transfer has integrity and conflict semantics that must be tested, not inferred.** Manifest kind is `codex-session-export`, version 1, with per-file SHA-256; path traversal and hash mismatch reject before write; same-id same-hash skip and same-id different-hash conflict; index rollback is part of failure behavior.
 7. **Trash is reversible but not “delete with undo UI”.** It moves rollout files into timestamped app-data trash and stores original path/index in manifest. Restore verifies identity and index consistency before cleanup. Permanent delete functions exist in Cockpit (`delete_trashed_sessions`) but are explicitly out of scope.
-8. **Visibility repair is a mutation with backup/rollback.** It touches rollout metadata, SQLite/index candidates in Cockpit and can inspect running instances. Phase 23 must narrow to effective local Codex home and local visibility/index files; never inspect process state, never coordinate instances, and preserve “backup -> mutate -> rollback on error” semantics.
+8. **Visibility repair is a mutation with backup/rollback.** Cockpit 还保留旧/深度实现，但当前默认路径只修 official state DB 与其引用的 rollout，不修 session index。Phase 23 只实现这个 current quick 路径，限定 effective local Codex home，不 inspect process、不协调 instances，并保留“backup -> mutate -> rollback on error”语义。
 
 ## Security/Threat Model Inputs
 
@@ -194,9 +205,9 @@ Identity upsert 建议按稳定身份和认证模式定义 deterministic key：�
 | Existing session ID | silent overwrite/data loss | same hash skip; different hash conflict; no overwrite; per-item result |
 | Effective `CODEX_HOME` | env points outside expected home or file changes during apply | resolve once; operate only `home/auth.json`; preserve old bytes/mode; atomic replace; backup and rollback |
 | Plugin storage | key disclosure, world-readable files, partial writes/corruption | random key in plugin dir mode 0600; encrypted details; index/detail/key atomic; backup/repair on legacy migration |
-| Path inputs/file dialog | arbitrary file read/write, symlink escape | canonicalize/validate import source and chosen destination; native dialog only; destination permission tightening where possible |
+| Path inputs/file dialog | arbitrary file read/write, symlink escape | one-shot feature-bound open/save handle via trusted context; reject payload paths, existing symlink, parent escape and replay; atomic 0600 destination |
 | Logging/diagnostics | token fragments, OAuth URL, session content, cwd leakage | structured safe error codes/reasons; never log payload/credentials/session lines; diagnostic IDs only |
-| Concurrent actions | torn index/detail/auth, stale current marker | per-plugin operation lock; temp same-dir writes; commit order and compensating rollback; reject concurrent mutation while busy |
+| Concurrent actions | torn index/detail/auth/session state | one cross-process lock file under plugin data root shared by account/OAuth/apply/ZIP/trash/restore/repair; temp same-dir writes; commit order and rollback |
 | Visibility repair/trash restore | partial file/index mutation | manifest/backup first, mutate only selected effective home, restore prior index/files on failure, report unchanged/rolled-back |
 
 Failure semantics are part of the API: canceling native save dialog is silent; import partial results are `ok/skipped/rejected`; unsupported format is a clear shape/version error; apply failure says rollback status and leaves current marker unchanged; session import/trash/restore failure says whether files/index were untouched or restored. Never return a stack trace containing paths, payloads, or secrets to frontend.
@@ -208,15 +219,15 @@ This is a planning map, not a claim that files already exist.
 | Area | Proposed location | Responsibility |
 |---|---|---|
 | manifest/feature declaration | `plugins/providers/builtin/codex/plugin.yaml`; generic parser near `core/providers/manifest.py`/new neutral feature module | declaration and validated non-secret metadata only |
-| generic discovery | `core/...` minimal neutral account-feature registry, or existing registry extension | discover, isolate load failures, expose feature metadata; no Codex terms |
-| generic Tauri host | `mac-app/src-tauri/src/commands/account_feature.rs` + `mod.rs`/`lib.rs` registration | list feature metadata, invoke opaque action, native browser/file/save capabilities, generic errors/timeouts |
+| generic discovery | `core/account_features.py` + pure YAML helper in `core/providers/manifest.py` | builtin-only enabled discovery, isolated failures, no provider registry/live imports |
+| generic Tauri host | `mac-app/src-tauri/src/commands/account_feature.rs` + `mod.rs`/`lib.rs` registration | opaque action, trusted data root/path handles, browser/loopback/file/save, generic errors/timeouts |
 | generic host React | `mac-app/src/App.tsx` minimal dynamic sidebar/mount; new generic host component | one `账号` entry, selector, loading/error boundary; no Codex labels/models/actions |
 | Vite entry contract | generic host import/glob; plugin-owned entry under `plugins/providers/builtin/codex/frontend/` | build-time component discovery; no iframe/WebView/runtime TS loader |
 | Codex frontend | `plugins/providers/builtin/codex/frontend/` | account cards/modal, session assets hierarchy, all Codex labels/actions/errors/a11y |
 | Codex action bridge | `plugins/providers/builtin/codex/python/account_feature.py` plus one-shot CLI dispatch | action routing independent of provider owner bridge/runtime |
 | account model/import/upsert | `plugins/providers/builtin/codex/python/account_model.py`, `compat.py` | auth modes, identity key, unknown raw JSON, Cockpit shape/aliases/per-item validation |
 | encrypted store | `plugins/providers/builtin/codex/python/account_store.py` (or backend with audited AES primitive) | key/index/detail envelope, permissions, atomic writes/backups/legacy migration |
-| OAuth | `plugins/providers/builtin/codex/python/oauth.py` | system browser URL, PKCE/state, callback listener/manual parser, pending state and safe errors |
+| OAuth | generic Tauri loopback broker + `plugins/providers/builtin/codex/python/oauth.py` | host 仅绑定/捕获，Codex plugin 负责 PKCE/state/manual parser/token exchange/pending state/safe errors |
 | apply | `plugins/providers/builtin/codex/python/apply.py` | effective home/auth.json transaction, backup/rollback, no process/runtime side effects |
 | sessions | `plugins/providers/builtin/codex/python/session_assets.py` | effective-home list/title search/30-day local token-cost/trash/restore/visibility repair |
 | ZIP | same Codex session module or focused `session_package.py` | manifest v1, ZIP bounds/path/hash/conflict/index rollback |
@@ -234,6 +245,9 @@ The exact final split should remain small. Do not create a general plugin SDK, a
 - Do not mark imported account current. Import updates library only; Apply is explicit and only then updates current marker.
 - Do not serialize a typed subset and silently discard Cockpit unknown fields. Raw object/extra merge is mandatory.
 - Do not expose API key/token fields in list DTO, React state persistence, logs, diagnostic bundle, or generic Tauri errors.
+- Do not make a one-shot plugin process own a listener after it returns. Bind the generic loopback broker before building/opening the authorization URL; host must never parse OAuth code/state and callback URLs must not enter logs or frontend persistence.
+- Do not import `core.providers.registry`, `core.state`, `core.lifecycle`, bot or Telegram on the feature one-shot path. The early argv bootstrap must exit before those module imports execute.
+- Do not let payload/config choose OAuth client/authorize/token endpoint or effective home/path. Codex endpoints are fixed plugin constants; effective home is resolved once in backend; user-selected files use trusted native handles.
 - Do not call OAuth token endpoint, refresh, account quota, or network login during structural import. OAuth network exchange only belongs to explicit OAuth flow and still must not auto-apply.
 - Do not let save-dialog cancel become an error; do not write an export file before user confirmation/destination selection.
 - Do not trust ZIP manifest paths, `relative_rollout_path`, `session_id`, title, or `cwd`; sanitize display values and validate write paths independently.
@@ -281,7 +295,7 @@ Suggested command: `python3 -m pytest plugins/providers/builtin/codex/tests/test
 
 ### Layer 3 — OAuth local protocol tests
 
-No real browser or token endpoint. Use a local loopback callback fixture and fake clock/state store. Assert PKCE verifier/challenge and state are present; exact state mismatch/empty code/expired state/cancel reject; full URL/path/query manual parsing accepts only supported forms; callback response/logging never contains code/verifier/token. Browser open is injected as a generic host capability and tested as a recorded call, not launched.
+No real browser, listener, or token endpoint. Feed a synthetic URL captured by the generic broker, plus manual callback strings, into the same complete action; use fake clock/state store and monkeypatched token opener. Assert PKCE verifier/challenge and state are present; exact state mismatch/empty code/expired state/cancel reject; full URL/path/query manual parsing accepts only supported forms; callback response/logging never contains code/verifier/token. Browser open is a recorded generic host capability, not launched by Python tests.
 
 Suggested command: `python3 -m pytest plugins/providers/builtin/codex/tests/test_oauth.py`.
 
@@ -299,7 +313,7 @@ Suggested command: `python3 -m pytest plugins/providers/builtin/codex/tests/test
 
 ### Layer 5 — Session file/ZIP/trash/repair tests
 
-Build a synthetic effective home with `sessions/`, `archived_sessions/`, `session_index.jsonl`, minimal rollout JSONL, and optional SQLite fixture. Cover:
+Build a synthetic effective home with `sessions/`, `archived_sessions/`, `session_index.jsonl`, minimal rollout JSONL, plus required `<home>/state_5.sqlite` and `<home>/sqlite/state_5.sqlite` fixtures. Cover:
 
 - title search and expandable row metadata;
 - 30-day boundary inclusion/exclusion, duplicate snapshot dedup, fork replay handling, cost unavailable state;
@@ -307,7 +321,7 @@ Build a synthetic effective home with `sessions/`, `archived_sessions/`, `sessio
 - import valid package, same-id same-hash skip, same-id different-hash conflict, bad hash, malformed manifest/version, absolute/`..`/colon/symlink path, size mismatch, and index-write failure rollback;
 - trash writes manifest and moves file without permanent deletion;
 - restore verifies session id/path, handles target conflict, restores index/mtime, and leaves trash on failure;
-- visibility repair dry-run/no-op/success/failure backup restore, with no EventBus/session/notification side effect.
+- current quick visibility repair reads `config.toml.model_provider` (default `openai`), updates only existing official `threads.model_provider` rows and referenced rollout first-line `session_meta`, ignores `sqlite/codex-dev.db`/session index/timestamps, and covers no-op/success/failure rollback with no EventBus/session/notification side effect.
 
 Suggested command: `python3 -m pytest plugins/providers/builtin/codex/tests/test_session_assets.py`.
 

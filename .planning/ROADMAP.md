@@ -891,11 +891,43 @@ Plans:
 
 ### Phase 23: Plugin-Owned Codex Account and Session Asset Management
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** 在 OnlineWorker 的通用插件载体中提供独立、插件自持的 Codex 账号导入/导出/应用与离线会话资产管理，不耦合任何在线 Provider 运行链路。
+**Requirements**: D-01–D-40（Phase 23 context decisions）
 **Depends on:** Phase 22
-**Plans:** 0 plans
+**Decision source:** Phase context D-01–D-40
+**Plans:** 12 plans
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 23 to break down)
+**Wave 1**
+
+- [ ] 23-01-PLAN.md — 通过依赖与前端根配置人工闸门
+- [ ] 23-02-PLAN.md — 建立中性账号插件发现契约
+- [ ] 23-05-PLAN.md — 固化 Codex 账号模型与 Cockpit 兼容格式
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 23-03-PLAN.md — 建立通用一次性 action 与系统能力 host
+- [ ] 23-06-PLAN.md — 建立 AES-GCM 账号安全存储
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 23-04-PLAN.md — 建立 build-time 插件前端挂载与账号入口
+- [ ] 23-07-PLAN.md — 实现 OAuth 与一次性账号 action
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 23-08-PLAN.md — 实现 Apply 与账号导出事务
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 23-09-PLAN.md — 实现离线 Codex 会话资产后端
+- [ ] 23-10-PLAN.md — 完成 Codex 账号前端与四源导入流程
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 23-11-PLAN.md — 接入会话资产页面与离线集成状态
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 23-12-PLAN.md — 完成 Phase 23 安全边界与回归验证
