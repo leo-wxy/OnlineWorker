@@ -37,6 +37,13 @@ def _string_tuple(value: Any, default: tuple[str, ...] = ()) -> tuple[str, ...]:
     return default
 
 
+def load_yaml_mapping(path: Path) -> dict[str, Any]:
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise ValueError("Plugin manifest must be a mapping")
+    return data
+
+
 def ai_services_from_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     ai = _mapping(manifest.get("ai"))
     services = ai.get("services")
@@ -175,7 +182,4 @@ def metadata_from_provider_manifest(manifest: dict[str, Any]) -> ProviderMetadat
 
 def metadata_from_builtin_provider_manifest(provider_file: str) -> ProviderMetadata:
     manifest_path = Path(provider_file).resolve().parents[1] / "plugin.yaml"
-    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-    if not isinstance(manifest, dict):
-        raise ValueError(f"Provider plugin manifest must be a mapping: {manifest_path}")
-    return metadata_from_provider_manifest(manifest)
+    return metadata_from_provider_manifest(load_yaml_mapping(manifest_path))

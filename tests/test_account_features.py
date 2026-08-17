@@ -75,7 +75,8 @@ def test_isolates_duplicate_malformed_missing_and_overlay_features(tmp_path):
     builtin = tmp_path / "builtin"
     _write_feature(builtin, "first", feature_id="shared")
     _write_feature(builtin, "second", feature_id="shared")
-    _write_feature(builtin, "missing", backend_entry="python/missing.py")
+    missing = _write_feature(builtin, "missing", backend_entry="python/missing.py")
+    (missing / "python" / "missing.py").unlink()
     (builtin / "broken").mkdir(parents=True)
     (builtin / "broken" / "plugin.yaml").write_text("features: [", encoding="utf-8")
 
