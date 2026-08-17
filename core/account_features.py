@@ -11,6 +11,8 @@ from core.providers.overlay import iter_overlay_manifest_paths
 BUILTIN_PLUGIN_ROOT = Path(__file__).resolve().parents[1] / "plugins" / "providers" / "builtin"
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _FAILURES: list[dict[str, str]] = []
+_BACKEND_ENTRIES: dict[str, Path] = {}
+_BACKEND_MODULES: dict[str, str] = {}
 
 
 @dataclass(frozen=True)
@@ -91,6 +93,16 @@ def _descriptor(manifest_path: Path, manifest: dict, account: dict) -> AccountFe
     )
 
 
+def _backend_module_name(manifest_path: Path, relative_entry: str) -> str:
+    relative = Path(relative_entry)
+    if relative.suffix != ".py":
+        raise _FeatureError("invalid_manifest")
+    module_parts = [manifest_path.parent.name, *relative.with_suffix("").parts]
+    if not all(part.isidentifier() for part in module_parts):
+        raise _FeatureError("invalid_manifest")
+    return ".".join(("plugins", "providers", "builtin", *module_parts))
+
+
 def _failure(feature_id: str, code: str) -> dict[str, str]:
     return {"featureId": feature_id if _SAFE_ID.fullmatch(feature_id) else "", "code": code}
 
@@ -101,6 +113,8 @@ def list_account_features(
     overlay_spec: str | None = None,
 ) -> list[AccountFeatureDescriptor]:
     _FAILURES.clear()
+    _BACKEND_ENTRIES.clear()
+    _BACKEND_MODULES.clear()
     descriptors: list[AccountFeatureDescriptor] = []
     seen: set[str] = set()
     root = builtin_root or BUILTIN_PLUGIN_ROOT
@@ -117,7 +131,12 @@ def list_account_features(
             descriptor = _descriptor(manifest_path, manifest, account)
             if descriptor.feature_id in seen:
                 raise _FeatureError("duplicate_feature_id")
+            backend_module = _backend_module_name(manifest_path, descriptor.backend_entry)
             seen.add(descriptor.feature_id)
+            _BACKEND_ENTRIES[descriptor.feature_id] = (
+                manifest_path.parent / descriptor.backend_entry
+            ).resolve()
+            _BACKEND_MODULES[descriptor.feature_id] = backend_module
             descriptors.append(descriptor)
         except _FeatureError as exc:
             _FAILURES.append(_failure(feature_id, exc.code))
@@ -146,3 +165,11 @@ def list_account_features(
 
 def account_feature_load_failures() -> list[dict[str, str]]:
     return [dict(failure) for failure in _FAILURES]
+
+
+def account_feature_backend_entry(feature_id: str) -> Path | None:
+    return _BACKEND_ENTRIES.get(feature_id)
+
+
+def account_feature_backend_module(feature_id: str) -> str | None:
+    return _BACKEND_MODULES.get(feature_id)

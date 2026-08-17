@@ -16,6 +16,12 @@ use std::{
 use tauri::Manager;
 use tokio::sync::Mutex;
 
+use commands::account_feature::{
+    await_account_feature_loopback, begin_account_feature_loopback,
+    cancel_account_feature_loopback, choose_account_feature_file, choose_account_feature_save,
+    invoke_account_feature, list_account_features, open_account_feature_browser,
+    AccountFeatureHostState,
+};
 use commands::ai_config::test_ai_service_connection;
 use commands::attachment_cache::{clear_attachment_cache, get_attachment_cache_stats};
 use commands::command_registry::{
@@ -386,6 +392,7 @@ pub fn run() {
                 .build(),
         )
         .manage(Arc::new(Mutex::new(BotState::new())))
+        .manage(AccountFeatureHostState::default())
         .manage(MenubarPopoverSnapshotStore::default())
         .manage(AppExitState::default())
         .setup(|app| {
@@ -410,6 +417,14 @@ pub fn run() {
             service_restart,
             service_stop,
             service_status,
+            list_account_features,
+            invoke_account_feature,
+            choose_account_feature_file,
+            choose_account_feature_save,
+            open_account_feature_browser,
+            begin_account_feature_loopback,
+            await_account_feature_loopback,
+            cancel_account_feature_loopback,
             test_ai_service_connection,
             get_dashboard_state,
             check_cli,

@@ -1,5 +1,5 @@
-pub mod ai_config;
 pub mod account_feature;
+pub mod ai_config;
 pub mod attachment_cache;
 pub mod command_catalog;
 pub mod command_registry;

@@ -141,7 +141,11 @@ def test_importing_discovery_does_not_initialize_provider_runtime():
 
 
 def test_backend_entry_is_internal_and_canonically_confined(tmp_path):
-    from core.account_features import account_feature_backend_entry, list_account_features
+    from core.account_features import (
+        account_feature_backend_entry,
+        account_feature_backend_module,
+        list_account_features,
+    )
 
     builtin = tmp_path / "builtin"
     plugin_dir = _write_feature(builtin, "valid")
@@ -151,6 +155,9 @@ def test_backend_entry_is_internal_and_canonically_confined(tmp_path):
     assert account_feature_backend_entry("valid-accounts") == (
         plugin_dir / "python" / "account_feature.py"
     ).resolve()
+    assert account_feature_backend_module("valid-accounts") == (
+        "plugins.providers.builtin.valid.python.account_feature"
+    )
     assert account_feature_backend_entry("missing") is None
 
 
@@ -175,7 +182,11 @@ print(json.dumps({'exit': code, 'blocked': blocked}), file=sys.stderr)
     completed = subprocess.run(
         [sys.executable, "-c", wrapper],
         cwd=repo_root,
-        env={**dict(__import__("os").environ), "HOME": str(tmp_path)},
+        env={
+            "HOME": str(tmp_path),
+            "PATH": __import__("os").environ.get("PATH", ""),
+            "LANG": "C.UTF-8",
+        },
         check=True,
         capture_output=True,
         text=True,
@@ -187,3 +198,75 @@ print(json.dumps({'exit': code, 'blocked': blocked}), file=sys.stderr)
     assert set(envelope["data"]) == {"features", "failures"}
     assert marker == {"exit": 0, "blocked": []}
     assert list(tmp_path.iterdir()) == []
+
+
+def test_main_account_feature_action_round_trips_opaque_payload_without_live_imports(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    builtin = tmp_path / "builtin"
+    plugin_dir = _write_feature(builtin, "fixture")
+    (plugin_dir / "python" / "account_feature.py").write_text(
+        """
+def handle_account_feature(*, action, payload, context):
+    return {
+        "action": action,
+        "payload": payload,
+        "contextKeys": sorted(context),
+    }
+""".strip(),
+        encoding="utf-8",
+    )
+    data_root = tmp_path / "plugin-data"
+    wrapper = """
+import json, runpy, sys
+from pathlib import Path
+import core.account_features as account_features
+account_features.BUILTIN_PLUGIN_ROOT = Path(sys.argv[1])
+sys.argv = [
+    'main.py',
+    '--account-feature-action',
+    '--account-feature-id', 'fixture-accounts',
+    '--account-feature-action-name', 'fixture.roundtrip',
+]
+try:
+    runpy.run_path('main.py', run_name='__main__')
+except SystemExit as exc:
+    code = exc.code
+blocked = sorted(name for name in sys.modules if (
+    name == 'telegram'
+    or name.startswith('telegram.')
+    or name.startswith('bot.')
+    or name in {'core.state', 'core.lifecycle', 'core.providers.registry'}
+))
+print(json.dumps({'exit': code, 'blocked': blocked}), file=sys.stderr)
+"""
+    request = {
+        "payload": {"opaqueValue": {"nested": True}},
+        "trusted_context": {"data_root": str(data_root), "native_paths": []},
+    }
+
+    completed = subprocess.run(
+        [sys.executable, "-c", wrapper, str(builtin)],
+        cwd=repo_root,
+        env={
+            "HOME": str(tmp_path / "home"),
+            "PATH": __import__("os").environ.get("PATH", ""),
+            "LANG": "C.UTF-8",
+        },
+        input=json.dumps(request),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    envelope = json.loads(completed.stdout)
+    marker = json.loads(completed.stderr)
+    assert envelope == {
+        "ok": True,
+        "data": {
+            "action": "fixture.roundtrip",
+            "payload": {"opaqueValue": {"nested": True}},
+            "contextKeys": ["data_root", "native_paths"],
+        },
+        "error": None,
+    }
+    assert marker == {"exit": 0, "blocked": []}

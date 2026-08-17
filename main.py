@@ -8,6 +8,159 @@ import os
 import re
 import sys
 import time
+
+
+_ACCOUNT_FEATURE_FLAGS = {"--account-feature-list", "--account-feature-action"}
+_ACCOUNT_FEATURE_MAX_INPUT = 8 * 1024 * 1024
+
+
+def _account_feature_arg(argv: list[str], name: str) -> str:
+    indexes = [index for index, value in enumerate(argv) if value == name]
+    if len(indexes) != 1 or indexes[0] + 1 >= len(argv):
+        return ""
+    return argv[indexes[0] + 1].strip()
+
+
+def _print_account_feature_envelope(payload: object) -> None:
+    try:
+        encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError):
+        encoded = '{"ok":false,"data":null,"error":{"code":"invalid_response","message":"账号功能返回了无效数据。","retryable":false}}'
+    sys.stdout.write(encoded)
+    sys.stdout.flush()
+
+
+def _account_feature_error(code: str, message: str, *, retryable: bool = False) -> dict:
+    return {
+        "ok": False,
+        "data": None,
+        "error": {"code": code, "message": message, "retryable": retryable},
+    }
+
+
+def _read_account_feature_request() -> dict | None:
+    raw = sys.stdin.buffer.read(_ACCOUNT_FEATURE_MAX_INPUT + 1)
+    if len(raw) > _ACCOUNT_FEATURE_MAX_INPUT:
+        return None
+    try:
+        request = json.loads(raw or b"{}")
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return request if isinstance(request, dict) else None
+
+
+def _account_feature_payload_has_reserved_context(value: object) -> bool:
+    if isinstance(value, dict):
+        return any(
+            key in {"data_root", "dataRoot", "native_paths", "nativePaths"}
+            or _account_feature_payload_has_reserved_context(child)
+            for key, child in value.items()
+        )
+    if isinstance(value, list):
+        return any(_account_feature_payload_has_reserved_context(child) for child in value)
+    return False
+
+
+def _run_account_feature_bootstrap(argv: list[str]) -> int:
+    from dataclasses import asdict
+
+    from core.account_features import (
+        account_feature_backend_entry,
+        account_feature_backend_module,
+        account_feature_load_failures,
+        list_account_features,
+    )
+
+    if "--account-feature-list" in argv:
+        features = list_account_features()
+        _print_account_feature_envelope(
+            {
+                "ok": True,
+                "data": {
+                    "features": [asdict(feature) for feature in features],
+                    "failures": account_feature_load_failures(),
+                },
+                "error": None,
+            }
+        )
+        return 0
+
+    feature_id = _account_feature_arg(argv, "--account-feature-id")
+    action = _account_feature_arg(argv, "--account-feature-action-name")
+    if not feature_id or not action:
+        _print_account_feature_envelope(
+            _account_feature_error("invalid_request", "账号功能请求无效。")
+        )
+        return 0
+
+    request = _read_account_feature_request()
+    if request is None:
+        _print_account_feature_envelope(
+            _account_feature_error("invalid_request", "账号功能请求无效。")
+        )
+        return 0
+    payload = request.get("payload")
+    trusted_context = request.get("trusted_context")
+    if not isinstance(trusted_context, dict):
+        _print_account_feature_envelope(
+            _account_feature_error("invalid_context", "账号功能上下文无效。")
+        )
+        return 0
+    data_root = trusted_context.get("data_root")
+    native_paths = trusted_context.get("native_paths", [])
+    if (
+        not isinstance(data_root, str)
+        or not os.path.isabs(data_root)
+        or not isinstance(native_paths, list)
+    ):
+        _print_account_feature_envelope(
+            _account_feature_error("invalid_context", "账号功能上下文无效。")
+        )
+        return 0
+    if _account_feature_payload_has_reserved_context(payload):
+        _print_account_feature_envelope(
+            _account_feature_error("invalid_payload", "账号功能参数包含保留字段。")
+        )
+        return 0
+
+    list_account_features()
+    backend_path = account_feature_backend_entry(feature_id)
+    backend_module = account_feature_backend_module(feature_id)
+    if backend_path is None or backend_module is None:
+        _print_account_feature_envelope(
+            _account_feature_error("feature_unavailable", "账号功能不可用。")
+        )
+        return 0
+
+    try:
+        import importlib
+
+        try:
+            module = importlib.import_module(backend_module)
+        except ModuleNotFoundError:
+            if getattr(sys, "frozen", False):
+                raise
+            import importlib.util
+
+            module_name = f"_onlineworker_account_feature_{feature_id.replace('-', '_')}"
+            spec = importlib.util.spec_from_file_location(module_name, backend_path)
+            if spec is None or spec.loader is None:
+                raise ImportError("missing loader")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        handler = getattr(module, "handle_account_feature")
+        result = handler(action=action, payload=payload, context=trusted_context)
+        _print_account_feature_envelope({"ok": True, "data": result, "error": None})
+    except Exception:
+        _print_account_feature_envelope(
+            _account_feature_error("action_failed", "账号功能操作失败。", retryable=True)
+        )
+    return 0
+
+
+if __name__ == "__main__" and any(flag in sys.argv[1:] for flag in _ACCOUNT_FEATURE_FLAGS):
+    raise SystemExit(_run_account_feature_bootstrap(sys.argv[1:]))
+
 from telegram import Update
 from telegram.ext import (
     Application,
