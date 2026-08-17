@@ -1,0 +1,139 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from dataclasses import asdict
+from pathlib import Path
+
+import yaml
+
+
+def _write_feature(
+    root: Path,
+    plugin_id: str,
+    *,
+    feature_id: str | None = None,
+    enabled: object = True,
+    frontend_entry: str = "frontend/account-entry.tsx",
+    backend_entry: str = "python/account_feature.py",
+    extra: dict[str, object] | None = None,
+) -> Path:
+    plugin_dir = root / plugin_id
+    plugin_dir.mkdir(parents=True)
+    for relative in ("icon.svg", frontend_entry, backend_entry):
+        path = plugin_dir / relative
+        if ".." not in Path(relative).parts and not Path(relative).is_absolute():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("fixture", encoding="utf-8")
+    account = {
+        "enabled": enabled,
+        "feature_id": feature_id or f"{plugin_id}-accounts",
+        "label": f"{plugin_id} Accounts",
+        "icon": "icon.svg",
+        "frontend_entry": frontend_entry,
+        "backend_entry": backend_entry,
+        "protocol_version": 1,
+        **(extra or {}),
+    }
+    (plugin_dir / "plugin.yaml").write_text(
+        yaml.safe_dump({"id": plugin_id, "kind": "provider", "features": {"account": account}}),
+        encoding="utf-8",
+    )
+    return plugin_dir
+
+
+def test_discovers_only_enabled_builtin_metadata_without_secret_fields(tmp_path):
+    from core.account_features import account_feature_load_failures, list_account_features
+
+    builtin = tmp_path / "builtin"
+    _write_feature(builtin, "valid", extra={"credential": "credential-fixture", "payload": {"session": "hidden"}})
+    _write_feature(builtin, "disabled", enabled=False)
+    _write_feature(builtin, "string-disabled", enabled="true")
+
+    features = list_account_features(builtin_root=builtin, overlay_spec="")
+
+    assert [asdict(feature) for feature in features] == [
+        {
+            "feature_id": "valid-accounts",
+            "label": "valid Accounts",
+            "icon": "icon.svg",
+            "frontend_entry": "frontend/account-entry.tsx",
+            "backend_entry": "python/account_feature.py",
+            "protocol_version": 1,
+        }
+    ]
+    serialized = json.dumps([asdict(feature) for feature in features] + account_feature_load_failures())
+    assert "credential-fixture" not in serialized
+    assert "credential" not in serialized
+    assert "session" not in serialized
+
+
+def test_isolates_duplicate_malformed_missing_and_overlay_features(tmp_path):
+    from core.account_features import account_feature_load_failures, list_account_features
+
+    builtin = tmp_path / "builtin"
+    _write_feature(builtin, "first", feature_id="shared")
+    _write_feature(builtin, "second", feature_id="shared")
+    _write_feature(builtin, "missing", backend_entry="python/missing.py")
+    (builtin / "broken").mkdir(parents=True)
+    (builtin / "broken" / "plugin.yaml").write_text("features: [", encoding="utf-8")
+
+    overlay = tmp_path / "overlay"
+    _write_feature(overlay, "external")
+
+    features = list_account_features(builtin_root=builtin, overlay_spec=str(overlay))
+    failures = account_feature_load_failures()
+
+    assert [feature.feature_id for feature in features] == ["shared"]
+    assert {failure["code"] for failure in failures} == {
+        "duplicate_feature_id",
+        "invalid_manifest",
+        "missing_entry",
+        "unsupported_frontend_source",
+    }
+    assert all(set(failure) == {"featureId", "code"} for failure in failures)
+
+
+def test_rejects_unsafe_ids_and_entry_paths_without_hiding_valid_feature(tmp_path):
+    from core.account_features import account_feature_load_failures, list_account_features
+
+    builtin = tmp_path / "builtin"
+    _write_feature(builtin, "valid")
+    for index, feature_id in enumerate(("../bad", "bad/id", "bad\\id", "/absolute")):
+        _write_feature(builtin, f"bad-id-{index}", feature_id=feature_id)
+    _write_feature(builtin, "parent", frontend_entry="../outside.tsx")
+    _write_feature(builtin, "absolute", backend_entry="/tmp/outside.py")
+
+    escaped = _write_feature(builtin, "symlink")
+    outside = tmp_path / "outside.tsx"
+    outside.write_text("fixture", encoding="utf-8")
+    symlink = escaped / "frontend" / "account-entry.tsx"
+    symlink.unlink()
+    symlink.symlink_to(outside)
+
+    features = list_account_features(builtin_root=builtin, overlay_spec="")
+    failures = account_feature_load_failures()
+
+    assert [feature.feature_id for feature in features] == ["valid-accounts"]
+    assert {failure["code"] for failure in failures} == {"invalid_feature_id", "unsafe_entry_path"}
+
+
+def test_importing_discovery_does_not_initialize_provider_runtime():
+    repo_root = Path(__file__).resolve().parents[1]
+    command = (
+        "import json,sys; import core.account_features; "
+        "print(json.dumps(sorted(name for name in sys.modules "
+        "if name == 'core.providers.registry' or name.startswith('plugins.providers.builtin.codex.python.runtime') "
+        "or 'telegram' in name.lower())))"
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", command],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert json.loads(completed.stdout) == []
