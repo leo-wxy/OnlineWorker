@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: general-ai-capability-and-session-operations
 milestone_name: General AI Capability and Session Operations
 current_phase: 23 — Plugin-Owned Codex Account and Session Asset Management
-current_plan: 23-03 — 建立通用一次性 action 与系统能力 host
+current_plan: 23-06 — 建立 AES-GCM 账号安全存储
 status: Executing Phase 23 Wave 2
-stopped_at: Wave 1 complete — starting 23-03 and 23-06
-last_updated: "2026-08-17T12:31:40Z"
+stopped_at: 23-03 complete — continuing 23-06
+last_updated: "2026-08-17T13:18:10Z"
 progress:
   total_phases: 18
   completed_phases: 11
   total_plans: 49
-  completed_plans: 28
-  percent: 57
+  completed_plans: 29
+  percent: 59
 current_phase_name: Plugin-Owned Codex Account and Session Asset Management
 ---
 
@@ -22,7 +22,7 @@ current_phase_name: Plugin-Owned Codex Account and Session Asset Management
 **Current milestone:** General AI Capability and Session Operations
 **Current phase:** 23 — Plugin-Owned Codex Account and Session Asset Management
 **Status:** Executing Phase 23 Wave 2
-**Current plan:** 23-03 — 建立通用一次性 action 与系统能力 host
+**Current plan:** 23-06 — 建立 AES-GCM 账号安全存储
 **Last archived milestone:** v1.2.1
 
 ## Current Status
@@ -80,14 +80,14 @@ current_phase_name: Plugin-Owned Codex Account and Session Asset Management
 | 20. One-Click Diagnostics And Support Bundle | Completed and installed-app verified | None |
 | 21. Provider Child-Session Visibility | Completed; canonical verification and installed child-suppression smoke passed | None; standalone live Telegram visual comparison was waived and remains unclaimed |
 | 22. Dark Mode Support | Source verified through `22-06` | Await explicit permission for installed-app visual and native-window verification |
-| 23. Plugin-Owned Codex Account and Session Asset Management | Executing Wave 2; 3/12 plans complete | Implement 23-03 and 23-06 |
+| 23. Plugin-Owned Codex Account and Session Asset Management | Executing Wave 2; 4/12 plans complete | Implement 23-06 |
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 **Core value:** Developers can reliably control local AI coding CLI workflows from an installed Mac app while receiving timely remote notifications and final results through supported notification channels.
-**Current focus:** Phase 23 Wave 2 — generic one-shot host and encrypted account storage
+**Current focus:** Phase 23 Wave 2 — encrypted account storage
 
 ## Key Preserved Decisions
 
@@ -220,6 +220,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 ## Session Continuity
 
-Last session: 2026-08-17T12:31:40Z
-Stopped at: Wave 1 complete — starting 23-03 and 23-06
-Resume file: .planning/phases/23-plugin-owned-codex-account-and-session-asset-management/23-03-PLAN.md
+Last session: 2026-08-17T13:18:10Z
+Stopped at: 23-03 complete — continuing 23-06
+Resume file: .planning/phases/23-plugin-owned-codex-account-and-session-asset-management/23-06-PLAN.md

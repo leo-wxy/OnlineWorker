@@ -907,7 +907,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 23-03-PLAN.md — 建立通用一次性 action 与系统能力 host
+- [x] 23-03-PLAN.md — 建立通用一次性 action 与系统能力 host
 - [ ] 23-06-PLAN.md — 建立 AES-GCM 账号安全存储
 
 **Wave 3** *(blocked on Wave 2 completion)*
