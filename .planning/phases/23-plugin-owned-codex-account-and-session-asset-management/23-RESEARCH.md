@@ -10,6 +10,19 @@
 
 所有 D-01..D-40 已视为锁定，不在本研究中重新取舍。页面必须在 bot/provider runtime/owner bridge/Codex app-server 停止时仍可用；Apply 只投影有效 `$CODEX_HOME`/`~/.codex` 的 credential file，不重启、检查、通知或连接任何进程。
 
+## Package Legitimacy Audit
+
+| Package | Status | Evidence | Fit and decision |
+|---------|--------|----------|------------------|
+| `cryptography==48.0.1` | **[VERIFIED]** | [PyPI 48.0.1](https://pypi.org/project/cryptography/48.0.1/) 由 Python Cryptographic Authority 发布，使用 Trusted Publishing 和可验证 provenance；[project metadata](https://pypi.org/project/cryptography/) 标记 Production/Stable、Python `>=3.9`、`Apache-2.0 OR BSD-3-Clause`；[official AESGCM API](https://cryptography.io/en/stable/hazmat/primitives/aead/) 直接支持 256-bit key、12-byte nonce 和 `InvalidTag` tamper failure；[GHSA-537c-gmf6-5ccf](https://github.com/pyca/cryptography/security/advisories/GHSA-537c-gmf6-5ccf) 明确说明 wheel 漏洞在 `48.0.1` 修复。 | 选为 Codex Python plugin 的单一 AES-256-GCM 生产原语依赖。`48.0.1` 为 CPython 3.9+/3.11+ 提供 macOS universal2 wheel，覆盖仓库 DMG 脚本支持的 arm64/x86_64；[49.0.0 changelog](https://cryptography.io/en/stable/changelog/) 明确移除 macOS x86_64 wheel，因此 Phase 23 不升到 49/50。 |
+
+Audit disposition:
+
+- 包名、owner、source repository、license、release provenance、Python 版本和 AESGCM API 均从官方 PyPI/PyCA 资料核验，不是 typosquat/新生包，无 `[ASSUMED]`/`[SUS]`/`[SLOP]` 结论。
+- 实现必须使用 `cryptography.hazmat.primitives.ciphers.aead.AESGCM`，32-byte random key，12-byte random nonce，不自行实现 AES/GCM/tag。
+- `requirements.txt` 是依赖/根配置变更；虽然包合法性已验证，执行计划仍必须在修改前通过用户确认 checkpoint。未确认前不安装、不修改 requirements、不运行 package/build 验证。
+- 引入后必须在 synthetic fixture 中验证 AESGCM round-trip/tamper/vector，并在获得另行打包许可后验证 PyInstaller 收集该 wheel。
+
 ## Current Architecture Facts
 
 ### Provider discovery and the smallest neutral seam
@@ -316,7 +329,7 @@ cd mac-app && npm run build
 
 1. Plan the generic host seam first, but keep its contract to discovery, selector, mount, opaque action, and native system capabilities. Add no future-provider registry, schema, or account abstraction beyond what Codex needs.
 2. Plan Codex backend as independent offline feature modules: compat/model -> encrypted store -> OAuth -> apply -> sessions/ZIP/trash/repair. Keep every mutation behind a per-plugin lock and explicit rollback boundary.
-3. Resolve the AES-256-GCM dependency/placement before implementation. Record why the selected primitive is audited and how PyInstaller/Tauri packaging includes it; current repository dependencies are insufficient.
+3. Use the audited `cryptography==48.0.1` candidate above for the plugin-owned AES-256-GCM implementation, but place a blocking user-confirmation checkpoint before changing `requirements.txt`; packaging inclusion remains unverified until build/package permission is granted.
 4. Pin Cockpit fixtures at commit `35963163813d7424b63cd6053874ce5fc7973d03` in synthetic tests, with a short format note. Do not vendor Cockpit source or copy implementation.
 5. Parameterize `effective_codex_home` in all Codex parsers before adding session operations; add a test fixture that fails if any code opens literal `~/.codex`.
 6. Implement and test account import/apply/export before session asset UI. The acceptance contract must distinguish import success, Apply success, external matched, and external unmanaged.
