@@ -903,7 +903,7 @@ Plans:
 
 - [x] 23-01-PLAN.md — 通过依赖与前端根配置人工闸门
 - [x] 23-02-PLAN.md — 建立中性账号插件发现契约
-- [ ] 23-05-PLAN.md — 固化 Codex 账号模型与 Cockpit 兼容格式
+- [x] 23-05-PLAN.md — 固化 Codex 账号模型与 Cockpit 兼容格式
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
