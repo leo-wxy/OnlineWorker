@@ -888,3 +888,14 @@ Plans:
 - [x] 22-04-PLAN.md — 迁移 Dashboard 与 Task Board 主题表面（source verified）
 - [x] 22-05-PLAN.md — 迁移 Sessions、Usage 与 Commands 主题表面（source verified）
 - [x] 22-06-PLAN.md — 迁移 Setup、Settings、表单与弹窗主题表面（source verified）
+
+### Phase 23: Plugin-Owned Codex Account and Session Asset Management
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 22
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 23 to break down)
