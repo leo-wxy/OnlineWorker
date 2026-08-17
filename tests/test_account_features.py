@@ -138,3 +138,52 @@ def test_importing_discovery_does_not_initialize_provider_runtime():
     )
 
     assert json.loads(completed.stdout) == []
+
+
+def test_backend_entry_is_internal_and_canonically_confined(tmp_path):
+    from core.account_features import account_feature_backend_entry, list_account_features
+
+    builtin = tmp_path / "builtin"
+    plugin_dir = _write_feature(builtin, "valid")
+
+    list_account_features(builtin_root=builtin, overlay_spec="")
+
+    assert account_feature_backend_entry("valid-accounts") == (
+        plugin_dir / "python" / "account_feature.py"
+    ).resolve()
+    assert account_feature_backend_entry("missing") is None
+
+
+def test_main_account_feature_list_exits_before_live_runtime_imports(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    wrapper = """
+import json, runpy, sys
+sys.argv = ['main.py', '--account-feature-list']
+try:
+    runpy.run_path('main.py', run_name='__main__')
+except SystemExit as exc:
+    code = exc.code
+blocked = sorted(name for name in sys.modules if (
+    name == 'telegram'
+    or name.startswith('telegram.')
+    or name.startswith('bot.')
+    or name in {'core.state', 'core.lifecycle', 'core.providers.registry'}
+))
+print(json.dumps({'exit': code, 'blocked': blocked}), file=sys.stderr)
+"""
+
+    completed = subprocess.run(
+        [sys.executable, "-c", wrapper],
+        cwd=repo_root,
+        env={**dict(__import__("os").environ), "HOME": str(tmp_path)},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    envelope = json.loads(completed.stdout)
+    marker = json.loads(completed.stderr)
+    assert envelope["ok"] is True
+    assert set(envelope["data"]) == {"features", "failures"}
+    assert marker == {"exit": 0, "blocked": []}
+    assert list(tmp_path.iterdir()) == []
