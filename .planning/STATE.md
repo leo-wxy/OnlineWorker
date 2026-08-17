@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: general-ai-capability-and-session-operations
 milestone_name: General AI Capability and Session Operations
 current_phase: 23 — Plugin-Owned Codex Account and Session Asset Management
-current_plan: 23-01 — 依赖与前端根配置人工闸门
-status: Planned; implementation blocked on explicit dependency/config approval
-stopped_at: Phase 23 planning complete — awaiting 23-01 approval
-last_updated: "2026-08-17T11:13:49Z"
+current_plan: 23-02 — 建立中性账号插件发现契约
+status: Executing Phase 23 Wave 1
+stopped_at: 23-01 approval recorded — executing 23-02 and 23-05
+last_updated: "2026-08-17T12:18:52Z"
 progress:
   total_phases: 18
   completed_phases: 11
   total_plans: 49
-  completed_plans: 25
-  percent: 51
+  completed_plans: 26
+  percent: 53
 current_phase_name: Plugin-Owned Codex Account and Session Asset Management
 ---
 
@@ -21,8 +21,8 @@ current_phase_name: Plugin-Owned Codex Account and Session Asset Management
 **Updated:** 2026-08-17
 **Current milestone:** General AI Capability and Session Operations
 **Current phase:** 23 — Plugin-Owned Codex Account and Session Asset Management
-**Status:** Planned; implementation blocked on explicit dependency/config approval
-**Current plan:** 23-01 — 依赖与前端根配置人工闸门
+**Status:** Executing Phase 23 Wave 1
+**Current plan:** 23-02 — 建立中性账号插件发现契约
 **Last archived milestone:** v1.2.1
 
 ## Current Status
@@ -50,7 +50,7 @@ current_phase_name: Plugin-Owned Codex Account and Session Asset Management
 - Phase 20 is complete and installed-app verified. Settings > Maintenance provides bounded diagnostics, compact independent results, summary copy, privacy-safe local ZIP export, and Finder reveal. Installed UAT fixed foreground save behavior, localized cancellation, macOS metadata leakage, and real environment-value leakage before final closure. The final ZIP whitelist and installed `.env` zero-match scan passed.
 - Phase 21 is complete and installed-app verified. Provider-owned visibility now suppresses Codex child/internal sessions before EventBus and unbound Topic materialization, provider-native titles are shared across Desktop and Telegram, stale child/internal state and routes reconcile to zero without deleting provider history, and the installed `v1.8.4` runtime passed a real child-suppression smoke. The remaining standalone Telegram visual comparison was explicitly waived at closeout and is not claimed as passed.
 - Phase 22 is source verified through 22-06. System/Light/Dark persistence, first-frame bootstrap, shared main/menubar synchronization, semantic tokens, all existing UI surfaces, and the stable theme development guide are implemented. Frontend regression passed 183 tests, TypeScript and Vite production build passed, and installed-app visual/native-window verification remains pending explicit permission.
-- Phase 23 is fully planned as a plugin-owned Codex account/import/export/apply and offline session-asset feature. Product implementation has not started; 23-01 blocks on explicit approval for the pinned cryptography dependency and generic Vite/TypeScript builtin-plugin frontend root changes.
+- Phase 23 implementation is active. The user approved the pinned cryptography dependency and provider-neutral Vite/TypeScript builtin-plugin frontend root changes at 23-01; this approval does not include dependency installation, build, package, install, restart, or app launch.
 - Phase 17's intermediate preview/cache/hydration fixes and their earlier installed evidence are consolidated in `17-01-SUMMARY.md`; `17-VERIFICATION.md` is the canonical closure result.
 
 ## Archived Milestone
@@ -80,14 +80,14 @@ current_phase_name: Plugin-Owned Codex Account and Session Asset Management
 | 20. One-Click Diagnostics And Support Bundle | Completed and installed-app verified | None |
 | 21. Provider Child-Session Visibility | Completed; canonical verification and installed child-suppression smoke passed | None; standalone live Telegram visual comparison was waived and remains unclaimed |
 | 22. Dark Mode Support | Source verified through `22-06` | Await explicit permission for installed-app visual and native-window verification |
-| 23. Plugin-Owned Codex Account and Session Asset Management | Planned; 12 plans across 7 waves | Approve 23-01 dependency/config changes before implementation |
+| 23. Plugin-Owned Codex Account and Session Asset Management | Executing Wave 1; 1/12 plans complete | Implement 23-02 and 23-05 |
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 **Core value:** Developers can reliably control local AI coding CLI workflows from an installed Mac app while receiving timely remote notifications and final results through supported notification channels.
-**Current focus:** Phase 23 — 23-01 dependency/config approval checkpoint
+**Current focus:** Phase 23 Wave 1 — neutral account discovery and Cockpit compatibility
 
 ## Key Preserved Decisions
 
@@ -216,10 +216,10 @@ See: `.planning/PROJECT.md` (updated 2026-07-11)
 - Phase 22 added: Dark Mode Support.
 - Phase 22 planned on 2026-08-16: 6 plans across 3 waves cover theme runtime/first frame, reusable tokens and `docs/UI-THEME.md`, App shell/menubar parity, and full existing UI surface migration. Plan structure passed for all 6 plans; CONTEXT decision coverage and post-planning gap analysis both passed 14/14.
 - Phase 22 source verification completed on 2026-08-16: all 6 plans are implemented, frontend regression passed `183` tests, TypeScript and Vite build passed, and independent reviews found no remaining P0/P1 issue. Installed-app visual/native-window verification was not run and remains unclaimed pending explicit permission.
-- Phase 23 planned on 2026-08-17: 12 plans across 7 waves cover independent enabled-builtin discovery, generic one-shot/native capabilities, Cockpit-compatible account transfer, encrypted storage, explicit Apply/export, and current-home offline session assets. Plan schema/structure and final independent review passed after closing all execution-level findings; implementation is stopped at the 23-01 dependency/config approval checkpoint.
+- Phase 23 planned on 2026-08-17: 12 plans across 7 waves cover independent enabled-builtin discovery, generic one-shot/native capabilities, Cockpit-compatible account transfer, encrypted storage, explicit Apply/export, and current-home offline session assets. The 23-01 dependency/config approval checkpoint passed; Wave 1 implementation is active without build/package/install permission.
 
 ## Session Continuity
 
-Last session: 2026-08-17T11:13:49Z
-Stopped at: Phase 23 planning complete — awaiting 23-01 approval
-Resume file: .planning/phases/23-plugin-owned-codex-account-and-session-asset-management/23-01-PLAN.md
+Last session: 2026-08-17T12:18:52Z
+Stopped at: 23-01 approval recorded — executing 23-02 and 23-05
+Resume file: .planning/phases/23-plugin-owned-codex-account-and-session-asset-management/23-02-PLAN.md
