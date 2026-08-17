@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: general-ai-capability-and-session-operations
 milestone_name: General AI Capability and Session Operations
 current_phase: 23 — Plugin-Owned Codex Account and Session Asset Management
-current_plan: 23-02 — 建立中性账号插件发现契约
+current_plan: 23-05 — 固化 Codex 账号模型与 Cockpit 兼容格式
 status: Executing Phase 23 Wave 1
 stopped_at: 23-01 approval recorded — executing 23-02 and 23-05
 last_updated: "2026-08-17T12:18:52Z"
@@ -11,8 +11,8 @@ progress:
   total_phases: 18
   completed_phases: 11
   total_plans: 49
-  completed_plans: 26
-  percent: 53
+  completed_plans: 27
+  percent: 55
 current_phase_name: Plugin-Owned Codex Account and Session Asset Management
 ---
 
@@ -22,7 +22,7 @@ current_phase_name: Plugin-Owned Codex Account and Session Asset Management
 **Current milestone:** General AI Capability and Session Operations
 **Current phase:** 23 — Plugin-Owned Codex Account and Session Asset Management
 **Status:** Executing Phase 23 Wave 1
-**Current plan:** 23-02 — 建立中性账号插件发现契约
+**Current plan:** 23-05 — 固化 Codex 账号模型与 Cockpit 兼容格式
 **Last archived milestone:** v1.2.1
 
 ## Current Status
@@ -80,7 +80,7 @@ current_phase_name: Plugin-Owned Codex Account and Session Asset Management
 | 20. One-Click Diagnostics And Support Bundle | Completed and installed-app verified | None |
 | 21. Provider Child-Session Visibility | Completed; canonical verification and installed child-suppression smoke passed | None; standalone live Telegram visual comparison was waived and remains unclaimed |
 | 22. Dark Mode Support | Source verified through `22-06` | Await explicit permission for installed-app visual and native-window verification |
-| 23. Plugin-Owned Codex Account and Session Asset Management | Executing Wave 1; 1/12 plans complete | Implement 23-02 and 23-05 |
+| 23. Plugin-Owned Codex Account and Session Asset Management | Executing Wave 1; 2/12 plans complete | Complete 23-05 |
 
 ## Project Reference
 
