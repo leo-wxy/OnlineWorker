@@ -14,9 +14,11 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
-use tauri_plugin_shell::{process::CommandEvent, ShellExt};
-
-use super::provider_bridge_common::{kill_provider_bridge_process_tree, ProviderBridgeOutput};
+use tauri_plugin_shell::{
+    process::{CommandChild, CommandEvent},
+    ShellExt,
+};
+use tokio::sync::Mutex as AsyncMutex;
 
 const SIDECAR_TIMEOUT: Duration = Duration::from_secs(60);
 const NATIVE_HANDLE_TTL: Duration = Duration::from_secs(120);
@@ -148,26 +150,7 @@ fn account_feature_root(app: &AppHandle, feature_id: &str) -> Result<PathBuf, St
     Ok(root)
 }
 
-pub(crate) fn normalize_sidecar_result(
-    result: Result<ProviderBridgeOutput, String>,
-) -> AccountFeatureResponse {
-    let output = match result {
-        Ok(output) => output,
-        Err(error) if error.contains("timed out") => {
-            return failure("host_timeout", "账号功能操作超时。", true)
-        }
-        Err(error) if error.contains("output too large") => {
-            return failure("output_too_large", "账号功能返回数据过大。", false)
-        }
-        Err(_) => return failure("host_unavailable", "账号功能宿主不可用。", true),
-    };
-    if !output.success() {
-        return failure("feature_failed", "账号功能操作失败。", true);
-    }
-    let parsed: Value = match serde_json::from_slice(&output.stdout) {
-        Ok(value) => value,
-        Err(_) => return failure("invalid_response", "账号功能返回无效。", false),
-    };
+fn normalize_account_feature_envelope(parsed: Value) -> AccountFeatureResponse {
     let Some(ok) = parsed.get("ok").and_then(Value::as_bool) else {
         return failure("invalid_response", "账号功能返回无效。", false);
     };
@@ -186,106 +169,120 @@ pub(crate) fn normalize_sidecar_result(
     failure(code, "账号功能操作失败。", retryable)
 }
 
-async fn collect_account_feature_events<F>(
-    mut rx: tauri::async_runtime::Receiver<CommandEvent>,
-    root_pid: u32,
-    max_output_bytes: usize,
-    kill_root: F,
-) -> Result<ProviderBridgeOutput, String>
-where
-    F: FnOnce(u32),
-{
-    let mut code = None;
-    let mut signal = None;
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
+fn parse_worker_response(
+    raw: &[u8],
+    expected_request_id: &str,
+) -> Result<AccountFeatureResponse, String> {
+    if raw.len() > MAX_HOST_OUTPUT_BYTES {
+        return Err("account feature output too large".into());
+    }
+    let parsed: Value =
+        serde_json::from_slice(raw).map_err(|_| "account feature invalid response".to_string())?;
+    if parsed.get("requestId").and_then(Value::as_str) != Some(expected_request_id) {
+        return Err("account feature invalid response".into());
+    }
+    Ok(normalize_account_feature_envelope(parsed))
+}
 
-    while let Some(event) = rx.recv().await {
+fn worker_failure(error: &str) -> AccountFeatureResponse {
+    if error.contains("timed out") {
+        failure("host_timeout", "账号功能操作超时。", true)
+    } else if error.contains("output too large") {
+        failure("output_too_large", "账号功能返回数据过大。", false)
+    } else if error.contains("invalid response") {
+        failure("invalid_response", "账号功能返回无效。", false)
+    } else {
+        failure("host_unavailable", "账号功能宿主不可用。", true)
+    }
+}
+
+struct AccountFeatureWorker {
+    child: CommandChild,
+    events: tauri::async_runtime::Receiver<CommandEvent>,
+}
+
+fn spawn_account_feature_worker(app: &AppHandle) -> Result<AccountFeatureWorker, String> {
+    let sidecar = app
+        .shell()
+        .sidecar("onlineworker-bot")
+        .map_err(|_| "account feature spawn failed".to_string())?;
+    let (events, child) = sidecar
+        .args(["--account-feature-worker"])
+        .env("PYINSTALLER_RESET_ENVIRONMENT", "1")
+        .spawn()
+        .map_err(|_| "account feature spawn failed".to_string())?;
+    Ok(AccountFeatureWorker { child, events })
+}
+
+async fn receive_worker_response(
+    worker: &mut AccountFeatureWorker,
+    request_id: &str,
+) -> Result<AccountFeatureResponse, String> {
+    let mut stderr_bytes = 0usize;
+    while let Some(event) = worker.events.recv().await {
         match event {
-            CommandEvent::Terminated(payload) => {
-                code = payload.code;
-                signal = payload.signal;
-            }
-            CommandEvent::Stdout(line) | CommandEvent::Stderr(line)
-                if stdout
-                    .len()
-                    .saturating_add(stderr.len())
-                    .saturating_add(line.len())
-                    > max_output_bytes =>
-            {
-                kill_root(root_pid);
-                return Err("account feature output too large".into());
-            }
-            CommandEvent::Stdout(line) => {
-                stdout.extend(line);
-            }
+            CommandEvent::Stdout(line) => return parse_worker_response(&line, request_id),
             CommandEvent::Stderr(line) => {
-                stderr.extend(line);
+                stderr_bytes = stderr_bytes.saturating_add(line.len());
+                if stderr_bytes > MAX_HOST_OUTPUT_BYTES {
+                    return Err("account feature output too large".into());
+                }
             }
-            CommandEvent::Error(_) => return Err("account feature event failed".into()),
+            CommandEvent::Terminated(_) | CommandEvent::Error(_) => {
+                return Err("account feature event failed".into())
+            }
             _ => {}
         }
     }
-
-    Ok(ProviderBridgeOutput {
-        code,
-        signal,
-        stdout,
-        stderr,
-    })
+    Err("account feature event failed".into())
 }
 
-async fn run_account_feature_sidecar(
+fn stop_worker(slot: &mut Option<AccountFeatureWorker>) {
+    if let Some(worker) = slot.take() {
+        let _ = worker.child.kill();
+    }
+}
+
+async fn run_account_feature_worker(
     app: &AppHandle,
-    args: Vec<String>,
-    input: Value,
+    state: &AccountFeatureHostState,
+    mut request: Value,
     timeout: Duration,
 ) -> AccountFeatureResponse {
-    let encoded = match serde_json::to_vec(&input) {
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let Some(object) = request.as_object_mut() else {
+        return failure("invalid_payload", "账号功能参数无效。", false);
+    };
+    object.insert("requestId".into(), Value::String(request_id.clone()));
+    let mut encoded = match serde_json::to_vec(&request) {
         Ok(encoded) if encoded.len() <= MAX_ACTION_BYTES => encoded,
         _ => return failure("invalid_payload", "账号功能参数无效。", false),
     };
-    let sidecar = match app.shell().sidecar("onlineworker-bot") {
-        Ok(sidecar) => sidecar,
-        Err(_) => return failure("host_unavailable", "账号功能宿主不可用。", true),
-    };
-    let (rx, mut child) = match sidecar
-        .args(args)
-        .env("PYINSTALLER_RESET_ENVIRONMENT", "1")
-        .set_raw_out(true)
-        .spawn()
-    {
-        Ok(result) => result,
-        Err(_) => return failure("host_unavailable", "账号功能宿主不可用。", true),
-    };
-    let root_pid = child.pid();
-    let writer = tauri::async_runtime::spawn_blocking(move || child.write(&encoded));
-    let work = async {
-        let (write_result, collect_result) = tokio::join!(
-            writer,
-            collect_account_feature_events(
-                rx,
-                root_pid,
-                MAX_HOST_OUTPUT_BYTES,
-                kill_provider_bridge_process_tree,
-            )
-        );
-        match write_result {
-            Ok(Ok(())) => collect_result,
-            _ => Err("account feature write failed".into()),
+    encoded.push(b'\n');
+
+    let mut slot = state.worker.lock().await;
+    if slot.is_none() {
+        match spawn_account_feature_worker(app) {
+            Ok(worker) => *slot = Some(worker),
+            Err(error) => return worker_failure(&error),
         }
-    };
-    let result = match tokio::time::timeout(timeout, work).await {
-        Ok(result) => result,
+    }
+    let worker = slot.as_mut().expect("worker initialized");
+    if worker.child.write(&encoded).is_err() {
+        stop_worker(&mut slot);
+        return worker_failure("account feature write failed");
+    }
+    match tokio::time::timeout(timeout, receive_worker_response(worker, &request_id)).await {
+        Ok(Ok(response)) => response,
+        Ok(Err(error)) => {
+            stop_worker(&mut slot);
+            worker_failure(&error)
+        }
         Err(_) => {
-            kill_provider_bridge_process_tree(root_pid);
-            Err(format!(
-                "account feature timed out after {}ms",
-                timeout.as_millis()
-            ))
+            stop_worker(&mut slot);
+            worker_failure("account feature timed out")
         }
-    };
-    normalize_sidecar_result(result)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -337,6 +334,7 @@ struct LoopbackShared {
 pub struct AccountFeatureHostState {
     native_handles: Arc<Mutex<HashMap<String, NativeHandleRecord>>>,
     loopbacks: Arc<Mutex<HashMap<String, LoopbackSession>>>,
+    worker: Arc<AsyncMutex<Option<AccountFeatureWorker>>>,
 }
 
 fn expiry_epoch_ms(ttl: Duration) -> u64 {
@@ -397,6 +395,12 @@ fn validated_native_target(
 }
 
 impl AccountFeatureHostState {
+    pub fn shutdown(&self) {
+        if let Ok(mut worker) = self.worker.try_lock() {
+            stop_worker(&mut *worker);
+        }
+    }
+
     pub(crate) fn issue_native_handle(
         &self,
         feature_id: &str,
@@ -844,14 +848,17 @@ pub(crate) fn cancel_loopback_session(
 }
 
 #[tauri::command]
-pub async fn list_account_features(app: AppHandle) -> AccountFeatureResponse {
-    run_account_feature_sidecar(
+pub async fn list_account_features(
+    app: AppHandle,
+    state: tauri::State<'_, AccountFeatureHostState>,
+) -> Result<AccountFeatureResponse, String> {
+    Ok(run_account_feature_worker(
         &app,
-        vec!["--account-feature-list".into()],
-        json!({}),
+        state.inner(),
+        json!({"command": "list"}),
         SIDECAR_TIMEOUT,
     )
-    .await
+    .await)
 }
 
 #[tauri::command]
@@ -887,16 +894,13 @@ pub async fn invoke_account_feature(
             ))
         }
     };
-    Ok(run_account_feature_sidecar(
+    Ok(run_account_feature_worker(
         &app,
-        vec![
-            "--account-feature-action".into(),
-            "--account-feature-id".into(),
-            feature_id,
-            "--account-feature-action-name".into(),
-            action,
-        ],
+        state.inner(),
         json!({
+            "command": "action",
+            "featureId": feature_id,
+            "action": action,
             "payload": payload,
             "trusted_context": {
                 "data_root": data_root,
@@ -1015,22 +1019,17 @@ pub async fn cancel_account_feature_loopback(
 mod tests {
     use super::{
         await_loopback_session, begin_loopback_session, cancel_loopback_session,
-        collect_account_feature_events, confined_feature_root, normalize_sidecar_result,
-        valid_feature_id, validate_action_payload, AccountFeatureHostState, CapabilityMode,
+        confined_feature_root, parse_worker_response, valid_feature_id, validate_action_payload,
+        worker_failure, AccountFeatureHostState, CapabilityMode, MAX_HOST_OUTPUT_BYTES,
     };
-    use crate::commands::provider_bridge_common::ProviderBridgeOutput;
     use serde_json::json;
     use std::fs;
     use std::io::{Read, Write};
     use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
     use std::os::unix::fs::{symlink, PermissionsExt};
-    use std::sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc, Barrier,
-    };
+    use std::sync::{Arc, Barrier};
     use std::thread;
     use std::time::{Duration, Instant};
-    use tauri_plugin_shell::process::CommandEvent;
 
     fn temp_dir() -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!(
@@ -1084,67 +1083,36 @@ mod tests {
     }
 
     #[test]
-    fn process_failures_are_generic_and_redacted() {
-        let failed = normalize_sidecar_result(Ok(ProviderBridgeOutput {
-            code: Some(1),
-            signal: None,
-            stdout: b"credential-fixture".to_vec(),
-            stderr: b"credential-fixture /Users/example/private.json".to_vec(),
-        }));
-        let malformed = normalize_sidecar_result(Ok(ProviderBridgeOutput {
-            code: Some(0),
-            signal: None,
-            stdout: b"not-json".to_vec(),
-            stderr: Vec::new(),
-        }));
-        let timeout = normalize_sidecar_result(Err("account feature timed out after 10ms".into()));
-        let oversized = normalize_sidecar_result(Err("account feature output too large".into()));
+    fn worker_responses_are_request_bound_bounded_and_redacted() {
+        let success = parse_worker_response(
+            br#"{"requestId":"request-1","ok":true,"data":{"value":1},"error":null}"#,
+            "request-1",
+        )
+        .unwrap();
+        assert!(success.ok);
 
-        for response in [&failed, &malformed, &timeout, &oversized] {
+        let malformed =
+            worker_failure(&parse_worker_response(b"credential-fixture", "request-1").unwrap_err());
+        let mismatched = worker_failure(
+            &parse_worker_response(
+                br#"{"requestId":"other","ok":true,"data":null,"error":null}"#,
+                "request-1",
+            )
+            .unwrap_err(),
+        );
+        let timeout = worker_failure("account feature timed out");
+        let oversized = worker_failure(
+            &parse_worker_response(&vec![0; MAX_HOST_OUTPUT_BYTES + 1], "request-1").unwrap_err(),
+        );
+
+        for response in [&malformed, &mismatched, &timeout, &oversized] {
             let serialized = serde_json::to_string(response).unwrap();
             assert!(!serialized.contains("credential-fixture"));
-            assert!(!serialized.contains("/Users/example"));
         }
-        assert_eq!(failed.error.unwrap().code, "feature_failed");
         assert_eq!(malformed.error.unwrap().code, "invalid_response");
+        assert_eq!(mismatched.error.unwrap().code, "invalid_response");
         assert_eq!(timeout.error.unwrap().code, "host_timeout");
         assert_eq!(oversized.error.unwrap().code, "output_too_large");
-    }
-
-    #[tokio::test]
-    async fn sidecar_output_is_bounded_and_kills_process() {
-        let (tx, rx) = tauri::async_runtime::channel(1);
-        tx.send(CommandEvent::Stdout(vec![0; 9])).await.unwrap();
-        drop(tx);
-        let killed_pid = Arc::new(AtomicU32::new(0));
-        let killed_pid_for_callback = killed_pid.clone();
-
-        let error = collect_account_feature_events(rx, 4242, 8, move |pid| {
-            killed_pid_for_callback.store(pid, Ordering::SeqCst);
-        })
-        .await
-        .unwrap_err();
-
-        assert_eq!(error, "account feature output too large");
-        assert_eq!(killed_pid.load(Ordering::SeqCst), 4242);
-    }
-
-    #[tokio::test]
-    async fn sidecar_raw_output_reassembles_fragmented_json_without_changes() {
-        let (tx, rx) = tauri::async_runtime::channel(2);
-        tx.send(CommandEvent::Stdout(b"{\"ok\":tr".to_vec()))
-            .await
-            .unwrap();
-        tx.send(CommandEvent::Stdout(b"ue}".to_vec()))
-            .await
-            .unwrap();
-        drop(tx);
-
-        let output = collect_account_feature_events(rx, 4242, 64, |_| {})
-            .await
-            .unwrap();
-
-        assert_eq!(output.stdout, b"{\"ok\":true}");
     }
 
     #[test]

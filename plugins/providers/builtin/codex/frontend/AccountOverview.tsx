@@ -2,31 +2,15 @@ import { useCallback, useEffect, useState } from "react";
 import type { AccountFeatureApi } from "../../../../../mac-app/src/components/AccountFeatureHost";
 import { AddAccountModal } from "./AddAccountModal";
 import { ConfirmActionDialog } from "./ConfirmActionDialog";
+import {
+  loadAccountSummaries,
+  parseAccountSummaries,
+  saveAccountSummaries,
+  type AccountSummary,
+  type QuotaWindow,
+} from "./accountSummaryStorage";
 import { pluginResult } from "./plugin_result";
 import { SessionAssetsPage } from "./SessionAssetsPage";
-
-interface QuotaWindow {
-  remainingPercent?: number;
-  windowSeconds?: number;
-  resetAt?: string | null;
-}
-
-interface QuotaSnapshot {
-  status?: "ok" | "error" | "unsupported";
-  planType?: string;
-  primary?: QuotaWindow | null;
-  secondary?: QuotaWindow | null;
-  errorCode?: string;
-}
-
-interface AccountSummary {
-  id: string;
-  stableIdentityDisplay: string;
-  authMode: string;
-  source: string;
-  isCurrent: boolean;
-  quota?: QuotaSnapshot;
-}
 
 function quotaLabel(window: QuotaWindow | null | undefined, fallback: string) {
   const seconds = window?.windowSeconds || 0;
@@ -57,9 +41,9 @@ function sourceLabel(source: string, authMode: string) {
 }
 
 export function AccountOverview({ api }: { api: AccountFeatureApi }) {
-  const [accounts, setAccounts] = useState<AccountSummary[]>([]);
+  const [accounts, setAccounts] = useState<AccountSummary[]>(loadAccountSummaries);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(accounts.length === 0);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -71,8 +55,9 @@ export function AccountOverview({ api }: { api: AccountFeatureApi }) {
     setError("");
     try {
       const value = pluginResult(await api.invoke("accounts.list"));
-      const next = (value.accounts as AccountSummary[]) || [];
+      const next = parseAccountSummaries(value.accounts);
       setAccounts(next);
+      saveAccountSummaries(next);
       setSelected((current) => new Set([...current].filter((id) => next.some((account) => account.id === id))));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "账号读取失败");

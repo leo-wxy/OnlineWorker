@@ -15,7 +15,10 @@ test("shared account host stays provider neutral", async () => {
 test("plugin frontend keeps secrets and live surfaces out of persistence", async () => {
   const files = ["AccountOverview.tsx", "AddAccountModal.tsx", "SessionAssetsPage.tsx"];
   const source = (await Promise.all(files.map((name) => readFile(new URL(`plugins/providers/builtin/codex/frontend/${name}`, repo), "utf8")))).join("\n");
+  const cache = await readFile(new URL("plugins/providers/builtin/codex/frontend/accountSummaryStorage.ts", repo), "utf8");
   assert.doesNotMatch(source, /localStorage|sessionStorage|provider_owner_bridge|list_provider_sessions|get_usage_source_summary/);
   assert.doesNotMatch(source, /native_paths|data_root|CODEX_HOME/);
   assert.match(source, /type="password"/);
+  assert.match(cache, /localStorage/);
+  assert.doesNotMatch(cache, /credentials|access_token|refresh_token|OPENAI_API_KEY|native_paths|data_root|CODEX_HOME/);
 });

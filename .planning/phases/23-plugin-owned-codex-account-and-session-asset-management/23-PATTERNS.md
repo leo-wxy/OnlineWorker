@@ -7,7 +7,7 @@
 ## 结论先行
 
 - **可直接复用**：现有 manifest/YAML 读取、插件失败隔离的形状；`default_codex_home()` 的有效 Home precedence；`data_dir()`/`ensure_data_dir()` 的宿主数据根；现有 `ow-*` CSS、native dialog、pytest/Rust/Node test 基础设施。
-- **需最小扩展**：在当前 discovery 旁增加中性 account-feature metadata；增加独立的一次性 opaque action；`App.tsx` 增加动态入口和 selector/page mount；Codex builtin 通过 build-time frontend entry 接入。
+- **需最小扩展**：在当前 discovery 旁增加中性 account-feature metadata；增加独立常驻 opaque action worker；`App.tsx` 增加动态入口和 selector/page mount；Codex builtin 通过 build-time frontend entry 接入。
 - **禁止复用**：`provider_owner_bridge`、`provider_sessions`、Task Board、EventBus、notification、现有 Usage/ccusage projection、Codex app-server/runtime lifecycle。它们把离线页面重新耦合到 runtime 或实时链路，违反 D-02/D-12/D-26/D-31/D-40。
 
 ## 角色与真实 analog
@@ -16,8 +16,8 @@
 | --- | --- | --- |
 | provider manifest / descriptor / capability | `core/providers/contracts.py:68-80` `ProviderManifestCapabilities`；`:93-106` `ProviderMetadata`；`:173-189` `ProviderDescriptor`；`core/providers/manifest.py:85-100` `capabilities_from_manifest()`、`:112-173` `metadata_from_provider_manifest()`；`plugins/providers/builtin/codex/plugin.yaml:1-12,33-58,139-142`；`plugins/providers/builtin/codex/python/provider.py:61-79` `create_provider_descriptor()` | **需最小扩展**：沿 YAML 解析、稳定 id/label/icon/entrypoint 的现有形状新增中性 feature declaration/descriptor。**不要**把 account/page 字段塞进 `ProviderManifestCapabilities`；该类型目前全是 runtime/session/message 能力。Codex descriptor 的 hooks 从 `provider.py:67-127` 进入 live runtime，不能挂载 account actions。 |
 | discovery / registry / per-plugin failure isolation | `core/providers/registry.py:19-27` `_iter_provider_plugin_manifests()`；`:37-48` `_load_descriptor_from_entrypoint()`；`:51-86` `_load_provider_descriptors()`；`:89-90` `provider_load_failures()`；`mac-app/src-tauri/src/commands/config_provider.rs:730-762,837-862` manifest source discovery | **可直接复用形状，需最小扩展边界**：复用 manifest path/import-root/校验/失败记录的思路；独立输出 feature metadata，不把 feature loader 塞入 `_PROVIDERS` live descriptor。失败应保留 feature id、entrypoint、safe diagnostic，不能让一个插件阻断其他 selector。Rust 的 `provider_plugin_manifest_sources_with_paths()` 可借鉴 builtin/overlay/fallback 顺序，但不要为 page runtime 误用 `provider_assets.rs` 的 provider-only include。 |
-| generic one-shot feature operation | `main.py:99-101` `_print_provider_session_bridge_result()`；`:104-205` `_run_provider_session_bridge()`；`:255-391` `main()` argparse/early-exit dispatch；`plugins/providers/builtin/codex/python/tui_host_protocol.py:30-49` `build_send_message_request()`/`encode_host_request()`/`decode_host_response()` | **需最小扩展**：维持一次进程、单 JSON stdout、错误退出的 envelope 习惯，新增独立 feature operation/handler；action/payload 对 host opaque。TUI newline JSON 可借鉴编码习惯，但不能复用其 session/control 语义。不得把 Phase 23 action 加进 provider session operation 列表，或让一次性 operation 初始化 Telegram/provider runtime。 |
-| Tauri command / sidecar process / timeout | `mac-app/src-tauri/src/commands/provider_bridge_common.rs:88-99` `ProviderBridgeOutput`；`:164-224` `collect_provider_bridge_events_with_timeout()`；`:226-254` `run_provider_bridge_sidecar()`；`mac-app/src-tauri/src/commands/provider_sessions.rs:723-777` `run_provider_session_bridge()` | **需最小扩展**：复用 sidecar spawn、stdout/stderr 收集、timeout、非 0/invalid JSON 的通用错误形状，另建 `account_feature` command/transport。`ProviderBridgeOutput` 的 `code/signal/stdout/stderr` 是合适的过程边界；`run_provider_session_bridge()` 的参数、owner bridge socket、provider session error 语义均禁止搬入。命令在 `mac-app/src-tauri/src/commands/mod.rs:1-17` 和 `lib.rs:408-465` 注册时保持中性。 |
+| generic account-feature worker | `main.py` early account-feature bootstrap；`plugins/providers/builtin/codex/python/tui_host_protocol.py:30-49` newline JSON encoding analog | **已最小扩展**：独立 early JSONL worker 串行处理 request-bound list/action；action/payload 对 host opaque。不得把 Phase 23 action 加进 provider session operation 列表，或让 worker 初始化 Telegram/provider runtime。 |
+| Tauri command / worker lifecycle / timeout | `mac-app/src-tauri/src/commands/account_feature.rs` `AccountFeatureHostState` / `run_account_feature_worker()` | **已最小扩展**：Tauri 自持独立 child/stdin/stdout，限制输入输出与 timeout；异常时清理并在下一请求懒启动，不复用 owner bridge socket、provider session error 或 app-server authority。 |
 | JSON envelope / generic error | `main.py:99-101,188-203` 输出 JSON；`provider_sessions.rs:762-777` 只在成功 stdout 反序列化 `Value`；`mac-app/src-tauri/src/commands/task_board_state.rs:90-120` 的 `ok/error` response structs | **需最小扩展**：host-visible response 只允许 `{ok,data,error{code,message,retryable,diagnosticId?}}` 等无 secret envelope；成功 data 由 plugin opaque 返回。`TaskBoard` response 可借鉴 optional error 字段和 serde camelCase，但不能复用其 activity/session contract。stdout 必须是唯一机器响应，stderr/diagnostic 不得含 credential/session 原文。 |
 | App dynamic sidebar / page shell | `mac-app/src/App.tsx:70-80` `activeTab`/mount state；`:217-230` `getTabIcon()`；`:299-337` `PRIMARY_APP_TABS.map()` sidebar；`:440-545` `Suspense`/page mount；`mac-app/src/utils/appTabs.js:1-6` static tab registry；`mac-app/tests/appShell.test.mjs:10-23,59-85` shell contracts | **需最小扩展**：保留 `App` 的 sidebar width 84/248、native button、`Suspense` loading、page frame；新增的是“至少一个 account feature 才显示一个账号入口”、metadata-driven selector/mount 和 isolated error boundary。`PRIMARY_APP_TABS` 是静态主导航，不能把 Codex 硬编码进数组；feature presence 应来自 generic discovery。不要把 Codex labels/actions/model 放 `App.tsx`、`appTabs.js` 或 shared i18n。 |
 | provider metadata-driven selector/card | `mac-app/src/components/ProviderSettingsPanel.tsx:146-207` `ProviderSettingsPanel` load/state；`:381-447` loading/error/empty + metadata map/card；`mac-app/src/components/ai-settings/AiSettingsSidebar.tsx`（metadata list/sidebar analog） | **可直接复用 UI 结构，需最小扩展数据契约**：`useState` 的 `loading/error`、`invoke`、`useCallback(load)`、metadata-driven `map` 和 per-id busy state 可复用。ProviderSettings 的 provider-specific capability checks、CLI auth fields、`externalCli` 分支不复用到 account host；Codex content 应留在 plugin entry。 |
@@ -39,7 +39,7 @@
 
 | 禁止 analog | 证据 | 为什么禁止 |
 | --- | --- | --- |
-| provider owner bridge / live session bridge | `core/provider_owner_bridge.py:14-30,44-48` imports state, routing and publishes messages；`mac-app/src-tauri/src/commands/provider_bridge_common.rs:84-86` socket；`provider_sessions.rs:347-486,723-777` owner-bridge session list/read/archive/sidecar | 依赖 runtime readiness、socket、session lifecycle；bot/provider runtime 停止时不可用。Phase 23 action 必须独立 one-shot。 |
+| provider owner bridge / live session bridge | `core/provider_owner_bridge.py:14-30,44-48` imports state, routing and publishes messages；`mac-app/src-tauri/src/commands/provider_bridge_common.rs:84-86` socket；`provider_sessions.rs:347-486,723-777` owner-bridge session list/read/archive/sidecar | 依赖 runtime readiness、socket、session lifecycle；bot/provider runtime 停止时不可用。Phase 23 action 必须使用独立 account-feature worker。 |
 | Task Board / EventBus / notification | `mac-app/src-tauri/src/commands/task_board_state.rs:20-68,90-154` session activity/control schema；`core/provider_owner_bridge.py:25-30` publish hooks | account apply/import/trash/repair 不得产生 live activity、message、notification 或 approval；这些结构会把离线资产操作带入实时链路。 |
 | OnlineWorker Usage / ccusage projection | `mac-app/src-tauri/src/commands/provider_usage.rs:10-13,17-31,83-114` catalog/summary contracts；`plugins/usage/builtin/ccusage/python/runtime.py:111-165` sidecar/cache | Usage source/plugin ownership与 Codex 本地 session asset scope不同；复用会违反 D-31，且成本/数据根不再由 Codex feature 控制。 |
 | `ProviderSettingsPanel` provider-specific fields | `ProviderSettingsPanel.tsx:65-84,417-438` external CLI/remote proxy capability branches | 可以复用 loading/card shell，不能复用 provider CLI auth/remote-proxy model；account host 必须 metadata-only。 |
@@ -52,7 +52,7 @@ plugin.yaml
   └─ generic feature declaration
      ├─ neutral discovery/registry (core boundary, metadata + isolated failures)
      ├─ Tauri account_feature command
-     │   └─ one-shot sidecar JSON envelope (opaque featureId/action/payload)
+     │   └─ resident worker JSONL envelope (opaque featureId/action/payload)
      └─ App.tsx host
          ├─ dynamic single 账号 sidebar entry
          ├─ generic plugin selector + error/retry/diagnostic boundary
@@ -81,8 +81,8 @@ Tests
 1. `core/providers/contracts.py:68-80` — 现有 runtime capability，不要把 account/page capability 混入。
 2. `core/providers/registry.py:51-90` — manifest descriptor 加载、失败隔离、diagnostic 形状。
 3. `plugins/providers/builtin/codex/plugin.yaml:139-142` — Codex 当前 Python entrypoints；feature entry 应独立声明。
-4. `main.py:99-205,255-391` — one-shot sidecar dispatch/单 JSON stdout 的最接近 analog。
-5. `mac-app/src-tauri/src/commands/provider_bridge_common.rs:226-254` — Tauri sidecar spawn/timeout 基础，但不带 owner socket 语义。
+4. `main.py` early account-feature branch — 独立 JSONL worker，不加载 live runtime。
+5. `mac-app/src-tauri/src/commands/account_feature.rs` — Tauri 自持 worker/spawn/timeout/request binding，不带 owner socket 语义。
 6. `mac-app/src/App.tsx:299-337,440-545` — sidebar/page mounting 的唯一 host seam。
 7. `mac-app/src/components/ActionGuideDialog.tsx:37-83,143-159` — modal Escape/focus/ARIA/disabled 基础。
 8. `plugins/providers/builtin/codex/python/transport.py:25-27` — `CODEX_HOME` precedence；必须一次解析并显式传递。

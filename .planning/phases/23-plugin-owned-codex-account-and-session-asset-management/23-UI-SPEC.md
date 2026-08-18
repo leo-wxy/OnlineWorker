@@ -103,8 +103,11 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 
 账号卡片只显示：selection checkbox、稳定身份、`当前账号` / `未应用`、来源（`OAuth` / `Token / JSON` / `API Key` / `文件导入`）、外部状态（`外部修改` / `未托管`）、官方返回的 plan/额度窗口，以及 `应用`/`重新应用`、`刷新额度`和 `导出`。页面提供 `全选当前结果`、`清除选择`、`已选择 {count} 项`和 `导出选中`；无选中时用 native `disabled`。不显示凭据本体，不提供标签、备注、分组、轮换、账号池、网关、模型供应商、唤醒或自动切换。
 
+账号首屏允许从 versioned local cache 读取上述卡片所需的脱敏字段；命中时立即渲染，随后后台执行 `accounts.list` 覆盖校准。缓存只按显式白名单重建对象，不保存 callback、表单输入、native path、credential/token 或 backend 未知字段。后台刷新失败时保留已有缓存行并显示错误。
+
 | State | Copy and behavior |
 |-------|-------------------|
+| Cached | 立即显示脱敏账号卡片；后台校准不清空已有行，真实返回后覆盖缓存 |
 | Loading | `正在加载账号…`；mutation 禁用，不用旧响应覆盖新状态 |
 | Empty | `暂无账号` / `从 OAuth、Token / JSON、API Key 或本地文件导入第一个账号。` |
 | External matched | `检测到外部凭据文件已匹配此账号。`；不自动应用 |
@@ -259,7 +262,7 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 |---------|-------|------------|
 | Sidebar | no plugin / discovered | 入口缺席 / 恰好一个动态“账号”入口 |
 | Plugin selector | loading / error | `正在加载账号插件…` + disabled + `aria-live`；host 无 Codex 特判；错误隔离 + `重试` + `查看诊断` |
-| Account overview | loading / empty / loaded | 明确状态；checkbox + selection count + 全选/清除；卡片只有身份/current/source/plan/quota/`应用`/`刷新额度`/`导出` |
+| Account overview | cached / loading / empty / loaded | 脱敏缓存先显示并后台校准；明确状态；checkbox + selection count + 全选/清除；卡片只有身份/current/source/plan/quota/`应用`/`刷新额度`/`导出` |
 | Add modal | idle | 四个精确 tab；无嵌入 WebView |
 | OAuth | waiting / fallback | 系统浏览器、callback status、manual URL fallback |
 | Import | success / invalid | 账号库更新但 current 不变；错误保留输入 |

@@ -24,8 +24,22 @@ test("account mutations keep existing rows visible during background refresh", a
   const overview = await readFile(new URL("plugins/providers/builtin/codex/frontend/AccountOverview.tsx", repo), "utf8");
   const loadBody = overview.match(/const load = useCallback\(async \(\) => \{([\s\S]*?)\n  \}, \[api\]\);/)?.[1];
   assert.ok(loadBody, "account list loader should remain identifiable");
-  assert.match(overview, /useState\(true\)/, "initial account load still needs a loading state");
+  assert.match(overview, /useState\(accounts\.length === 0\)/, "cached rows should skip the blocking loader");
+  assert.match(overview, /useState<AccountSummary\[\]>\(loadAccountSummaries\)/);
+  assert.match(loadBody, /parseAccountSummaries\(value\.accounts\)/);
+  assert.match(loadBody, /saveAccountSummaries\(next\)/);
   assert.doesNotMatch(loadBody, /setLoading\(true\)/, "background reload must not replace existing account rows");
+});
+
+test("account summary cache is versioned and only persists display-safe fields", async () => {
+  const storage = await readFile(new URL("plugins/providers/builtin/codex/frontend/accountSummaryStorage.ts", repo), "utf8");
+  assert.match(storage, /onlineworker\.codex\.account-summary\.v1/);
+  for (const field of ["id", "stableIdentityDisplay", "authMode", "source", "isCurrent"]) {
+    assert.match(storage, new RegExp(`${field}: candidate\\.${field}`));
+  }
+  assert.match(storage, /quota: quotaSnapshot\(candidate\.quota\)/);
+  assert.doesNotMatch(storage, /\.\.\.candidate/);
+  assert.doesNotMatch(storage, /credentials|access_token|refresh_token|OPENAI_API_KEY/);
 });
 
 test("account export opens the native save flow without reloading the account list", async () => {

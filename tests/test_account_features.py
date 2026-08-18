@@ -278,3 +278,92 @@ print(json.dumps({'exit': code, 'blocked': blocked}), file=sys.stderr)
         "error": None,
     }
     assert marker == {"exit": 0, "blocked": []}
+
+
+def test_main_account_feature_worker_reuses_one_early_process_for_multiple_requests(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    builtin = tmp_path / "builtin"
+    _write_feature(builtin, "fixture")
+    data_root = tmp_path / "plugin-data"
+    wrapper = """
+import json, runpy, sys, types
+from pathlib import Path
+import core.account_features as account_features
+account_features.BUILTIN_PLUGIN_ROOT = Path(sys.argv[1])
+module = types.ModuleType('fixture_account_feature')
+module.calls = 0
+def handle_account_feature(*, action, payload, context):
+    module.calls += 1
+    return {'action': action, 'call': module.calls, 'payload': payload}
+module.handle_account_feature = handle_account_feature
+sys.modules[module.__name__] = module
+original_backend_module = account_features.account_feature_backend_module
+account_features.account_feature_backend_module = lambda feature_id: (
+    module.__name__ if feature_id == 'fixture-accounts' else original_backend_module(feature_id)
+)
+sys.argv = ['main.py', '--account-feature-worker']
+try:
+    runpy.run_path('main.py', run_name='__main__')
+except SystemExit as exc:
+    code = exc.code
+blocked = sorted(name for name in sys.modules if (
+    name == 'telegram'
+    or name.startswith('telegram.')
+    or name.startswith('bot.')
+    or name in {'core.state', 'core.lifecycle', 'core.providers.registry'}
+))
+print(json.dumps({'exit': code, 'blocked': blocked}), file=sys.stderr)
+"""
+    requests = [
+        {"requestId": "list-1", "command": "list"},
+        {
+            "requestId": "action-1",
+            "command": "action",
+            "featureId": "fixture-accounts",
+            "action": "fixture.first",
+            "payload": {"value": 1},
+            "trusted_context": {"data_root": str(data_root), "native_paths": []},
+        },
+        {
+            "requestId": "action-2",
+            "command": "action",
+            "featureId": "fixture-accounts",
+            "action": "fixture.second",
+            "payload": {"value": 2},
+            "trusted_context": {"data_root": str(data_root), "native_paths": []},
+        },
+    ]
+
+    completed = subprocess.run(
+        [sys.executable, "-c", wrapper, str(builtin)],
+        cwd=repo_root,
+        env={
+            "HOME": str(tmp_path / "home"),
+            "PATH": __import__("os").environ.get("PATH", ""),
+            "LANG": "C.UTF-8",
+        },
+        input="".join(f"{json.dumps(request)}\n" for request in requests),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    responses = [json.loads(line) for line in completed.stdout.splitlines()]
+    marker = json.loads(completed.stderr)
+    assert [response["requestId"] for response in responses] == [
+        "list-1",
+        "action-1",
+        "action-2",
+    ]
+    assert responses[0]["ok"] is True
+    assert responses[1]["data"] == {
+        "action": "fixture.first",
+        "call": 1,
+        "payload": {"value": 1},
+    }
+    assert responses[2]["data"] == {
+        "action": "fixture.second",
+        "call": 2,
+        "payload": {"value": 2},
+    }
+    assert marker == {"exit": 0, "blocked": []}

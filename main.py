@@ -10,7 +10,11 @@ import sys
 import time
 
 
-_ACCOUNT_FEATURE_FLAGS = {"--account-feature-list", "--account-feature-action"}
+_ACCOUNT_FEATURE_FLAGS = {
+    "--account-feature-list",
+    "--account-feature-action",
+    "--account-feature-worker",
+}
 _ACCOUNT_FEATURE_MAX_INPUT = 8 * 1024 * 1024
 
 
@@ -21,12 +25,21 @@ def _account_feature_arg(argv: list[str], name: str) -> str:
     return argv[indexes[0] + 1].strip()
 
 
-def _print_account_feature_envelope(payload: object) -> None:
+def _print_account_feature_envelope(
+    payload: object, *, request_id: str = "", newline: bool = False
+) -> None:
+    if request_id and isinstance(payload, dict):
+        payload = {**payload, "requestId": request_id}
     try:
         encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     except (TypeError, ValueError):
-        encoded = '{"ok":false,"data":null,"error":{"code":"invalid_response","message":"账号功能返回了无效数据。","retryable":false}}'
-    sys.stdout.write(encoded)
+        fallback = _account_feature_error(
+            "invalid_response", "账号功能返回了无效数据。"
+        )
+        if request_id:
+            fallback["requestId"] = request_id
+        encoded = json.dumps(fallback, ensure_ascii=False, separators=(",", ":"))
+    sys.stdout.write(encoded + ("\n" if newline else ""))
     sys.stdout.flush()
 
 
@@ -61,51 +74,40 @@ def _account_feature_payload_has_reserved_context(value: object) -> bool:
     return False
 
 
-def _run_account_feature_bootstrap(argv: list[str]) -> int:
+def _account_feature_list_envelope() -> dict:
     from dataclasses import asdict
 
     from core.account_features import (
-        account_feature_backend_entry,
-        account_feature_backend_module,
         account_feature_load_failures,
         list_account_features,
     )
 
-    if "--account-feature-list" in argv:
-        features = list_account_features()
-        _print_account_feature_envelope(
-            {
-                "ok": True,
-                "data": {
-                    "features": [asdict(feature) for feature in features],
-                    "failures": account_feature_load_failures(),
-                },
-                "error": None,
-            }
-        )
-        return 0
+    features = list_account_features()
+    return {
+        "ok": True,
+        "data": {
+            "features": [asdict(feature) for feature in features],
+            "failures": account_feature_load_failures(),
+        },
+        "error": None,
+    }
 
-    feature_id = _account_feature_arg(argv, "--account-feature-id")
-    action = _account_feature_arg(argv, "--account-feature-action-name")
+
+def _account_feature_action_envelope(
+    feature_id: str, action: str, request: dict, *, discover: bool
+) -> dict:
+    from core.account_features import (
+        account_feature_backend_entry,
+        account_feature_backend_module,
+        list_account_features,
+    )
+
     if not feature_id or not action:
-        _print_account_feature_envelope(
-            _account_feature_error("invalid_request", "账号功能请求无效。")
-        )
-        return 0
-
-    request = _read_account_feature_request()
-    if request is None:
-        _print_account_feature_envelope(
-            _account_feature_error("invalid_request", "账号功能请求无效。")
-        )
-        return 0
+        return _account_feature_error("invalid_request", "账号功能请求无效。")
     payload = request.get("payload")
     trusted_context = request.get("trusted_context")
     if not isinstance(trusted_context, dict):
-        _print_account_feature_envelope(
-            _account_feature_error("invalid_context", "账号功能上下文无效。")
-        )
-        return 0
+        return _account_feature_error("invalid_context", "账号功能上下文无效。")
     data_root = trusted_context.get("data_root")
     native_paths = trusted_context.get("native_paths", [])
     if (
@@ -113,24 +115,16 @@ def _run_account_feature_bootstrap(argv: list[str]) -> int:
         or not os.path.isabs(data_root)
         or not isinstance(native_paths, list)
     ):
-        _print_account_feature_envelope(
-            _account_feature_error("invalid_context", "账号功能上下文无效。")
-        )
-        return 0
+        return _account_feature_error("invalid_context", "账号功能上下文无效。")
     if _account_feature_payload_has_reserved_context(payload):
-        _print_account_feature_envelope(
-            _account_feature_error("invalid_payload", "账号功能参数包含保留字段。")
-        )
-        return 0
+        return _account_feature_error("invalid_payload", "账号功能参数包含保留字段。")
 
-    list_account_features()
+    if discover:
+        list_account_features()
     backend_path = account_feature_backend_entry(feature_id)
     backend_module = account_feature_backend_module(feature_id)
     if backend_path is None or backend_module is None:
-        _print_account_feature_envelope(
-            _account_feature_error("feature_unavailable", "账号功能不可用。")
-        )
-        return 0
+        return _account_feature_error("feature_unavailable", "账号功能不可用。")
 
     try:
         import importlib
@@ -150,11 +144,78 @@ def _run_account_feature_bootstrap(argv: list[str]) -> int:
             spec.loader.exec_module(module)
         handler = getattr(module, "handle_account_feature")
         result = handler(action=action, payload=payload, context=trusted_context)
-        _print_account_feature_envelope({"ok": True, "data": result, "error": None})
+        return {"ok": True, "data": result, "error": None}
     except Exception:
-        _print_account_feature_envelope(
-            _account_feature_error("action_failed", "账号功能操作失败。", retryable=True)
+        return _account_feature_error(
+            "action_failed", "账号功能操作失败。", retryable=True
         )
+
+
+def _run_account_feature_worker() -> int:
+    discovered = False
+    while True:
+        raw = sys.stdin.buffer.readline(_ACCOUNT_FEATURE_MAX_INPUT + 2)
+        if not raw:
+            return 0
+        if len(raw) > _ACCOUNT_FEATURE_MAX_INPUT + 1 or not raw.endswith(b"\n"):
+            _print_account_feature_envelope(
+                _account_feature_error("invalid_request", "账号功能请求无效。"),
+                newline=True,
+            )
+            return 0
+        try:
+            request = json.loads(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            request = None
+        request_id = request.get("requestId") if isinstance(request, dict) else None
+        if (
+            not isinstance(request, dict)
+            or not isinstance(request_id, str)
+            or not request_id
+            or len(request_id) > 128
+        ):
+            _print_account_feature_envelope(
+                _account_feature_error("invalid_request", "账号功能请求无效。"),
+                newline=True,
+            )
+            continue
+        command = request.get("command")
+        if command == "list":
+            response = _account_feature_list_envelope()
+            discovered = True
+        elif command == "action":
+            if not discovered:
+                _account_feature_list_envelope()
+                discovered = True
+            response = _account_feature_action_envelope(
+                request.get("featureId") if isinstance(request.get("featureId"), str) else "",
+                request.get("action") if isinstance(request.get("action"), str) else "",
+                request,
+                discover=False,
+            )
+        else:
+            response = _account_feature_error("invalid_request", "账号功能请求无效。")
+        _print_account_feature_envelope(response, request_id=request_id, newline=True)
+
+
+def _run_account_feature_bootstrap(argv: list[str]) -> int:
+    if "--account-feature-worker" in argv:
+        return _run_account_feature_worker()
+    if "--account-feature-list" in argv:
+        _print_account_feature_envelope(_account_feature_list_envelope())
+        return 0
+
+    feature_id = _account_feature_arg(argv, "--account-feature-id")
+    action = _account_feature_arg(argv, "--account-feature-action-name")
+    request = _read_account_feature_request()
+    if request is None:
+        _print_account_feature_envelope(
+            _account_feature_error("invalid_request", "账号功能请求无效。")
+        )
+        return 0
+    _print_account_feature_envelope(
+        _account_feature_action_envelope(feature_id, action, request, discover=True)
+    )
     return 0
 
 

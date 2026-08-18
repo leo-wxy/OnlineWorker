@@ -1,5 +1,7 @@
 # Phase 23 Research: Plugin-Owned Codex Account and Session Asset Management
 
+> 2026-08-18 implementation follow-up: this document preserves the original planning research. The shipped transport subsequently moved from one process per action to one independent resident account-feature JSONL worker; it still imports before live runtime, remains provider-neutral, and does not use owner bridge or app-server authority.
+
 ## Summary
 
 本次研究只覆盖规划事实和实现约束；没有修改产品代码、ROADMAP、STATE、CONTEXT 或 UI-SPEC。Cockpit Tools 行为基线已核对：`/tmp/cockpit-tools-root-3596316` 的 `HEAD` 是 `35963163813d7424b63cd6053874ce5fc7973d03`，工作树干净；没有复制其 CC BY-NC-SA 源码。

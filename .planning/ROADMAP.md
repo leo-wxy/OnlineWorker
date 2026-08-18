@@ -896,7 +896,7 @@ Plans:
 **Depends on:** Phase 22
 **Decision source:** Phase context D-01–D-40
 **Plans:** 12 plans
-**Status:** Completed; source regression, combined package build, and mounted-DMG read-only UI QA passed on 2026-08-18. Real account/session mutations remain unexecuted.
+**Status:** Completed. Source regression, combined package build, and mounted-DMG read-only UI QA passed on 2026-08-18. A later follow-up replaced per-action Python cold starts with an independent resident account-feature worker and added versioned redacted account-summary cache-first rendering. Its combined build/install verification passed; the installed cache-hit account row rendered in 449 ms without a loading placeholder, while session refresh still took 6.0 s and remains a separate performance gap. Real account/session mutations remain unexecuted.
 
 Plans:
 
@@ -908,13 +908,13 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [x] 23-03-PLAN.md — 建立通用一次性 action 与系统能力 host
+- [x] 23-03-PLAN.md — 建立通用常驻 action worker 与系统能力 host
 - [x] 23-06-PLAN.md — 建立 AES-GCM 账号安全存储
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 23-04-PLAN.md — 建立 build-time 插件前端挂载与账号入口
-- [x] 23-07-PLAN.md — 实现 OAuth 与一次性账号 action
+- [x] 23-07-PLAN.md — 实现 OAuth 与独立账号 action
 
 **Wave 4** *(blocked on Wave 3 completion)*
 

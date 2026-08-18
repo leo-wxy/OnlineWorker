@@ -1,7 +1,7 @@
 # Phase 23: Plugin-Owned Codex Account and Session Asset Management - Context
 
 **Gathered:** 2026-08-17
-**Status:** Implemented; final regression and packaged QA recorded below
+**Status:** Implemented; account worker/cache performance follow-up source and installed cache-hit path verified 2026-08-18
 
 <domain>
 ## Phase Boundary
@@ -22,7 +22,7 @@ The feature must remain usable when the OnlineWorker bot, Provider runtime, owne
 - **D-04:** The `账号` page presents one selector per account-capable plugin (`Codex`, later `Claude`/`Codemaker`). Each plugin supplies its own content and configuration; the host must not branch on provider IDs.
 - **D-05:** A plugin load failure is isolated to that plugin selector and shows its own error, retry, and diagnostic state. Other account plugins remain usable.
 - **D-06:** Phase 23 implements Codex only. Claude and Codemaker business implementations are deferred, but the host seam must permit them without adding provider-specific code later.
-- **D-07:** The host may expose only generic system capabilities needed by plugins, such as mounting local assets, opening a browser, choosing files, saving files, and invoking a plugin-owned action. Those capabilities must not contain Codex account/session vocabulary.
+- **D-07:** The host may expose only generic system capabilities needed by plugins, such as mounting local assets, opening a browser, choosing files, saving files, and invoking a plugin-owned action. Action invocation uses one independent long-lived account-feature worker, not Provider runtime/app-server authority; timeout or crash clears that worker and the next request starts a new one without replaying the failed action. Those capabilities must not contain Codex account/session vocabulary.
 
 ### Codex account credential scope
 - **D-08:** The account feature is a focused credential workflow: import into the plugin-owned account library, select an account, manually apply it, explicitly refresh the official Codex usage windows, and export it for backup or transfer. It is not a full account operations dashboard.
@@ -45,7 +45,7 @@ The feature must remain usable when the OnlineWorker bot, Provider runtime, owne
 ### Credential storage
 - **D-22:** Follow Cockpit's current storage behavior independently: keep a plaintext non-secret account summary index, store each full account detail in an AES-256-GCM envelope, and keep a random 32-byte local storage key in the plugin data directory with user-only permissions.
 - **D-23:** Use atomic writes for the index, key, encrypted account details, and applied Codex credential file. Legacy plaintext plugin records, if supported, are rewritten encrypted after successful read.
-- **D-24:** Secrets must not enter logs, diagnostics, frontend persistence, or ordinary list responses. Full credentials may leave the backend boundary only for explicit import, export, or apply operations.
+- **D-24:** Secrets must not enter logs, diagnostics, frontend persistence, or ordinary list responses. Frontend persistence is limited to a versioned allowlist of redacted account-card fields already present in ordinary list responses, so cached rows can render before background calibration. Full credentials may leave the backend boundary only for explicit import, export, or apply operations.
 - **D-25:** Storage lives under the Codex plugin's own data directory. It must not use Cockpit's `~/.antigravity_cockpit` directory or treat Cockpit files as a live datastore.
 
 ### Codex session assets

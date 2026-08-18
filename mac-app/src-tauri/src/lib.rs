@@ -129,6 +129,7 @@ pub(crate) fn cleanup_managed_processes_for_exit_once(app: &tauri::AppHandle) {
     if !exit_state.begin_exit_cleanup() {
         return;
     }
+    app.state::<AccountFeatureHostState>().shutdown();
     tauri::async_runtime::block_on(async {
         let state = app.state::<Arc<Mutex<BotState>>>();
         shutdown_managed_processes_for_app_exit(state.inner()).await;
