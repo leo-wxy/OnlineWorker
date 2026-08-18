@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import json
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -78,8 +80,15 @@ def create_account_record(
     )
 
 
-def stable_identity_key(record: AccountRecord) -> str:
-    return record.identity_key
+def decode_jwt_payload(token: object) -> dict[str, Any]:
+    if not isinstance(token, str):
+        return {}
+    try:
+        encoded = token.split(".")[1]
+        value = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
 
 
 def _deep_merge(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
@@ -125,7 +134,6 @@ def classify_external_account(
 def redacted_index_dto(
     record: AccountRecord,
     *,
-    is_current: bool = False,
     external_state: str = "managed",
 ) -> dict[str, object]:
     _, digest = record.identity_key.split(":", 1)
@@ -135,6 +143,5 @@ def redacted_index_dto(
         "identityKeyHash": digest,
         "authMode": record.auth_mode,
         "source": record.source,
-        "isCurrent": is_current,
         "externalState": external_state,
     }

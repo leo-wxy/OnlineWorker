@@ -1,0 +1,60 @@
+.codex-account-tabs {
+  width: min(100%, 18rem);
+}
+
+.codex-account-surface button:disabled,
+.codex-account-surface select:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.codex-account-card {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.codex-account-card-current {
+  box-shadow: inset 3px 0 0 var(--ow-blue);
+}
+
+.codex-account-quota-progress {
+  accent-color: var(--ow-green);
+}
+
+.codex-session-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.codex-session-summary-content {
+  width: calc(100% - 2rem);
+}
+
+@media (min-width: 768px) {
+  .codex-session-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .codex-account-card {
+    align-items: center;
+    grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1.2fr);
+  }
+
+  .codex-account-actions {
+    grid-column: 1 / -1;
+  }
+
+  .codex-session-metrics {
+    grid-template-columns: minmax(110px, 0.9fr) repeat(5, minmax(90px, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  .codex-account-card {
+    grid-template-columns: minmax(240px, 0.9fr) minmax(380px, 1.35fr) auto;
+  }
+
+  .codex-account-actions {
+    grid-column: auto;
+  }
+}

@@ -896,6 +896,7 @@ Plans:
 **Depends on:** Phase 22
 **Decision source:** Phase context D-01–D-40
 **Plans:** 12 plans
+**Status:** Completed; source regression, combined package build, and mounted-DMG read-only UI QA passed on 2026-08-18. Real account/session mutations remain unexecuted.
 
 Plans:
 
@@ -908,26 +909,26 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 23-03-PLAN.md — 建立通用一次性 action 与系统能力 host
-- [ ] 23-06-PLAN.md — 建立 AES-GCM 账号安全存储
+- [x] 23-06-PLAN.md — 建立 AES-GCM 账号安全存储
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 23-04-PLAN.md — 建立 build-time 插件前端挂载与账号入口
-- [ ] 23-07-PLAN.md — 实现 OAuth 与一次性账号 action
+- [x] 23-04-PLAN.md — 建立 build-time 插件前端挂载与账号入口
+- [x] 23-07-PLAN.md — 实现 OAuth 与一次性账号 action
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 23-08-PLAN.md — 实现 Apply 与账号导出事务
+- [x] 23-08-PLAN.md — 实现 Apply 与账号导出事务
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 23-09-PLAN.md — 实现离线 Codex 会话资产后端
-- [ ] 23-10-PLAN.md — 完成 Codex 账号前端与四源导入流程
+- [x] 23-09-PLAN.md — 实现离线 Codex 会话资产后端
+- [x] 23-10-PLAN.md — 完成 Codex 账号前端与四源导入流程
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 23-11-PLAN.md — 接入会话资产页面与离线集成状态
+- [x] 23-11-PLAN.md — 接入会话资产页面与离线集成状态
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 23-12-PLAN.md — 完成 Phase 23 安全边界与回归验证
+- [x] 23-12-PLAN.md — 完成 Phase 23 安全边界与回归验证

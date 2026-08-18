@@ -337,7 +337,7 @@ cargo test --manifest-path mac-app/src-tauri/Cargo.toml account_feature --lib
 cd mac-app && npm run build
 ```
 
-`npm run build` is source/frontend verification only; packaging, DMG creation, install, launch, and packaged-app verification remain prohibited until explicitly authorized. If a test harness needs `HOME`, `CODEX_HOME`, or process env, set/restore it in a scoped fixture and assert the real home was not touched.
+`npm run build` is source/frontend verification only; packaging, DMG creation, install, launch, and packaged-app verification remain prohibited until explicitly authorized. The user later granted build/package/DMG-launch permission on 2026-08-18; see `23-VALIDATION.md` for the executed boundary. If a test harness needs `HOME`, `CODEX_HOME`, or process env, set/restore it in a scoped fixture and assert the real home was not touched.
 
 ## Planning recommendations
 
@@ -352,4 +352,4 @@ cd mac-app && npm run build
 
 ## Explicitly out of scope
 
-The locked D-38..D-40 exclusions remain: quotas/subscription refresh, account tags/notes/groups, auto-rotation, API gateway/relay, API service keys, account pools/load balancing, model-provider management, wake-up tasks, multi-open, automatic account switching, Claude/Codemaker implementations, copy-to-instance, cross-instance sync, multiple named Codex homes, permanent session deletion, OnlineWorker live provider/session behavior, Task Board/EventBus/notification integration, app-server lifecycle/restart/reconnect, and any Cockpit live datastore or source-code reuse.
+The implemented D-38..D-40 boundary allows only an explicit user-triggered read of the fixed official Codex usage endpoint. It still excludes background quota polling, subscription management beyond those returned usage windows, account tags/notes/groups, auto-rotation, API gateway/relay, API service keys, account pools/load balancing, model-provider management, wake-up tasks, multi-open, automatic account switching, Claude/Codemaker implementations, copy-to-instance, cross-instance sync, multiple named Codex homes, permanent session deletion, OnlineWorker live provider/session behavior, Task Board/EventBus/notification integration, app-server lifecycle/restart/reconnect, and any Cockpit live datastore or source-code reuse.

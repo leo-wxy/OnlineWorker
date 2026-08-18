@@ -20,6 +20,8 @@ a = Analysis(
         ('plugins/providers/builtin/claude/plugin.yaml', 'plugins/providers/builtin/claude'),
         ('plugins/providers/builtin/claude/python/claude_hook_relay.py', 'plugins/providers/builtin/claude/python'),
         ('plugins/providers/builtin/codex/plugin.yaml', 'plugins/providers/builtin/codex'),
+        ('plugins/providers/builtin/codex/icon.svg', 'plugins/providers/builtin/codex'),
+        ('plugins/providers/builtin/codex/python/account_feature.py', 'plugins/providers/builtin/codex/python'),
     ],
     hiddenimports=[
         'yaml',

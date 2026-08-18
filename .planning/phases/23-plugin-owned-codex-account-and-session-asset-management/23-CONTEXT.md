@@ -1,7 +1,7 @@
 # Phase 23: Plugin-Owned Codex Account and Session Asset Management - Context
 
 **Gathered:** 2026-08-17
-**Status:** Ready for planning
+**Status:** Implemented; final regression and packaged QA recorded below
 
 <domain>
 ## Phase Boundary
@@ -25,7 +25,7 @@ The feature must remain usable when the OnlineWorker bot, Provider runtime, owne
 - **D-07:** The host may expose only generic system capabilities needed by plugins, such as mounting local assets, opening a browser, choosing files, saving files, and invoking a plugin-owned action. Those capabilities must not contain Codex account/session vocabulary.
 
 ### Codex account credential scope
-- **D-08:** The account feature is a focused credential workflow: import into the plugin-owned account library, select an account, manually apply it, and export it for backup or transfer. It is not a full account operations dashboard.
+- **D-08:** The account feature is a focused credential workflow: import into the plugin-owned account library, select an account, manually apply it, explicitly refresh the official Codex usage windows, and export it for backup or transfer. It is not a full account operations dashboard.
 - **D-09:** Support four add paths in one modal: OAuth, `Token / JSON`, API Key, and local file import.
 - **D-10:** OAuth uses the system browser with PKCE/state, automatic local callback capture when available, and manual callback URL input as fallback. Do not use an embedded login WebView.
 - **D-11:** Import never auto-applies an account. The user explicitly clicks `应用`; application atomically projects the selected credentials to the current effective `CODEX_HOME` (`$CODEX_HOME` when set, otherwise `~/.codex`).
@@ -59,13 +59,13 @@ The feature must remain usable when the OnlineWorker bot, Provider runtime, owne
 
 ### User interface
 - **D-33:** Align with Cockpit's information architecture and operation flow, while using OnlineWorker's existing theme, typography, accessibility states, and responsive behavior. Do not make a pixel-level copy.
-- **D-34:** The Codex account overview uses responsive account cards with identity, current-account state, and import source. Cards expose only the scoped actions such as apply and export; do not add the excluded operational dashboard controls.
+- **D-34:** The Codex account overview uses responsive account cards with identity, current-account state, import source, plan, and official quota windows when available. Cards expose only the scoped actions such as apply/reapply, explicit quota refresh, and export; do not add the excluded operational dashboard controls.
 - **D-35:** The add-account modal uses four tabs: `OAuth`, `Token / JSON`, `API Key`, and `导入`.
-- **D-36:** The session-asset page follows the reference single-page hierarchy: 30-day summary, search and scoped batch actions, then an expandable session list.
+- **D-36:** The session-asset page follows the reference single-page hierarchy: 30-day summary, search and scoped batch actions, then a default-collapsed list grouped by effective `cwd`/project; expanding a group reveals its individual conversations.
 - **D-37:** Plugin UI must remain self-contained behind the generic account-plugin host. Shared React/Tauri code may render the shell and generic failure/loading states, but no Codex-specific labels, models, or commands belong there.
 
 ### Explicitly excluded from Phase 23
-- **D-38:** Do not implement quotas/subscription refresh, account tags, notes, groups, auto-rotation, API gateway/relay, API service keys, account pools, load balancing, model-provider management, wake-up tasks, application multi-open, or automatic account switching.
+- **D-38:** Only an explicit user-triggered read of the official Codex usage endpoint is in scope. Do not implement background quota polling, subscription management beyond those returned usage windows, account tags, notes, groups, auto-rotation, API gateway/relay, API service keys, account pools, load balancing, model-provider management, wake-up tasks, application multi-open, or automatic account switching.
 - **D-39:** Do not implement Claude or Codemaker account behavior in this phase.
 - **D-40:** Do not modify or coordinate OnlineWorker live provider/session behavior as a side effect of account or asset operations.
 
@@ -131,7 +131,7 @@ The feature must remain usable when the OnlineWorker bot, Provider runtime, owne
 ## Specific Ideas
 
 - The user selected Cockpit's account overview, four-tab add-account modal, and session-manager information hierarchy as product references, while explicitly rejecting the unrelated gateway/relay/account-pool surface.
-- The account feature should feel like a focused credential transfer and application tool, not an administrative quota dashboard.
+- The account feature should feel like a focused credential transfer, application, and quota-status tool, not an administrative account-pool dashboard.
 - Cockpit account-file compatibility targets the format present at commit `35963163813d7424b63cd6053874ce5fc7973d03`; planning research must capture exact fixtures and round-trip assertions from that version.
 - OnlineWorker's visual system remains the presentation source of truth even when the plugin mirrors Cockpit's flow.
 
@@ -142,7 +142,7 @@ The feature must remain usable when the OnlineWorker bot, Provider runtime, owne
 
 - Claude account plugin implementation.
 - Codemaker account plugin implementation.
-- Account quotas, subscription details, tags, notes, groups, automatic refresh, and automatic rotation.
+- Subscription management beyond the official usage windows, background/automatic quota refresh, tags, notes, groups, and automatic rotation.
 - API gateways, relay services, account pools, load balancing, API-service management, model providers, wake-up tasks, and application multi-open.
 - Session copy-to-instance, cross-instance synchronization, and multiple named Codex homes.
 

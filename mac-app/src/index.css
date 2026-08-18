@@ -175,6 +175,14 @@
   font-weight: 700;
 }
 
+.ow-sidebar-nav-compact {
+  scrollbar-width: none;
+}
+
+.ow-sidebar-nav-compact::-webkit-scrollbar {
+  display: none;
+}
+
 .ow-main-surface {
   background: var(--ow-shell);
 }
@@ -319,6 +327,18 @@
   box-shadow: var(--ow-shadow-lg);
   backdrop-filter: blur(28px);
   -webkit-backdrop-filter: blur(28px);
+}
+
+.ow-native-dialog {
+  color: inherit;
+}
+
+.ow-native-dialog::backdrop {
+  background:
+    radial-gradient(circle at top, var(--ow-blue-soft), transparent 32%),
+    var(--ow-overlay);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
 }
 
 .ow-log-filter-chip {

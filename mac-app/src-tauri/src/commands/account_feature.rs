@@ -18,8 +18,7 @@ use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 use super::provider_bridge_common::{kill_provider_bridge_process_tree, ProviderBridgeOutput};
 
-const ACTION_TIMEOUT: Duration = Duration::from_secs(60);
-const LIST_TIMEOUT: Duration = Duration::from_secs(10);
+const SIDECAR_TIMEOUT: Duration = Duration::from_secs(60);
 const NATIVE_HANDLE_TTL: Duration = Duration::from_secs(120);
 const LOOPBACK_RESULT_TTL: Duration = Duration::from_secs(120);
 const MAX_ACTION_BYTES: usize = 8 * 1024 * 1024;
@@ -75,10 +74,6 @@ fn safe_token(value: &str) -> bool {
 }
 
 pub(crate) fn valid_feature_id(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 128 && safe_token(value)
-}
-
-fn valid_action(value: &str) -> bool {
     !value.is_empty() && value.len() <= 128 && safe_token(value)
 }
 
@@ -216,7 +211,6 @@ where
                     .len()
                     .saturating_add(stderr.len())
                     .saturating_add(line.len())
-                    .saturating_add(1)
                     > max_output_bytes =>
             {
                 kill_root(root_pid);
@@ -224,11 +218,9 @@ where
             }
             CommandEvent::Stdout(line) => {
                 stdout.extend(line);
-                stdout.push(b'\n');
             }
             CommandEvent::Stderr(line) => {
                 stderr.extend(line);
-                stderr.push(b'\n');
             }
             CommandEvent::Error(_) => return Err("account feature event failed".into()),
             _ => {}
@@ -296,27 +288,11 @@ async fn run_account_feature_sidecar(
     normalize_sidecar_result(result)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CapabilityMode {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CapabilityMode {
     Open,
     Save,
-}
-
-impl CapabilityMode {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "open" => Some(Self::Open),
-            "save" => Some(Self::Save),
-            _ => None,
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Open => "open",
-            Self::Save => "save",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -331,7 +307,7 @@ pub struct NativeCapabilityHandle {
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityHandleRef {
     pub handle_id: String,
-    pub mode: String,
+    pub mode: CapabilityMode,
 }
 
 #[derive(Clone)]
@@ -506,10 +482,8 @@ fn redeem_native_handles(
 ) -> Result<Vec<Value>, String> {
     let mut trusted = Vec::with_capacity(handles.len());
     for handle in handles {
-        let mode = CapabilityMode::parse(&handle.mode)
-            .ok_or_else(|| "invalid_capability_handle".to_string())?;
-        let path = state.redeem_native_handle(feature_id, &handle.handle_id, mode)?;
-        trusted.push(json!({"mode": mode.as_str(), "path": path}));
+        let path = state.redeem_native_handle(feature_id, &handle.handle_id, handle.mode)?;
+        trusted.push(json!({"mode": handle.mode, "path": path}));
     }
     Ok(trusted)
 }
@@ -735,9 +709,7 @@ pub(crate) fn begin_loopback_session(
         return Err("invalid_loopback_request".into());
     }
     let address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, preferred_port);
-    let listener = TcpListener::bind(address)
-        .or_else(|_| TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)))
-        .map_err(|_| "loopback_unavailable".to_string())?;
+    let listener = TcpListener::bind(address).map_err(|_| "loopback_unavailable".to_string())?;
     listener
         .set_nonblocking(true)
         .map_err(|_| "loopback_unavailable".to_string())?;
@@ -877,7 +849,7 @@ pub async fn list_account_features(app: AppHandle) -> AccountFeatureResponse {
         &app,
         vec!["--account-feature-list".into()],
         json!({}),
-        LIST_TIMEOUT,
+        SIDECAR_TIMEOUT,
     )
     .await
 }
@@ -892,7 +864,7 @@ pub async fn invoke_account_feature(
     capability_handles: Option<Vec<CapabilityHandleRef>>,
 ) -> Result<AccountFeatureResponse, String> {
     if !valid_feature_id(&feature_id)
-        || !valid_action(&action)
+        || !valid_feature_id(&action)
         || validate_action_payload(&payload).is_err()
     {
         return Ok(failure("invalid_request", "账号功能请求无效。", false));
@@ -931,9 +903,27 @@ pub async fn invoke_account_feature(
                 "native_paths": native_paths,
             }
         }),
-        ACTION_TIMEOUT,
+        SIDECAR_TIMEOUT,
     )
     .await)
+}
+
+async fn choose_account_feature_path(
+    state: &AccountFeatureHostState,
+    feature_id: String,
+    mode: CapabilityMode,
+    suggested_name: Option<String>,
+) -> Result<Option<NativeCapabilityHandle>, String> {
+    if !valid_feature_id(&feature_id) {
+        return Err("invalid_feature_id".into());
+    }
+    let selected =
+        tauri::async_runtime::spawn_blocking(move || choose_native_path(mode, suggested_name))
+            .await
+            .map_err(|_| "native_dialog_failed".to_string())??;
+    selected
+        .map(|path| state.issue_native_handle(&feature_id, mode, path, NATIVE_HANDLE_TTL))
+        .transpose()
 }
 
 #[tauri::command]
@@ -941,19 +931,7 @@ pub async fn choose_account_feature_file(
     state: tauri::State<'_, AccountFeatureHostState>,
     feature_id: String,
 ) -> Result<Option<NativeCapabilityHandle>, String> {
-    if !valid_feature_id(&feature_id) {
-        return Err("invalid_feature_id".into());
-    }
-    let selected = tauri::async_runtime::spawn_blocking(move || {
-        choose_native_path(CapabilityMode::Open, None)
-    })
-    .await
-    .map_err(|_| "native_dialog_failed".to_string())??;
-    selected
-        .map(|path| {
-            state.issue_native_handle(&feature_id, CapabilityMode::Open, path, NATIVE_HANDLE_TTL)
-        })
-        .transpose()
+    choose_account_feature_path(state.inner(), feature_id, CapabilityMode::Open, None).await
 }
 
 #[tauri::command]
@@ -962,19 +940,13 @@ pub async fn choose_account_feature_save(
     feature_id: String,
     suggested_name: Option<String>,
 ) -> Result<Option<NativeCapabilityHandle>, String> {
-    if !valid_feature_id(&feature_id) {
-        return Err("invalid_feature_id".into());
-    }
-    let selected = tauri::async_runtime::spawn_blocking(move || {
-        choose_native_path(CapabilityMode::Save, suggested_name)
-    })
+    choose_account_feature_path(
+        state.inner(),
+        feature_id,
+        CapabilityMode::Save,
+        suggested_name,
+    )
     .await
-    .map_err(|_| "native_dialog_failed".to_string())??;
-    selected
-        .map(|path| {
-            state.issue_native_handle(&feature_id, CapabilityMode::Save, path, NATIVE_HANDLE_TTL)
-        })
-        .transpose()
 }
 
 #[tauri::command]
@@ -1050,7 +1022,7 @@ mod tests {
     use serde_json::json;
     use std::fs;
     use std::io::{Read, Write};
-    use std::net::TcpStream;
+    use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
     use std::os::unix::fs::{symlink, PermissionsExt};
     use std::sync::{
         atomic::{AtomicU32, Ordering},
@@ -1099,6 +1071,19 @@ mod tests {
     }
 
     #[test]
+    fn capability_mode_uses_the_wire_values() {
+        assert_eq!(
+            serde_json::from_str::<CapabilityMode>("\"open\"").unwrap(),
+            CapabilityMode::Open
+        );
+        assert_eq!(
+            serde_json::to_string(&CapabilityMode::Save).unwrap(),
+            "\"save\""
+        );
+        assert!(serde_json::from_str::<CapabilityMode>("\"other\"").is_err());
+    }
+
+    #[test]
     fn process_failures_are_generic_and_redacted() {
         let failed = normalize_sidecar_result(Ok(ProviderBridgeOutput {
             code: Some(1),
@@ -1142,6 +1127,24 @@ mod tests {
 
         assert_eq!(error, "account feature output too large");
         assert_eq!(killed_pid.load(Ordering::SeqCst), 4242);
+    }
+
+    #[tokio::test]
+    async fn sidecar_raw_output_reassembles_fragmented_json_without_changes() {
+        let (tx, rx) = tauri::async_runtime::channel(2);
+        tx.send(CommandEvent::Stdout(b"{\"ok\":tr".to_vec()))
+            .await
+            .unwrap();
+        tx.send(CommandEvent::Stdout(b"ue}".to_vec()))
+            .await
+            .unwrap();
+        drop(tx);
+
+        let output = collect_account_feature_events(rx, 4242, 64, |_| {})
+            .await
+            .unwrap();
+
+        assert_eq!(output.stdout, b"{\"ok\":true}");
     }
 
     #[test]
@@ -1263,6 +1266,21 @@ mod tests {
 
         assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
         assert_eq!(results.iter().filter(|result| result.is_err()).count(), 1);
+    }
+
+    #[test]
+    fn loopback_does_not_fallback_when_requested_port_is_busy() {
+        let occupied = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = occupied.local_addr().unwrap().port();
+        let result = begin_loopback_session(
+            &AccountFeatureHostState::default(),
+            "feature-a",
+            port,
+            "/auth/callback",
+            Duration::from_secs(1),
+        );
+
+        assert!(matches!(result, Err(ref error) if error == "loopback_unavailable"));
     }
 
     #[test]

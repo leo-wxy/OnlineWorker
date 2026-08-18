@@ -20,6 +20,7 @@ import {
   setThemePreference,
   type ThemePreference,
 } from "./utils/theme";
+import { AccountFeatureHost } from "./components/AccountFeatureHost";
 
 const APP_NAVIGATE_TAB_EVENT = "app:navigate-tab";
 const APP_OPEN_SESSION_EVENT = "app:open-session";
@@ -69,7 +70,7 @@ const UsageBrowser = lazy(() =>
 
 export default function App() {
   const { locale, setLocale, t } = useI18n();
-  const [activeTab, setActiveTab] = useState<AppTab>("dashboard");
+  const [activeTab, setActiveTab] = useState<AppTab | "accounts">("dashboard");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [themePreference, setThemePreferenceState] =
     useState<ThemePreference>(readThemePreference);
@@ -251,14 +252,14 @@ export default function App() {
   return (
     <div className="relative flex h-screen w-screen overflow-hidden ow-app-shell text-[var(--ow-text)]">
       {/* Sidebar Navigation */}
-      <div className={`${sidebarCollapsed ? "w-[84px]" : "w-[248px]"} ow-sidebar flex h-full shrink-0 flex-col p-4 transition-[width] duration-150 ease-out`}>
+      <div className={`${sidebarCollapsed ? "w-[84px] px-3 py-4" : "w-[248px] p-4"} ow-sidebar flex h-full shrink-0 flex-col transition-[width] duration-150 ease-out`}>
         <div
           className="mb-3 h-8 shrink-0 select-none"
           data-tauri-drag-region
           onMouseDown={handleWindowDrag}
         />
 
-        <div className={`ow-brand-card mb-5 flex min-h-16 items-center rounded-[22px] p-3 ${sidebarCollapsed ? "justify-center" : "gap-3"}`}>
+        <div className={`mb-4 flex shrink-0 items-center ${sidebarCollapsed ? "h-12 justify-center" : "ow-brand-card min-h-16 gap-3 rounded-[22px] p-3"}`}>
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl [background:var(--ow-primary-surface)] [box-shadow:var(--ow-shadow-md)]">
             <svg className="h-5 w-5 text-[var(--ow-inverse)]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
           </div>
@@ -273,13 +274,15 @@ export default function App() {
           </div>
         </div>
 
-        <div className="mb-4">
+        <div className="mb-3 shrink-0">
           <button
             type="button"
             onClick={() => setSidebarCollapsed((current) => !current)}
             title={sidebarCollapsed ? t.app.sidebar.expand : t.app.sidebar.collapse}
-            className={`ow-sidebar-toggle flex w-full items-center rounded-2xl border border-[var(--ow-line-soft)] bg-[var(--ow-panel-soft)] px-3 py-2.5 text-sm font-bold text-[var(--ow-muted)] transition-colors hover:bg-[var(--ow-hover)] hover:text-[var(--ow-text)] ${
-              sidebarCollapsed ? "justify-center" : "gap-3"
+            className={`ow-sidebar-toggle flex w-full items-center text-sm font-bold text-[var(--ow-muted)] transition-colors hover:bg-[var(--ow-hover)] hover:text-[var(--ow-text)] ${
+              sidebarCollapsed
+                ? "h-10 justify-center rounded-xl border border-transparent p-0 [box-shadow:none]"
+                : "gap-3 rounded-2xl border border-[var(--ow-line-soft)] bg-[var(--ow-panel-soft)] px-3 py-2.5"
             }`}
           >
             <span className="grid h-8 w-8 place-items-center rounded-xl bg-[var(--ow-hover)] text-[var(--ow-muted)]">
@@ -296,17 +299,17 @@ export default function App() {
           </button>
         </div>
         
-        <nav className="flex-1 space-y-1.5">
+        <nav className={`min-h-0 flex-1 overflow-y-auto ${sidebarCollapsed ? "ow-sidebar-nav-compact space-y-1" : "space-y-1.5 pr-1"}`}>
           {PRIMARY_APP_TABS.map((key) => (
             <button
               key={key}
               onClick={() => setActiveTab(key)}
               title={t.app.tabs[key]}
-              className={`ow-tab-button w-full flex items-center rounded-2xl px-3 py-2.5 text-sm font-bold transition-colors ${
+              className={`ow-tab-button flex w-full items-center text-sm font-bold transition-colors ${
                 activeTab === key
                   ? "ow-tab-button-active bg-[var(--ow-panel)] text-[var(--ow-text)] [box-shadow:var(--ow-shadow-sm)]"
                   : "text-[var(--ow-muted)] hover:bg-[var(--ow-hover)] hover:text-[var(--ow-text)]"
-              } ${sidebarCollapsed ? "justify-center" : "gap-3"}`}
+              } ${sidebarCollapsed ? "h-10 justify-center rounded-xl p-0" : "gap-3 rounded-2xl px-3 py-2.5"}`}
             >
               <span className={`relative grid h-8 w-8 place-items-center rounded-xl ${
                 activeTab === key
@@ -335,9 +338,26 @@ export default function App() {
               )}
             </button>
           ))}
+          <button
+              type="button"
+              onClick={() => setActiveTab("accounts")}
+              title="账号"
+              className={`ow-tab-button flex w-full items-center text-sm font-bold transition-colors ${
+                activeTab === "accounts"
+                  ? "ow-tab-button-active bg-[var(--ow-panel)] text-[var(--ow-text)] [box-shadow:var(--ow-shadow-sm)]"
+                  : "text-[var(--ow-muted)] hover:bg-[var(--ow-hover)] hover:text-[var(--ow-text)]"
+              } ${sidebarCollapsed ? "h-10 justify-center rounded-xl p-0" : "gap-3 rounded-2xl px-3 py-2.5"}`}
+            >
+              <span className={`grid h-8 w-8 place-items-center rounded-xl ${activeTab === "accounts" ? "bg-[var(--ow-blue-soft)] text-[var(--ow-blue)]" : "bg-[var(--ow-hover)] text-[var(--ow-subtle)]"}`}>
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2m7-10a4 4 0 100-8 4 4 0 000 8zm13 10v-2a4 4 0 00-3-3.87m-1-7.13a4 4 0 010 7.75" />
+                </svg>
+              </span>
+              {!sidebarCollapsed && <span className="truncate">账号</span>}
+          </button>
         </nav>
         
-        <div className="mt-auto space-y-3">
+        <div className="mt-3 shrink-0 space-y-3">
           {!sidebarCollapsed ? (
             <>
               <div className="ow-page-frame-soft rounded-2xl p-3">
@@ -403,7 +423,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setLocale(locale === "en" ? "zh" : "en")}
-                className="ow-page-frame-soft flex h-10 w-10 items-center justify-center rounded-2xl text-[11px] font-bold text-[var(--ow-muted)]"
+                className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--ow-hover)] text-[11px] font-bold text-[var(--ow-muted)] transition-colors hover:text-[var(--ow-text)]"
                 title={locale === "en" ? t.app.locale.zh : t.app.locale.en}
               >
                 {locale === "en" ? "EN" : "中"}
@@ -440,7 +460,7 @@ export default function App() {
         {/* Content */}
         <main
           className={`flex-1 flex flex-col min-h-0 ${
-            activeTab === "sessions" || activeTab === "commands" || activeTab === "usage" || activeTab === "ai" || activeTab === "notifications"
+            activeTab === "sessions" || activeTab === "commands" || activeTab === "usage" || activeTab === "ai" || activeTab === "notifications" || activeTab === "accounts"
               ? "overflow-hidden overscroll-none"
               : "overflow-y-auto"
           }`}
@@ -541,6 +561,9 @@ export default function App() {
               />
             </div>
           )}
+          <AccountFeatureHost
+            active={activeTab === "accounts"}
+          />
           </Suspense>
         </main>
       </div>

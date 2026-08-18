@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -111,7 +110,7 @@ def _parse_item(item: object, *, source: str) -> AccountRecord:
         mode = _validate_token(item)
     else:
         raise AccountModelError("unsupported_auth_mode")
-    return create_account_record(deepcopy(item), auth_mode=mode, source=source)
+    return create_account_record(item, auth_mode=mode, source=source)
 
 
 def parse_cockpit_tools(raw: str | bytes | dict | list, *, source: str = "cockpit_tools") -> ParseBatchResult:
@@ -130,7 +129,7 @@ def parse_cockpit_tools(raw: str | bytes | dict | list, *, source: str = "cockpi
         except json.JSONDecodeError:
             return ParseBatchResult(error=_error("invalid_json"))
     else:
-        parsed = deepcopy(raw)
+        parsed = raw
 
     if isinstance(parsed, dict) and "version" in parsed and "accounts" in parsed:
         return ParseBatchResult(error=_error("unsupported_version"))
@@ -156,4 +155,4 @@ def parse_local_auth(raw: str | bytes | dict | list) -> ParseBatchResult:
 
 
 def export_cockpit_tools(records: list[AccountRecord]) -> str:
-    return json.dumps([deepcopy(record.credentials) for record in records], ensure_ascii=False, indent=2)
+    return json.dumps([record.credentials for record in records], ensure_ascii=False, indent=2)

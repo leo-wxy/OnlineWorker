@@ -11,15 +11,21 @@ test("app shell wires a collapsible narrow sidebar state", () => {
   const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
 
   assert.match(app, /const \[sidebarCollapsed,\s*setSidebarCollapsed\] = useState\(false\);/);
-  assert.match(app, /sidebarCollapsed \? "w-\[84px\]" : "w-\[248px\]"/);
+  assert.match(app, /sidebarCollapsed \? "w-\[84px\] px-3 py-4" : "w-\[248px\] p-4"/);
   assert.match(app, /setSidebarCollapsed\(\(current\) => !current\)/);
   assert.match(app, /title=\{sidebarCollapsed \? t\.app\.sidebar\.expand : t\.app\.sidebar\.collapse\}/);
-  assert.match(app, /ow-brand-card[\s\S]*ow-sidebar-toggle/);
-  assert.match(app, /ow-brand-card mb-5 flex min-h-16 items-center/);
+  assert.match(app, /sidebarCollapsed \? "h-12 justify-center" : "ow-brand-card min-h-16/);
   assert.match(app, /ow-sidebar-toggle flex w-full items-center/);
+  assert.match(app, /sidebarCollapsed[\s\S]*"h-10 justify-center rounded-xl border border-transparent p-0 \[box-shadow:none\]"/);
+  assert.match(app, /ow-sidebar-nav-compact space-y-1/);
+  assert.match(app, /sidebarCollapsed \? "h-10 justify-center rounded-xl p-0"/);
   assert.match(app, /!sidebarCollapsed && <span>\{t\.app\.sidebar\.collapse\}<\/span>/);
   assert.match(app, /!sidebarCollapsed && \(/);
   assert.match(app, /<span className="truncate">\{t\.app\.tabs\[key\]\}<\/span>/);
+
+  const css = readFileSync(join(root, "src", "index.css"), "utf8");
+  assert.match(css, /\.ow-sidebar-nav-compact\s*\{[\s\S]*scrollbar-width: none;/);
+  assert.match(css, /\.ow-sidebar-nav-compact::-webkit-scrollbar\s*\{[\s\S]*display: none;/);
 });
 
 test("expanded sidebar owns the only System Light Dark preference control", () => {

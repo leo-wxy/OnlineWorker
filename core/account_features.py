@@ -19,20 +19,14 @@ _BACKEND_MODULES: dict[str, str] = {}
 class AccountFeatureDescriptor:
     feature_id: str
     label: str
-    icon: str
     frontend_entry: str
     backend_entry: str
-    protocol_version: int
 
 
 class _FeatureError(ValueError):
     def __init__(self, code: str):
         super().__init__(code)
         self.code = code
-
-
-def _mapping(value: object) -> dict:
-    return value if isinstance(value, dict) else {}
 
 
 def _safe_feature_id(value: object) -> str:
@@ -42,7 +36,7 @@ def _safe_feature_id(value: object) -> str:
     return feature_id
 
 
-def _safe_entry(plugin_dir: Path, value: object) -> str:
+def _safe_entry(plugin_dir: Path, value: object, *, require_file: bool = True) -> str:
     raw = value.strip() if isinstance(value, str) else ""
     relative = Path(raw)
     if (
@@ -53,6 +47,8 @@ def _safe_entry(plugin_dir: Path, value: object) -> str:
         or any(part in {"", ".", ".."} for part in relative.parts)
     ):
         raise _FeatureError("unsafe_entry_path")
+    if not require_file:
+        return relative.as_posix()
     try:
         resolved = (plugin_dir / relative).resolve(strict=True)
     except FileNotFoundError as exc:
@@ -79,17 +75,11 @@ def _account_declaration(manifest: dict) -> dict | None:
 def _descriptor(manifest_path: Path, manifest: dict, account: dict) -> AccountFeatureDescriptor:
     feature_id = _safe_feature_id(account.get("feature_id"))
     plugin_dir = manifest_path.parent
-    protocol_version = account.get("protocol_version", 1)
-    if isinstance(protocol_version, bool) or not isinstance(protocol_version, int) or protocol_version < 1:
-        raise _FeatureError("invalid_manifest")
-    icon_value = account.get("icon") or _mapping(manifest.get("icon")).get("path") or ""
     return AccountFeatureDescriptor(
         feature_id=feature_id,
         label=str(account.get("label") or manifest.get("label") or feature_id).strip() or feature_id,
-        icon=_safe_entry(plugin_dir, icon_value),
-        frontend_entry=_safe_entry(plugin_dir, account.get("frontend_entry")),
+        frontend_entry=_safe_entry(plugin_dir, account.get("frontend_entry"), require_file=False),
         backend_entry=_safe_entry(plugin_dir, account.get("backend_entry")),
-        protocol_version=protocol_version,
     )
 
 

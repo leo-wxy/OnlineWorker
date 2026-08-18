@@ -11,6 +11,14 @@ icon:
   path: icon.svg
   source: https://simpleicons.org/icons/openai.svg
 
+features:
+  account:
+    enabled: true
+    feature_id: codex
+    label: Codex
+    frontend_entry: frontend/account_entry.tsx
+    backend_entry: python/account_feature.py
+
 provider:
   usage:
     plugin_id: ccusage

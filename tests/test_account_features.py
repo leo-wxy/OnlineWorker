@@ -21,7 +21,7 @@ def _write_feature(
 ) -> Path:
     plugin_dir = root / plugin_id
     plugin_dir.mkdir(parents=True)
-    for relative in ("icon.svg", frontend_entry, backend_entry):
+    for relative in (frontend_entry, backend_entry):
         path = plugin_dir / relative
         if ".." not in Path(relative).parts and not Path(relative).is_absolute():
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -30,10 +30,8 @@ def _write_feature(
         "enabled": enabled,
         "feature_id": feature_id or f"{plugin_id}-accounts",
         "label": f"{plugin_id} Accounts",
-        "icon": "icon.svg",
         "frontend_entry": frontend_entry,
         "backend_entry": backend_entry,
-        "protocol_version": 1,
         **(extra or {}),
     }
     (plugin_dir / "plugin.yaml").write_text(
@@ -57,16 +55,26 @@ def test_discovers_only_enabled_builtin_metadata_without_secret_fields(tmp_path)
         {
             "feature_id": "valid-accounts",
             "label": "valid Accounts",
-            "icon": "icon.svg",
             "frontend_entry": "frontend/account-entry.tsx",
             "backend_entry": "python/account_feature.py",
-            "protocol_version": 1,
         }
     ]
     serialized = json.dumps([asdict(feature) for feature in features] + account_feature_load_failures())
     assert "credential-fixture" not in serialized
     assert "credential" not in serialized
     assert "session" not in serialized
+
+
+def test_frontend_entry_is_resolved_by_the_compiled_host_registry(tmp_path):
+    from core.account_features import list_account_features
+
+    builtin = tmp_path / "builtin"
+    plugin = _write_feature(builtin, "compiled")
+    (plugin / "frontend" / "account-entry.tsx").unlink()
+
+    features = list_account_features(builtin_root=builtin, overlay_spec="")
+
+    assert [feature.frontend_entry for feature in features] == ["frontend/account-entry.tsx"]
 
 
 def test_isolates_duplicate_malformed_missing_and_overlay_features(tmp_path):
@@ -107,9 +115,9 @@ def test_rejects_unsafe_ids_and_entry_paths_without_hiding_valid_feature(tmp_pat
     _write_feature(builtin, "absolute", backend_entry="/tmp/outside.py")
 
     escaped = _write_feature(builtin, "symlink")
-    outside = tmp_path / "outside.tsx"
+    outside = tmp_path / "outside.py"
     outside.write_text("fixture", encoding="utf-8")
-    symlink = escaped / "frontend" / "account-entry.tsx"
+    symlink = escaped / "python" / "account_feature.py"
     symlink.unlink()
     symlink.symlink_to(outside)
 

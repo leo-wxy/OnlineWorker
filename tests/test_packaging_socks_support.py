@@ -2,6 +2,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SPEC_PATHS = (ROOT / "onlineworker.spec", ROOT / "onlineworker-x86_64.spec")
 
 
 def test_requirements_include_socksio_runtime_dependency() -> None:
@@ -10,32 +11,31 @@ def test_requirements_include_socksio_runtime_dependency() -> None:
 
 
 def test_pyinstaller_specs_include_socksio_hiddenimport() -> None:
-    spec_paths = [
-        ROOT / "onlineworker.spec",
-        ROOT / "onlineworker-x86_64.spec",
-    ]
-    for spec_path in spec_paths:
+    for spec_path in SPEC_PATHS:
         spec_text = spec_path.read_text(encoding="utf-8")
         assert "'socksio'" in spec_text, spec_path.name
 
 
 def test_pyinstaller_specs_bundle_builtin_provider_manifests() -> None:
-    spec_paths = [
-        ROOT / "onlineworker.spec",
-        ROOT / "onlineworker-x86_64.spec",
-    ]
-    for spec_path in spec_paths:
+    for spec_path in SPEC_PATHS:
         spec_text = spec_path.read_text(encoding="utf-8")
         assert "'plugins/providers/builtin/claude/plugin.yaml'" in spec_text, spec_path.name
         assert "'plugins/providers/builtin/codex/plugin.yaml'" in spec_text, spec_path.name
 
 
-def test_packaging_includes_lightweight_claude_hook_relay() -> None:
-    spec_paths = [
-        ROOT / "onlineworker.spec",
-        ROOT / "onlineworker-x86_64.spec",
+def test_pyinstaller_specs_bundle_codex_account_feature_discovery_entries() -> None:
+    required = [
+        "'plugins/providers/builtin/codex/icon.svg'",
+        "'plugins/providers/builtin/codex/python/account_feature.py'",
     ]
-    for spec_path in spec_paths:
+    for spec_path in SPEC_PATHS:
+        spec_text = spec_path.read_text(encoding="utf-8")
+        for entry in required:
+            assert entry in spec_text, f"{entry} missing from {spec_path.name}"
+
+
+def test_packaging_includes_lightweight_claude_hook_relay() -> None:
+    for spec_path in SPEC_PATHS:
         spec_text = spec_path.read_text(encoding="utf-8")
         assert "'plugins/providers/builtin/claude/python/claude_hook_relay.py'" in spec_text, spec_path.name
 
@@ -44,11 +44,7 @@ def test_packaging_includes_lightweight_claude_hook_relay() -> None:
 
 
 def test_pyinstaller_specs_include_packaged_ow_codex_entrypoint() -> None:
-    spec_paths = [
-        ROOT / "onlineworker.spec",
-        ROOT / "onlineworker-x86_64.spec",
-    ]
-    for spec_path in spec_paths:
+    for spec_path in SPEC_PATHS:
         spec_globals = _load_spec_globals(spec_path)
         assert "plugins.providers.builtin.codex.python.cli_wrapper" in spec_globals["provider_hiddenimports"]
 
@@ -66,17 +62,13 @@ def _exec_spec_prefix(source: str, spec_path: Path) -> dict:
 
 
 def test_pyinstaller_specs_bundle_dynamic_provider_python_modules() -> None:
-    spec_paths = [
-        ROOT / "onlineworker.spec",
-        ROOT / "onlineworker-x86_64.spec",
-    ]
     required_hiddenimports = [
         "plugins.providers.builtin.claude.python.config_normalizer",
         "plugins.providers.builtin.claude.python.provider",
         "plugins.providers.builtin.codex.python.config_normalizer",
         "plugins.providers.builtin.codex.python.provider",
     ]
-    for spec_path in spec_paths:
+    for spec_path in SPEC_PATHS:
         spec_globals = _load_spec_globals(spec_path)
         hiddenimports = spec_globals["provider_hiddenimports"]
         for hiddenimport in required_hiddenimports:

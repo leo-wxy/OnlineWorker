@@ -5,7 +5,6 @@ import json
 from plugins.providers.builtin.codex.python.account_model import (
     classify_external_account,
     redacted_index_dto,
-    stable_identity_key,
     upsert_account,
 )
 from plugins.providers.builtin.codex.python.compat import parse_cockpit_tools
@@ -60,12 +59,12 @@ def test_stable_identity_is_deterministic_and_namespaced_by_auth_mode():
     token = _record(token_fixture())
     api_key = _record(api_key_fixture())
 
-    assert stable_identity_key(token) == stable_identity_key(_record(token_fixture()))
-    assert stable_identity_key(token).startswith("token:")
-    assert stable_identity_key(api_key).startswith("apikey:")
-    assert stable_identity_key(token) != stable_identity_key(api_key)
-    assert "account-token" not in stable_identity_key(token)
-    assert "api-key-fixture" not in stable_identity_key(api_key)
+    assert token.identity_key == _record(token_fixture()).identity_key
+    assert token.identity_key.startswith("token:")
+    assert api_key.identity_key.startswith("apikey:")
+    assert token.identity_key != api_key.identity_key
+    assert "account-token" not in token.identity_key
+    assert "api-key-fixture" not in api_key.identity_key
 
 
 def test_same_identity_upsert_updates_in_place_and_preserves_unknown_fields():
@@ -102,11 +101,10 @@ def test_duplicate_existing_identity_is_ambiguous_and_does_not_mutate_records():
 def test_redacted_index_and_external_classification_never_expose_credentials():
     token = _record(token_fixture())
     api_key = _record(api_key_fixture())
-    dto = redacted_index_dto(token, is_current=True, external_state="matched")
+    dto = redacted_index_dto(token, external_state="matched")
 
     assert classify_external_account(token, [token, api_key]) == "matched"
     assert classify_external_account(_record(token_fixture(account_id="different")), [token, api_key]) == "unmanaged"
-    assert dto["isCurrent"] is True
     assert dto["externalState"] == "matched"
     serialized = json.dumps(dto)
     for secret in ("id-token-fixture", "access-token-fixture", "refresh-token-fixture"):

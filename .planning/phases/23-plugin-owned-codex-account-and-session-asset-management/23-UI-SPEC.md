@@ -15,14 +15,14 @@ created: 2026-08-17
 
 | Property | Value |
 |----------|-------|
-| Tool | 现有 Tailwind CSS 与 OnlineWorker `ow-*` utilities |
+| Tool | 现有 Tailwind CSS、OnlineWorker `ow-*` utilities 与插件自带语义 CSS |
 | Preset | 现有 installed-app light / dark / system 主题 |
 | Component library | 无新增库；复用现有 React/HTML 组件 |
 | Icon library | 现有 inline SVG + `currentColor` 模式 |
 | Font | `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif` |
 | Ownership | Host 只负责通用入口、发现、selector shell 和错误边界；插件负责全部 Codex 文案、数据、操作、校验和内容 |
 
-禁止新增依赖、字体、全局主题 token、host 中的 Codex 特判、API 中转/网关、配额面板或账号池。
+禁止新增依赖、字体、全局主题 token、host 中的 Codex 特判、API 中转/网关、账号池或后台配额轮询。插件 CSS 只能消费现有语义 token，不修改 host 的 Tailwind 扫描范围。
 
 ## Information Architecture
 
@@ -33,12 +33,13 @@ OnlineWorker sidebar
         └── Codex plugin
             ├── 账号
             │   ├── 账号总览
-            │   ├── 账号卡片
+            │   ├── 账号卡片与官方额度窗口
             │   └── 添加账号弹窗
             └── 会话资产
                 ├── 近 30 天 Token / 成本摘要
                 ├── 标题搜索与选中范围批量操作
-                └── 可展开会话列表
+                └── 默认折叠的工程目录组
+                    └── 展开后显示该目录下的对话
 ```
 
 - 没有 account-capable 插件时，侧边栏不显示“账号”。
@@ -100,7 +101,7 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 - Primary CTA: `添加账号`
 - Codex plugin selector label: `Codex`
 
-账号卡片只显示：selection checkbox、稳定身份、`当前账号` / `未应用`、来源（`OAuth` / `Token / JSON` / `API Key` / `文件导入`）、外部状态（`外部修改` / `未托管`）、`应用`和 `导出`。页面提供 `全选当前结果`、`清除选择`、`已选择 {count} 项`和 `导出选中`；无选中时用 native `disabled`。不显示凭据本体，不提供配额、套餐、标签、备注、分组、轮换、账号池、网关、模型供应商、唤醒或自动切换。
+账号卡片只显示：selection checkbox、稳定身份、`当前账号` / `未应用`、来源（`OAuth` / `Token / JSON` / `API Key` / `文件导入`）、外部状态（`外部修改` / `未托管`）、官方返回的 plan/额度窗口，以及 `应用`/`重新应用`、`刷新额度`和 `导出`。页面提供 `全选当前结果`、`清除选择`、`已选择 {count} 项`和 `导出选中`；无选中时用 native `disabled`。不显示凭据本体，不提供标签、备注、分组、轮换、账号池、网关、模型供应商、唤醒或自动切换。
 
 | State | Copy and behavior |
 |-------|-------------------|
@@ -112,6 +113,10 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 | Import success | `账号已导入。需要使用时，请点击“应用”。`；current account 不变 |
 | Apply success | `账号已应用到当前 Codex Home。` |
 | Apply failure | `应用失败，已恢复之前的凭据。`；current account 不变 |
+| Quota idle | `尚未刷新额度`；仅用户点击时访问官方 Codex usage endpoint |
+| Quota loading | `正在刷新额度…`；只禁用该账号的刷新操作 |
+| Quota success | 显示官方 plan、额度百分比和重置时间；不推导官方响应中不存在的值 |
+| Quota unavailable | `额度暂不可用` + 精简错误；保留上次成功结果，不伪造 `0` |
 
 ## Add Account Modal
 
@@ -160,7 +165,7 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 `Import` 与 `Apply` 在视觉和行为上始终分离；import success 不得暗示 apply success。
 
 - Apply confirmation: `应用此账号？这只会更新当前 Codex 凭据文件，不会停止、重启或重新连接任何进程。`
-- Apply states: `应用`、`正在应用…`、`已是当前账号`、`请先导入账号`。
+- Apply states: `应用`、`正在应用…`、`重新应用`、`请先导入账号`。当前账号允许显式重新投影凭据，按钮不得因“已经是当前账号”而永久禁用。
 - Apply failure: `应用失败，已恢复之前的凭据；当前账号未改变。`
 - Export actions: 卡片单账号 `导出`、选择栏 `导出选中`；两者都显示 confirmation `导出的文件包含完整凭据，请仅保存到受信任的位置。`
 - Export 使用 native save dialog；states `正在导出…`、`账号已导出：{filename}`、`导出失败：{reason}`；save dialog cancel 不产生成功/错误状态。
@@ -171,7 +176,8 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 会话资产
 ├── 近 30 天：Token 总量 / 估算成本
 ├── Toolbar：标题搜索 / 导入 ZIP / 导出选中 / 修复可见性 / 选中范围操作
-└── Expandable list：checkbox / disclosure / title / date / token-cost metadata / details
+└── Workdir groups：disclosure / cwd title / conversation count / latest date
+    └── Conversation rows：checkbox / title / date / session id / details
 ```
 
 ### 30-day Summary
@@ -183,11 +189,12 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 
 ### Search, Selection, and Rows
 
-- Search label / placeholder: `按标题搜索会话` / `搜索会话标题`。
+- Search label / placeholder: `按标题搜索会话` / `搜索会话标题`；同时匹配 conversation title 和 `cwd`。
 - Empty search: `没有匹配的会话标题。`；selection: `已选择 {count} 项`。
 - Batch actions: `全选当前结果`、`清除选择`、`导出选中`、`移到废纸篓`。无选中时用 native `disabled`。
 - 批量操作只作用于显式选中/当前可见结果，不修改隐藏集合。
-- 行使用非交互 wrapper；checkbox、disclosure 和其他 action 都是 sibling native controls，不在 button 内嵌套 checkbox/button。行显示 checkbox、disclosure、title、date、token/cost summary、state text；展开后可显示 session id、源文件信息、完整性结果和时间戳。
+- 一级列表按 effective `cwd`/project 分组，默认全部折叠；组标题显示目录名、conversation 数量和最后活动时间。展开后才渲染该组的 conversation rows，避免把每条对话一级平铺。
+- Group 使用 native `details/summary` 或等价 disclosure；conversation row 使用非交互 wrapper，checkbox 和其他 action 是 sibling native controls，不嵌套交互控件。对话行显示 title、date、session id 和状态；详情可显示源文件、完整性结果和时间戳。
 - 后台刷新保留已渲染行，不用全屏 loading 清空列表。
 
 ### ZIP Import / Export
@@ -252,15 +259,17 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 |---------|-------|------------|
 | Sidebar | no plugin / discovered | 入口缺席 / 恰好一个动态“账号”入口 |
 | Plugin selector | loading / error | `正在加载账号插件…` + disabled + `aria-live`；host 无 Codex 特判；错误隔离 + `重试` + `查看诊断` |
-| Account overview | loading / empty / loaded | 明确状态；checkbox + selection count + 全选/清除；卡片只有身份/current/source/`应用`/`导出` |
+| Account overview | loading / empty / loaded | 明确状态；checkbox + selection count + 全选/清除；卡片只有身份/current/source/plan/quota/`应用`/`刷新额度`/`导出` |
 | Add modal | idle | 四个精确 tab；无嵌入 WebView |
 | OAuth | waiting / fallback | 系统浏览器、callback status、manual URL fallback |
 | Import | success / invalid | 账号库更新但 current 不变；错误保留输入 |
 | Apply | success / failure | 不重启/重连；失败原子回滚 |
+| Quota refresh | idle / loading / success / unavailable | 仅显式刷新官方 usage endpoint；保留上次结果；无后台轮询或账号池逻辑 |
 | Account export | cancel / success | cancel 安静；完整凭据不出现在列表 |
 | Session page | bot stopped | 仍从当前 Codex Home 读本地文件 |
 | 30-day summary | success / empty / error | 只用本地数据；不伪造成本 `0` |
-| Search/batch | no match / no selection | 明确 empty；无选中时 scoped actions disabled |
+| Session groups | collapsed / expanded | 一级只显示 cwd/project；默认折叠；展开后显示该组 conversation rows |
+| Search/batch | no match / no selection | title/cwd 均可匹配；明确 empty；无选中时 scoped actions disabled |
 | ZIP import | conflict / integrity/version error | 不静默覆盖；逐项结果；受影响项不写入 |
 | Trash/restore | success / error | manifest-backed 可逆；无永久删除 |
 | Visibility repair | success / no-op / error | 计数/no-op；无 EventBus/session/notification 副作用 |
