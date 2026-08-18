@@ -896,7 +896,7 @@ Plans:
 **Depends on:** Phase 22
 **Decision source:** Phase context D-01–D-40
 **Plans:** 12 plans
-**Status:** Completed. Source regression, combined package build, and mounted-DMG read-only UI QA passed on 2026-08-18. A later follow-up replaced per-action Python cold starts with an independent resident account-feature worker and added versioned redacted account-summary cache-first rendering. Its combined build/install verification passed; the installed cache-hit account row rendered in 449 ms without a loading placeholder, while session refresh still took 6.0 s and remains a separate performance gap. Real account/session mutations remain unexecuted.
+**Status:** Completed. Source regression, combined package build, and mounted-DMG read-only UI QA passed on 2026-08-18. A later performance follow-up replaced per-action Python cold starts with an independent resident worker and added redacted cache-first rendering; its build/install verification passed. The latest scope/UI follow-up keeps only OAuth and Token / JSON add paths and fixes shared desktop row tracks; source regression plus light/dark/narrow browser QA passed, but this latest follow-up is not packaged. Session refresh remains a separate 6.0 s gap; real account/session mutations remain unexecuted.
 
 Plans:
 
@@ -923,7 +923,7 @@ Plans:
 **Wave 5** *(blocked on Wave 4 completion)*
 
 - [x] 23-09-PLAN.md — 实现离线 Codex 会话资产后端
-- [x] 23-10-PLAN.md — 完成 Codex 账号前端与四源导入流程
+- [x] 23-10-PLAN.md — 完成 Codex 账号前端与 OAuth / Token JSON 双入口流程
 
 **Wave 6** *(blocked on Wave 5 completion)*
 

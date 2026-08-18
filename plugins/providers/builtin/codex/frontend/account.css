@@ -8,24 +8,281 @@
   opacity: 0.45;
 }
 
-.codex-account-card {
-  grid-template-columns: minmax(0, 1fr);
+.codex-account-list {
+  background: var(--ow-panel);
 }
 
-.codex-account-card-current {
+.codex-account-list-header,
+.codex-account-list-toolbar {
+  border-bottom: 1px solid var(--ow-line-soft);
+}
+
+.codex-account-list-toolbar {
+  background: var(--ow-toolbar);
+}
+
+.codex-account-text-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--ow-muted);
+  padding: 0.45rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.codex-account-text-action:hover:not(:disabled) {
+  background: var(--ow-hover);
+  color: var(--ow-text);
+}
+
+.codex-account-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(15rem, 1.05fr) minmax(17rem, 0.95fr) 11.75rem;
+  align-items: center;
+  gap: 1.5rem;
+  min-width: 0;
+  padding: 1.15rem 1.25rem;
+  background: transparent;
+  transition: background-color 150ms ease;
+}
+
+.codex-account-identity-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4.5rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.codex-account-identity-heading .codex-account-state {
+  width: 4.5rem;
+  justify-self: end;
+}
+
+.codex-account-row-actions {
+  display: grid;
+  grid-template-columns: 5.5rem 2.75rem 2.75rem;
+  align-items: center;
+  justify-content: end;
+  gap: 0.375rem;
+}
+
+.codex-account-row-actions .codex-account-text-action,
+.codex-account-primary-action {
+  width: 100%;
+}
+
+.codex-account-row-actions .codex-account-text-action {
+  padding-inline: 0.25rem;
+}
+
+.codex-account-row + .codex-account-row {
+  border-top: 1px solid var(--ow-line-soft);
+}
+
+.codex-account-row:hover {
+  background: var(--ow-hover);
+}
+
+.codex-account-row-current,
+.codex-account-row-current:hover {
+  background: var(--ow-blue-soft);
   box-shadow: inset 3px 0 0 var(--ow-blue);
 }
 
+.codex-account-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.codex-account-state > span {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: var(--ow-line);
+}
+
+.codex-account-state-current {
+  color: var(--ow-green);
+}
+
+.codex-account-state-current > span {
+  background: var(--ow-green);
+  box-shadow: 0 0 0 3px var(--ow-green-soft);
+}
+
+.codex-account-state-idle {
+  color: var(--ow-muted);
+}
+
+.codex-account-quota-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.codex-account-quota-window {
+  padding: 0.125rem 0;
+}
+
 .codex-account-quota-progress {
-  accent-color: var(--ow-green);
+  display: block;
+  height: 0.375rem;
+  overflow: hidden;
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ow-line-soft);
+  accent-color: var(--ow-blue);
+}
+
+.codex-account-quota-progress::-webkit-progress-bar {
+  background: var(--ow-line-soft);
+  border-radius: inherit;
+}
+
+.codex-account-quota-progress::-webkit-progress-value {
+  background: var(--ow-blue);
+  border-radius: inherit;
+}
+
+.codex-account-quota-progress::-moz-progress-bar {
+  background: var(--ow-blue);
+  border-radius: inherit;
+}
+
+.codex-account-quota-empty {
+  display: flex;
+  align-items: center;
+}
+
+.codex-account-apply {
+  border: 1px solid var(--ow-focus);
+  border-color: var(--ow-focus);
+  background: var(--ow-blue-soft);
+  color: var(--ow-blue);
+  box-shadow: none;
+}
+
+.codex-account-modal {
+  width: min(calc(100vw - 2rem), 38rem);
+}
+
+.codex-account-modal[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.codex-account-modal::backdrop {
+  background: var(--ow-overlay);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.codex-account-modal-close {
+  border: 0;
+  background: transparent;
+  color: var(--ow-muted);
+}
+
+.codex-account-modal-close:hover:not(:disabled) {
+  background: var(--ow-hover);
+  color: var(--ow-text);
+}
+
+.codex-account-modal-tab {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 6.5rem;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ow-muted);
+  padding: 0.75rem 0.6rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.codex-account-modal-tab:hover:not(:disabled) {
+  color: var(--ow-text);
+}
+
+.codex-account-modal-tab-active {
+  border-bottom-color: var(--ow-blue);
+  color: var(--ow-text);
+}
+
+.codex-account-modal-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  background: var(--ow-panel-soft);
+}
+
+.codex-account-modal-header,
+.codex-account-modal-tabs,
+.codex-account-modal-footer {
+  flex: 0 0 auto;
+}
+
+.codex-account-modal-mode {
+  min-height: 11.5rem;
+}
+
+.codex-account-modal-kicker {
+  color: var(--ow-blue);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.codex-account-modal-fallback {
+  border: 1px solid var(--ow-line-soft);
+  background: var(--ow-panel);
+}
+
+.codex-account-modal-footer {
+  background: var(--ow-panel);
+}
+
+.codex-account-field {
+  border: 1px solid var(--ow-line);
+  background: var(--ow-input);
+  color: var(--ow-text);
+  outline: none;
+}
+
+.codex-account-field::placeholder {
+  color: var(--ow-subtle);
+}
+
+.codex-account-field:focus {
+  border-color: var(--ow-focus);
+  box-shadow: 0 0 0 3px var(--ow-blue-soft);
 }
 
 .codex-session-metrics {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .codex-session-summary-content {
   width: calc(100% - 2rem);
+}
+
+@media (min-width: 640px) {
+  .codex-session-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (min-width: 768px) {
@@ -35,26 +292,107 @@
 }
 
 @media (min-width: 1024px) {
-  .codex-account-card {
-    align-items: center;
-    grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1.2fr);
-  }
-
-  .codex-account-actions {
-    grid-column: 1 / -1;
-  }
-
   .codex-session-metrics {
     grid-template-columns: minmax(110px, 0.9fr) repeat(5, minmax(90px, 1fr));
   }
 }
 
-@media (min-width: 1280px) {
-  .codex-account-card {
-    grid-template-columns: minmax(240px, 0.9fr) minmax(380px, 1.35fr) auto;
+@media (max-width: 1099px) {
+  .codex-account-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 1rem 1.25rem;
   }
 
-  .codex-account-actions {
-    grid-column: auto;
+  .codex-account-row-quota {
+    grid-column: 1 / -1;
+    width: min(100%, 34rem);
+    padding-left: 1.5rem;
+  }
+
+  .codex-account-row-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
+@media (max-width: 767px) {
+  .codex-account-page-actions,
+  .codex-account-toolbar-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .codex-account-page-actions {
+    justify-content: space-between;
+  }
+
+  .codex-account-toolbar-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 639px) {
+  .codex-account-page-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .codex-account-tabs {
+    width: 100%;
+  }
+
+  .codex-account-list-header,
+  .codex-account-list-toolbar {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .codex-account-row {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 1rem;
+  }
+
+  .codex-account-row-quota {
+    grid-column: 1;
+    width: 100%;
+    padding-left: 1.5rem;
+  }
+
+  .codex-account-row-actions {
+    grid-column: 1;
+    grid-row: auto;
+    justify-content: flex-start;
+    padding-left: 1.5rem;
+  }
+
+  .codex-account-identity-heading {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .codex-account-identity-heading .codex-account-state {
+    width: auto;
+  }
+
+  .codex-account-quota-grid {
+    gap: 1rem;
+  }
+
+  .codex-account-modal {
+    width: calc(100vw - 1rem);
+    max-height: calc(100vh - 1rem);
+    border-radius: 14px;
+  }
+
+  .codex-account-modal-tab {
+    min-width: 0;
+  }
+
+  .codex-account-modal-mode {
+    min-height: 0;
+  }
+
+  .codex-account-modal-footer button {
+    width: 100%;
   }
 }

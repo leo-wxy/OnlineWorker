@@ -6,7 +6,6 @@ import pytest
 
 from plugins.providers.builtin.codex.python import apply as apply_module
 from plugins.providers.builtin.codex.python.account_store import AccountStore
-from plugins.providers.builtin.codex.python.account_feature import handle_account_feature
 from plugins.providers.builtin.codex.python.apply import ApplyError, apply_account, refresh_current
 from plugins.providers.builtin.codex.python.compat import parse_cockpit_tools
 
@@ -97,47 +96,3 @@ def test_malformed_auth_is_unmanaged(account_store_root, tmp_path):
     (home / "auth.json").write_text("{", encoding="utf-8")
 
     assert refresh_current(store, home=home)["state"] == "unmanaged"
-
-
-@pytest.mark.parametrize(
-    ("auth", "mode"),
-    [
-        (
-            {
-                "OPENAI_API_KEY": None,
-                "tokens": {"id_token": "id", "access_token": "access", "refresh_token": "refresh", "account_id": "acct-local"},
-                "last_refresh": "2026-08-18T00:00:00Z",
-                "future": {"kept": True},
-            },
-            "token",
-        ),
-        ({"auth_mode": "apikey", "OPENAI_API_KEY": "key-local", "future": {"kept": True}}, "apikey"),
-        (
-            {
-                "auth_mode": "agentIdentity",
-                "agent_identity": {
-                    "agent_runtime_id": "runtime-local",
-                    "agent_private_key": "private-local",
-                    "account_id": "acct-agent",
-                    "chatgpt_user_id": "user-agent",
-                },
-                "future": {"kept": True},
-            },
-            "agentIdentity",
-        ),
-    ],
-)
-def test_import_file_accepts_current_auth_json_shapes(account_store_root, tmp_path, auth, mode):
-    path = tmp_path / "auth.json"
-    path.write_text(json.dumps(auth), encoding="utf-8")
-
-    result = handle_account_feature(
-        action="accounts.import_file",
-        payload={},
-        context={"data_root": str(account_store_root), "native_paths": [{"mode": "open", "path": str(path)}]},
-    )
-
-    assert result["ok"] is True
-    record = AccountStore(account_store_root).list_records()[0]
-    assert record.auth_mode == mode
-    assert record.credentials["future"] == {"kept": True}

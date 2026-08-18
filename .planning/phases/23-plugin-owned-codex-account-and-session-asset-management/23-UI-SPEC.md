@@ -33,7 +33,7 @@ OnlineWorker sidebar
         └── Codex plugin
             ├── 账号
             │   ├── 账号总览
-            │   ├── 账号卡片与官方额度窗口
+            │   ├── 对齐的账号列表与官方额度窗口
             │   └── 添加账号弹窗
             └── 会话资产
                 ├── 近 30 天 Token / 成本摘要
@@ -101,15 +101,15 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 - Primary CTA: `添加账号`
 - Codex plugin selector label: `Codex`
 
-账号卡片只显示：selection checkbox、稳定身份、`当前账号` / `未应用`、来源（`OAuth` / `Token / JSON` / `API Key` / `文件导入`）、外部状态（`外部修改` / `未托管`）、官方返回的 plan/额度窗口，以及 `应用`/`重新应用`、`刷新额度`和 `导出`。页面提供 `全选当前结果`、`清除选择`、`已选择 {count} 项`和 `导出选中`；无选中时用 native `disabled`。不显示凭据本体，不提供标签、备注、分组、轮换、账号池、网关、模型供应商、唤醒或自动切换。
+账号列表只显示：selection checkbox、稳定身份、`当前账号` / `未应用`、来源（新入口为 `OAuth` / `Token / JSON`；历史记录可显示 `API Key` / `文件导入`）、外部状态（`外部修改` / `未托管`）、官方返回的 plan/额度窗口，以及 `应用`/`重新应用`、`刷新额度`和 `导出`。桌面每行共享固定的身份、额度和操作列轨，主操作按钮宽度一致；文案长度不得改变相邻行的列起点。页面提供 `全选当前结果`、`清除选择`、`已选择 {count} 项`和 `导出选中`；无选中时用 native `disabled`。
 
-账号首屏允许从 versioned local cache 读取上述卡片所需的脱敏字段；命中时立即渲染，随后后台执行 `accounts.list` 覆盖校准。缓存只按显式白名单重建对象，不保存 callback、表单输入、native path、credential/token 或 backend 未知字段。后台刷新失败时保留已有缓存行并显示错误。
+账号首屏允许从 versioned local cache 读取上述列表行所需的脱敏字段；命中时立即渲染，随后后台执行 `accounts.list` 覆盖校准。缓存只按显式白名单重建对象，不保存 callback、表单输入、native path、credential/token 或 backend 未知字段。后台刷新失败时保留已有缓存行并显示错误。
 
 | State | Copy and behavior |
 |-------|-------------------|
-| Cached | 立即显示脱敏账号卡片；后台校准不清空已有行，真实返回后覆盖缓存 |
+| Cached | 立即显示脱敏账号行；后台校准不清空已有行，真实返回后覆盖缓存 |
 | Loading | `正在加载账号…`；mutation 禁用，不用旧响应覆盖新状态 |
-| Empty | `暂无账号` / `从 OAuth、Token / JSON、API Key 或本地文件导入第一个账号。` |
+| Empty | `暂无账号` / `通过 OAuth 或 Token / JSON 添加第一个账号。` |
 | External matched | `检测到外部凭据文件已匹配此账号。`；不自动应用 |
 | External unmanaged | `检测到未托管的当前账号。请导入后决定是否加入账号库。` |
 | Plugin error | `账号功能加载失败。请重试，或查看诊断。` + `重试` + `查看诊断` |
@@ -127,7 +127,7 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 
 - Title: `添加账号`
 - Description: `选择一种凭据来源。导入只会加入账号库，不会自动应用。`
-- 四个 tab 的精确文案：`OAuth`、`Token / JSON`、`API Key`、`导入`。
+- 两个 tab 的精确文案：`OAuth`、`Token / JSON`。
 - 共通状态：`正在校验…`、`正在导入账号…`；执行期间禁用所有 mutation 控件；错误保留用户输入。
 
 ### OAuth tab
@@ -145,23 +145,9 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 
 - Help: `粘贴完整 Token 或账号 JSON。仅在本地完成结构和身份校验。`
 - CTA: `导入账号`
-- Invalid shape: `账号文件格式不受支持。请检查版本和必需字段。`
+- Invalid shape: `账号 JSON 格式不受支持。请检查版本和必需字段。`
 - Invalid identity: `无法解析账号身份。请修正后重试。`
 - 不执行登录、refresh 或网络验证。
-
-### API Key tab
-
-- Help: `输入 Codex 账号凭据中的 API Key。此入口不是 API 服务管理。`
-- 使用 native password input；CTA `导入账号`；校验 `请输入有效的 API Key。`
-- 不在列表、诊断、日志或前端持久化中回显 secret。
-
-### Import tab
-
-- CTA: `选择账号文件`；selection `已选择：{filename}`；empty `尚未选择文件。`
-- Result groups: `导入成功`、`已跳过`、`已拒绝`。
-- Partial result: `已导入 {ok} 项，跳过 {skipped} 项，拒绝 {rejected} 项。`
-- Unsupported: `账号文件格式不受支持。请检查版本和文件结构。`
-- 已支持的未知字段必须保留，不得静默丢弃。
 
 ## Apply and Account Export
 
@@ -236,11 +222,10 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 
 使用现有 Tailwind 断点：`sm=640`、`md=768`、`lg=1024`、`xl=1280`。
 
-- `>=1280`: 账号卡片最多 3 列；30 天摘要 2 列；toolbar 单行优先。
-- `1024–1279`: 卡片 2 列；toolbar 可换行；会话标题与操作不溢出。
-- `768–1023`: 只有每张卡片可读时才保留 2 列；内部 pane 堆叠；展开详情放在行下。
-- `<768`: 卡片、摘要单列；toolbar 换行；modal footer 按钮全宽堆叠；四 tab 换行或仅 tab strip 水平滚动。
-- `<640`: modal `p-4`，页面复用现有 `p-5`，卡片 `p-4`；不定宽；actions 换行到 heading 下。
+- `>=1100`: 账号行使用相同的身份 / 额度 / 操作三列轨；操作列和主按钮固定宽度，所有额度窗口纵向对齐；30 天摘要 2 列；toolbar 单行优先。
+- `768–1099`: 账号身份与操作保留两列，额度移到下一行；toolbar 可换行；会话标题与操作不溢出。
+- `<768`: 账号列表保持单一 surface；toolbar 换行；modal footer 按钮全宽堆叠。
+- `<640`: modal `p-4`，页面复用现有 `p-5`，账号行 `p-4`；身份、额度、actions 单列，不定宽。
 - 侧边栏收起为 84px 时保留“账号”icon 和 `title`/`aria-label`；展开复用 248px。
 - 页面不得产生水平滚动。窄屏 session detail 复用现有 list/detail 切换并显示 `返回列表`。
 
@@ -249,8 +234,8 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 - 侧边栏入口使用 native button，accessible name `账号`。
 - Provider selector 使用 `role="tablist"` 或等价 labelled group；选中项暴露 `aria-selected`。
 - Modal 使用 `role="dialog"`、`aria-modal="true"`、关联 title/description、Escape 关闭、初始 focus 和 focus restore。
-- 所有 input 有可见 label 或 `aria-label`；secret 使用 password semantics。
-- Import tabs 可键盘激活；focus ring 使用 `--ow-focus`。
+- 所有 input 有可见 label 或 `aria-label`；Token / JSON 输入不持久化。
+- Add-account tabs 可键盘激活；focus ring 使用 `--ow-focus`。
 - Session row 使用非交互 wrapper；checkbox 用 Space 选中，disclosure button 用 Enter/Space 展开并暴露 `aria-expanded`，其他 action 各自使用 sibling native control。
 - Async status 用 `aria-live="polite"`；需要立即注意的错误用 `role="alert"`。
 - 状态同时有文字/icon，不只靠颜色。禁用操作使用 native `disabled`，不接受 pointer/keyboard mutation。
@@ -263,7 +248,7 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 | Sidebar | no plugin / discovered | 入口缺席 / 恰好一个动态“账号”入口 |
 | Plugin selector | loading / error | `正在加载账号插件…` + disabled + `aria-live`；host 无 Codex 特判；错误隔离 + `重试` + `查看诊断` |
 | Account overview | cached / loading / empty / loaded | 脱敏缓存先显示并后台校准；明确状态；checkbox + selection count + 全选/清除；卡片只有身份/current/source/plan/quota/`应用`/`刷新额度`/`导出` |
-| Add modal | idle | 四个精确 tab；无嵌入 WebView |
+| Add modal | idle | `OAuth`、`Token / JSON` 两个精确 tab；无嵌入 WebView |
 | OAuth | waiting / fallback | 系统浏览器、callback status、manual URL fallback |
 | Import | success / invalid | 账号库更新但 current 不变；错误保留输入 |
 | Apply | success / failure | 不重启/重连；失败原子回滚 |

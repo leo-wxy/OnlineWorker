@@ -56,7 +56,7 @@ completed: 2026-08-18
 
 ## Accomplishments
 
-- Codex 插件独立提供四源账号导入、Cockpit 兼容导出、显式 apply/reapply、官方额度刷新和安全存储；host 不含 Codex 业务分支。
+- Codex 插件当前独立提供 OAuth 与 Token / JSON 账号新增、Cockpit 兼容导出、显式 apply/reapply、官方额度刷新和安全存储；专属 API Key / 本地文件新增动作已在后续范围收缩中移除，host 仍不含 Codex 业务分支。
 - 会话后端按 conversation 处理本地资产，前端按 `cwd`/project 默认折叠分组，展开后显示各 conversation。
 - source guards 固定 OAuth/usage endpoint、trusted handles、真实目录拒绝、shared lock 和 live runtime 零耦合边界。
 - combined wrapper 生成 `OnlineWorker_1.9.0_aarch64.dmg`；挂载运行后完成账号页、添加弹窗和会话分组的只读视觉验证。
@@ -68,6 +68,7 @@ completed: 2026-08-18
 - 用户在实现阶段将“显式额度刷新”加入范围，因此 D-38 从“完全排除 quota”修订为“仅允许显式官方 usage 读取，继续排除后台轮询与账号池”。
 - 参考 Cockpit 的实际信息结构后，会话一级列表由 conversation 平铺改为 `cwd`/project 分组，conversation 保持二级资产单位。
 - 用户后续明确授权打包验证；初次执行 combined build 和 mounted-DMG 只读 QA，performance follow-up 再执行 `verify-packaged-fast.sh` 并安装到 `/Applications` 验证。
+- 用户后续将账号新增入口收缩为 OAuth 与 Token / JSON，并要求账号行共享固定列轨；历史 API-key/文件来源记录继续兼容展示和导出。
 
 ## Verification
 
@@ -76,9 +77,10 @@ completed: 2026-08-18
 - `cd mac-app && node --test tests/accountFeature*.test.mjs` — 5 passed。
 - `cd mac-app && ./node_modules/.bin/tsc --noEmit` — passed。
 - `bash build.sh`（combined shell）— passed；39 MB DMG 已生成并从挂载卷启动，SHA-256 `b3bd54ab4485160268f285e8fba4474ac9f19b63f2f57c111dc6c3360035193c`。
-- Mounted-DMG UI — 账号入口/账号卡片/四源弹窗/额度入口/reapply 可见；会话页显示 31 个 project groups 和 71 条 conversations，展开行为通过。
+- 范围收缩前的 Mounted-DMG UI 历史证据 — 当时的账号入口/四源弹窗/额度入口/reapply 可见；会话页显示 31 个 project groups 和 71 条 conversations。当前双入口与固定列轨 follow-up 需以本轮源码/视觉验证为准。
 - Performance follow-up source verification：Python account/Codex regression 47 passed；Rust account feature 10 passed；account feature Node contracts 10 passed；`npm run build` passed。
 - Performance follow-up packaged verification：`verify-packaged-fast.sh` 113 s passed；39 MB DMG SHA-256 `6c1a6b0ae4b40e41196fe1897a4074f930e12f5d2e2a1e96120e75e0e8a38472`；安装版账号 cache-hit 449 ms，resident worker tree 稳定；会话刷新 6001 ms。
+- OAuth/Token-only 与固定列轨 follow-up：Python account/Codex regression `44 passed`；Node account contracts `10 passed`；TypeScript 与 `pnpm build` passed；1440px Light/Dark 及 900px Light 截图确认身份状态、额度和操作列对齐且无横向溢出。
 
 ## Not Executed
 
@@ -86,6 +88,7 @@ completed: 2026-08-18
 - 未执行会话导入导出、trash/restore/visibility repair。
 - 已安装并启动 `/Applications/OnlineWorker.app`；未验证上述 credential/session mutation action 的安装包时延。
 - 会话完整刷新实测 6.0 s，仍需单独优化，不声明为本 follow-up 已修复。
+- 当前 OAuth/Token-only 与固定列轨 follow-up 未执行打包、安装或真实账号 mutation；浏览器截图不是 installed-app 验证。
 - 本阶段没有创建 commit 或 push。
 
 ## Self-Check

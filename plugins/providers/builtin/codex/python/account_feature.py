@@ -3,12 +3,11 @@ from __future__ import annotations
 import json
 import zipfile
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from plugins.providers.builtin.codex.python.account_store import AccountStore, AccountStoreError, operation_lock
-from plugins.providers.builtin.codex.python.apply import ApplyError, apply_account, auth_file_to_portable, export_accounts, refresh_current, resolve_effective_home
-from plugins.providers.builtin.codex.python.compat import ParseBatchResult, parse_cockpit_tools, parse_local_auth
+from plugins.providers.builtin.codex.python.apply import ApplyError, apply_account, export_accounts, refresh_current, resolve_effective_home
+from plugins.providers.builtin.codex.python.compat import ParseBatchResult, parse_cockpit_tools
 from plugins.providers.builtin.codex.python.oauth import OAuthError, cancel_oauth, complete_oauth, start_oauth
 from plugins.providers.builtin.codex.python.quota import QuotaError, fetch_quota, refresh_oauth_record
 from plugins.providers.builtin.codex.python.session_assets import (
@@ -122,22 +121,6 @@ def handle_account_feature(*, action: str, payload: Any, context: Any) -> dict[s
             )
         if action == "accounts.import":
             return _import_result(store, parse_cockpit_tools(payload.get("content"), source=str(payload.get("source") or "manual")))
-        if action == "accounts.import_api_key":
-            raw = {
-                "auth_mode": "apikey",
-                "OPENAI_API_KEY": payload.get("apiKey"),
-                "email": payload.get("label") or "API Key",
-            }
-            return _import_result(store, parse_cockpit_tools(raw, source="api_key"))
-        if action == "accounts.import_file":
-            path = Path(_trusted_path(context, "open"))
-            raw = path.read_bytes()
-            parsed = parse_local_auth(raw)
-            if not parsed.records and parsed.error is None:
-                portable = auth_file_to_portable(json.loads(raw))
-                if portable is not None:
-                    parsed = parse_local_auth(portable)
-            return _import_result(store, parsed)
         if action == "oauth.start":
             return _ok(**start_oauth(store.root, payload.get("redirectUri")))
         if action == "oauth.cancel":

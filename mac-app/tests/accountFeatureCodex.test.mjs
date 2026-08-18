@@ -4,17 +4,21 @@ import test from "node:test";
 
 const repo = new URL("../..", import.meta.url);
 
-test("codex plugin exposes four import paths, quota refresh and explicit apply/export", async () => {
+test("codex plugin exposes OAuth and Token import, quota refresh and explicit apply/export", async () => {
   const modal = await readFile(new URL("plugins/providers/builtin/codex/frontend/AddAccountModal.tsx", repo), "utf8");
   const overview = await readFile(new URL("plugins/providers/builtin/codex/frontend/AccountOverview.tsx", repo), "utf8");
+  const backend = await readFile(new URL("plugins/providers/builtin/codex/python/account_feature.py", repo), "utf8");
   const manifest = await readFile(new URL("plugins/providers/builtin/codex/plugin.yaml", repo), "utf8");
-  for (const label of ["OAuth 授权", "Token / JSON", "API Key", "导入"]) assert.match(modal, new RegExp(label.replace("/", "\\/")));
+  for (const label of ["OAuth", "Token / JSON"]) assert.match(modal, new RegExp(label.replace("/", "\\/")));
+  assert.doesNotMatch(modal, /API Key|文件导入|chooseOpen|accounts\.import_(?:api_key|file)/);
+  assert.doesNotMatch(backend, /accounts\.import_(?:api_key|file)/);
   for (const action of ["accounts.list", "accounts.apply", "accounts.export", "accounts.refresh"]) assert.match(overview, new RegExp(action.replace(".", "\\.")));
   assert.match(overview, /重新应用/);
   assert.match(overview, /刷新额度/);
   assert.match(overview, /remainingPercent/);
   assert.match(modal, /beginLoopback/);
-  assert.match(modal, /chooseOpen/);
+  assert.match(modal, /onKeyDown/);
+  for (const key of ["ArrowLeft", "ArrowRight", "Home", "End"]) assert.match(modal, new RegExp(key));
   assert.match(overview, /chooseSave/);
   assert.match(manifest, /features:\s*[\s\S]*account:\s*[\s\S]*enabled: true/);
   assert.match(manifest, /backend_entry: python\/account_feature\.py/);
@@ -55,10 +59,14 @@ test("account export opens the native save flow without reloading the account li
 test("account overview uses the compact selectable account-list contract", async () => {
   const overview = await readFile(new URL("plugins/providers/builtin/codex/frontend/AccountOverview.tsx", repo), "utf8");
   const styles = await readFile(new URL("plugins/providers/builtin/codex/frontend/account.css", repo), "utf8");
-  for (const label of ["全选当前结果", "清除选择", "导出选中", "暂无账号", "当前账号", "当前未使用"]) assert.match(overview, new RegExp(label));
-  assert.match(overview, /codex-account-card-current/);
-  assert.match(styles, /@media \(min-width: 1024px\)[\s\S]*grid-template-columns:[\s\S]*grid-column: 1 \/ -1/);
-  assert.match(styles, /@media \(min-width: 1280px\)[\s\S]*grid-template-columns:/);
+  for (const label of ["账号库", "全选当前结果", "清除选择", "导出选中", "暂无账号", "当前账号", "未应用"]) assert.match(overview, new RegExp(label));
+  assert.match(overview, /codex-account-row-current/);
+  assert.match(styles, /codex-account-list-toolbar/);
+  assert.match(styles, /codex-account-row[\s\S]*grid-template-columns/);
+  assert.match(styles, /grid-template-columns:\s*minmax\(15rem, 1\.05fr\) minmax\(17rem, 0\.95fr\) 11\.75rem/);
+  assert.match(styles, /codex-account-row-actions[\s\S]*grid-template-columns:\s*5\.5rem 2\.75rem 2\.75rem/);
+  assert.match(overview, /codex-account-primary-action/);
+  assert.doesNotMatch(styles, /codex-account-grid/);
 });
 
 test("codex session assets are grouped, deferred and reversible", async () => {

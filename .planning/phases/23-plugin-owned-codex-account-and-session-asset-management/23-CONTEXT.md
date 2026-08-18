@@ -26,7 +26,7 @@ The feature must remain usable when the OnlineWorker bot, Provider runtime, owne
 
 ### Codex account credential scope
 - **D-08:** The account feature is a focused credential workflow: import into the plugin-owned account library, select an account, manually apply it, explicitly refresh the official Codex usage windows, and export it for backup or transfer. It is not a full account operations dashboard.
-- **D-09:** Support four add paths in one modal: OAuth, `Token / JSON`, API Key, and local file import.
+- **D-09:** Support two focused add paths in one modal: OAuth and `Token / JSON`. Keep historical API-key records and compatible JSON shapes readable/exportable, but do not expose dedicated API Key or local-file add actions.
 - **D-10:** OAuth uses the system browser with PKCE/state, automatic local callback capture when available, and manual callback URL input as fallback. Do not use an embedded login WebView.
 - **D-11:** Import never auto-applies an account. The user explicitly clicks `应用`; application atomically projects the selected credentials to the current effective `CODEX_HOME` (`$CODEX_HOME` when set, otherwise `~/.codex`).
 - **D-12:** Applying an account is only a credential-file operation. It does not inspect running tasks, stop or restart processes, reconnect adapters, or interact with app-server. Existing processes are outside this feature's responsibility; newly started Codex processes read the applied credentials.
@@ -39,7 +39,7 @@ The feature must remain usable when the OnlineWorker bot, Provider runtime, owne
 - **D-17:** Account imports and exports must be bidirectionally compatible with the current Cockpit Tools Codex account export format, not merely visually similar.
 - **D-18:** Research and tests must pin the exact current Cockpit format at planning time. Additive unknown fields are accepted; an unsupported breaking format must fail with a clear version/shape error rather than silently losing data.
 - **D-19:** Preserve unknown Cockpit fields through import, internal storage, and re-export so a supported round trip is as lossless as the JSON format permits.
-- **D-20:** Import performs local structural validation of the file, required credential fields, and parseable account identity. It reports invalid records per item and does not automatically call a network endpoint, refresh a token, or log in.
+- **D-20:** Import performs local structural validation of the submitted JSON, required credential fields, and parseable account identity. It reports invalid records per item and does not automatically call a network endpoint, refresh a token, or log in.
 - **D-21:** Cockpit Tools is a behavioral and data-format reference only. Its CC BY-NC-SA source must not be copied into OnlineWorker; implementation and tests must be independently written.
 
 ### Credential storage
@@ -59,8 +59,8 @@ The feature must remain usable when the OnlineWorker bot, Provider runtime, owne
 
 ### User interface
 - **D-33:** Align with Cockpit's information architecture and operation flow, while using OnlineWorker's existing theme, typography, accessibility states, and responsive behavior. Do not make a pixel-level copy.
-- **D-34:** The Codex account overview uses responsive account cards with identity, current-account state, import source, plan, and official quota windows when available. Cards expose only the scoped actions such as apply/reapply, explicit quota refresh, and export; do not add the excluded operational dashboard controls.
-- **D-35:** The add-account modal uses four tabs: `OAuth`, `Token / JSON`, `API Key`, and `导入`.
+- **D-34:** The Codex account overview uses one responsive account list with identity, current-account state, import source, plan, and official quota windows when available. Desktop rows share fixed identity/quota/action column rails and fixed primary-action width; narrower layouts may reflow without horizontal scrolling. Rows expose only apply/reapply, explicit quota refresh, and export.
+- **D-35:** The add-account modal uses two tabs: `OAuth` and `Token / JSON`.
 - **D-36:** The session-asset page follows the reference single-page hierarchy: 30-day summary, search and scoped batch actions, then a default-collapsed list grouped by effective `cwd`/project; expanding a group reveals its individual conversations.
 - **D-37:** Plugin UI must remain self-contained behind the generic account-plugin host. Shared React/Tauri code may render the shell and generic failure/loading states, but no Codex-specific labels, models, or commands belong there.
 
@@ -130,7 +130,7 @@ The feature must remain usable when the OnlineWorker bot, Provider runtime, owne
 <specifics>
 ## Specific Ideas
 
-- The user selected Cockpit's account overview, four-tab add-account modal, and session-manager information hierarchy as product references, while explicitly rejecting the unrelated gateway/relay/account-pool surface.
+- The user selected Cockpit's account overview and session-manager information hierarchy as product references, then narrowed the add-account modal to OAuth and Token / JSON only. The account list uses stable shared column rails rather than content-sized per-row columns.
 - The account feature should feel like a focused credential transfer, application, and quota-status tool, not an administrative account-pool dashboard.
 - Cockpit account-file compatibility targets the format present at commit `35963163813d7424b63cd6053874ce5fc7973d03`; planning research must capture exact fixtures and round-trip assertions from that version.
 - OnlineWorker's visual system remains the presentation source of truth even when the plugin mirrors Cockpit's flow.

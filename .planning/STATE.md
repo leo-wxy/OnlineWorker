@@ -4,9 +4,9 @@ milestone: general-ai-capability-and-session-operations
 milestone_name: General AI Capability and Session Operations
 current_phase: 23 — Plugin-Owned Codex Account and Session Asset Management
 current_plan: none
-status: Phase 23 complete; account loading performance follow-up packaged cache path verified
-stopped_at: Phase 23 resident worker and redacted account cache installed verification complete
-last_updated: "2026-08-18T19:58:55+08:00"
+status: Phase 23 complete; account entry scope and row-alignment follow-up source verified
+stopped_at: Phase 23 OAuth/Token-only entry and fixed account row tracks source verification complete
+last_updated: "2026-08-18T23:37:51+08:00"
 progress:
   total_phases: 18
   completed_phases: 12
@@ -21,7 +21,7 @@ current_phase_name: Plugin-Owned Codex Account and Session Asset Management
 **Updated:** 2026-08-18
 **Current milestone:** General AI Capability and Session Operations
 **Current phase:** 23 — Plugin-Owned Codex Account and Session Asset Management
-**Status:** Phase 23 complete; account loading performance follow-up packaged cache path verified
+**Status:** Phase 23 complete; account entry scope and row-alignment follow-up source verified
 **Current plan:** None
 **Last archived milestone:** v1.2.1
 
@@ -50,7 +50,7 @@ current_phase_name: Plugin-Owned Codex Account and Session Asset Management
 - Phase 20 is complete and installed-app verified. Settings > Maintenance provides bounded diagnostics, compact independent results, summary copy, privacy-safe local ZIP export, and Finder reveal. Installed UAT fixed foreground save behavior, localized cancellation, macOS metadata leakage, and real environment-value leakage before final closure. The final ZIP whitelist and installed `.env` zero-match scan passed.
 - Phase 21 is complete and installed-app verified. Provider-owned visibility now suppresses Codex child/internal sessions before EventBus and unbound Topic materialization, provider-native titles are shared across Desktop and Telegram, stale child/internal state and routes reconcile to zero without deleting provider history, and the installed `v1.8.4` runtime passed a real child-suppression smoke. The remaining standalone Telegram visual comparison was explicitly waived at closeout and is not claimed as passed.
 - Phase 22 is source verified through 22-06. System/Light/Dark persistence, first-frame bootstrap, shared main/menubar synchronization, semantic tokens, all existing UI surfaces, and the stable theme development guide are implemented. Frontend regression passed 183 tests, TypeScript and Vite production build passed, and installed-app visual/native-window verification remains pending explicit permission.
-- Phase 23 is complete. The independent Codex plugin owns four-source account import, Cockpit-compatible export, explicit apply/reapply, official manual quota refresh, encrypted storage, and offline session assets. A 2026-08-18 performance follow-up replaced per-action Python cold starts with one independent resident account-feature worker and added a versioned redacted account-summary cache with background calibration. Combined build/install verification passed for this follow-up: the installed cache-hit account page showed its row in 449 ms without a loading placeholder, and the same packaged worker process tree remained resident. Session refresh still took 6.0 s for 32 work directories and 74 conversations and remains a separate performance gap. No credential or session mutation was executed by this verification.
+- Phase 23 is complete. The independent Codex plugin exposes OAuth and Token / JSON account entry, Cockpit-compatible export, explicit apply/reapply, official manual quota refresh, encrypted storage, and offline session assets. Dedicated API Key and local-file add actions were removed in a later scope reduction while historical credential shapes remain readable/exportable. A 2026-08-18 performance follow-up replaced per-action Python cold starts with one independent resident account-feature worker and added a versioned redacted account-summary cache with background calibration. Combined build/install verification passed for that performance follow-up; session refresh still took 6.0 s and remains separate.
 - Phase 17's intermediate preview/cache/hydration fixes and their earlier installed evidence are consolidated in `17-01-SUMMARY.md`; `17-VERIFICATION.md` is the canonical closure result.
 
 ## Archived Milestone
@@ -80,14 +80,14 @@ current_phase_name: Plugin-Owned Codex Account and Session Asset Management
 | 20. One-Click Diagnostics And Support Bundle | Completed and installed-app verified | None |
 | 21. Provider Child-Session Visibility | Completed; canonical verification and installed child-suppression smoke passed | None; standalone live Telegram visual comparison was waived and remains unclaimed |
 | 22. Dark Mode Support | Source verified through `22-06` | Await explicit permission for installed-app visual and native-window verification |
-| 23. Plugin-Owned Codex Account and Session Asset Management | Completed; resident worker/cache follow-up source and installed cache-hit path verified | Session refresh remains 6.0 s; real account/session mutations remain unverified |
+| 23. Plugin-Owned Codex Account and Session Asset Management | Completed; OAuth/Token-only entry and fixed row tracks source/visual verified; earlier resident cache path installed verified | Current follow-up is not packaged; session refresh remains 6.0 s and real mutations remain unverified |
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 **Core value:** Developers can reliably control local AI coding CLI workflows from an installed Mac app while receiving timely remote notifications and final results through supported notification channels.
-**Current focus:** Phase 23 closed with resident worker and packaged cache-hit account loading verified; session refresh performance remains open
+**Current focus:** Phase 23 closed with OAuth/Token-only account entry and fixed row alignment source verified; current follow-up packaging and session refresh performance remain open
 
 ## Key Preserved Decisions
 

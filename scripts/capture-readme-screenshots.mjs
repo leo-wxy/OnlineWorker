@@ -10,11 +10,13 @@ import { spawn } from "node:child_process";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
 const macAppDir = join(repoRoot, "mac-app");
-const outputDir = join(repoRoot, "docs", "screenshots");
+const outputDir = resolve(
+  process.env.ONLINEWORKER_SCREENSHOT_OUTPUT_DIR || join(repoRoot, "docs", "screenshots"),
+);
 const require = createRequire(join(macAppDir, "package.json"));
 const puppeteer = require("puppeteer");
 
-const SCREENSHOTS = [
+const DEFAULT_SCREENSHOTS = [
   { tab: "Dashboard", file: "dashboard.png" },
   { tab: "Setup", file: "setup.png" },
   { tab: "Sessions", file: "sessions-overview.png", afterNavigate: openFirstSessionMenu },
@@ -22,6 +24,18 @@ const SCREENSHOTS = [
   { tab: "AI", file: "ai-services.png" },
   { tab: "AI", file: "ai-scenarios.png", afterNavigate: openAiScenarios },
 ];
+
+const ACCOUNT_SCREENSHOTS = [
+  { tab: "账号", selector: 'button[title="账号"]', file: "accounts.png", afterNavigate: waitForAccountOverview },
+  { tab: "账号", selector: 'button[title="账号"]', file: "account-add-modal.png", afterNavigate: openAddAccountModal },
+];
+
+const SCREENSHOTS = process.env.ONLINEWORKER_SCREENSHOT_ONLY_ACCOUNT === "1"
+  ? ACCOUNT_SCREENSHOTS
+  : [
+      ...DEFAULT_SCREENSHOTS,
+      ...(process.env.ONLINEWORKER_SCREENSHOT_INCLUDE_ACCOUNT === "1" ? ACCOUNT_SCREENSHOTS : []),
+    ];
 
 function sleep(ms) {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
@@ -380,11 +394,54 @@ function demoCodexThreads() {
   ];
 }
 
+function demoAccounts() {
+  return [
+    {
+      id: "demo-account-primary",
+      stableIdentityDisplay: "developer@example.test",
+      authMode: "token",
+      source: "oauth",
+      isCurrent: true,
+      quota: {
+        status: "ok",
+        planType: "Plus",
+        primary: { remainingPercent: 68, windowSeconds: 18_000, resetAt: "2026-08-18T14:30:00Z" },
+        secondary: { remainingPercent: 42, windowSeconds: 604_800, resetAt: "2026-08-24T08:00:00Z" },
+      },
+    },
+    {
+      id: "demo-account-team",
+      stableIdentityDisplay: "team@example.test",
+      authMode: "token",
+      source: "token_json",
+      isCurrent: false,
+      quota: {
+        status: "ok",
+        planType: "Team",
+        primary: { remainingPercent: 91, windowSeconds: 18_000, resetAt: "2026-08-18T16:00:00Z" },
+        secondary: { remainingPercent: 76, windowSeconds: 604_800, resetAt: "2026-08-25T08:00:00Z" },
+      },
+    },
+    {
+      id: "demo-account-automation",
+      stableIdentityDisplay: "automation@example.test",
+      authMode: "agentIdentity",
+      source: "token_json",
+      isCurrent: false,
+      quota: { status: "unsupported" },
+    },
+  ];
+}
+
 function demoTauriScript() {
+  const theme = ["system", "light", "dark"].includes(process.env.ONLINEWORKER_SCREENSHOT_THEME)
+    ? process.env.ONLINEWORKER_SCREENSHOT_THEME
+    : "light";
   const data = {
     providers: demoProviders(),
     dashboard: demoDashboardState(),
     ai: demoAiConfig(),
+    accounts: demoAccounts(),
   };
   return `
 (() => {
@@ -392,6 +449,7 @@ function demoTauriScript() {
   let callbackId = 1;
   const callbacks = new Map();
   window.localStorage.setItem("onlineworker.locale", "en");
+  window.localStorage.setItem("onlineworker.theme", ${JSON.stringify(theme)});
   window.localStorage.setItem("onlineworker.setup.botfather.completed", "1");
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
     unregisterListener() {},
@@ -440,6 +498,12 @@ function demoTauriScript() {
           return "ok";
         case "service_status":
           return { running: true, pid: null };
+        case "get_task_board_session_activities":
+          return [];
+        case "start_task_board_activity_stream":
+          return 1;
+        case "stop_task_board_activity_stream":
+          return null;
         case "get_dashboard_state":
           return data.dashboard;
         case "get_provider_metadata":
@@ -478,6 +542,24 @@ function demoTauriScript() {
           return [];
         case "get_command_registry":
           return { commands: [], lastRefreshedEpoch: null, lastPublishedEpoch: null, hasUnpublishedChanges: false };
+        case "list_account_features":
+          return {
+            ok: true,
+            data: {
+              features: [{
+                feature_id: "codex",
+                label: "Codex",
+                frontend_entry: "frontend/account_entry.tsx",
+                backend_entry: "python/account_feature.py",
+              }],
+              failures: [],
+            },
+          };
+        case "invoke_account_feature":
+          if (args.action === "accounts.list" || args.action === "accounts.refresh") {
+            return { ok: true, data: { ok: true, accounts: data.accounts } };
+          }
+          return { ok: true, data: { ok: true } };
         case "read_config":
           return { raw: "schema_version: 2\\n", path: "/demo/config.yaml" };
         case "read_env":
@@ -523,6 +605,18 @@ async function openAiScenarios(page) {
   await page.waitForFunction(() => document.body.textContent?.includes("Notification summary"));
 }
 
+async function waitForAccountOverview(page) {
+  await page.waitForSelector(".codex-account-list");
+}
+
+async function openAddAccountModal(page) {
+  await waitForAccountOverview(page);
+  await clickText(page, "添加账号");
+  await page.waitForSelector("dialog[open]");
+  const method = process.env.ONLINEWORKER_SCREENSHOT_ACCOUNT_METHOD;
+  if (method === "token") await clickText(page, "Token / JSON");
+}
+
 async function capture(baseUrl) {
   await mkdir(outputDir, { recursive: true });
   const viewport = await appWindowViewport();
@@ -537,20 +631,38 @@ async function capture(baseUrl) {
 
   try {
     const page = await browser.newPage();
+    const pageErrors = [];
     page.setDefaultTimeout(10_000);
     page.setDefaultNavigationTimeout(15_000);
+    page.on("pageerror", (error) => {
+      pageErrors.push(error);
+      console.error("[screenshots] page error", error);
+    });
+    page.on("console", (message) => {
+      if (["error", "warning"].includes(message.type())) {
+        console.error(`[screenshots] browser ${message.type()}`, message.text());
+      }
+    });
     await page.evaluateOnNewDocument(demoTauriScript());
     console.log(`[screenshots] open ${baseUrl}`);
     await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".ow-app-shell");
+    if (process.env.ONLINEWORKER_SCREENSHOT_DEBUG === "1") {
+      console.log(`[screenshots] body ${await page.evaluate(() => document.body.innerText)}`);
+      await page.screenshot({ path: join(outputDir, "debug-initial.png"), fullPage: false });
+    }
 
     for (const item of SCREENSHOTS) {
       console.log(`[screenshots] capture ${item.file}`);
-      await clickText(page, item.tab);
+      if (item.selector) await page.click(item.selector);
+      else await clickText(page, item.tab);
       await sleep(500);
       if (item.afterNavigate) {
         await item.afterNavigate(page);
         await sleep(300);
+      }
+      if (pageErrors.length) {
+        throw new Error(`[screenshots] page failed: ${pageErrors.map((error) => error.message).join("; ")}`);
       }
       await page.screenshot({
         path: join(outputDir, item.file),

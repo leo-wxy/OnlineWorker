@@ -24,12 +24,12 @@
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| Four add paths | OAuth, Token/JSON, API Key, and local import in one feature | ✓ |
-| Partial add paths | OAuth plus selected manual/import paths | |
+| Four add paths | OAuth, Token/JSON, API Key, and local import in one feature | superseded |
+| Partial add paths | OAuth plus Token/JSON | ✓ |
 | Local auth.json only | Minimal existing-login import | |
 
-**User's choice:** Support all four add paths and full single/batch credential export.
-**Notes:** Re-importing the same account updates it in place. OAuth uses the system browser with local callback plus manual callback fallback.
+**User's choice:** Keep OAuth and Token/JSON as the only add paths, while retaining full single/batch credential export.
+**Notes:** The later scope reduction removes dedicated API Key and local-file add actions. Historical credential shapes remain readable/exportable. Re-importing the same account updates it in place; OAuth keeps local callback plus manual fallback.
 
 ## Account application
 
@@ -95,7 +95,7 @@
 | Function-only alignment | Entirely independent page structure | |
 
 **User's choice:** Align information structure and operation flow, not pixels.
-**Notes:** Use responsive account cards, a four-tab add modal, and the reference single-page session layout. Use OnlineWorker theme, typography, accessibility, and responsive behavior.
+**Notes:** Use one responsive account list with fixed desktop column rails, a two-tab add modal, and the reference single-page session layout. Use OnlineWorker theme, typography, accessibility, and responsive behavior.
 
 ## the agent's Discretion
 

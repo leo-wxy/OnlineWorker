@@ -52,7 +52,7 @@ completed: 2026-08-17
 
 ## Accomplishments
 
-- 支持 top-level object/array、OAuth 结构输入和 local-file 复用 parser。
+- 支持 top-level object/array、OAuth 结构输入和历史 credential shape 兼容；后续 UI 只暴露 OAuth 与 Token / JSON。
 - 保持 token、agentIdentity、apikey 三种 Cockpit shape 与未知字段完整 round-trip。
 - 实现 hashed stable identity、唯一命中更新、歧义保护、external matched/unmanaged 与 secret-free DTO。
 
