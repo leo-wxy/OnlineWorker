@@ -17,6 +17,11 @@ test("codex plugin exposes OAuth and Token import, quota refresh and explicit ap
   assert.match(overview, /刷新额度/);
   assert.match(overview, /remainingPercent/);
   assert.match(modal, /beginLoopback/);
+  assert.match(modal, /const canClose = !busy \|\| Boolean\(loopbackHandle\)/);
+  assert.match(modal, /result\.status === "cancelled"/);
+  assert.match(modal, /disabled=\{!canClose\}/);
+  assert.match(modal, /http:\/\/localhost:1455\/auth\/callback/);
+  assert.doesNotMatch(modal, /disabled=\{busy\} onClick=\{close\}/);
   assert.match(modal, /onKeyDown/);
   for (const key of ["ArrowLeft", "ArrowRight", "Home", "End"]) assert.match(modal, new RegExp(key));
   assert.match(overview, /chooseSave/);
@@ -56,17 +61,25 @@ test("account export opens the native save flow without reloading the account li
   assert.match(overview, /run\("export", \(\) => exportIds\(\[account\.id\]\), false\)/);
 });
 
-test("account overview uses the compact selectable account-list contract", async () => {
+test("account overview uses the selectable account-card grid contract", async () => {
   const overview = await readFile(new URL("plugins/providers/builtin/codex/frontend/AccountOverview.tsx", repo), "utf8");
   const styles = await readFile(new URL("plugins/providers/builtin/codex/frontend/account.css", repo), "utf8");
   for (const label of ["账号库", "全选当前结果", "清除选择", "导出选中", "暂无账号", "当前账号", "未应用"]) assert.match(overview, new RegExp(label));
   assert.match(overview, /codex-account-row-current/);
+  assert.match(overview, /codex-account-plan/);
   assert.match(styles, /codex-account-list-toolbar/);
-  assert.match(styles, /codex-account-row[\s\S]*grid-template-columns/);
-  assert.match(styles, /grid-template-columns:\s*minmax\(15rem, 1\.05fr\) minmax\(17rem, 0\.95fr\) 11\.75rem/);
-  assert.match(styles, /codex-account-row-actions[\s\S]*grid-template-columns:\s*5\.5rem 2\.75rem 2\.75rem/);
+  assert.match(styles, /codex-account-list-body[\s\S]*display:\s*grid/);
+  assert.match(styles, /grid-template-columns:\s*repeat\(auto-fill, minmax\(22rem, 26rem\)\)/);
+  assert.match(styles, /codex-account-row[\s\S]*border-radius:\s*1\.25rem/);
+  assert.match(styles, /codex-account-row-actions[\s\S]*grid-template-columns:\s*minmax\(7rem, 1fr\) repeat\(2, 3\.75rem\)/);
   assert.match(overview, /codex-account-primary-action/);
-  assert.doesNotMatch(styles, /codex-account-grid/);
+  assert.match(overview, /codex-account-meta-grid/);
+  assert.match(overview, /codex-account-quota-warning/);
+  assert.match(overview, /codex-account-quota-healthy/);
+  assert.match(styles, /codex-account-secondary-action/);
+  assert.match(overview, /key=\{windowKey\}/);
+  assert.doesNotMatch(overview, /key=\{label\}/);
+  assert.doesNotMatch(styles, /minmax\(15rem, 1\.05fr\) minmax\(17rem, 0\.95fr\) 11\.75rem/);
 });
 
 test("codex session assets are grouped, deferred and reversible", async () => {

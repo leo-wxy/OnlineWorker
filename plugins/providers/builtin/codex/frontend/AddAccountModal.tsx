@@ -18,6 +18,7 @@ export function AddAccountModal({ open, api, onClose, onImported }: { open: bool
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const runIdRef = useRef(0);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -26,9 +27,18 @@ export function AddAccountModal({ open, api, onClose, onImported }: { open: bool
   }, [open]);
 
   const run = async (action: () => Promise<void>) => {
+    const runId = ++runIdRef.current;
     setBusy(true);
     setError("");
-    try { await action(); } catch (reason) { setError(reason instanceof Error ? reason.message : "导入失败"); } finally { setBusy(false); }
+    try {
+      await action();
+    } catch (reason) {
+      if (runId !== runIdRef.current) return;
+      const message = reason instanceof Error ? reason.message : typeof reason === "string" ? reason : "导入失败";
+      setError(message === "loopback_unavailable" ? "OAuth 回调端口 1455 被占用，请关闭占用程序后重试。" : message);
+    } finally {
+      if (runId === runIdRef.current) setBusy(false);
+    }
   };
 
   const completeOAuth = async (url: string) => {
@@ -49,6 +59,8 @@ export function AddAccountModal({ open, api, onClose, onImported }: { open: bool
     setLoopbackHandle("");
     if (result.status === "completed" && result.callbackUrl) {
       await completeOAuth(result.callbackUrl);
+    } else if (result.status === "cancelled") {
+      return;
     } else {
       setShowFallback(true);
       setError("未收到浏览器回调，可粘贴完整回调地址继续。");
@@ -56,11 +68,19 @@ export function AddAccountModal({ open, api, onClose, onImported }: { open: bool
   };
 
   const close = () => {
-    if (loopbackHandle) {
-      void api.cancelLoopback(loopbackHandle);
-      void api.invoke("oauth.cancel");
-    }
+    runIdRef.current += 1;
+    setBusy(false);
+    setLoopbackHandle("");
+    if (loopbackHandle) void api.cancelLoopback(loopbackHandle);
+    void api.invoke("oauth.cancel");
     onClose();
+  };
+
+  const submitCallback = () => {
+    runIdRef.current += 1;
+    if (loopbackHandle) void api.cancelLoopback(loopbackHandle);
+    setLoopbackHandle("");
+    void run(() => completeOAuth(callbackUrl.trim()));
   };
 
   const submitPrimary = () => {
@@ -76,6 +96,7 @@ export function AddAccountModal({ open, api, onClose, onImported }: { open: bool
 
   const primaryDisabled = busy
     || (method === "token" && !content.trim());
+  const canClose = !busy || Boolean(loopbackHandle);
   const primaryLabel = busy
     ? (method === "oauth" ? "正在等待浏览器授权…" : "正在导入账号…")
     : method === "oauth"
@@ -97,13 +118,13 @@ export function AddAccountModal({ open, api, onClose, onImported }: { open: bool
   };
 
   return (
-    <dialog ref={dialogRef} aria-labelledby="add-codex-account-title" aria-describedby="add-codex-account-description" aria-modal="true" className="codex-account-modal ow-native-dialog ow-modal-panel max-h-[90vh] overflow-hidden rounded-[24px] p-0" onCancel={(event) => { event.preventDefault(); if (!busy) close(); }}>
+    <dialog ref={dialogRef} aria-labelledby="add-codex-account-title" aria-describedby="add-codex-account-description" aria-modal="true" className="codex-account-modal ow-native-dialog ow-modal-panel max-h-[90vh] overflow-hidden rounded-[24px] p-0" onCancel={(event) => { event.preventDefault(); if (canClose) close(); }}>
       <div className="codex-account-modal-header flex items-start justify-between gap-4 px-5 pb-4 pt-5 sm:px-6 sm:pt-6">
         <div className="min-w-0">
           <h2 id="add-codex-account-title" className="text-lg font-bold tracking-[-0.02em] text-[var(--ow-text)]">添加账号</h2>
           <p id="add-codex-account-description" className="mt-1 text-sm leading-5 text-[var(--ow-muted)]">选择一种方式，将凭据安全地加入本地账号库。</p>
         </div>
-        <button type="button" aria-label="关闭添加账号弹窗" className="codex-account-modal-close shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold" disabled={busy} onClick={close}>关闭</button>
+        <button type="button" aria-label="关闭添加账号弹窗" className="codex-account-modal-close shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold" disabled={!canClose} onClick={close}>关闭</button>
       </div>
 
       <div className="codex-account-modal-tabs flex overflow-x-auto border-b border-[var(--ow-line-soft)] px-5 sm:px-6" role="tablist" aria-label="账号导入方式">
@@ -123,10 +144,10 @@ export function AddAccountModal({ open, api, onClose, onImported }: { open: bool
               <div className="border-t border-[var(--ow-line-soft)] px-4 pb-4 pt-3">
                 <p className="text-xs leading-5 text-[var(--ow-muted)]">粘贴浏览器最终打开的完整回调 URL，继续完成导入。</p>
                 <label className="mt-3 block text-xs font-semibold text-[var(--ow-text)]">回调 URL
-                  <input type="url" value={callbackUrl} onChange={(event) => setCallbackUrl(event.target.value)} className="codex-account-field mt-2 w-full rounded-lg px-3 py-2.5 text-sm" placeholder="http://127.0.0.1:1455/auth/callback?..." autoComplete="off" spellCheck={false} />
+                  <input type="url" value={callbackUrl} onChange={(event) => setCallbackUrl(event.target.value)} className="codex-account-field mt-2 w-full rounded-lg px-3 py-2.5 text-sm" placeholder="http://localhost:1455/auth/callback?..." autoComplete="off" spellCheck={false} />
                 </label>
                 <div className="mt-3 flex justify-end">
-                  <button type="button" disabled={busy || !callbackUrl.trim()} className="ow-btn rounded-lg px-3 py-2 text-xs font-bold" onClick={() => void run(() => completeOAuth(callbackUrl.trim()))}>使用回调 URL</button>
+                  <button type="button" disabled={!callbackUrl.trim() || (busy && !loopbackHandle)} className="ow-btn rounded-lg px-3 py-2 text-xs font-bold" onClick={submitCallback}>使用回调 URL</button>
                 </div>
               </div>
             </details>
@@ -148,7 +169,7 @@ export function AddAccountModal({ open, api, onClose, onImported }: { open: bool
       <div className="codex-account-modal-footer flex flex-col gap-3 border-t border-[var(--ow-line-soft)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <p role="status" className="min-h-5 text-xs text-[var(--ow-muted)]">{busy ? primaryLabel : ""}</p>
         <div className="flex flex-col-reverse gap-2 sm:flex-row">
-          <button type="button" className="ow-btn rounded-xl px-4 py-2.5 text-sm font-semibold" disabled={busy} onClick={close}>取消</button>
+          <button type="button" className="ow-btn rounded-xl px-4 py-2.5 text-sm font-semibold" disabled={!canClose} onClick={close}>取消</button>
           <button type="button" className="ow-btn-primary rounded-xl px-4 py-2.5 text-sm font-bold" disabled={primaryDisabled} onClick={submitPrimary}>{primaryLabel}</button>
         </div>
       </div>

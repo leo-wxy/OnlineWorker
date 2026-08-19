@@ -30,13 +30,14 @@ class _Response:
 
 
 def test_pkce_callback_exchange_imports_without_applying(account_store_root, monkeypatch, tmp_path):
-    redirect = "http://127.0.0.1:1455/auth/callback"
+    redirect = "http://localhost:1455/auth/callback"
     started = start_oauth(account_store_root, redirect, now=100)
     parsed = urlparse(started["authorizationUrl"])
     query = parse_qs(parsed.query)
     assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == AUTHORIZE_ENDPOINT
     assert query["client_id"] == [CLIENT_ID]
     assert query["code_challenge_method"] == ["S256"]
+    assert query["redirect_uri"] == [redirect]
 
     callback = f"{redirect}?code=code-fixture&state={query['state'][0]}"
     raw = complete_oauth(account_store_root, callback, opener=lambda request, timeout: _Response(), now=101)
@@ -52,7 +53,7 @@ def test_pkce_callback_exchange_imports_without_applying(account_store_root, mon
 
 
 def test_state_mismatch_and_injection_fail_without_import(account_store_root):
-    redirect = "http://127.0.0.1:1455/auth/callback"
+    redirect = "http://localhost:1455/auth/callback"
     start_oauth(account_store_root, redirect)
     result = handle_account_feature(
         action="oauth.complete",

@@ -51,6 +51,11 @@ def _failure(code: str) -> dict[str, object]:
         "oauth_expired": "OAuth 授权已过期，请重新开始。",
         "oauth_cancelled": "OAuth 授权已取消。",
         "state_mismatch": "OAuth 回调校验失败。",
+        "invalid_redirect": "OAuth 回调地址无效。",
+        "invalid_callback": "OAuth 回调地址不匹配。",
+        "token_exchange_failed": "OpenAI Token 交换失败，请重试。",
+        "invalid_token_response": "OpenAI 返回的 Token 数据不完整。",
+        "missing_identity": "OAuth 账号缺少可识别的身份信息。",
         "apply_failed": "账号应用失败，原配置已恢复。",
     }
     return {"ok": False, "error": {"code": code, "message": messages.get(code, "账号操作失败。")}}

@@ -722,7 +722,7 @@ pub(crate) fn begin_loopback_session(
         .map_err(|_| "loopback_unavailable".to_string())?
         .port();
     let handle_id = uuid::Uuid::new_v4().to_string();
-    let redirect_uri = format!("http://127.0.0.1:{port}");
+    let redirect_uri = format!("http://localhost:{port}");
     let shared = Arc::new(LoopbackShared {
         result: Mutex::new(None),
         ready: Condvar::new(),
@@ -1285,7 +1285,7 @@ mod tests {
             Duration::from_secs(2),
         )
         .unwrap();
-        assert!(session.redirect_uri.starts_with("http://127.0.0.1:"));
+        assert!(session.redirect_uri.starts_with("http://localhost:"));
         let address = session.redirect_uri.trim_start_matches("http://");
         let address = address.split('/').next().unwrap();
         let mut stream = TcpStream::connect(address).unwrap();
