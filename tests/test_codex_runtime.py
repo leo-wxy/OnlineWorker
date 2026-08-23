@@ -109,6 +109,42 @@ async def test_setup_connection_installs_codex_desktop_event_ingress(tmp_path, m
 
 
 @pytest.mark.asyncio
+async def test_setup_connection_keeps_app_server_when_rollout_ingress_is_unavailable(
+    tmp_path,
+    monkeypatch,
+):
+    storage = AppStorage()
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=2,
+        log_level="INFO",
+        tools=[],
+        data_dir=str(tmp_path),
+    )
+    state = AppState(config=cfg, storage=storage)
+    manager = MagicMock(state=state, storage=storage, gid=2)
+    adapter = MagicMock()
+    adapter.install_external_event_ingress = AsyncMock(return_value={"state": "installed"})
+    adapter.start_desktop_rollout_ingress = AsyncMock(
+        side_effect=ModuleNotFoundError("No module named 'watchfiles'")
+    )
+    adapter.on_event = MagicMock()
+    adapter.on_server_request = MagicMock()
+
+    monkeypatch.setattr(codex_runtime, "prime_thread_mappings", AsyncMock())
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.owner_bridge.ensure_codex_owner_bridge_started",
+        AsyncMock(),
+    )
+
+    await codex_runtime.setup_connection(manager, MagicMock(), adapter)
+
+    assert state.get_adapter("codex") is adapter
+    adapter.start_desktop_rollout_ingress.assert_awaited_once_with(state)
+
+
+@pytest.mark.asyncio
 async def test_setup_connection_backfills_live_thread_mapping(tmp_path, monkeypatch):
     storage = AppStorage()
     ws = WorkspaceInfo(
@@ -636,6 +672,128 @@ async def test_send_message_watches_codex_transcript_after_tg_send(monkeypatch):
     )
     assert seeded == [(state, ws, "thread-imported")]
     assert watched == [(state, ws, "thread-imported")]
+
+
+@pytest.mark.asyncio
+async def test_send_message_resumes_and_retries_when_turn_start_lost_thread(monkeypatch):
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    thread_info = ThreadInfo(
+        thread_id="thread-imported",
+        topic_id=206,
+        preview="历史导入会话",
+        archived=False,
+        is_active=True,
+        source="imported",
+    )
+    ws.threads[thread_info.thread_id] = thread_info
+    storage.workspaces[ws.daemon_workspace_id] = ws
+    state = AppState(storage=storage)
+    adapter = MagicMock()
+    adapter.send_user_message = AsyncMock(
+        side_effect=[RuntimeError("thread not found: thread-imported"), {}]
+    )
+    adapter.resume_thread = AsyncMock(return_value={"id": "thread-imported"})
+    watched = []
+
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_realtime_mirror.seed_codex_watch_baseline",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_realtime_mirror.watch_codex_thread",
+        lambda *_args: watched.append(thread_info.thread_id),
+    )
+
+    await codex_runtime.send_message(
+        state,
+        adapter,
+        ws,
+        thread_info,
+        update=SimpleNamespace(),
+        context=SimpleNamespace(),
+        group_chat_id=1,
+        src_topic_id=206,
+        text="继续",
+        has_photo=False,
+    )
+
+    adapter.resume_thread.assert_awaited_once_with(
+        "codex:onlineWorker",
+        "thread-imported",
+    )
+    assert adapter.send_user_message.await_count == 2
+    assert watched == ["thread-imported"]
+
+
+@pytest.mark.asyncio
+async def test_send_message_queues_when_resume_finds_active_writer(monkeypatch):
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    thread_info = ThreadInfo(
+        thread_id="thread-external",
+        topic_id=206,
+        preview="外部活跃会话",
+        archived=False,
+        is_active=True,
+        source="unknown",
+    )
+    ws.threads[thread_info.thread_id] = thread_info
+    storage.workspaces[ws.daemon_workspace_id] = ws
+    state = AppState(storage=storage)
+    adapter = MagicMock()
+    adapter.send_user_message = AsyncMock(
+        side_effect=RuntimeError("thread not found: thread-external")
+    )
+    adapter.resume_thread = AsyncMock(
+        side_effect=RuntimeError("thread thread-external already has an active writer")
+    )
+    queue_mock = AsyncMock()
+
+    monkeypatch.setattr(codex_runtime, "_queue_codex_message", queue_mock)
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_realtime_mirror.seed_codex_watch_baseline",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_realtime_mirror.watch_codex_thread",
+        lambda *_args: None,
+    )
+
+    await codex_runtime.send_message(
+        state,
+        adapter,
+        ws,
+        thread_info,
+        update=SimpleNamespace(),
+        context=SimpleNamespace(),
+        group_chat_id=1,
+        src_topic_id=206,
+        text="继续",
+        has_photo=False,
+    )
+
+    adapter.resume_thread.assert_awaited_once_with(
+        "codex:onlineWorker",
+        "thread-external",
+    )
+    queue_mock.assert_awaited_once_with(
+        state,
+        ws,
+        "thread-external",
+        "继续",
+        None,
+    )
 
 
 @pytest.mark.asyncio

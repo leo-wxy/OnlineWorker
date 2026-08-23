@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 
 CODEX_RECONNECT_GRACE_SECONDS = 3.0
 CODEX_RECONNECT_POLL_SECONDS = 0.1
+CODEX_QUEUE_TIMEOUT_SECONDS = 15.0
 DEFAULT_REASONING_OPTIONS = ["minimal", "low", "medium", "high", "xhigh"]
 CODEX_APP_SERVER_RESOLVED_METHOD = "serverRequest/resolved"
 CODEX_CAPACITY_ABORT_REASON = "Selected model is at capacity. Please try a different model."
@@ -1175,6 +1176,56 @@ async def prepare_send(
     return True
 
 
+def _is_codex_active_writer_error(error: object) -> bool:
+    return "already has an active writer" in str(error).lower()
+
+
+async def _queue_codex_message(
+    state,
+    ws_info,
+    thread_id: str,
+    text: str,
+    attachments=None,
+) -> None:
+    tool_cfg = state.config.get_tool("codex") if state.config is not None else None
+    codex_bin = str(getattr(tool_cfg, "bin", "") or "codex")
+    command = [codex_bin, "queue", "--thread", thread_id, "--message", text]
+    for attachment in attachments or []:
+        if not isinstance(attachment, dict):
+            continue
+        if str(attachment.get("kind") or "").strip().lower() != "image":
+            continue
+        path = str(attachment.get("path") or "").strip()
+        if path:
+            command.extend(["--image", path])
+
+    workspace_path = str(getattr(ws_info, "path", "") or "").strip()
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=workspace_path if os.path.isdir(workspace_path) else None,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(),
+            timeout=CODEX_QUEUE_TIMEOUT_SECONDS,
+        )
+    except TimeoutError as exc:
+        process.kill()
+        await process.wait()
+        raise RuntimeError("codex queue 发送超时") from exc
+
+    if process.returncode:
+        output = (stderr or stdout or b"").decode(errors="replace").strip()
+        detail = output.splitlines()[-1][:300] if output else "unknown error"
+        raise RuntimeError(f"codex queue 发送失败：{detail}")
+    logger.info(
+        "[provider-message] active writer thread 已通过 codex queue 投递 thread=%s",
+        thread_id[:12],
+    )
+
+
 async def send_message(
     state,
     adapter,
@@ -1197,16 +1248,45 @@ async def send_message(
     seed_codex_watch_baseline(state, ws_info, thread_info.thread_id)
     codex_state.mark_send_started(state, thread_info.thread_id)
     state.mark_provider_task_summary("codex", thread_info.thread_id, text)
-    if attachments:
-        await adapter.send_user_message(
-            ws_info.daemon_workspace_id,
-            thread_info.thread_id,
-            text,
-            attachments=attachments,
-        )
-        watch_codex_thread(state, ws_info, thread_info.thread_id)
-        return
-    await adapter.send_user_message(ws_info.daemon_workspace_id, thread_info.thread_id, text)
+    workspace_id = ws_info.daemon_workspace_id
+    thread_id = thread_info.thread_id
+
+    async def send() -> None:
+        if attachments:
+            await adapter.send_user_message(
+                workspace_id,
+                thread_id,
+                text,
+                attachments=attachments,
+            )
+            return
+        await adapter.send_user_message(workspace_id, thread_id, text)
+
+    try:
+        await send()
+    except Exception as exc:
+        if _is_codex_active_writer_error(exc):
+            await _queue_codex_message(state, ws_info, thread_id, text, attachments)
+        elif not is_codex_unmaterialized_error(exc):
+            raise
+        else:
+            logger.warning(
+                "[provider-message] turn/start 未找到 thread，resume 后重试 thread=%s",
+                thread_id[:12],
+            )
+            try:
+                await adapter.resume_thread(workspace_id, thread_id)
+                await send()
+            except Exception as recovery_exc:
+                if not _is_codex_active_writer_error(recovery_exc):
+                    raise
+                await _queue_codex_message(
+                    state,
+                    ws_info,
+                    thread_id,
+                    text,
+                    attachments,
+                )
     watch_codex_thread(state, ws_info, thread_info.thread_id)
 
 
@@ -1634,9 +1714,16 @@ async def setup_connection(manager, bot, adapter, **kwargs) -> None:
         if not callable(start_rollout):
             logger.warning("[codex] Desktop rollout ingress 不可用：adapter 未实现")
             return
-        rollout_result = start_rollout(manager.state)
-        if inspect.isawaitable(rollout_result):
-            rollout_result = await rollout_result
+        try:
+            rollout_result = start_rollout(manager.state)
+            if inspect.isawaitable(rollout_result):
+                rollout_result = await rollout_result
+        except Exception as exc:
+            logger.warning(
+                "[codex] Desktop rollout event ingress 启动失败，继续使用 app-server：%s",
+                exc,
+            )
+            return
         rollout_state = (
             str(rollout_result.get("state") or "")
             if isinstance(rollout_result, dict)

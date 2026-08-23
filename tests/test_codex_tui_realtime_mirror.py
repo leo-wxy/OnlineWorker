@@ -137,6 +137,25 @@ def _make_shared_live_app_mode_config() -> Config:
     )
 
 
+def _make_tui_mode_config() -> Config:
+    return Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                bin="codex",
+                protocol="stdio",
+                control_mode="tui",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+
+
 @pytest.mark.asyncio
 async def test_watch_codex_thread_initializes_watch_state(tmp_path):
     from plugins.providers.builtin.codex.python.tui_realtime_mirror import watch_codex_thread
@@ -216,6 +235,7 @@ async def test_sync_watched_thread_once_completes_commentary_only_turn_after_idl
     )
 
     state, ws, session_file, sessions_dir = _make_state(tmp_path)
+    state.config = _make_tui_mode_config()
     handler = AsyncMock()
 
     _append_response_item(
@@ -255,6 +275,53 @@ async def test_sync_watched_thread_once_completes_commentary_only_turn_after_idl
     methods = [call.args[1]["message"]["method"] for call in handler.await_args_list]
     assert methods == ["turn/completed"]
     assert watch.turn_started_sent is False
+
+
+@pytest.mark.asyncio
+async def test_sync_watched_thread_once_keeps_app_turn_open_while_commentary_is_idle(tmp_path):
+    from plugins.providers.builtin.codex.python.tui_realtime_mirror import (
+        COMMENTARY_IDLE_COMPLETION_POLLS,
+        sync_watched_thread_once,
+        watch_codex_thread,
+    )
+
+    state, ws, session_file, sessions_dir = _make_state(tmp_path)
+    state.config = _make_app_mode_config()
+    handler = AsyncMock()
+
+    _append_response_item(
+        session_file,
+        role="assistant",
+        phase="commentary",
+        text="正在执行耗时工具调用",
+        timestamp="2026-04-06T10:00:01Z",
+        turn_id="turn-long-tool",
+    )
+
+    watch_codex_thread(state, ws, "tid-1", ttl_seconds=120)
+    watch = codex_state.get_runtime(state).watched_threads["tid-1"]
+    watch.session_file = str(session_file)
+
+    await sync_watched_thread_once(
+        state,
+        handler,
+        "tid-1",
+        watch,
+        sessions_dir=str(sessions_dir),
+    )
+    handler.reset_mock()
+
+    for _ in range(COMMENTARY_IDLE_COMPLETION_POLLS):
+        await sync_watched_thread_once(
+            state,
+            handler,
+            "tid-1",
+            watch,
+            sessions_dir=str(sessions_dir),
+        )
+
+    handler.assert_not_awaited()
+    assert watch.turn_started_sent is True
 
 
 @pytest.mark.asyncio
