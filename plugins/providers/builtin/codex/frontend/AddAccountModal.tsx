@@ -19,6 +19,8 @@ export function AddAccountModal({ open, api, onClose, onImported }: { open: bool
   const [error, setError] = useState("");
   const dialogRef = useRef<HTMLDialogElement>(null);
   const runIdRef = useRef(0);
+  const oauthOperationRef = useRef("");
+  const loopbackHandleRef = useRef("");
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -41,10 +43,28 @@ export function AddAccountModal({ open, api, onClose, onImported }: { open: bool
     }
   };
 
+  const cancelOAuth = (operationId = oauthOperationRef.current) => {
+    if (!operationId) return;
+    if (oauthOperationRef.current === operationId) oauthOperationRef.current = "";
+    void api.cancel("oauth.cancel", { operationId }).catch(() => undefined);
+  };
+
+  useEffect(() => () => {
+    runIdRef.current += 1;
+    const handleId = loopbackHandleRef.current;
+    const operationId = oauthOperationRef.current;
+    loopbackHandleRef.current = "";
+    oauthOperationRef.current = "";
+    if (handleId) void api.cancelLoopback(handleId);
+    if (operationId) void api.cancel("oauth.cancel", { operationId }).catch(() => undefined);
+  }, [api]);
+
   const completeOAuth = async (url: string, runId: number) => {
     const result = await api.invoke("oauth.complete", { callbackUrl: url });
+    if (runId !== runIdRef.current) return;
     pluginResult(result, "导入失败");
-    await onImported(runId === runIdRef.current);
+    oauthOperationRef.current = "";
+    await onImported();
   };
 
   const startOAuth = async (runId: number) => {
@@ -53,17 +73,27 @@ export function AddAccountModal({ open, api, onClose, onImported }: { open: bool
       void api.cancelLoopback(loopback.handleId);
       return;
     }
+    loopbackHandleRef.current = loopback.handleId;
     setLoopbackHandle(loopback.handleId);
     try {
       const started = await api.invoke("oauth.start", { redirectUri: loopback.redirectUri });
-      if (runId !== runIdRef.current) return;
+      const operationId = typeof started.operationId === "string" ? started.operationId : "";
+      if (operationId) oauthOperationRef.current = operationId;
+      if (runId !== runIdRef.current) {
+        cancelOAuth(operationId);
+        return;
+      }
       pluginResult(started, "导入失败");
       const authorizationUrl = started.authorizationUrl;
-      if (typeof authorizationUrl !== "string") throw new Error("OAuth 授权地址无效");
+      if (typeof authorizationUrl !== "string" || !operationId) throw new Error("OAuth 授权地址无效");
       await api.openBrowser(authorizationUrl);
-      if (runId !== runIdRef.current) return;
+      if (runId !== runIdRef.current) {
+        cancelOAuth(operationId);
+        return;
+      }
       const result = await api.awaitLoopback(loopback.handleId);
       if (runId !== runIdRef.current) return;
+      loopbackHandleRef.current = "";
       setLoopbackHandle("");
       if (result.status === "completed" && result.callbackUrl) {
         await completeOAuth(result.callbackUrl, runId);
@@ -72,7 +102,8 @@ export function AddAccountModal({ open, api, onClose, onImported }: { open: bool
         setError("未收到浏览器回调，可粘贴完整回调地址继续。");
       }
     } catch (reason) {
-      setLoopbackHandle("");
+      if (loopbackHandleRef.current === loopback.handleId) loopbackHandleRef.current = "";
+      if (runId === runIdRef.current) setLoopbackHandle("");
       void api.cancelLoopback(loopback.handleId);
       throw reason;
     }
@@ -81,15 +112,17 @@ export function AddAccountModal({ open, api, onClose, onImported }: { open: bool
   const close = () => {
     runIdRef.current += 1;
     setBusy(false);
+    loopbackHandleRef.current = "";
     setLoopbackHandle("");
     if (loopbackHandle) void api.cancelLoopback(loopbackHandle);
-    void api.invoke("oauth.cancel");
+    cancelOAuth();
     onClose();
   };
 
   const submitCallback = () => {
     runIdRef.current += 1;
     if (loopbackHandle) void api.cancelLoopback(loopbackHandle);
+    loopbackHandleRef.current = "";
     setLoopbackHandle("");
     void run((runId) => completeOAuth(callbackUrl.trim(), runId));
   };
@@ -100,8 +133,10 @@ export function AddAccountModal({ open, api, onClose, onImported }: { open: bool
       return;
     }
     void run(async (runId) => {
-      pluginResult(await api.invoke("accounts.import", { content, source: "token_json" }), "导入失败");
-      await onImported(runId === runIdRef.current);
+      const result = await api.invoke("accounts.import", { content, source: "token_json" });
+      if (runId !== runIdRef.current) return;
+      pluginResult(result, "导入失败");
+      await onImported();
     });
   };
 

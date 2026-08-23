@@ -101,7 +101,9 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 - Primary CTA: `添加账号`
 - Codex plugin selector label: `Codex`
 
-账号列表只显示：selection checkbox、稳定身份、`当前账号` / `未应用`、来源（新入口为 `OAuth` / `Token / JSON`；历史记录可显示 `API Key` / `文件导入`）、外部状态（`外部修改` / `未托管`）、官方返回的 plan/额度窗口，以及 `应用`/`重新应用`、`刷新额度`和 `导出`。桌面使用响应式卡片网格；每张卡片内部保持身份、状态、额度和底部操作的稳定层级，文案换行不得造成横向溢出。页面提供 `全选当前结果`、`清除选择`、`已选择 {count} 项`和 `导出选中`；无选中时用 native `disabled`。
+账号列表只显示：selection checkbox、稳定身份、`当前账号` / `未应用`、来源（新入口为 `OAuth` / `Token / JSON`；历史记录可显示 `API Key` / `文件导入`）、外部状态（`外部修改` / `未托管`）、官方返回的 plan/额度窗口，以及 `应用`/`重新应用`、`刷新额度`和 `导出`。桌面使用响应式卡片网格；每张卡片是一个 16px 圆角的单层 surface，内部按“身份与状态 → 额度 → 底部操作”排列，metadata 使用紧凑行，额度以 hairline 分隔，不再嵌套独立的 metadata/quota 卡片。当前账号只使用蓝色内侧边和轻量背景强调，不使用额外彩色外圈。页面提供 `全选当前结果`、`清除选择`、`已选择 {count} 项`和 `导出选中`；无选中时用 native `disabled`。
+
+账号工具栏使用 16px 圆角的紧凑 surface：账号统计、全选/选择数和批量操作共享同一对齐基线，空间不足时自然换行，不让批量按钮孤立漂浮。
 
 账号首屏允许从 versioned local cache 读取上述列表行所需的脱敏字段；命中时立即渲染，随后后台执行 `accounts.list` 覆盖校准。缓存只按显式白名单重建对象，不保存 callback、表单输入、native path、credential/token 或 backend 未知字段。后台刷新失败时保留已有缓存行并显示错误。
 
@@ -109,7 +111,7 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 |-------|-------------------|
 | Cached | 立即显示脱敏账号行；后台校准不清空已有行，真实返回后覆盖缓存 |
 | Loading | `正在加载账号…`；mutation 禁用，不用旧响应覆盖新状态 |
-| Empty | `暂无账号` / `通过 OAuth 或 Token / JSON 添加第一个账号。` |
+| Empty | 左侧为 `账号库为空` / `添加第一个账号` / `通过 OAuth 或 Token / JSON 导入凭据。导入后由你决定何时应用，不会自动切换当前账号。` / `添加账号`；右侧以 `01 安全导入`、`02 手动应用`解释两步流程。不得使用大面积居中占位卡或装饰插画。 |
 | External matched | `检测到外部凭据文件已匹配此账号。`；不自动应用 |
 | External unmanaged | `检测到未托管的当前账号。请导入后决定是否加入账号库。` |
 | Plugin error | `账号功能加载失败。请重试，或查看诊断。` + `重试` + `查看诊断` |
@@ -136,6 +138,7 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 - Idle CTA: `在浏览器中继续`
 - Hint: `将打开系统浏览器完成授权。授权完成后会自动接收本地回调。`
 - Waiting: `正在等待浏览器授权…` / `等待本地回调…`；开始监听、打开浏览器、等待回调和交换凭据期间始终允许 `取消` 或关闭弹窗。
+- 取消必须绑定当前 OAuth operation；关闭弹窗或离开账号页面后，旧 operation 不得写入账号，也不得删除后来启动的新 operation。
 - Manual fallback: `没有收到本地回调？`；field `回调 URL`；CTA `使用回调 URL`。
 - Success: `授权成功，账号已导入。需要使用时，请点击“应用”。`
 - Errors: `授权已取消。`、`没有收到本地回调。请粘贴回调 URL，或重新开始授权。`、`回调状态无法验证。请重新开始授权。`、`授权失败：{reason}`；retry `重新授权`。
@@ -144,9 +147,9 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 ### Localhost callback confirmation
 
 - 浏览器回调页只确认本地回调已被 OnlineWorker 接收，不承诺账号已经导入；最终结果回到应用内查看。
-- 固定信息层级：`授权回调已接收`、`浏览器授权已完成`、`返回 OnlineWorker 查看结果`。
+- 固定信息层级：`授权回调已接收`、`请返回 OnlineWorker 查看结果`、`关闭页面`；不得宣称授权或账号导入已经成功。
 - 页面提供可用的 `关闭页面`；浏览器不允许脚本关闭时显示可理解的手动关闭提示。
-- 页面保持 provider-neutral，不显示 Codex 标题，不回显 query、code、state、token 或错误详情。
+- 页面保持 provider-neutral，不显示 Codex 标题，不回显 query、code、state、token 或错误详情，并在加载后从地址栏清除 query。
 
 ### Token / JSON tab
 
@@ -229,8 +232,8 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 
 使用现有 Tailwind 断点：`sm=640`、`md=768`、`lg=1024`、`xl=1280`。
 
-- `>=1100`: 账号与会话工程使用 `auto-fit` 卡片网格；空间允许时并排显示多张独立卡片，操作固定在卡片底部；30 天摘要 2 列；toolbar 单行优先。
-- `768–1099`: 卡片网格按可用宽度自动降为单列；卡内信息和操作自然换行；会话标题与操作不溢出。
+- `>=1100`: 账号与会话工程使用 `auto-fit` 卡片网格；空间允许时并排显示多张独立卡片，账号卡固定“身份 / 额度 / 操作”顺序且操作贴底；空态使用左右分栏；30 天摘要 2 列；toolbar 单行优先。
+- `768–1099`: 卡片网格按可用宽度自动降为单列；账号空态降为上下结构；卡内信息和操作自然换行；会话标题与操作不溢出。
 - `<768`: 每行一张账号或会话工程卡片，卡内信息单列；toolbar 换行；modal footer 按钮全宽堆叠。
 - `<640`: modal `p-4`，页面复用现有 `p-5`，账号行 `p-4`；身份、额度、actions 单列，不定宽。
 - 侧边栏收起为 84px 时保留“账号”icon 和 `title`/`aria-label`；展开复用 248px。
@@ -254,7 +257,7 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 |---------|-------|------------|
 | Sidebar | no plugin / discovered | 入口缺席 / 恰好一个动态“账号”入口 |
 | Plugin selector | loading / error | `正在加载账号插件…` + disabled + `aria-live`；host 无 Codex 特判；错误隔离 + `重试` + `查看诊断` |
-| Account overview | cached / loading / empty / loaded | 脱敏缓存先显示并后台校准；明确状态；checkbox + selection count + 全选/清除；卡片只有身份/current/source/plan/quota/`应用`/`刷新额度`/`导出` |
+| Account overview | cached / loading / empty / loaded | 脱敏缓存先显示并后台校准；空态提供导入/应用两步引导；checkbox + selection count + 全选/清除；单层卡片只有身份/current/source/plan/quota/`应用`/`刷新额度`/`导出`，无嵌套 framed metadata/quota 卡 |
 | Add modal | idle | `OAuth`、`Token / JSON` 两个精确 tab；无嵌入 WebView |
 | OAuth | waiting / fallback / callback confirmation | 系统浏览器、全阶段可取消、callback status、manual URL fallback；localhost 页只确认回调并返回应用查看最终结果 |
 | Import | success / invalid | 账号库更新但 current 不变；错误保留输入 |
@@ -264,7 +267,7 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 | Session page | bot stopped | 仍从当前 Codex Home 读本地文件 |
 | 30-day summary | success / empty / error | 只用本地数据；不伪造成本 `0` |
 | Session projects | card / picker open / picker confirmed | 一级只显示 cwd/project 卡片；底部按钮打开可搜索、全选和逐条选择的 dialog；取消不提交，确认保留其他工程选择 |
-| Search/batch | no match / no selection | title/cwd 均可匹配；明确 empty；无选中时 scoped actions disabled |
+| Search/batch | no match / no selection | title/cwd/session id 均可匹配；明确 empty；无选中时 scoped actions disabled |
 | ZIP import | conflict / integrity/version error | 不静默覆盖；逐项结果；受影响项不写入 |
 | Trash/restore | success / error | manifest-backed 可逆；无永久删除 |
 | Visibility repair | success / no-op / error | 计数/no-op；无 EventBus/session/notification 副作用 |

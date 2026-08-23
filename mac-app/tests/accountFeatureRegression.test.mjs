@@ -8,8 +8,18 @@ test("shared account host stays provider neutral", async () => {
   const host = await readFile(new URL("mac-app/src/components/AccountFeatureHost.tsx", repo), "utf8");
   assert.doesNotMatch(host, /Codex|accounts\.apply|sessions\.list|OPENAI_API_KEY|refresh_token/);
   assert.match(host, /invoke_account_feature/);
+  assert.match(host, /cancel_account_feature_operation/);
   assert.match(host, /choose_account_feature_file/);
   assert.match(host, /begin_account_feature_loopback/);
+});
+
+test("localhost callback page reports receipt without claiming OAuth success", async () => {
+  const page = await readFile(new URL("mac-app/src-tauri/src/commands/account_feature_callback.html", repo), "utf8");
+  assert.match(page, /history\.replaceState/);
+  assert.match(page, /授权回调已接收/);
+  assert.match(page, /请返回 OnlineWorker 查看结果/);
+  assert.doesNotMatch(page, /浏览器授权已完成|location\.search|URLSearchParams|innerHTML/);
+  assert.doesNotMatch(page, /Codex|Claude|OpenAI|access_token|refresh_token/);
 });
 
 test("plugin frontend keeps secrets and live surfaces out of persistence", async () => {

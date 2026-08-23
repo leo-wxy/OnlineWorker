@@ -134,15 +134,9 @@ export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
     }
   };
 
-  const visibleSessions = useMemo(() => {
-    const needle = search.trim().toLocaleLowerCase();
-    if (!trash || !needle) return sessions;
-    return sessions.filter((session) => [session.title, session.cwd, session.sessionId]
-      .some((value) => value?.toLocaleLowerCase().includes(needle)));
-  }, [search, sessions, trash]);
-  const groups = useMemo(() => grouped(visibleSessions), [visibleSessions]);
+  const groups = useMemo(() => grouped(sessions), [sessions]);
   const ids = useMemo(() => [...selected], [selected]);
-  const allSelected = visibleSessions.length > 0 && visibleSessions.every((item) => selected.has(item.sessionId));
+  const allSelected = sessions.length > 0 && sessions.every((item) => selected.has(item.sessionId));
   const pickerSessions = useMemo(() => {
     if (!pickerGroup) return [];
     const needle = pickerQuery.trim().toLocaleLowerCase();
@@ -233,7 +227,7 @@ export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
         <div className="codex-session-list-header flex flex-wrap items-center justify-between gap-4 px-5 py-5 sm:px-6">
           <div>
             <h2 className="text-lg font-extrabold tracking-[-0.02em] text-[var(--ow-text)]">{trash ? "废纸篓" : kind === "conversation" ? "当前对话" : kind === "subagent" ? "子代理" : kind === "external" ? "外部会话" : "全部类型"}</h2>
-            <p className="mt-1 text-sm text-[var(--ow-muted)]">{groups.length} 个工作目录 · {visibleSessions.length} 个会话 · 按最近活动排序</p>
+            <p className="mt-1 text-sm text-[var(--ow-muted)]">{groups.length} 个工作目录 · {sessions.length} 个会话 · 按最近活动排序</p>
           </div>
           <div className="codex-session-batch-actions flex flex-wrap gap-2">
             {ids.length > 0 && <button type="button" className="ow-btn rounded-xl px-3 py-2 text-sm font-semibold" disabled={busy} onClick={() => setSelected(new Set())}>清除选择</button>}
@@ -244,7 +238,7 @@ export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
 
         <div className="codex-session-selection-bar flex flex-wrap items-center gap-3 px-5 py-3 sm:px-6">
           <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ow-text)]">
-            <input type="checkbox" aria-label="全选当前结果" checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(visibleSessions.map((item) => item.sessionId)))} />
+            <input type="checkbox" aria-label="全选当前结果" checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(sessions.map((item) => item.sessionId)))} />
             全选当前结果
           </label>
           <span className="text-xs text-[var(--ow-muted)]">{ids.length ? `已选择 ${ids.length} 项` : "选择会话后可导出或移到废纸篓"}</span>

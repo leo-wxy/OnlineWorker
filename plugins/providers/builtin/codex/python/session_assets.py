@@ -131,6 +131,11 @@ def _usage_for_file(path: Path, cutoff: datetime, seen: set[tuple]) -> dict[str,
     return totals
 
 
+def _matches_query(query: str, *values: object) -> bool:
+    needle = query.strip().casefold()
+    return not needle or any(needle in str(value or "").casefold() for value in values)
+
+
 def list_sessions(home: Path, *, query: str = "", include_usage: bool = True, kind: str = "conversation") -> dict[str, object]:
     if kind not in {"conversation", "external", "subagent", "all"}:
         raise SessionAssetError("invalid_session_kind")
@@ -148,7 +153,7 @@ def list_sessions(home: Path, *, query: str = "", include_usage: bool = True, ki
         session_kind = _session_kind(title, str(meta["cwd"]), meta.pop("source", ""))
         if kind != "all" and session_kind != kind:
             continue
-        if query and query.casefold() not in f"{title}\n{meta['cwd']}".casefold():
+        if not _matches_query(query, title, meta["cwd"], meta["sessionId"]):
             continue
         usage = _usage_for_file(path, cutoff, seen_usage) if include_usage else {}
         for key, value in usage.items():
@@ -228,7 +233,7 @@ def trash_sessions(plugin_root: Path, home: Path, session_ids: list[str]) -> dic
             raise SessionAssetError("trash_failed") from exc
 
 
-def list_trash(plugin_root: Path) -> list[dict[str, object]]:
+def list_trash(plugin_root: Path, *, query: str = "") -> list[dict[str, object]]:
     root = plugin_root / "session-trash"
     results: list[dict[str, object]] = []
     if not root.exists():
@@ -242,7 +247,7 @@ def list_trash(plugin_root: Path) -> list[dict[str, object]]:
             if isinstance(item, dict):
                 mtime_ns = item.get("mtime_ns")
                 updated_at = datetime.fromtimestamp(mtime_ns / 1_000_000_000, UTC).isoformat().replace("+00:00", "Z") if isinstance(mtime_ns, int) else None
-                results.append({
+                result = {
                     "sessionId": item.get("session_id"),
                     "title": item.get("title") or item.get("session_id"),
                     "cwd": item.get("cwd") or "",
@@ -250,7 +255,9 @@ def list_trash(plugin_root: Path) -> list[dict[str, object]]:
                     "sessionKind": "conversation",
                     "state": "trashed",
                     "trashPackage": manifest_path.parent.name,
-                })
+                }
+                if _matches_query(query, result["title"], result["cwd"], result["sessionId"]):
+                    results.append(result)
     return results
 
 

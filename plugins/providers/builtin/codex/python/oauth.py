@@ -77,12 +77,26 @@ def start_oauth(root: str | Path, redirect_uri: object, *, now: float | None = N
     return {
         "authorizationUrl": f"{AUTHORIZE_ENDPOINT}?{query}",
         "expiresAt": int(created_at + PENDING_TTL_SECONDS),
+        "operationId": state,
     }
 
 
-def cancel_oauth(root: str | Path) -> None:
+def cancel_oauth(root: str | Path, operation_id: object = None) -> bool:
     with operation_lock(root):
-        _pending_path(root).unlink(missing_ok=True)
+        path = _pending_path(root)
+        if operation_id is not None:
+            if not isinstance(operation_id, str) or not operation_id:
+                return False
+            try:
+                pending = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return False
+            state = pending.get("state") if isinstance(pending, dict) else None
+            if not isinstance(state, str) or not secrets.compare_digest(state, operation_id):
+                return False
+        existed = path.exists()
+        path.unlink(missing_ok=True)
+        return existed
 
 
 def _read_pending(root: str | Path, now: float) -> dict:
@@ -95,6 +109,33 @@ def _read_pending(root: str | Path, now: float) -> dict:
         path.unlink(missing_ok=True)
         raise OAuthError("oauth_expired")
     return pending
+
+
+def _validated_callback(root: str | Path, callback_url: object, timestamp: float) -> tuple[dict, str]:
+    if not isinstance(callback_url, str):
+        raise OAuthError("invalid_callback")
+    pending = _read_pending(root, timestamp)
+    parsed = urlparse(callback_url)
+    expected = urlparse(pending["redirect_uri"])
+    if (parsed.scheme, parsed.netloc, parsed.path) != (expected.scheme, expected.netloc, expected.path):
+        raise OAuthError("invalid_callback")
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    state = params.get("state", [""])[0]
+    if not state or not secrets.compare_digest(state, pending["state"]):
+        raise OAuthError("state_mismatch")
+    if params.get("error", [""])[0]:
+        _pending_path(root).unlink(missing_ok=True)
+        raise OAuthError("oauth_cancelled")
+    code = params.get("code", [""])[0]
+    if not code:
+        raise OAuthError("state_mismatch")
+    return pending, code
+
+
+def ensure_oauth_pending(root: str | Path, callback_url: object, *, now: float | None = None) -> None:
+    timestamp = time.time() if now is None else now
+    with operation_lock(root):
+        _validated_callback(root, callback_url, timestamp)
 
 
 def _account_id(claims: dict, response: dict) -> str:
@@ -141,44 +182,30 @@ def complete_oauth(
     opener=urlopen,
     now: float | None = None,
 ) -> dict:
-    if not isinstance(callback_url, str):
-        raise OAuthError("invalid_callback")
     timestamp = time.time() if now is None else now
     with operation_lock(root):
-        pending = _read_pending(root, timestamp)
-        parsed = urlparse(callback_url)
-        expected = urlparse(pending["redirect_uri"])
-        if (parsed.scheme, parsed.netloc, parsed.path) != (expected.scheme, expected.netloc, expected.path):
-            raise OAuthError("invalid_callback")
-        params = parse_qs(parsed.query, keep_blank_values=True)
-        if params.get("error", [""])[0]:
-            cancel_oauth(root)
-            raise OAuthError("oauth_cancelled")
-        code = params.get("code", [""])[0]
-        state = params.get("state", [""])[0]
-        if not code or not secrets.compare_digest(state, pending["state"]):
-            raise OAuthError("state_mismatch")
-        body = urlencode(
-            {
-                "grant_type": "authorization_code",
-                "client_id": CLIENT_ID,
-                "code": code,
-                "code_verifier": pending["verifier"],
-                "redirect_uri": pending["redirect_uri"],
-            }
-        ).encode()
-        request = Request(TOKEN_ENDPOINT, data=body, headers={"Content-Type": "application/x-www-form-urlencoded"})
-        try:
-            response = opener(request, timeout=20)
-            status = getattr(response, "status", 200)
-            raw = response.read(1024 * 1024 + 1)
-            if status < 200 or status >= 300 or len(raw) > 1024 * 1024:
-                raise OAuthError("token_exchange_failed")
-            value = json.loads(raw)
-        except OAuthError:
-            raise
-        except Exception as exc:
-            raise OAuthError("token_exchange_failed") from exc
-        if not isinstance(value, dict):
-            raise OAuthError("invalid_token_response")
-        return _portable_tokens(value)
+        pending, code = _validated_callback(root, callback_url, timestamp)
+    body = urlencode(
+        {
+            "grant_type": "authorization_code",
+            "client_id": CLIENT_ID,
+            "code": code,
+            "code_verifier": pending["verifier"],
+            "redirect_uri": pending["redirect_uri"],
+        }
+    ).encode()
+    request = Request(TOKEN_ENDPOINT, data=body, headers={"Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        response = opener(request, timeout=20)
+        status = getattr(response, "status", 200)
+        raw = response.read(1024 * 1024 + 1)
+        if status < 200 or status >= 300 or len(raw) > 1024 * 1024:
+            raise OAuthError("token_exchange_failed")
+        value = json.loads(raw)
+    except OAuthError:
+        raise
+    except Exception as exc:
+        raise OAuthError("token_exchange_failed") from exc
+    if not isinstance(value, dict):
+        raise OAuthError("invalid_token_response")
+    return _portable_tokens(value)

@@ -67,6 +67,9 @@ completed: 2026-08-18
 - 2026-08-18 performance follow-up 消除了每次账号 action 的 Python sidecar 冷启动，并让脱敏账号摘要先显示、后台校准；账号业务仍完全留在插件，未接 provider/app-server。
 - performance follow-up 的 combined build/install verification 通过；安装版 cache-hit 账号行在 449 ms 内显示，常驻 worker process tree 保持稳定。会话刷新仍需 6.0 s，未被本次账号链路优化覆盖。
 - 2026-08-23 UI follow-up 将账号列表改为响应式卡片网格，补齐全阶段 OAuth 取消/关闭、provider-neutral localhost 确认页和废纸篓搜索过滤。
+- 2026-08-23 account-tab design follow-up 保留页头、分段控件和业务交互骨架，将账号空态改为导入/应用两步引导，并将账号卡片收敛为“身份 → 额度 → 操作”的单层结构，移除 metadata/quota 卡中卡。
+- 2026-08-23 本地 HTML 状态板直接复用 production build 的主题与插件 CSS，以合成数据展示账号空态、账号卡片、OAuth、Token / JSON、会话工程卡片和会话选择弹窗；用户确认采用该视觉方向。
+- 2026-08-23 review follow-up 将 OAuth 取消线性化为 operation-scoped 独立 sidecar，落盘前复核 pending；同时统一 active/trash 三字段搜索并将 callback 页改为中性结果提示。
 - 2026-08-23 session UI follow-up 将工作目录改为统一高度的工程卡片，底部按钮打开 scoped conversation picker；取消不提交，确认只更新当前工程选择。
 - 2026-08-23 combined DMG 已重新构建并安装；安装版账号卡片、添加账号弹窗和 35 个工作目录 / 79 个会话完成只读 UI 验证。
 
@@ -75,7 +78,7 @@ completed: 2026-08-18
 - 用户在实现阶段将“显式额度刷新”加入范围，因此 D-38 从“完全排除 quota”修订为“仅允许显式官方 usage 读取，继续排除后台轮询与账号池”。
 - 参考 Cockpit 的实际信息结构后，会话一级列表由 conversation 平铺改为 `cwd`/project 卡片，conversation 在选择弹窗中保持二级资产单位。
 - 用户后续明确授权打包验证；初次执行 combined build 和 mounted-DMG 只读 QA，performance follow-up 再执行 `verify-packaged-fast.sh` 并安装到 `/Applications` 验证。
-- 用户后续将账号新增入口收缩为 OAuth 与 Token / JSON；账号列表最终采用响应式卡片网格，历史 API-key/文件来源记录继续兼容展示和导出。
+- 用户后续将账号新增入口收缩为 OAuth 与 Token / JSON；账号列表最终采用响应式单层卡片网格，空态明确区分导入与手动应用，历史 API-key/文件来源记录继续兼容展示和导出。
 
 ## Verification
 
@@ -92,6 +95,10 @@ completed: 2026-08-18
 - 2026-08-23 packaged follow-up：`bash build.sh` passed；39 MB `OnlineWorker_1.9.0_aarch64.dmg` SHA-256 `aea1e9baeb4fa598201d332cd9dcb5aa626866abc6afb03b8c5e9f10c1f2ead7`。首次 packaged install 被两个不响应 SIGTERM 的 3 天旧 bot 阻塞；按 PID 清理后 `install-current-dmg.sh` passed，DMG/installed 三个二进制哈希一致，Codemaker/POPO bundled manifests 存在，app 与 account worker 正常启动。
 - Installed-app read-only UI：账号卡片显示 1 个当前 PRO 账号、68% 周额度和可用 reapply/refresh/export；添加弹窗双 tab 与关闭/取消可用；会话页显示 **35 个 cwd/project 组 / 79 个 conversations**。
 - Session card-picker source verification：`node --test tests/accountFeature*.test.mjs` **10 passed**；TypeScript 与 `git diff --check` passed。
+- Review remediation source verification：Python **75 passed**、Rust account feature **13 passed**、Node account contracts **11 passed**，TypeScript 与 Rust format checks passed。
+- Account-tab design source verification：`node --test tests/accountFeature*.test.mjs` **11 passed**；`./node_modules/.bin/tsc --noEmit`、`pnpm build` 与 `git diff --check` passed。
+- Account-tab local visual checkpoint：1300 × 768 本地状态板可切换上述 6 个状态、Light/Dark 与宽/窄布局；状态板只使用合成数据，不触发账号或会话 mutation。用户已确认视觉方向，不能替代 installed-app 验证。
+- Review remediation packaged verification：`verify-packaged-fast.sh` **97s passed**；DMG SHA-256 `8e81ced0429e707e4709f69f6a7750ff7652a316b3595de873e68750e89e983c`，DMG/installed app、bot、ccusage hashes 一致，新 app PID `48647` 与 account worker PID `48707` 均从 `/Applications/OnlineWorker.app` 启动。
 - Session card-picker packaged verification：40,896,350-byte DMG SHA-256 `ae1802ddd9bd0a900a42d3761f12b7bc493f5d738db288c6094ccc4521e92101`；安装版 35 个工程卡片 / 79 个 conversations 加载正常，卡片底部 action 对齐，picker 的取消不提交与 scoped confirm 通过，同尺寸设计稿/安装包并排 QA 无 P0/P1/P2。
 
 ## Not Executed
@@ -102,6 +109,7 @@ completed: 2026-08-18
 - 会话完整刷新实测 6.0 s，仍需单独优化，不声明为本 follow-up 已修复。
 - 当前 OAuth/Token-only 与响应式卡片 follow-up 已完成打包、安装和只读 UI 验证；未执行真实账号 mutation。
 - 当前 session card-picker follow-up 已完成 build/package/install 与只读选择状态验收；会话文件 mutation 仍未执行。
+- 当前 account-tab design follow-up 只完成源码契约与前端 production build；新空态和账号卡片尚未重新打包、安装或完成同尺寸 Light/Dark 视觉对比。
 - 本阶段没有创建 commit 或 push。
 
 ## Self-Check

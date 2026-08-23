@@ -17,7 +17,9 @@ test("codex plugin exposes OAuth and Token import, quota refresh and explicit ap
   assert.match(overview, /刷新额度/);
   assert.match(overview, /remainingPercent/);
   assert.match(modal, /beginLoopback/);
-  assert.match(modal, /onImported\(runId === runIdRef\.current\)/);
+  assert.match(modal, /api\.cancel\("oauth\.cancel", \{ operationId \}\)/);
+  assert.match(modal, /oauthOperationRef/);
+  assert.doesNotMatch(modal, /onImported\(runId === runIdRef\.current\)/);
   assert.match(modal, /result\.status !== "cancelled"/);
   assert.doesNotMatch(modal, /const canClose|disabled=\{!canClose\}/);
   assert.match(modal, /http:\/\/localhost:1455\/auth\/callback/);
@@ -61,25 +63,20 @@ test("account export opens the native save flow without reloading the account li
   assert.match(overview, /run\("export", \(\) => exportIds\(\[account\.id\]\), false\)/);
 });
 
-test("account overview uses the selectable responsive account-card contract", async () => {
+test("account overview uses the selectable single-surface account-card contract", async () => {
   const overview = await readFile(new URL("plugins/providers/builtin/codex/frontend/AccountOverview.tsx", repo), "utf8");
   const styles = await readFile(new URL("plugins/providers/builtin/codex/frontend/account.css", repo), "utf8");
-  for (const label of ["账号库", "全选当前结果", "清除选择", "导出选中", "暂无账号", "当前账号", "未应用"]) assert.match(overview, new RegExp(label));
-  assert.match(overview, /codex-account-row-current/);
-  assert.match(overview, /codex-account-plan/);
+  for (const label of ["账号库", "全选当前结果", "清除选择", "导出选中", "账号库为空", "添加第一个账号", "安全导入", "手动应用", "当前账号", "未应用"]) assert.match(overview, new RegExp(label));
+  assert.match(overview, /codex-account-empty-steps/);
   assert.match(styles, /codex-account-list-toolbar/);
-  assert.match(styles, /codex-account-list-body[\s\S]*display:\s*grid/);
-  assert.match(styles, /grid-template-columns:\s*repeat\(auto-fit, minmax\(min\(100%, 32rem\), 1fr\)\)/);
-  assert.match(styles, /codex-account-row[\s\S]*border-radius:\s*1\.625rem/);
-  assert.match(styles, /codex-account-row-content[\s\S]*display:\s*grid/);
-  assert.match(styles, /codex-account-row-actions[\s\S]*display:\s*flex/);
+  assert.match(styles, /codex-account-identity-meta/);
   assert.match(overview, /codex-account-primary-action/);
-  assert.match(overview, /codex-account-meta-grid/);
+  assert.match(overview, /codex-account-secondary-actions/);
   assert.match(overview, /codex-account-quota-warning/);
   assert.match(overview, /codex-account-quota-healthy/);
-  assert.match(styles, /codex-account-secondary-action/);
   assert.match(overview, /key=\{windowKey\}/);
   assert.doesNotMatch(overview, /key=\{label\}/);
+  assert.doesNotMatch(styles, /codex-account-meta-grid/);
   assert.doesNotMatch(styles, /minmax\(15rem, 1\.05fr\) minmax\(17rem, 0\.95fr\) 11\.75rem/);
 });
 
@@ -102,9 +99,6 @@ test("codex session assets are grouped, deferred and reversible", async () => {
   assert.match(page, /codex-session-metrics/);
   assert.match(page, /codex-session-toolbar/);
   assert.match(page, /codex-session-list/);
-  assert.match(page, /const visibleSessions = useMemo/);
-  assert.match(page, /\[session\.title, session\.cwd, session\.sessionId\]/);
-  assert.match(page, /visibleSessions\.map/);
   const loadBody = page.match(/const load = useCallback\(async \(\) => \{([\s\S]*?)\n  \}, \[api, kind, search, trash\]\);/)?.[1];
   assert.ok(loadBody, "session loader should remain identifiable");
   assert.doesNotMatch(loadBody, /setLoading\(true\)/, "background refresh must keep existing groups visible");

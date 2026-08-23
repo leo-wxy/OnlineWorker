@@ -3,22 +3,30 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>授权回调已接收 · OnlineWorker</title>
+    <title>回调已收到 · OnlineWorker</title>
+    <script>
+      window.history.replaceState(null, document.title, window.location.pathname);
+      window.addEventListener("DOMContentLoaded", () => {
+        const closeButton = document.getElementById("close-page");
+        const closeHint = document.getElementById("close-hint");
+        closeButton.addEventListener("click", () => {
+          window.close();
+          window.setTimeout(() => { closeHint.hidden = false; }, 250);
+        });
+      });
+    </script>
     <style>
       :root {
         color-scheme: light dark;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        --canvas: #eef3f8;
-        --panel: rgba(255, 255, 255, 0.94);
-        --panel-soft: #f8fafc;
-        --line: rgba(148, 163, 184, 0.24);
+        --page: #f3f6fa;
+        --panel: #ffffff;
+        --line: #dfe5ec;
         --text: #172033;
-        --muted: #64748b;
-        --blue: #1d4ed8;
-        --blue-soft: rgba(29, 78, 216, 0.1);
-        --green: #047857;
-        --green-soft: rgba(5, 150, 105, 0.1);
-        --shadow: 0 30px 80px rgba(15, 23, 42, 0.12);
+        --muted: #657286;
+        --blue: #245eea;
+        --blue-soft: #eaf0ff;
+        --shadow: 0 18px 48px rgba(30, 48, 75, 0.1);
       }
 
       * {
@@ -30,81 +38,43 @@
         margin: 0;
         display: grid;
         place-items: center;
-        padding: 32px 20px;
+        padding: 24px;
         color: var(--text);
-        background:
-          radial-gradient(circle at 8% 0%, rgba(49, 104, 164, 0.13), transparent 30%),
-          radial-gradient(circle at 92% 12%, rgba(40, 126, 116, 0.09), transparent 26%),
-          linear-gradient(180deg, #edf3fa 0%, #f7f9fc 48%, #eef2f7 100%);
+        background: var(--page);
       }
 
       main {
-        width: min(100%, 620px);
-        overflow: hidden;
+        width: min(100%, 520px);
+        padding: 32px;
         border: 1px solid var(--line);
-        border-radius: 28px;
+        border-radius: 18px;
         background: var(--panel);
         box-shadow: var(--shadow);
       }
 
-      header {
+      .status {
         display: flex;
         align-items: center;
-        gap: 12px;
-        padding: 22px 26px;
-        border-bottom: 1px solid var(--line);
+        gap: 10px;
+        margin: 0;
+        color: var(--blue);
+        font-size: 13px;
+        font-weight: 750;
       }
 
-      .brand-icon {
+      .status-mark {
+        width: 24px;
+        height: 24px;
         display: grid;
         place-items: center;
-        width: 36px;
-        height: 36px;
-        border-radius: 11px;
-        color: white;
-        background: linear-gradient(180deg, #2563eb, #1d4ed8);
-        box-shadow: 0 8px 20px rgba(29, 78, 216, 0.2);
-      }
-
-      .brand-icon svg {
-        width: 19px;
-        height: 19px;
-      }
-
-      .brand-name {
-        margin: 0;
-        font-size: 16px;
-        font-weight: 800;
-        letter-spacing: -0.01em;
-      }
-
-      .brand-caption {
-        margin: 2px 0 0;
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 650;
-      }
-
-      .content {
-        padding: 34px 34px 30px;
-      }
-
-      .status {
-        display: inline-flex;
-        align-items: center;
-        min-height: 30px;
-        padding: 0 12px;
-        border: 1px solid rgba(4, 120, 87, 0.2);
-        border-radius: 999px;
-        color: var(--green);
-        background: var(--green-soft);
-        font-size: 13px;
-        font-weight: 800;
+        border-radius: 7px;
+        background: var(--blue-soft);
+        font-size: 15px;
       }
 
       h1 {
-        margin: 18px 0 10px;
-        font-size: clamp(28px, 5vw, 36px);
+        margin: 22px 0 10px;
+        font-size: clamp(26px, 6vw, 34px);
         line-height: 1.18;
         letter-spacing: -0.035em;
       }
@@ -112,68 +82,21 @@
       .lead {
         margin: 0;
         color: var(--muted);
-        font-size: 16px;
-        line-height: 1.75;
+        font-size: 15px;
+        line-height: 1.7;
       }
 
-      .progress {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
-        margin-top: 28px;
-        padding: 12px;
-        border: 1px solid var(--line);
-        border-radius: 20px;
-        background: var(--panel-soft);
-      }
-
-      .step {
-        min-height: 106px;
-        padding: 17px;
-        border-radius: 15px;
-        background: var(--panel);
-      }
-
-      .step-label {
-        display: block;
-        margin-bottom: 9px;
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 800;
-        letter-spacing: 0.08em;
-      }
-
-      .step strong {
-        display: block;
-        font-size: 16px;
-        line-height: 1.45;
-      }
-
-      .step.complete strong {
-        color: var(--green);
-      }
-
-      .notice {
-        margin: 22px 0 0;
-        padding: 14px 16px;
-        border-radius: 15px;
-        color: var(--blue);
-        background: var(--blue-soft);
-        font-size: 13px;
-        font-weight: 700;
-        line-height: 1.6;
-      }
-
-      footer {
+      .actions {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 18px;
-        padding: 20px 26px;
+        gap: 16px;
+        margin-top: 28px;
+        padding-top: 20px;
         border-top: 1px solid var(--line);
       }
 
-      footer p {
+      .actions p {
         margin: 0;
         color: var(--muted);
         font-size: 12px;
@@ -182,72 +105,55 @@
 
       button {
         flex: 0 0 auto;
-        min-height: 42px;
-        padding: 0 18px;
-        border: 0;
-        border-radius: 13px;
-        color: white;
-        background: linear-gradient(180deg, #2563eb, #1d4ed8);
-        box-shadow: 0 10px 24px rgba(29, 78, 216, 0.2);
+        min-height: 40px;
+        padding: 0 16px;
+        border: 1px solid var(--blue);
+        border-radius: 10px;
+        color: #ffffff;
+        background: var(--blue);
         font: inherit;
         font-size: 14px;
-        font-weight: 800;
+        font-weight: 750;
         cursor: pointer;
       }
 
       button:focus-visible {
-        outline: 3px solid rgba(37, 99, 235, 0.38);
+        outline: 3px solid color-mix(in srgb, var(--blue) 30%, transparent);
         outline-offset: 3px;
       }
 
-      #close-hint[hidden] {
+      [hidden] {
         display: none;
       }
 
       @media (prefers-color-scheme: dark) {
         :root {
-          --canvas: #101a2a;
-          --panel: rgba(25, 40, 60, 0.94);
-          --panel-soft: rgba(30, 45, 66, 0.8);
-          --line: rgba(148, 163, 184, 0.24);
-          --text: #e8eef6;
-          --muted: #a8b6c8;
-          --blue: #7baaf7;
-          --blue-soft: rgba(123, 170, 247, 0.14);
-          --green: #67cbb1;
-          --green-soft: rgba(103, 203, 177, 0.13);
-          --shadow: 0 30px 80px rgba(2, 8, 18, 0.42);
+          --page: #111a29;
+          --panel: #192538;
+          --line: #2d3c52;
+          --text: #edf2f8;
+          --muted: #a6b3c4;
+          --blue: #78a7ff;
+          --blue-soft: #243a60;
+          --shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
         }
 
-        body {
-          background:
-            radial-gradient(circle at 8% 0%, rgba(72, 115, 170, 0.18), transparent 32%),
-            radial-gradient(circle at 92% 12%, rgba(51, 121, 113, 0.12), transparent 28%),
-            linear-gradient(180deg, #0e1827 0%, #142033 48%, #111c2d 100%);
+        button {
+          color: #101827;
         }
       }
 
-      @media (max-width: 560px) {
+      @media (max-width: 520px) {
         body {
           padding: 16px;
         }
 
         main {
-          border-radius: 22px;
+          padding: 24px;
+          border-radius: 14px;
         }
 
-        header,
-        .content,
-        footer {
-          padding-left: 20px;
-          padding-right: 20px;
-        }
-
-        .progress {
-          grid-template-columns: 1fr;
-        }
-
-        footer {
+        .actions {
           align-items: stretch;
           flex-direction: column;
         }
@@ -260,51 +166,14 @@
   </head>
   <body>
     <main>
-      <header>
-        <span class="brand-icon" aria-hidden="true">
-          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-          </svg>
-        </span>
-        <div>
-          <p class="brand-name">OnlineWorker</p>
-          <p class="brand-caption">本地账号授权</p>
-        </div>
-      </header>
-
-      <section class="content">
-        <span class="status">授权回调已接收</span>
-        <h1>浏览器授权已完成</h1>
-        <p class="lead">
-          OnlineWorker 已收到本次授权结果，正在应用内完成账号导入。你现在可以返回应用查看最终结果。
-        </p>
-
-        <div class="progress" aria-label="授权进度">
-          <div class="step complete">
-            <span class="step-label">浏览器授权</span>
-            <strong>已完成</strong>
-          </div>
-          <div class="step">
-            <span class="step-label">账号导入</span>
-            <strong>返回 OnlineWorker 查看结果</strong>
-          </div>
-        </div>
-
-        <p class="notice">请不要在此页面继续操作。账号是否成功加入，以 OnlineWorker 内的提示为准。</p>
-      </section>
-
-      <footer>
-        <div>
-          <p>这是由 OnlineWorker 创建的本机 localhost 页面。</p>
-          <p id="close-hint" hidden aria-live="polite">若浏览器未自动关闭，请手动关闭此标签页。</p>
-        </div>
-        <button
-          type="button"
-          onclick="window.close(); setTimeout(() => document.getElementById('close-hint').hidden = false, 250)"
-        >
-          关闭此页面
-        </button>
-      </footer>
+      <p class="status"><span class="status-mark" aria-hidden="true">✓</span>授权回调已接收</p>
+      <h1>请返回 OnlineWorker 查看结果</h1>
+      <p class="lead">本地回调已安全接收。授权和账号导入仍需在应用内验证，此页面不会显示回调参数或最终结果。</p>
+      <div class="actions">
+        <p id="close-hint" hidden aria-live="polite">浏览器未自动关闭，请手动关闭此标签页。</p>
+        <p>你可以安全关闭此页面。</p>
+        <button id="close-page" type="button">关闭页面</button>
+      </div>
     </main>
   </body>
 </html>

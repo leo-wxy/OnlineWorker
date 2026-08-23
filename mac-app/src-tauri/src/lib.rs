@@ -18,9 +18,9 @@ use tokio::sync::Mutex;
 
 use commands::account_feature::{
     await_account_feature_loopback, begin_account_feature_loopback,
-    cancel_account_feature_loopback, choose_account_feature_file, choose_account_feature_save,
-    invoke_account_feature, list_account_features, open_account_feature_browser,
-    AccountFeatureHostState,
+    cancel_account_feature_loopback, cancel_account_feature_operation, choose_account_feature_file,
+    choose_account_feature_save, invoke_account_feature, list_account_features,
+    open_account_feature_browser, AccountFeatureHostState,
 };
 use commands::ai_config::test_ai_service_connection;
 use commands::attachment_cache::{clear_attachment_cache, get_attachment_cache_stats};
@@ -420,6 +420,7 @@ pub fn run() {
             service_status,
             list_account_features,
             invoke_account_feature,
+            cancel_account_feature_operation,
             choose_account_feature_file,
             choose_account_feature_save,
             open_account_feature_browser,

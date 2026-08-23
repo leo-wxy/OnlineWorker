@@ -20,6 +20,8 @@ use tauri_plugin_shell::{
 };
 use tokio::sync::Mutex as AsyncMutex;
 
+use super::provider_bridge_common::{kill_provider_bridge_process_tree, ProviderBridgeOutput};
+
 const SIDECAR_TIMEOUT: Duration = Duration::from_secs(60);
 const NATIVE_HANDLE_TTL: Duration = Duration::from_secs(120);
 const LOOPBACK_RESULT_TTL: Duration = Duration::from_secs(120);
@@ -78,6 +80,10 @@ fn safe_token(value: &str) -> bool {
 
 pub(crate) fn valid_feature_id(value: &str) -> bool {
     !value.is_empty() && value.len() <= 128 && safe_token(value)
+}
+
+fn valid_cancel_action(value: &str) -> bool {
+    valid_feature_id(value) && (value == "cancel" || value.ends_with(".cancel"))
 }
 
 fn contains_reserved_context(value: &Value) -> bool {
@@ -195,6 +201,115 @@ fn worker_failure(error: &str) -> AccountFeatureResponse {
     } else {
         failure("host_unavailable", "账号功能宿主不可用。", true)
     }
+}
+
+fn normalize_sidecar_result(
+    result: Result<ProviderBridgeOutput, String>,
+) -> AccountFeatureResponse {
+    let output = match result {
+        Ok(output) => output,
+        Err(error) => return worker_failure(&error),
+    };
+    if !output.success() {
+        return failure("feature_failed", "账号功能操作失败。", true);
+    }
+    if output.stdout.len() > MAX_HOST_OUTPUT_BYTES {
+        return worker_failure("account feature output too large");
+    }
+    match serde_json::from_slice(&output.stdout) {
+        Ok(parsed) => normalize_account_feature_envelope(parsed),
+        Err(_) => worker_failure("account feature invalid response"),
+    }
+}
+
+async fn collect_account_feature_events<F>(
+    mut events: tauri::async_runtime::Receiver<CommandEvent>,
+    root_pid: u32,
+    kill_root: F,
+) -> Result<ProviderBridgeOutput, String>
+where
+    F: FnOnce(u32),
+{
+    let mut code = None;
+    let mut signal = None;
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    while let Some(event) = events.recv().await {
+        match event {
+            CommandEvent::Terminated(payload) => {
+                code = payload.code;
+                signal = payload.signal;
+            }
+            CommandEvent::Stdout(line) | CommandEvent::Stderr(line)
+                if stdout
+                    .len()
+                    .saturating_add(stderr.len())
+                    .saturating_add(line.len())
+                    > MAX_HOST_OUTPUT_BYTES =>
+            {
+                kill_root(root_pid);
+                return Err("account feature output too large".into());
+            }
+            CommandEvent::Stdout(line) => stdout.extend(line),
+            CommandEvent::Stderr(line) => stderr.extend(line),
+            CommandEvent::Error(_) => {
+                kill_root(root_pid);
+                return Err("account feature event failed".into());
+            }
+            _ => {}
+        }
+    }
+    Ok(ProviderBridgeOutput {
+        code,
+        signal,
+        stdout,
+        stderr,
+    })
+}
+
+async fn run_account_feature_sidecar(
+    app: &AppHandle,
+    args: Vec<String>,
+    input: Value,
+    timeout: Duration,
+) -> AccountFeatureResponse {
+    let encoded = match serde_json::to_vec(&input) {
+        Ok(encoded) if encoded.len() <= MAX_ACTION_BYTES => encoded,
+        _ => return failure("invalid_payload", "账号功能参数无效。", false),
+    };
+    let sidecar = match app.shell().sidecar("onlineworker-bot") {
+        Ok(sidecar) => sidecar,
+        Err(_) => return worker_failure("account feature spawn failed"),
+    };
+    let (events, mut child) = match sidecar
+        .args(args)
+        .env("PYINSTALLER_RESET_ENVIRONMENT", "1")
+        .set_raw_out(true)
+        .spawn()
+    {
+        Ok(result) => result,
+        Err(_) => return worker_failure("account feature spawn failed"),
+    };
+    let root_pid = child.pid();
+    let writer = tauri::async_runtime::spawn_blocking(move || child.write(&encoded));
+    let work = async {
+        let (write_result, collect_result) = tokio::join!(
+            writer,
+            collect_account_feature_events(events, root_pid, kill_provider_bridge_process_tree)
+        );
+        match write_result {
+            Ok(Ok(())) => collect_result,
+            _ => Err("account feature write failed".into()),
+        }
+    };
+    let result = match tokio::time::timeout(timeout, work).await {
+        Ok(result) => result,
+        Err(_) => {
+            kill_provider_bridge_process_tree(root_pid);
+            Err("account feature timed out".into())
+        }
+    };
+    normalize_sidecar_result(result)
 }
 
 struct AccountFeatureWorker {
@@ -916,6 +1031,44 @@ pub async fn invoke_account_feature(
     .await)
 }
 
+#[tauri::command]
+pub async fn cancel_account_feature_operation(
+    app: AppHandle,
+    feature_id: String,
+    action: String,
+    payload: Value,
+) -> Result<AccountFeatureResponse, String> {
+    if !valid_feature_id(&feature_id)
+        || !valid_cancel_action(&action)
+        || validate_action_payload(&payload).is_err()
+    {
+        return Ok(failure("invalid_request", "账号功能请求无效。", false));
+    }
+    let data_root = match account_feature_root(&app, &feature_id) {
+        Ok(root) => root,
+        Err(_) => return Ok(failure("storage_unavailable", "账号功能存储不可用。", true)),
+    };
+    Ok(run_account_feature_sidecar(
+        &app,
+        vec![
+            "--account-feature-action".into(),
+            "--account-feature-id".into(),
+            feature_id,
+            "--account-feature-action-name".into(),
+            action,
+        ],
+        json!({
+            "payload": payload,
+            "trusted_context": {
+                "data_root": data_root,
+                "native_paths": [],
+            }
+        }),
+        SIDECAR_TIMEOUT,
+    )
+    .await)
+}
+
 async fn choose_account_feature_path(
     state: &AccountFeatureHostState,
     feature_id: String,
@@ -1023,17 +1176,23 @@ pub async fn cancel_account_feature_loopback(
 mod tests {
     use super::{
         await_loopback_session, begin_loopback_session, cancel_loopback_session,
-        confined_feature_root, parse_worker_response, valid_feature_id, validate_action_payload,
+        collect_account_feature_events, confined_feature_root, normalize_sidecar_result,
+        parse_worker_response, valid_cancel_action, valid_feature_id, validate_action_payload,
         worker_failure, AccountFeatureHostState, CapabilityMode, MAX_HOST_OUTPUT_BYTES,
     };
+    use crate::commands::provider_bridge_common::ProviderBridgeOutput;
     use serde_json::json;
     use std::fs;
     use std::io::{Read, Write};
     use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
     use std::os::unix::fs::{symlink, PermissionsExt};
-    use std::sync::{Arc, Barrier};
+    use std::sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc, Barrier,
+    };
     use std::thread;
     use std::time::{Duration, Instant};
+    use tauri_plugin_shell::process::CommandEvent;
 
     fn temp_dir() -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!(
@@ -1061,6 +1220,14 @@ mod tests {
         );
         assert!(confined_feature_root(&base, "../escape").is_err());
         let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn cancellation_actions_are_explicit_and_provider_neutral() {
+        assert!(valid_cancel_action("cancel"));
+        assert!(valid_cancel_action("oauth.cancel"));
+        assert!(!valid_cancel_action("oauth.complete"));
+        assert!(!valid_cancel_action("../cancel"));
     }
 
     #[test]
@@ -1117,6 +1284,48 @@ mod tests {
         assert_eq!(mismatched.error.unwrap().code, "invalid_response");
         assert_eq!(timeout.error.unwrap().code, "host_timeout");
         assert_eq!(oversized.error.unwrap().code, "output_too_large");
+    }
+
+    #[tokio::test]
+    async fn one_shot_cancellation_output_is_bounded() {
+        let (sender, receiver) = tauri::async_runtime::channel(1);
+        sender
+            .send(CommandEvent::Stdout(vec![0; MAX_HOST_OUTPUT_BYTES + 1]))
+            .await
+            .unwrap();
+        drop(sender);
+        let killed_pid = Arc::new(AtomicU32::new(0));
+        let killed_pid_for_callback = killed_pid.clone();
+
+        let error = collect_account_feature_events(receiver, 4242, move |pid| {
+            killed_pid_for_callback.store(pid, Ordering::SeqCst);
+        })
+        .await
+        .unwrap_err();
+
+        assert_eq!(error, "account feature output too large");
+        assert_eq!(killed_pid.load(Ordering::SeqCst), 4242);
+    }
+
+    #[test]
+    fn one_shot_cancellation_response_is_normalized_and_redacted() {
+        let success = normalize_sidecar_result(Ok(ProviderBridgeOutput {
+            code: Some(0),
+            signal: None,
+            stdout: br#"{"ok":true,"data":{"cancelled":true},"error":null}"#.to_vec(),
+            stderr: Vec::new(),
+        }));
+        let failed = normalize_sidecar_result(Ok(ProviderBridgeOutput {
+            code: Some(1),
+            signal: None,
+            stdout: b"credential-fixture".to_vec(),
+            stderr: b"/Users/example/private.json".to_vec(),
+        }));
+
+        assert!(success.ok);
+        let serialized = serde_json::to_string(&failed).unwrap();
+        assert!(!serialized.contains("credential-fixture"));
+        assert!(!serialized.contains("/Users/example"));
     }
 
     #[test]
@@ -1301,8 +1510,12 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 200"));
         assert!(response.contains("Content-Type: text/html; charset=utf-8"));
         assert!(response.contains("Cache-Control: no-store"));
-        assert!(response.contains("浏览器授权已完成"));
-        assert!(response.contains("返回 OnlineWorker 查看结果"));
+        assert!(response.contains("授权回调已接收"));
+        assert!(response.contains("请返回 OnlineWorker 查看结果"));
+        assert!(response.contains("history.replaceState"));
+        assert!(!response.contains("浏览器授权已完成"));
+        assert!(!response.contains("code=fixture"));
+        assert!(!response.contains("state=fixture"));
         assert!(!response.contains("Codex"));
 
         let completed = await_loopback_session(&state, "feature-a", &session.handle_id).unwrap();

@@ -8,7 +8,7 @@ from typing import Any
 from plugins.providers.builtin.codex.python.account_store import AccountStore, AccountStoreError, operation_lock
 from plugins.providers.builtin.codex.python.apply import ApplyError, apply_account, export_accounts, refresh_current, resolve_effective_home
 from plugins.providers.builtin.codex.python.compat import ParseBatchResult, parse_cockpit_tools
-from plugins.providers.builtin.codex.python.oauth import OAuthError, cancel_oauth, complete_oauth, start_oauth
+from plugins.providers.builtin.codex.python.oauth import OAuthError, cancel_oauth, complete_oauth, ensure_oauth_pending, start_oauth
 from plugins.providers.builtin.codex.python.quota import QuotaError, fetch_quota, refresh_oauth_record
 from plugins.providers.builtin.codex.python.session_assets import (
     SessionAssetError,
@@ -129,12 +129,17 @@ def handle_account_feature(*, action: str, payload: Any, context: Any) -> dict[s
         if action == "oauth.start":
             return _ok(**start_oauth(store.root, payload.get("redirectUri")))
         if action == "oauth.cancel":
-            cancel_oauth(store.root)
-            return _ok(cancelled=True)
+            operation_id = payload.get("operationId")
+            if not isinstance(operation_id, str) or not operation_id:
+                return _failure("invalid_request")
+            return _ok(cancelled=cancel_oauth(store.root, operation_id))
         if action == "oauth.complete":
+            callback_url = payload.get("callbackUrl")
+            raw = complete_oauth(store.root, callback_url)
+            parsed = parse_cockpit_tools(raw, source="oauth")
             with operation_lock(store.root):
-                raw = complete_oauth(store.root, payload.get("callbackUrl"))
-                result = _import_result(store, parse_cockpit_tools(raw, source="oauth"))
+                ensure_oauth_pending(store.root, callback_url)
+                result = _import_result(store, parsed)
                 if result.get("ok"):
                     cancel_oauth(store.root)
                 return result
@@ -162,7 +167,7 @@ def handle_account_feature(*, action: str, payload: Any, context: Any) -> dict[s
             query = payload.get("query") if isinstance(payload.get("query"), str) else ""
             kind = payload.get("kind") if isinstance(payload.get("kind"), str) else "conversation"
             if payload.get("trash") is True:
-                return _ok(sessions=list_trash(store.root), usage30d={"cost": {"status": "unavailable"}})
+                return _ok(sessions=list_trash(store.root, query=query), usage30d={"cost": {"status": "unavailable"}})
             return _ok(**list_sessions(home, query=query, include_usage=False, kind=kind))
         if action == "sessions.usage":
             return _ok(usage30d=list_sessions(resolve_effective_home(), kind="conversation")["usage30d"])

@@ -28,6 +28,7 @@ export interface LoopbackResult {
 
 export interface AccountFeatureApi {
   invoke: (action: string, payload?: Record<string, unknown>, handles?: Array<{ handleId: string; mode: "open" | "save" }>) => Promise<Record<string, unknown>>;
+  cancel: (action: string, payload?: Record<string, unknown>) => Promise<Record<string, unknown>>;
   chooseOpen: () => Promise<CapabilityHandle | null>;
   chooseSave: (suggestedName: string) => Promise<CapabilityHandle | null>;
   openBrowser: (url: string) => Promise<void>;
@@ -130,6 +131,15 @@ export function AccountFeatureHost({ active }: { active: boolean }) {
           capabilityHandles: handles,
         });
         if (!response.ok) throw new Error(response.error?.message || "账号操作失败");
+        return response.data || {};
+      },
+      cancel: async (action, payload = {}) => {
+        const response = await tauriInvoke<HostResponse>("cancel_account_feature_operation", {
+          featureId,
+          action,
+          payload,
+        });
+        if (!response.ok) throw new Error(response.error?.message || "取消账号操作失败");
         return response.data || {};
       },
       chooseOpen: () => tauriInvoke("choose_account_feature_file", { featureId }),

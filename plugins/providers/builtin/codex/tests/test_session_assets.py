@@ -45,6 +45,8 @@ def test_list_search_and_30_day_usage_are_local(tmp_path):
     assert result["usage30d"]["cost"] == {"status": "unavailable"}
     assert list_sessions(home, query="missing")["sessions"] == []
     assert len(list_sessions(home, query="worker")["sessions"]) == 1
+    assert len(list_sessions(home, query="project")["sessions"]) == 1
+    assert [item["sessionId"] for item in list_sessions(home, query="session-1")["sessions"]] == ["session-1"]
 
 
 def test_fast_list_classifies_and_filters_session_kinds(tmp_path):
@@ -90,6 +92,9 @@ def test_trash_restore_and_quick_visibility_repair(tmp_path):
     assert trashed["count"] == 1
     assert not rollout.exists()
     assert list_trash(plugin_root)[0]["sessionId"] == "session-1"
+    for query in ["worker", "project", "session-1"]:
+        assert [item["sessionId"] for item in list_trash(plugin_root, query=query)] == ["session-1"]
+    assert list_trash(plugin_root, query="missing") == []
     assert restore_sessions(plugin_root, home, ["session-1"])["count"] == 1
     assert rollout.exists()
 

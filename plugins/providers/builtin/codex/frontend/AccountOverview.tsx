@@ -120,28 +120,41 @@ export function AccountOverview({ api }: { api: AccountFeatureApi }) {
           </div>}
 
           {loading ? (
-            <div aria-live="polite" className="ow-page-frame-soft grid min-h-52 place-items-center rounded-[28px] text-sm font-semibold text-[var(--ow-muted)]">正在加载账号…</div>
+            <div aria-live="polite" className="codex-account-loading ow-page-frame-soft">正在加载账号…</div>
           ) : accounts.length === 0 ? (
-            <div className="ow-page-frame grid min-h-64 place-items-center rounded-[28px] p-8 text-center">
-              <div>
-                <p className="text-lg font-extrabold tracking-[-0.02em] text-[var(--ow-text)]">暂无账号</p>
-                <p className="mt-2 text-sm text-[var(--ow-muted)]">通过 OAuth 或 Token / JSON 添加第一个账号。</p>
-                <button type="button" className="ow-btn-primary mt-5 rounded-xl px-4 py-2.5 text-sm font-bold" disabled={Boolean(busy)} onClick={() => setShowAdd(true)}>添加第一个账号</button>
+            <section className="codex-account-empty ow-page-frame" aria-labelledby="codex-account-empty-title">
+              <div className="codex-account-empty-copy">
+                <p className="codex-account-empty-eyebrow">账号库为空</p>
+                <h2 id="codex-account-empty-title">添加第一个账号</h2>
+                <p>通过 OAuth 或 Token / JSON 导入凭据。导入后由你决定何时应用，不会自动切换当前账号。</p>
+                <button type="button" className="ow-btn-primary codex-account-empty-action" disabled={Boolean(busy)} onClick={() => setShowAdd(true)}>添加账号</button>
               </div>
-            </div>
+              <ol className="codex-account-empty-steps" aria-label="账号使用流程">
+                <li>
+                  <span aria-hidden="true">01</span>
+                  <div><strong>安全导入</strong><p>选择 OAuth，或粘贴 Token / JSON。</p></div>
+                </li>
+                <li>
+                  <span aria-hidden="true">02</span>
+                  <div><strong>手动应用</strong><p>确认账号后，再应用到当前客户端。</p></div>
+                </li>
+              </ol>
+            </section>
           ) : (
             <div className="codex-account-list flex min-w-0 flex-col gap-4">
-              <div className="codex-account-list-toolbar ow-toolbar flex flex-wrap items-center gap-3 rounded-[22px] px-4 py-3">
-                <div>
+              <div className="codex-account-list-toolbar">
+                <div className="codex-account-toolbar-summary">
                   <h2 className="text-sm font-bold text-[var(--ow-text)]">账号库</h2>
                   <p className="mt-0.5 text-xs text-[var(--ow-muted)]">{accounts.length} 个账号 · {accounts.filter((account) => account.isCurrent).length} 个正在使用</p>
                 </div>
-                <label className="ml-2 flex items-center gap-2 text-sm font-semibold text-[var(--ow-text)]">
-                  <input type="checkbox" aria-label="全选账号" checked={allSelected} onChange={(event) => setSelected(event.target.checked ? new Set(accounts.map((account) => account.id)) : new Set())} />
-                  全选当前结果
-                </label>
-                <span className="text-xs text-[var(--ow-muted)]">{selectedIds.length ? `已选择 ${selectedIds.length} 项` : "可批量导出或刷新额度"}</span>
-                <div className="codex-account-toolbar-actions ml-auto flex flex-wrap items-center gap-2">
+                <div className="codex-account-toolbar-selection">
+                  <label>
+                    <input type="checkbox" aria-label="全选账号" checked={allSelected} onChange={(event) => setSelected(event.target.checked ? new Set(accounts.map((account) => account.id)) : new Set())} />
+                    全选当前结果
+                  </label>
+                  <span>{selectedIds.length ? `已选择 ${selectedIds.length} 项` : "可批量导出或刷新额度"}</span>
+                </div>
+                <div className="codex-account-toolbar-actions">
                   {selectedIds.length > 0 && <button type="button" className="codex-account-text-action" disabled={Boolean(busy)} onClick={() => setSelected(new Set())}>清除选择</button>}
                   <button type="button" className="codex-account-text-action" disabled={Boolean(busy) || !selectedIds.length} onClick={() => void run("export", () => exportIds(selectedIds), false)}>{busy === "export" ? "正在导出…" : "导出选中"}</button>
                 </div>
@@ -151,46 +164,42 @@ export function AccountOverview({ api }: { api: AccountFeatureApi }) {
                 {accounts.map((account) => {
                   const quota = account.quota;
                   const windows = [["primary", quotaLabel(quota?.primary, "短周期"), quota?.primary], ["secondary", quotaLabel(quota?.secondary, "周"), quota?.secondary]] as const;
-                  return <article key={account.id} className={`codex-account-row ow-page-frame ${account.isCurrent ? "codex-account-row-current" : ""}`}>
-                    <div className="codex-account-row-identity flex min-w-0 items-start gap-3">
-                      <input className="mt-1.5" aria-label={`选择 ${account.stableIdentityDisplay}`} type="checkbox" checked={selected.has(account.id)} onChange={(event) => setSelected((current) => { const next = new Set(current); event.target.checked ? next.add(account.id) : next.delete(account.id); return next; })} />
-                      <div className="min-w-0 flex-1">
-                        <div className="codex-account-identity-heading min-w-0">
-                          <h3 className="min-w-0 truncate text-base font-extrabold tracking-[-0.02em] text-[var(--ow-text)]">{account.stableIdentityDisplay}</h3>
+                  return <article key={account.id} className={`codex-account-row ${account.isCurrent ? "codex-account-row-current" : ""}`}>
+                    <div className="codex-account-row-identity">
+                      <input aria-label={`选择 ${account.stableIdentityDisplay}`} type="checkbox" checked={selected.has(account.id)} onChange={(event) => setSelected((current) => { const next = new Set(current); event.target.checked ? next.add(account.id) : next.delete(account.id); return next; })} />
+                      <div className="codex-account-identity-copy">
+                        <div className="codex-account-identity-heading">
+                          <h3>{account.stableIdentityDisplay}</h3>
                           <div className="codex-account-badges">
                             <span className={`codex-account-state ${account.isCurrent ? "codex-account-state-current" : "codex-account-state-idle"}`}><span aria-hidden="true" />{account.isCurrent ? "当前账号" : "未应用"}</span>
                             {quota?.planType && <span className="codex-account-plan">{quota.planType}</span>}
                           </div>
                         </div>
+                        <p className="codex-account-identity-meta"><span>{sourceLabel(account.source, account.authMode)}</span><span aria-hidden="true">·</span><span>{account.isCurrent ? "Codex Home 使用中" : "等待应用"}</span></p>
                       </div>
                     </div>
 
-                    <div className="codex-account-row-content">
-                      <dl className="codex-account-meta-grid">
-                        <div><dt>认证方式</dt><dd>{sourceLabel(account.source, account.authMode)}</dd></div>
-                        <div><dt>应用状态</dt><dd>{account.isCurrent ? "Codex Home 使用中" : "等待应用"}</dd></div>
-                      </dl>
-
-                      <div className="codex-account-row-quota min-w-0">
-                        <div className="codex-account-quota-heading"><span>额度概览</span><span>剩余额度</span></div>
-                        {quota?.status === "ok" && windows.some(([, , window]) => window) ? <div className="codex-account-quota-grid grid gap-4">
-                          {windows.map(([windowKey, label, window]) => {
-                            if (!window) return null;
-                            const remaining = Math.round(window.remainingPercent || 0);
-                            return <div key={windowKey} className={`codex-account-quota-window min-w-0 ${remaining < 50 ? "codex-account-quota-warning" : "codex-account-quota-healthy"}`}>
-                              <div className="flex items-baseline justify-between gap-3"><span className="text-sm font-bold text-[var(--ow-text)]">{label}</span><strong className="codex-account-quota-value">{remaining}%</strong></div>
-                              <progress className="codex-account-quota-progress mt-2.5 w-full" max="100" value={window.remainingPercent || 0} aria-label={`${label}剩余额度`} />
-                              <p className="mt-2 truncate text-xs text-[var(--ow-subtle)]">{formatReset(window.resetAt)}</p>
-                            </div>;
-                          })}
-                        </div> : <p className="codex-account-quota-empty text-sm leading-6 text-[var(--ow-muted)]">{quota?.status === "unsupported" ? "此认证方式不提供订阅额度" : quota?.status === "error" ? `额度暂不可用 · ${quota.errorCode || "未知错误"}` : "尚未刷新额度"}</p>}
-                      </div>
+                    <div className="codex-account-row-quota">
+                      <div className="codex-account-quota-heading"><span>额度概览</span><span>剩余</span></div>
+                      {quota?.status === "ok" && windows.some(([, , window]) => window) ? <div className="codex-account-quota-grid">
+                        {windows.map(([windowKey, label, window]) => {
+                          if (!window) return null;
+                          const remaining = Math.round(window.remainingPercent || 0);
+                          return <div key={windowKey} className={`codex-account-quota-window ${remaining < 50 ? "codex-account-quota-warning" : "codex-account-quota-healthy"}`}>
+                            <div className="codex-account-quota-window-heading"><span>{label}</span><strong className="codex-account-quota-value">{remaining}%</strong></div>
+                            <progress className="codex-account-quota-progress" max="100" value={window.remainingPercent || 0} aria-label={`${label}剩余额度`} />
+                            <p>{formatReset(window.resetAt)}</p>
+                          </div>;
+                        })}
+                      </div> : <p className="codex-account-quota-empty">{quota?.status === "unsupported" ? "此认证方式不提供订阅额度" : quota?.status === "error" ? `额度暂不可用 · ${quota.errorCode || "未知错误"}` : "尚未刷新额度"}</p>}
                     </div>
 
                     <div className="codex-account-row-actions">
                       <button type="button" className={`codex-account-primary-action ${account.isCurrent ? "ow-btn" : "codex-account-apply"} rounded-xl px-4 py-2.5 text-sm font-bold`} disabled={Boolean(busy)} onClick={() => setPendingApply(account)}>{busy === `apply:${account.id}` ? "正在应用…" : account.isCurrent ? "重新应用" : "应用"}</button>
-                      <button type="button" className="codex-account-secondary-action" disabled={Boolean(busy)} onClick={() => void run(`refresh:${account.id}`, async () => { pluginResult(await api.invoke("accounts.refresh", { accountIds: [account.id] })); setMessage("额度已刷新"); })}>{busy === `refresh:${account.id}` ? "刷新中…" : "刷新"}</button>
-                      <button type="button" className="codex-account-secondary-action" disabled={Boolean(busy)} onClick={() => void run("export", () => exportIds([account.id]), false)}>{busy === "export" ? "导出中…" : "导出"}</button>
+                      <div className="codex-account-secondary-actions">
+                        <button type="button" className="codex-account-secondary-action" disabled={Boolean(busy)} onClick={() => void run(`refresh:${account.id}`, async () => { pluginResult(await api.invoke("accounts.refresh", { accountIds: [account.id] })); setMessage("额度已刷新"); })}>{busy === `refresh:${account.id}` ? "刷新中…" : "刷新"}</button>
+                        <button type="button" className="codex-account-secondary-action" disabled={Boolean(busy)} onClick={() => void run("export", () => exportIds([account.id]), false)}>{busy === "export" ? "导出中…" : "导出"}</button>
+                      </div>
                     </div>
                   </article>;
                 })}
