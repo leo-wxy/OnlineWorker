@@ -38,8 +38,8 @@ OnlineWorker sidebar
             └── 会话资产
                 ├── 近 30 天 Token / 成本摘要
                 ├── 标题搜索与选中范围批量操作
-                └── 默认折叠的工程目录组
-                    └── 展开后显示该目录下的对话
+                └── 响应式工程目录卡片
+                    └── 选择会话弹窗：搜索 / 全选当前结果 / 逐条选择
 ```
 
 - 没有 account-capable 插件时，侧边栏不显示“账号”。
@@ -96,12 +96,12 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 
 ## Account Overview
 
-- Eyebrow / heading: `账号`
-- Description: `管理本地账号凭据。导入不会自动应用账号。`
+- Eyebrow / heading: `账号管理`
+- Description: `管理本地 AI 服务账号。导入后需手动应用到对应客户端。`
 - Primary CTA: `添加账号`
 - Codex plugin selector label: `Codex`
 
-账号列表只显示：selection checkbox、稳定身份、`当前账号` / `未应用`、来源（新入口为 `OAuth` / `Token / JSON`；历史记录可显示 `API Key` / `文件导入`）、外部状态（`外部修改` / `未托管`）、官方返回的 plan/额度窗口，以及 `应用`/`重新应用`、`刷新额度`和 `导出`。桌面每行共享固定的身份、额度和操作列轨，主操作按钮宽度一致；文案长度不得改变相邻行的列起点。页面提供 `全选当前结果`、`清除选择`、`已选择 {count} 项`和 `导出选中`；无选中时用 native `disabled`。
+账号列表只显示：selection checkbox、稳定身份、`当前账号` / `未应用`、来源（新入口为 `OAuth` / `Token / JSON`；历史记录可显示 `API Key` / `文件导入`）、外部状态（`外部修改` / `未托管`）、官方返回的 plan/额度窗口，以及 `应用`/`重新应用`、`刷新额度`和 `导出`。桌面使用响应式卡片网格；每张卡片内部保持身份、状态、额度和底部操作的稳定层级，文案换行不得造成横向溢出。页面提供 `全选当前结果`、`清除选择`、`已选择 {count} 项`和 `导出选中`；无选中时用 native `disabled`。
 
 账号首屏允许从 versioned local cache 读取上述列表行所需的脱敏字段；命中时立即渲染，随后后台执行 `accounts.list` 覆盖校准。缓存只按显式白名单重建对象，不保存 callback、表单输入、native path、credential/token 或 backend 未知字段。后台刷新失败时保留已有缓存行并显示错误。
 
@@ -126,7 +126,7 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 复用 `ow-modal-backdrop` / `ow-modal-panel` 及现有 dialog focus 模式。
 
 - Title: `添加账号`
-- Description: `选择一种凭据来源。导入只会加入账号库，不会自动应用。`
+- Description: `选择一种方式，将凭据安全地加入本地账号库。`
 - 两个 tab 的精确文案：`OAuth`、`Token / JSON`。
 - 共通状态：`正在校验…`、`正在导入账号…`；执行期间禁用所有 mutation 控件；错误保留用户输入。
 
@@ -135,11 +135,18 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 - 启动授权必须使用 PKCE + `state`；自动本地回调和手动 callback URL 都必须验证 `state`。
 - Idle CTA: `在浏览器中继续`
 - Hint: `将打开系统浏览器完成授权。授权完成后会自动接收本地回调。`
-- Waiting: `正在等待浏览器授权…` / `等待本地回调…`；除 `取消` 外禁用操作。
+- Waiting: `正在等待浏览器授权…` / `等待本地回调…`；开始监听、打开浏览器、等待回调和交换凭据期间始终允许 `取消` 或关闭弹窗。
 - Manual fallback: `没有收到本地回调？`；field `回调 URL`；CTA `使用回调 URL`。
 - Success: `授权成功，账号已导入。需要使用时，请点击“应用”。`
 - Errors: `授权已取消。`、`没有收到本地回调。请粘贴回调 URL，或重新开始授权。`、`回调状态无法验证。请重新开始授权。`、`授权失败：{reason}`；retry `重新授权`。
 - 不嵌入登录 WebView。
+
+### Localhost callback confirmation
+
+- 浏览器回调页只确认本地回调已被 OnlineWorker 接收，不承诺账号已经导入；最终结果回到应用内查看。
+- 固定信息层级：`授权回调已接收`、`浏览器授权已完成`、`返回 OnlineWorker 查看结果`。
+- 页面提供可用的 `关闭页面`；浏览器不允许脚本关闭时显示可理解的手动关闭提示。
+- 页面保持 provider-neutral，不显示 Codex 标题，不回显 query、code、state、token 或错误详情。
 
 ### Token / JSON tab
 
@@ -165,8 +172,8 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 会话资产
 ├── 近 30 天：Token 总量 / 估算成本
 ├── Toolbar：标题搜索 / 导入 ZIP / 导出选中 / 修复可见性 / 选中范围操作
-└── Workdir groups：disclosure / cwd title / conversation count / latest date
-    └── Conversation rows：checkbox / title / date / session id / details
+└── Workdir cards：cwd title / conversation count / latest date / recent conversations
+    └── Conversation picker dialog：search / visible-result select-all / checkbox rows
 ```
 
 ### 30-day Summary
@@ -178,12 +185,12 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 
 ### Search, Selection, and Rows
 
-- Search label / placeholder: `按标题搜索会话` / `搜索会话标题`；同时匹配 conversation title 和 `cwd`。
-- Empty search: `没有匹配的会话标题。`；selection: `已选择 {count} 项`。
+- Search label / placeholder: `按标题搜索会话` / `搜索会话标题或工作目录`；当前会话和废纸篓都同时匹配 conversation title、`cwd` 和 session id。
+- Empty search: `没有匹配的会话或工作目录。`；selection: `已选择 {count} 项`。
 - Batch actions: `全选当前结果`、`清除选择`、`导出选中`、`移到废纸篓`。无选中时用 native `disabled`。
 - 批量操作只作用于显式选中/当前可见结果，不修改隐藏集合。
-- 一级列表按 effective `cwd`/project 分组，默认全部折叠；组标题显示目录名、conversation 数量和最后活动时间。展开后才渲染该组的 conversation rows，避免把每条对话一级平铺。
-- Group 使用 native `details/summary` 或等价 disclosure；conversation row 使用非交互 wrapper，checkbox 和其他 action 是 sibling native controls，不嵌套交互控件。对话行显示 title、date、session id 和状态；详情可显示源文件、完整性结果和时间戳。
+- 一级列表按 effective `cwd`/project 分组为响应式卡片；卡片显示目录名、完整路径、conversation 数量、最后活动时间和最多两条最近会话，避免把每条对话一级平铺。所有卡片高度和底部 `选择会话` 操作保持一致。
+- `选择会话` 使用 native dialog。弹窗内可按 title/session id 搜索、全选当前可见结果或逐条勾选；取消不改变页面选择，确认只替换当前工程的选择并保留其他工程的已选会话。conversation row 使用 label + sibling native checkbox，不嵌套其他交互控件。
 - 后台刷新保留已渲染行，不用全屏 loading 清空列表。
 
 ### ZIP Import / Export
@@ -222,9 +229,9 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 
 使用现有 Tailwind 断点：`sm=640`、`md=768`、`lg=1024`、`xl=1280`。
 
-- `>=1100`: 账号行使用相同的身份 / 额度 / 操作三列轨；操作列和主按钮固定宽度，所有额度窗口纵向对齐；30 天摘要 2 列；toolbar 单行优先。
-- `768–1099`: 账号身份与操作保留两列，额度移到下一行；toolbar 可换行；会话标题与操作不溢出。
-- `<768`: 账号列表保持单一 surface；toolbar 换行；modal footer 按钮全宽堆叠。
+- `>=1100`: 账号与会话工程使用 `auto-fit` 卡片网格；空间允许时并排显示多张独立卡片，操作固定在卡片底部；30 天摘要 2 列；toolbar 单行优先。
+- `768–1099`: 卡片网格按可用宽度自动降为单列；卡内信息和操作自然换行；会话标题与操作不溢出。
+- `<768`: 每行一张账号或会话工程卡片，卡内信息单列；toolbar 换行；modal footer 按钮全宽堆叠。
 - `<640`: modal `p-4`，页面复用现有 `p-5`，账号行 `p-4`；身份、额度、actions 单列，不定宽。
 - 侧边栏收起为 84px 时保留“账号”icon 和 `title`/`aria-label`；展开复用 248px。
 - 页面不得产生水平滚动。窄屏 session detail 复用现有 list/detail 切换并显示 `返回列表`。
@@ -236,7 +243,7 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 - Modal 使用 `role="dialog"`、`aria-modal="true"`、关联 title/description、Escape 关闭、初始 focus 和 focus restore。
 - 所有 input 有可见 label 或 `aria-label`；Token / JSON 输入不持久化。
 - Add-account tabs 可键盘激活；focus ring 使用 `--ow-focus`。
-- Session row 使用非交互 wrapper；checkbox 用 Space 选中，disclosure button 用 Enter/Space 展开并暴露 `aria-expanded`，其他 action 各自使用 sibling native control。
+- Session 工程卡使用原生 `button` 打开关联标题的 native dialog；弹窗内 checkbox 用 Space 选中，Escape/取消关闭且不提交，确认后通过 `aria-live` 更新选择数量。
 - Async status 用 `aria-live="polite"`；需要立即注意的错误用 `role="alert"`。
 - 状态同时有文字/icon，不只靠颜色。禁用操作使用 native `disabled`，不接受 pointer/keyboard mutation。
 - 遵守 `prefers-reduced-motion: reduce`，不新增 transform/opacity transition。
@@ -249,14 +256,14 @@ Accent 只用于选中/focus/每个 surface 的单一主操作。禁止 provider
 | Plugin selector | loading / error | `正在加载账号插件…` + disabled + `aria-live`；host 无 Codex 特判；错误隔离 + `重试` + `查看诊断` |
 | Account overview | cached / loading / empty / loaded | 脱敏缓存先显示并后台校准；明确状态；checkbox + selection count + 全选/清除；卡片只有身份/current/source/plan/quota/`应用`/`刷新额度`/`导出` |
 | Add modal | idle | `OAuth`、`Token / JSON` 两个精确 tab；无嵌入 WebView |
-| OAuth | waiting / fallback | 系统浏览器、callback status、manual URL fallback |
+| OAuth | waiting / fallback / callback confirmation | 系统浏览器、全阶段可取消、callback status、manual URL fallback；localhost 页只确认回调并返回应用查看最终结果 |
 | Import | success / invalid | 账号库更新但 current 不变；错误保留输入 |
 | Apply | success / failure | 不重启/重连；失败原子回滚 |
 | Quota refresh | idle / loading / success / unavailable | 仅显式刷新官方 usage endpoint；保留上次结果；无后台轮询或账号池逻辑 |
 | Account export | cancel / success | cancel 安静；完整凭据不出现在列表 |
 | Session page | bot stopped | 仍从当前 Codex Home 读本地文件 |
 | 30-day summary | success / empty / error | 只用本地数据；不伪造成本 `0` |
-| Session groups | collapsed / expanded | 一级只显示 cwd/project；默认折叠；展开后显示该组 conversation rows |
+| Session projects | card / picker open / picker confirmed | 一级只显示 cwd/project 卡片；底部按钮打开可搜索、全选和逐条选择的 dialog；取消不提交，确认保留其他工程选择 |
 | Search/batch | no match / no selection | title/cwd 均可匹配；明确 empty；无选中时 scoped actions disabled |
 | ZIP import | conflict / integrity/version error | 不静默覆盖；逐项结果；受影响项不写入 |
 | Trash/restore | success / error | manifest-backed 可逆；无永久删除 |

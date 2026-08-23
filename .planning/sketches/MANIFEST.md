@@ -15,3 +15,4 @@ Phase 19 reuses the existing Task Board Tab but may redesign its internal inform
 |---|------|-----------------|--------|------|
 | 001 | Task Board Attention Layout | Which page structure best combines actionable pending states with running and followed Sessions? | — | layout, task-board, attention, session-lifecycle |
 | 002 | Task Board Market Patterns | Which mature inbox or agent-task pattern best fits OnlineWorker Task Board? | B+A synthesis | layout, task-board, triage, agent-sessions, market-reference |
+| 003 | Account Session Assets | 会话资产应采用整块工作台还是工程卡片流，才能兼顾扫描信息、批量操作和项目识别？ | C · 卡片流 + 选择弹窗 | account, session-assets, layout, grouped-list, responsive |

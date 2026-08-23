@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AccountFeatureApi } from "../../../../../mac-app/src/components/AccountFeatureHost";
 import { ConfirmActionDialog } from "./ConfirmActionDialog";
 import { pluginResult } from "./plugin_result";
@@ -74,8 +74,12 @@ export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
   const [usageLoading, setUsageLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [pendingAction, setPendingAction] = useState<"repair" | "trash" | null>(null);
+  const [pickerGroup, setPickerGroup] = useState<SessionGroup | null>(null);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const [draftSelected, setDraftSelected] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const pickerDialogRef = useRef<HTMLDialogElement>(null);
 
   const load = useCallback(async () => {
     setError("");
@@ -104,6 +108,12 @@ export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { void loadUsage(); }, [loadUsage]);
+  useEffect(() => {
+    const dialog = pickerDialogRef.current;
+    if (!dialog) return;
+    if (pickerGroup && !dialog.open) dialog.showModal();
+    if (!pickerGroup && dialog.open) dialog.close();
+  }, [pickerGroup]);
 
   const run = async (action: () => Promise<Record<string, unknown> | null>, success: string, reload = true) => {
     setBusy(true);
@@ -124,17 +134,54 @@ export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
     }
   };
 
-  const groups = useMemo(() => grouped(sessions), [sessions]);
+  const visibleSessions = useMemo(() => {
+    const needle = search.trim().toLocaleLowerCase();
+    if (!trash || !needle) return sessions;
+    return sessions.filter((session) => [session.title, session.cwd, session.sessionId]
+      .some((value) => value?.toLocaleLowerCase().includes(needle)));
+  }, [search, sessions, trash]);
+  const groups = useMemo(() => grouped(visibleSessions), [visibleSessions]);
   const ids = useMemo(() => [...selected], [selected]);
-  const allSelected = sessions.length > 0 && sessions.every((item) => selected.has(item.sessionId));
+  const allSelected = visibleSessions.length > 0 && visibleSessions.every((item) => selected.has(item.sessionId));
+  const pickerSessions = useMemo(() => {
+    if (!pickerGroup) return [];
+    const needle = pickerQuery.trim().toLocaleLowerCase();
+    if (!needle) return pickerGroup.sessions;
+    return pickerGroup.sessions.filter((session) => [session.title, session.sessionId]
+      .some((value) => value.toLocaleLowerCase().includes(needle)));
+  }, [pickerGroup, pickerQuery]);
+  const pickerAllSelected = pickerSessions.length > 0 && pickerSessions.every((item) => draftSelected.has(item.sessionId));
   const metric = (value: number | undefined) => usageLoading ? "—" : usage ? compactNumber(value) : "不可用";
 
-  const toggleIds = (targetIds: string[]) => setSelected((current) => {
+  const openSessionPicker = (group: SessionGroup) => {
+    const groupIds = group.sessions.map((session) => session.sessionId);
+    setDraftSelected(new Set(groupIds.filter((id) => selected.has(id))));
+    setPickerQuery("");
+    setPickerGroup(group);
+  };
+
+  const closeSessionPicker = () => {
+    setPickerGroup(null);
+    setPickerQuery("");
+  };
+
+  const toggleDraftIds = (targetIds: string[]) => setDraftSelected((current) => {
     const next = new Set(current);
     const checked = targetIds.every((id) => next.has(id));
     for (const id of targetIds) checked ? next.delete(id) : next.add(id);
     return next;
   });
+
+  const confirmSessionPicker = () => {
+    if (!pickerGroup) return;
+    const groupIds = new Set(pickerGroup.sessions.map((session) => session.sessionId));
+    setSelected((current) => {
+      const next = new Set([...current].filter((id) => !groupIds.has(id)));
+      for (const id of draftSelected) next.add(id);
+      return next;
+    });
+    closeSessionPicker();
+  };
 
   const importZip = async () => {
     const handle = await api.chooseOpen();
@@ -149,77 +196,130 @@ export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
   };
 
   return (
-    <section className="ow-page-frame min-w-0 overflow-hidden rounded-[24px]">
-      <div className="codex-session-metrics grid border-b border-[var(--ow-line-soft)]">
-        <div className="px-4 py-3">
+    <section className="codex-session-surface flex min-w-0 flex-col gap-4">
+      <div className="codex-session-metrics grid gap-3">
+        <div className="codex-session-period-card ow-page-frame rounded-[22px] p-4">
           <p className="text-sm font-extrabold text-[var(--ow-text)]">近 30 天</p>
-          <p className="mt-0.5 text-[11px] font-semibold text-[var(--ow-blue)]">{usageLoading ? "正在统计" : "Codex 本地数据"}</p>
+          <p className="mt-1 text-xs font-semibold text-[var(--ow-blue)]">{usageLoading ? "正在统计" : "Codex 本地数据"}</p>
         </div>
-        {[["输入", metric(usage?.inputTokens)], ["缓存", metric(usage?.cachedInputTokens)], ["输出", metric(usage?.outputTokens)], ["合计", metric(usage?.totalTokens)], ["费用", usageLoading ? "—" : usage?.cost?.status === "unavailable" ? "不可用" : "$0"]].map(([label, value]) => <div key={label} className="border-l border-[var(--ow-line-soft)] px-4 py-3"><span className="block text-[11px] text-[var(--ow-muted)]">{label}</span><strong className="mt-0.5 block text-sm text-[var(--ow-text)]">{value}</strong></div>)}
+        {[["输入", metric(usage?.inputTokens)], ["缓存", metric(usage?.cachedInputTokens)], ["输出", metric(usage?.outputTokens)], ["合计", metric(usage?.totalTokens)], ["费用", usageLoading ? "—" : usage?.cost?.status === "unavailable" ? "不可用" : "$0"]].map(([label, value]) => <div key={label} className="codex-session-metric-card ow-page-frame-soft rounded-[22px] p-4"><span className="block text-xs font-semibold text-[var(--ow-muted)]">{label}</span><strong className="mt-2 block text-xl font-extrabold tracking-[-0.03em] text-[var(--ow-text)]">{value}</strong></div>)}
       </div>
 
-      <form className="ow-toolbar flex flex-wrap gap-2 border-x-0 border-t-0 px-3 py-3 shadow-none" onSubmit={(event) => { event.preventDefault(); setSearch(query.trim()); }}>
-        <label className="sr-only" htmlFor="codex-session-search">按标题搜索会话</label>
-        <input id="codex-session-search" value={query} onChange={(event) => setQuery(event.target.value)} className="min-w-[220px] flex-1 rounded-xl border border-[var(--ow-line)] bg-[var(--ow-input)] px-3 py-2 text-sm text-[var(--ow-text)]" placeholder="搜索会话标题或工作目录" />
-        {query && <button type="button" className="ow-btn rounded-xl px-3 py-2 text-sm font-semibold" onClick={() => { setQuery(""); setSearch(""); }}>清空</button>}
-        <label className="sr-only" htmlFor="codex-session-kind">会话类型</label>
-        <select id="codex-session-kind" value={kind} disabled={trash} onChange={(event) => setKind(event.target.value as SessionKind)} className="rounded-xl border border-[var(--ow-line)] bg-[var(--ow-input)] px-3 py-2 text-sm text-[var(--ow-text)]">
-          <option value="conversation">对话</option><option value="external">外部</option><option value="subagent">子代理</option><option value="all">全部类型</option>
-        </select>
-        <button type="submit" className="ow-btn rounded-xl px-3 py-2 text-sm font-semibold">搜索</button>
-        <button type="button" className="ow-btn rounded-xl px-3 py-2 text-sm font-semibold" disabled={busy} onClick={() => void run(importZip, "会话资产已导入")}>导入 ZIP</button>
-        <button type="button" className="ow-btn rounded-xl px-3 py-2 text-sm font-semibold" disabled={busy || trash} onClick={() => setPendingAction("repair")}>修复可见性</button>
-        <button type="button" className={`rounded-xl px-3 py-2 text-sm font-semibold ${trash ? "ow-btn-primary" : "ow-btn"}`} disabled={busy} onClick={() => setTrash((value) => !value)}>{trash ? "返回当前会话" : "废纸篓"}</button>
-        <button type="button" className="ow-btn rounded-xl px-3 py-2 text-sm font-semibold" disabled={busy} onClick={() => { void load(); void loadUsage(); }}>刷新</button>
-      </form>
-
-      <div className="flex flex-wrap items-center gap-3 border-b border-[var(--ow-line-soft)] px-4 py-3">
-        <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ow-text)]">
-          <input type="checkbox" aria-label="全选当前结果" checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(sessions.map((item) => item.sessionId)))} />
-          全选当前结果
-        </label>
-        <span className="text-xs text-[var(--ow-muted)]">{ids.length ? `已选择 ${ids.length} 项` : `${groups.length} 个工作目录 · ${sessions.length} 个会话`}</span>
-        <div className="ml-auto flex flex-wrap gap-2">
-          {ids.length > 0 && <button type="button" className="ow-btn rounded-xl px-3 py-2 text-sm font-semibold" disabled={busy} onClick={() => setSelected(new Set())}>清除选择</button>}
-          <button type="button" className="ow-btn rounded-xl px-3 py-2 text-sm font-semibold" disabled={busy || !ids.length || trash} onClick={() => void run(exportZip, "会话资产已导出", false)}>导出选中</button>
-          {!trash ? <button type="button" className="rounded-xl bg-[var(--ow-red)] px-3 py-2 text-sm font-semibold text-[var(--ow-on-accent)] disabled:opacity-40" disabled={busy || !ids.length} onClick={() => setPendingAction("trash")}>移到废纸篓</button> : <button type="button" className="ow-btn-primary rounded-xl px-3 py-2 text-sm font-semibold" disabled={busy || !ids.length} onClick={() => void run(() => api.invoke("sessions.restore", { sessionIds: ids }), "会话已恢复")}>恢复</button>}
+      <div className="codex-session-toolbar ow-toolbar rounded-[22px] p-3">
+        <form className="codex-session-filter-form flex min-w-0 flex-1 flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); setSearch(query.trim()); }}>
+          <label className="sr-only" htmlFor="codex-session-search">按标题搜索会话</label>
+          <input id="codex-session-search" value={query} onChange={(event) => setQuery(event.target.value)} className="codex-session-search-field min-w-[220px] flex-1 rounded-xl border border-[var(--ow-line)] bg-[var(--ow-input)] px-3 py-2.5 text-sm text-[var(--ow-text)]" placeholder="搜索会话标题或工作目录" />
+          {query && <button type="button" className="ow-btn rounded-xl px-3 py-2.5 text-sm font-semibold" onClick={() => { setQuery(""); setSearch(""); }}>清空</button>}
+          <label className="sr-only" htmlFor="codex-session-kind">会话类型</label>
+          <select id="codex-session-kind" value={kind} disabled={trash} onChange={(event) => setKind(event.target.value as SessionKind)} className="rounded-xl border border-[var(--ow-line)] bg-[var(--ow-input)] px-3 py-2.5 text-sm text-[var(--ow-text)]">
+            <option value="conversation">对话</option><option value="external">外部</option><option value="subagent">子代理</option><option value="all">全部类型</option>
+          </select>
+          <button type="submit" className="ow-btn rounded-xl px-4 py-2.5 text-sm font-semibold">搜索</button>
+        </form>
+        <div className="codex-session-tool-actions flex flex-wrap gap-2">
+          <button type="button" className="ow-btn rounded-xl px-3 py-2.5 text-sm font-semibold" disabled={busy} onClick={() => void run(importZip, "会话资产已导入")}>导入 ZIP</button>
+          <button type="button" className="ow-btn rounded-xl px-3 py-2.5 text-sm font-semibold" disabled={busy || trash} onClick={() => setPendingAction("repair")}>修复可见性</button>
+          <button type="button" className={`rounded-xl px-3 py-2.5 text-sm font-semibold ${trash ? "ow-btn-primary" : "ow-btn"}`} disabled={busy} onClick={() => setTrash((value) => !value)}>{trash ? "返回当前会话" : "废纸篓"}</button>
+          <button type="button" className="ow-btn rounded-xl px-3 py-2.5 text-sm font-semibold" disabled={busy} onClick={() => { void load(); void loadUsage(); }}>刷新</button>
         </div>
       </div>
 
-      <div aria-live="polite">
+      {(message || error) && <div className="codex-account-notices" aria-live="polite">
         {message && <p className="border-b border-[var(--ow-green)] bg-[var(--ow-green-soft)] px-4 py-2.5 text-sm font-semibold text-[var(--ow-green)]">{message}</p>}
         {error && <p role="alert" className="border-b border-[var(--ow-red)] bg-[var(--ow-red-soft)] px-4 py-2.5 text-sm font-semibold text-[var(--ow-red)]">{error}</p>}
-      </div>
+      </div>}
 
-      <div className="flex items-center gap-3 border-b border-[var(--ow-line-soft)] bg-[var(--ow-panel-soft)] px-4 py-2.5">
-        <span className="text-sm font-bold text-[var(--ow-text)]">{trash ? "废纸篓" : kind === "conversation" ? "当前对话" : kind === "subagent" ? "子代理" : kind === "external" ? "外部会话" : "全部类型"}</span>
-        <span className="text-xs text-[var(--ow-muted)]">默认按工作目录折叠</span>
-      </div>
-      {loading ? <div aria-live="polite" className="grid min-h-44 place-items-center text-sm text-[var(--ow-muted)]">正在读取本地会话数据…</div> : groups.length === 0 ? <div className="grid min-h-44 place-items-center p-6 text-sm text-[var(--ow-muted)]">{search ? "没有匹配的会话标题。" : "暂无本地会话"}</div> : <div className="divide-y divide-[var(--ow-line-soft)]">
+      <div className="codex-session-list ow-page-frame min-w-0 overflow-hidden rounded-[28px]">
+        <div className="codex-session-list-header flex flex-wrap items-center justify-between gap-4 px-5 py-5 sm:px-6">
+          <div>
+            <h2 className="text-lg font-extrabold tracking-[-0.02em] text-[var(--ow-text)]">{trash ? "废纸篓" : kind === "conversation" ? "当前对话" : kind === "subagent" ? "子代理" : kind === "external" ? "外部会话" : "全部类型"}</h2>
+            <p className="mt-1 text-sm text-[var(--ow-muted)]">{groups.length} 个工作目录 · {visibleSessions.length} 个会话 · 按最近活动排序</p>
+          </div>
+          <div className="codex-session-batch-actions flex flex-wrap gap-2">
+            {ids.length > 0 && <button type="button" className="ow-btn rounded-xl px-3 py-2 text-sm font-semibold" disabled={busy} onClick={() => setSelected(new Set())}>清除选择</button>}
+            <button type="button" className="ow-btn rounded-xl px-3 py-2 text-sm font-semibold" disabled={busy || !ids.length || trash} onClick={() => void run(exportZip, "会话资产已导出", false)}>导出选中</button>
+            {!trash ? <button type="button" className="rounded-xl bg-[var(--ow-red)] px-3 py-2 text-sm font-semibold text-[var(--ow-on-accent)] disabled:opacity-40" disabled={busy || !ids.length} onClick={() => setPendingAction("trash")}>移到废纸篓</button> : <button type="button" className="ow-btn-primary rounded-xl px-3 py-2 text-sm font-semibold" disabled={busy || !ids.length} onClick={() => void run(() => api.invoke("sessions.restore", { sessionIds: ids }), "会话已恢复")}>恢复</button>}
+          </div>
+        </div>
+
+        <div className="codex-session-selection-bar flex flex-wrap items-center gap-3 px-5 py-3 sm:px-6">
+          <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ow-text)]">
+            <input type="checkbox" aria-label="全选当前结果" checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(visibleSessions.map((item) => item.sessionId)))} />
+            全选当前结果
+          </label>
+          <span className="text-xs text-[var(--ow-muted)]">{ids.length ? `已选择 ${ids.length} 项` : "选择会话后可导出或移到废纸篓"}</span>
+        </div>
+
+        {loading ? <div aria-live="polite" className="grid min-h-52 place-items-center text-sm font-semibold text-[var(--ow-muted)]">正在读取本地会话数据…</div> : groups.length === 0 ? <div className="grid min-h-52 place-items-center p-6 text-sm font-semibold text-[var(--ow-muted)]">{search ? "没有匹配的会话或工作目录。" : "暂无本地会话"}</div> : <div className="codex-session-project-grid">
           {groups.map((group) => {
             const groupIds = group.sessions.map((session) => session.sessionId);
-            const groupSelected = groupIds.every((id) => selected.has(id));
-            return <div key={`${trash ? "trash" : "active"}-${group.cwd}`} className="codex-session-group grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start px-4">
-              <input className="mt-[15px]" type="checkbox" aria-label={`选择工作目录 ${group.label}`} checked={groupSelected} onChange={() => toggleIds(groupIds)} />
-              <details className="min-w-0">
-                <summary className="cursor-pointer py-3 pl-3 text-sm text-[var(--ow-text)] hover:bg-[var(--ow-hover)]">
-                  <span className="codex-session-summary-content ml-2 inline-flex min-w-0 items-center gap-3 align-middle">
-                    <span className="min-w-0 flex-1 truncate font-extrabold" title={group.cwd || group.label}>{group.label}</span>
-                    <span className="shrink-0 text-xs text-[var(--ow-subtle)]">{group.sessions.length} 个对话</span>
-                    <span className="w-16 shrink-0 text-right text-xs font-semibold text-[var(--ow-muted)]">{relativeTime(group.latestUpdatedAt)}</span>
-                  </span>
-                </summary>
-                <div className="border-t border-[var(--ow-line-soft)] bg-[var(--ow-panel-soft)] py-1">
-                {group.sessions.map((session) => <div key={session.sessionId} className="flex min-w-0 items-center gap-3 border-b border-[var(--ow-line-soft)] px-4 py-3 last:border-b-0 hover:bg-[var(--ow-hover)]">
-                  <input type="checkbox" aria-label={`选择 ${session.title}`} checked={selected.has(session.sessionId)} onChange={() => toggleIds([session.sessionId])} />
-                  <span className="min-w-0 flex-1"><span className="block truncate text-sm font-bold text-[var(--ow-text)]">{session.title || "未命名会话"}</span><span className="mt-1 block truncate text-[11px] text-[var(--ow-subtle)]">会话 ID：{shortId(session.sessionId)}</span></span>
-                  <span className="shrink-0 text-xs text-[var(--ow-muted)]">{relativeTime(session.updatedAt)}</span>
-                </div>)}
+            const selectedCount = groupIds.filter((id) => selected.has(id)).length;
+            return <article key={`${trash ? "trash" : "active"}-${group.cwd}`} className="codex-session-project-card">
+              <div className="codex-session-project-heading">
+                <div className="min-w-0 flex-1">
+                  <h3 className="truncate text-sm font-extrabold text-[var(--ow-text)]" title={group.label}>{group.label}</h3>
+                  <p className="mt-1 truncate text-[11px] text-[var(--ow-subtle)]" title={group.cwd || group.label}>{group.cwd || "未标注工作目录"}</p>
                 </div>
-              </details>
-            </div>;
+                {selectedCount > 0 && <span className="codex-session-selected-badge">已选 {selectedCount}</span>}
+              </div>
+              <div className="codex-session-project-meta">
+                <span>{group.sessions.length} 个对话</span>
+                <span>最近活动 {relativeTime(group.latestUpdatedAt)}</span>
+              </div>
+              <div className="codex-session-project-recent">
+                {group.sessions.slice(0, 2).map((session) => <div key={session.sessionId} className="codex-session-project-recent-row">
+                  <span title={session.title || "未命名会话"}>{session.title || "未命名会话"}</span>
+                  <time>{relativeTime(session.updatedAt)}</time>
+                </div>)}
+              </div>
+              <button type="button" className="codex-session-picker-button ow-btn" disabled={busy} onClick={() => openSessionPicker(group)}>选择会话</button>
+            </article>;
           })}
-      </div>}
+        </div>}
+      </div>
+      <dialog
+        ref={pickerDialogRef}
+        className="codex-session-picker-dialog ow-native-dialog ow-modal-panel overflow-hidden rounded-[24px] border-0 p-0"
+        aria-labelledby="codex-session-picker-title"
+        aria-modal="true"
+        onCancel={(event) => { event.preventDefault(); closeSessionPicker(); }}
+        onClick={(event) => { if (event.target === event.currentTarget) closeSessionPicker(); }}
+      >
+        <div className="codex-session-picker-shell">
+          <div className="codex-session-picker-header">
+            <div className="min-w-0">
+              <h2 id="codex-session-picker-title" className="truncate text-xl font-extrabold tracking-[-0.025em] text-[var(--ow-text)]">{pickerGroup?.label || "选择会话"}</h2>
+              <p className="mt-1 truncate text-xs text-[var(--ow-muted)]" title={pickerGroup?.cwd}>{pickerGroup?.cwd || "从当前工作目录选择会话"}</p>
+            </div>
+            <button type="button" className="codex-account-text-action" aria-label="关闭会话选择" onClick={closeSessionPicker}>关闭</button>
+          </div>
+          <div className="codex-session-picker-controls ow-toolbar">
+            <label className="sr-only" htmlFor="codex-session-picker-search">搜索当前工作目录的会话</label>
+            <input id="codex-session-picker-search" className="codex-session-picker-search" value={pickerQuery} onChange={(event) => setPickerQuery(event.target.value)} placeholder="搜索当前工作目录的会话" autoFocus />
+            <label className="codex-session-picker-select-all">
+              <input type="checkbox" checked={pickerAllSelected} disabled={pickerSessions.length === 0} onChange={() => toggleDraftIds(pickerSessions.map((session) => session.sessionId))} />
+              全选当前结果
+            </label>
+          </div>
+          <div className="codex-session-picker-list">
+            {pickerSessions.length === 0 ? <div className="codex-session-picker-empty">没有匹配的会话。</div> : pickerSessions.map((session) => <label key={session.sessionId} className="codex-session-picker-row">
+              <input type="checkbox" checked={draftSelected.has(session.sessionId)} onChange={() => toggleDraftIds([session.sessionId])} />
+              <span className="min-w-0 flex-1">
+                <strong title={session.title || "未命名会话"}>{session.title || "未命名会话"}</strong>
+                <small>会话 ID：{shortId(session.sessionId)}</small>
+              </span>
+              <time>{relativeTime(session.updatedAt)}</time>
+            </label>)}
+          </div>
+          <div className="codex-session-picker-footer">
+            <span aria-live="polite">已选择 {draftSelected.size} / {pickerGroup?.sessions.length || 0} 个会话</span>
+            <div>
+              <button type="button" className="ow-btn rounded-xl px-4 py-2.5 text-sm font-semibold" onClick={closeSessionPicker}>取消</button>
+              <button type="button" className="ow-btn-primary rounded-xl px-4 py-2.5 text-sm font-semibold" onClick={confirmSessionPicker}>确认选择</button>
+            </div>
+          </div>
+        </div>
+      </dialog>
       <ConfirmActionDialog
         open={Boolean(pendingAction)}
         title={pendingAction === "trash" ? "移到废纸篓？" : "开始修复可见性？"}

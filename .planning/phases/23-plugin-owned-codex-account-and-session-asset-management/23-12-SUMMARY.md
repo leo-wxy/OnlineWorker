@@ -10,8 +10,8 @@ requires:
 provides:
   - phase-wide security and forbidden-coupling regression guards
   - official manual quota refresh and explicit reapply coverage
-  - cwd/project-grouped conversation asset UI
-  - combined package and mounted-DMG visual evidence
+  - cwd/project card-based conversation asset UI with scoped picker dialog
+  - combined package and installed-app visual evidence
 affects: [phase-23-closure]
 
 tech-stack:
@@ -24,6 +24,7 @@ key-files:
     - plugins/providers/builtin/codex/tests/test_quota.py
     - plugins/providers/builtin/codex/frontend/account.css
     - plugins/providers/builtin/codex/frontend/accountSummaryStorage.ts
+    - mac-app/src-tauri/src/commands/account_feature_callback.html
   modified:
     - main.py
     - tests/test_account_features.py
@@ -33,6 +34,8 @@ key-files:
     - plugins/providers/builtin/codex/python/apply.py
     - plugins/providers/builtin/codex/python/session_assets.py
     - plugins/providers/builtin/codex/frontend/AccountOverview.tsx
+    - plugins/providers/builtin/codex/frontend/AddAccountModal.tsx
+    - plugins/providers/builtin/codex/frontend/ConfirmActionDialog.tsx
     - plugins/providers/builtin/codex/frontend/SessionAssetsPage.tsx
     - plugins/providers/builtin/codex/tests/test_phase23_boundaries.py
     - mac-app/tests/accountFeatureCodex.test.mjs
@@ -40,10 +43,11 @@ key-files:
 
 key-decisions:
   - "Only explicit user-triggered quota refresh calls the fixed official Codex usage endpoint; account listing performs no background network request."
-  - "Session storage remains conversation-based, while the UI groups conversations by cwd/project and defaults groups to collapsed."
+  - "Session storage remains conversation-based, while the UI groups conversations into cwd/project cards and selects individual conversations through a scoped native dialog."
   - "Plugin-owned CSS fixes packaged layout without expanding the host Tailwind scan or adding a dependency."
   - "Account discovery/actions share one independent early JSONL worker; it has no provider bridge/app-server authority, clears on timeout/crash, and never auto-replays a failed action."
   - "Account cards may initialize from a versioned allowlist of redacted display fields, then authoritative accounts.list replaces the cache in the background."
+  - "The localhost OAuth page confirms callback receipt only; final import success remains an in-app result and callback parameters are never rendered."
 
 requirements-completed: [D-01, D-02, D-03, D-04, D-05, D-06, D-07, D-08, D-09, D-10, D-11, D-12, D-13, D-14, D-15, D-16, D-17, D-18, D-19, D-20, D-21, D-22, D-23, D-24, D-25, D-26, D-27, D-28, D-29, D-30, D-31, D-32, D-33, D-34, D-35, D-36, D-37, D-38, D-39, D-40]
 
@@ -57,18 +61,21 @@ completed: 2026-08-18
 ## Accomplishments
 
 - Codex 插件当前独立提供 OAuth 与 Token / JSON 账号新增、Cockpit 兼容导出、显式 apply/reapply、官方额度刷新和安全存储；专属 API Key / 本地文件新增动作已在后续范围收缩中移除，host 仍不含 Codex 业务分支。
-- 会话后端按 conversation 处理本地资产，前端按 `cwd`/project 默认折叠分组，展开后显示各 conversation。
+- 会话后端按 conversation 处理本地资产，前端按 `cwd`/project 显示响应式卡片，并通过弹窗搜索、全选或逐条选择 conversation。
 - source guards 固定 OAuth/usage endpoint、trusted handles、真实目录拒绝、shared lock 和 live runtime 零耦合边界。
 - combined wrapper 生成 `OnlineWorker_1.9.0_aarch64.dmg`；挂载运行后完成账号页、添加弹窗和会话分组的只读视觉验证。
 - 2026-08-18 performance follow-up 消除了每次账号 action 的 Python sidecar 冷启动，并让脱敏账号摘要先显示、后台校准；账号业务仍完全留在插件，未接 provider/app-server。
 - performance follow-up 的 combined build/install verification 通过；安装版 cache-hit 账号行在 449 ms 内显示，常驻 worker process tree 保持稳定。会话刷新仍需 6.0 s，未被本次账号链路优化覆盖。
+- 2026-08-23 UI follow-up 将账号列表改为响应式卡片网格，补齐全阶段 OAuth 取消/关闭、provider-neutral localhost 确认页和废纸篓搜索过滤。
+- 2026-08-23 session UI follow-up 将工作目录改为统一高度的工程卡片，底部按钮打开 scoped conversation picker；取消不提交，确认只更新当前工程选择。
+- 2026-08-23 combined DMG 已重新构建并安装；安装版账号卡片、添加账号弹窗和 35 个工作目录 / 79 个会话完成只读 UI 验证。
 
 ## Deviations from Original Plan
 
 - 用户在实现阶段将“显式额度刷新”加入范围，因此 D-38 从“完全排除 quota”修订为“仅允许显式官方 usage 读取，继续排除后台轮询与账号池”。
-- 参考 Cockpit 的实际信息结构后，会话一级列表由 conversation 平铺改为 `cwd`/project 分组，conversation 保持二级资产单位。
+- 参考 Cockpit 的实际信息结构后，会话一级列表由 conversation 平铺改为 `cwd`/project 卡片，conversation 在选择弹窗中保持二级资产单位。
 - 用户后续明确授权打包验证；初次执行 combined build 和 mounted-DMG 只读 QA，performance follow-up 再执行 `verify-packaged-fast.sh` 并安装到 `/Applications` 验证。
-- 用户后续将账号新增入口收缩为 OAuth 与 Token / JSON，并要求账号行共享固定列轨；历史 API-key/文件来源记录继续兼容展示和导出。
+- 用户后续将账号新增入口收缩为 OAuth 与 Token / JSON；账号列表最终采用响应式卡片网格，历史 API-key/文件来源记录继续兼容展示和导出。
 
 ## Verification
 
@@ -77,10 +84,15 @@ completed: 2026-08-18
 - `cd mac-app && node --test tests/accountFeature*.test.mjs` — 5 passed。
 - `cd mac-app && ./node_modules/.bin/tsc --noEmit` — passed。
 - `bash build.sh`（combined shell）— passed；39 MB DMG 已生成并从挂载卷启动，SHA-256 `b3bd54ab4485160268f285e8fba4474ac9f19b63f2f57c111dc6c3360035193c`。
-- 范围收缩前的 Mounted-DMG UI 历史证据 — 当时的账号入口/四源弹窗/额度入口/reapply 可见；会话页显示 31 个 project groups 和 71 条 conversations。当前双入口与固定列轨 follow-up 需以本轮源码/视觉验证为准。
+- 范围收缩前的 Mounted-DMG UI 历史证据 — 当时的账号入口/四源弹窗/额度入口/reapply 可见；会话页显示 31 个 project groups 和 71 条 conversations。当前双入口与响应式卡片 follow-up 需以本轮源码/视觉验证为准。
 - Performance follow-up source verification：Python account/Codex regression 47 passed；Rust account feature 10 passed；account feature Node contracts 10 passed；`npm run build` passed。
 - Performance follow-up packaged verification：`verify-packaged-fast.sh` 113 s passed；39 MB DMG SHA-256 `6c1a6b0ae4b40e41196fe1897a4074f930e12f5d2e2a1e96120e75e0e8a38472`；安装版账号 cache-hit 449 ms，resident worker tree 稳定；会话刷新 6001 ms。
-- OAuth/Token-only 与固定列轨 follow-up：Python account/Codex regression `44 passed`；Node account contracts `10 passed`；TypeScript 与 `pnpm build` passed；1440px Light/Dark 及 900px Light 截图确认身份状态、额度和操作列对齐且无横向溢出。
+- OAuth/Token-only 与账号卡片 follow-up：Python account/Codex regression `44 passed`；Node account contracts `10 passed`；TypeScript 与 `pnpm build` passed；1440px Light/Dark 及 900px Light 截图确认卡片层级和窄屏无横向溢出。
+- 2026-08-23 source follow-up：Python **71 passed**、Rust account feature **10 passed**、Node account contracts **10 passed**、TypeScript、Rust format 与 `git diff --check` 通过；桌面与窄屏浏览器预览确认回调成功状态、返回应用指引和关闭页面入口。
+- 2026-08-23 packaged follow-up：`bash build.sh` passed；39 MB `OnlineWorker_1.9.0_aarch64.dmg` SHA-256 `aea1e9baeb4fa598201d332cd9dcb5aa626866abc6afb03b8c5e9f10c1f2ead7`。首次 packaged install 被两个不响应 SIGTERM 的 3 天旧 bot 阻塞；按 PID 清理后 `install-current-dmg.sh` passed，DMG/installed 三个二进制哈希一致，Codemaker/POPO bundled manifests 存在，app 与 account worker 正常启动。
+- Installed-app read-only UI：账号卡片显示 1 个当前 PRO 账号、68% 周额度和可用 reapply/refresh/export；添加弹窗双 tab 与关闭/取消可用；会话页显示 **35 个 cwd/project 组 / 79 个 conversations**。
+- Session card-picker source verification：`node --test tests/accountFeature*.test.mjs` **10 passed**；TypeScript 与 `git diff --check` passed。
+- Session card-picker packaged verification：40,896,350-byte DMG SHA-256 `ae1802ddd9bd0a900a42d3761f12b7bc493f5d738db288c6094ccc4521e92101`；安装版 35 个工程卡片 / 79 个 conversations 加载正常，卡片底部 action 对齐，picker 的取消不提交与 scoped confirm 通过，同尺寸设计稿/安装包并排 QA 无 P0/P1/P2。
 
 ## Not Executed
 
@@ -88,7 +100,8 @@ completed: 2026-08-18
 - 未执行会话导入导出、trash/restore/visibility repair。
 - 已安装并启动 `/Applications/OnlineWorker.app`；未验证上述 credential/session mutation action 的安装包时延。
 - 会话完整刷新实测 6.0 s，仍需单独优化，不声明为本 follow-up 已修复。
-- 当前 OAuth/Token-only 与固定列轨 follow-up 未执行打包、安装或真实账号 mutation；浏览器截图不是 installed-app 验证。
+- 当前 OAuth/Token-only 与响应式卡片 follow-up 已完成打包、安装和只读 UI 验证；未执行真实账号 mutation。
+- 当前 session card-picker follow-up 已完成 build/package/install 与只读选择状态验收；会话文件 mutation 仍未执行。
 - 本阶段没有创建 commit 或 push。
 
 ## Self-Check

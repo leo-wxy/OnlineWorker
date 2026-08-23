@@ -1,7 +1,7 @@
 # Phase 23: Plugin-Owned Codex Account and Session Asset Management - Context
 
 **Gathered:** 2026-08-17
-**Status:** Implemented; account worker/cache performance follow-up source and installed cache-hit path verified 2026-08-18
+**Status:** Implemented; account worker/cache installed path verified 2026-08-18; account/session UI source follow-ups verified 2026-08-23
 
 <domain>
 ## Phase Boundary
@@ -50,7 +50,7 @@ The feature must remain usable when the OnlineWorker bot, Provider runtime, owne
 
 ### Codex session assets
 - **D-26:** Session-asset management is an offline, plugin-owned capability over the current effective `CODEX_HOME`; it is not an extension or replacement of OnlineWorker's live Sessions page.
-- **D-27:** The Phase 23 session scope is: expandable list, title search, local 30-day token/cost summary, ZIP import/export, conflict/integrity validation, reversible trash/restore, and visibility repair.
+- **D-27:** The Phase 23 session scope is: project-card browsing with a per-project conversation picker, title search, local 30-day token/cost summary, ZIP import/export, conflict/integrity validation, reversible trash/restore, and visibility repair.
 - **D-28:** For the selected operations, match the current Cockpit Tools behavior and archive layout. Research must extract exact manifest, checksum, conflict, trash, restore, and visibility-repair semantics before planning; plans may not guess them from screenshots.
 - **D-29:** Session import must never silently overwrite an existing conflicting Session. Apply the exact current Cockpit conflict behavior and report each skipped/rejected item.
 - **D-30:** Trash is reversible and manifest-backed. Phase 23 does not permanently delete Codex conversation history.
@@ -59,9 +59,9 @@ The feature must remain usable when the OnlineWorker bot, Provider runtime, owne
 
 ### User interface
 - **D-33:** Align with Cockpit's information architecture and operation flow, while using OnlineWorker's existing theme, typography, accessibility states, and responsive behavior. Do not make a pixel-level copy.
-- **D-34:** The Codex account overview uses one responsive account list with identity, current-account state, import source, plan, and official quota windows when available. Desktop rows share fixed identity/quota/action column rails and fixed primary-action width; narrower layouts may reflow without horizontal scrolling. Rows expose only apply/reapply, explicit quota refresh, and export.
+- **D-34:** The Codex account overview uses one responsive card grid with identity, current-account state, import source, plan, and official quota windows when available. Cards keep a stable internal hierarchy and bottom action row while reflowing without horizontal scrolling. Cards expose only apply/reapply, explicit quota refresh, and export.
 - **D-35:** The add-account modal uses two tabs: `OAuth` and `Token / JSON`.
-- **D-36:** The session-asset page follows the reference single-page hierarchy: 30-day summary, search and scoped batch actions, then a default-collapsed list grouped by effective `cwd`/project; expanding a group reveals its individual conversations.
+- **D-36:** The session-asset page follows one hierarchy: 30-day summary, search and scoped batch actions, then responsive cards grouped by effective `cwd`/project. Each card shows recent conversations and opens a native dialog for searching, selecting all visible results, or selecting individual conversations.
 - **D-37:** Plugin UI must remain self-contained behind the generic account-plugin host. Shared React/Tauri code may render the shell and generic failure/loading states, but no Codex-specific labels, models, or commands belong there.
 
 ### Explicitly excluded from Phase 23
@@ -130,7 +130,7 @@ The feature must remain usable when the OnlineWorker bot, Provider runtime, owne
 <specifics>
 ## Specific Ideas
 
-- The user selected Cockpit's account overview and session-manager information hierarchy as product references, then narrowed the add-account modal to OAuth and Token / JSON only. The account list uses stable shared column rails rather than content-sized per-row columns.
+- The user selected Cockpit's account overview and session-manager information hierarchy as product references, then narrowed the add-account modal to OAuth and Token / JSON only. Account and session surfaces use responsive cards with stable internal hierarchy rather than content-sized row columns.
 - The account feature should feel like a focused credential transfer, application, and quota-status tool, not an administrative account-pool dashboard.
 - Cockpit account-file compatibility targets the format present at commit `35963163813d7424b63cd6053874ce5fc7973d03`; planning research must capture exact fixtures and round-trip assertions from that version.
 - OnlineWorker's visual system remains the presentation source of truth even when the plugin mirrors Cockpit's flow.

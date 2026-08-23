@@ -17,9 +17,9 @@ test("codex plugin exposes OAuth and Token import, quota refresh and explicit ap
   assert.match(overview, /刷新额度/);
   assert.match(overview, /remainingPercent/);
   assert.match(modal, /beginLoopback/);
-  assert.match(modal, /const canClose = !busy \|\| Boolean\(loopbackHandle\)/);
-  assert.match(modal, /result\.status === "cancelled"/);
-  assert.match(modal, /disabled=\{!canClose\}/);
+  assert.match(modal, /onImported\(runId === runIdRef\.current\)/);
+  assert.match(modal, /result\.status !== "cancelled"/);
+  assert.doesNotMatch(modal, /const canClose|disabled=\{!canClose\}/);
   assert.match(modal, /http:\/\/localhost:1455\/auth\/callback/);
   assert.doesNotMatch(modal, /disabled=\{busy\} onClick=\{close\}/);
   assert.match(modal, /onKeyDown/);
@@ -61,7 +61,7 @@ test("account export opens the native save flow without reloading the account li
   assert.match(overview, /run\("export", \(\) => exportIds\(\[account\.id\]\), false\)/);
 });
 
-test("account overview uses the selectable account-card grid contract", async () => {
+test("account overview uses the selectable responsive account-card contract", async () => {
   const overview = await readFile(new URL("plugins/providers/builtin/codex/frontend/AccountOverview.tsx", repo), "utf8");
   const styles = await readFile(new URL("plugins/providers/builtin/codex/frontend/account.css", repo), "utf8");
   for (const label of ["账号库", "全选当前结果", "清除选择", "导出选中", "暂无账号", "当前账号", "未应用"]) assert.match(overview, new RegExp(label));
@@ -69,9 +69,10 @@ test("account overview uses the selectable account-card grid contract", async ()
   assert.match(overview, /codex-account-plan/);
   assert.match(styles, /codex-account-list-toolbar/);
   assert.match(styles, /codex-account-list-body[\s\S]*display:\s*grid/);
-  assert.match(styles, /grid-template-columns:\s*repeat\(auto-fill, minmax\(22rem, 26rem\)\)/);
-  assert.match(styles, /codex-account-row[\s\S]*border-radius:\s*1\.25rem/);
-  assert.match(styles, /codex-account-row-actions[\s\S]*grid-template-columns:\s*minmax\(7rem, 1fr\) repeat\(2, 3\.75rem\)/);
+  assert.match(styles, /grid-template-columns:\s*repeat\(auto-fit, minmax\(min\(100%, 32rem\), 1fr\)\)/);
+  assert.match(styles, /codex-account-row[\s\S]*border-radius:\s*1\.625rem/);
+  assert.match(styles, /codex-account-row-content[\s\S]*display:\s*grid/);
+  assert.match(styles, /codex-account-row-actions[\s\S]*display:\s*flex/);
   assert.match(overview, /codex-account-primary-action/);
   assert.match(overview, /codex-account-meta-grid/);
   assert.match(overview, /codex-account-quota-warning/);
@@ -90,15 +91,24 @@ test("codex session assets are grouped, deferred and reversible", async () => {
   assert.match(page, /chooseOpen/);
   assert.match(page, /chooseSave/);
   assert.match(page, /function grouped/);
-  assert.match(page, /<details/);
+  assert.match(page, /codex-session-project-grid/);
+  assert.match(page, /codex-session-project-card/);
+  assert.match(page, /codex-session-picker-dialog/);
+  assert.match(page, /openSessionPicker/);
+  assert.match(page, /showModal\(\)/);
+  assert.match(page, /draftSelected/);
   assert.match(page, /工作目录/);
   assert.match(page, /usageLoading/);
+  assert.match(page, /codex-session-metrics/);
+  assert.match(page, /codex-session-toolbar/);
+  assert.match(page, /codex-session-list/);
+  assert.match(page, /const visibleSessions = useMemo/);
+  assert.match(page, /\[session\.title, session\.cwd, session\.sessionId\]/);
+  assert.match(page, /visibleSessions\.map/);
   const loadBody = page.match(/const load = useCallback\(async \(\) => \{([\s\S]*?)\n  \}, \[api, kind, search, trash\]\);/)?.[1];
-  const summary = page.match(/<summary[\s\S]*?<\/summary>/)?.[0];
   assert.ok(loadBody, "session loader should remain identifiable");
-  assert.ok(summary, "session group summary should remain identifiable");
   assert.doesNotMatch(loadBody, /setLoading\(true\)/, "background refresh must keep existing groups visible");
-  assert.doesNotMatch(summary, /<input/, "group selection must be a sibling of the disclosure control");
+  assert.doesNotMatch(page, /<details/);
   assert.doesNotMatch(page, /text-white/);
   assert.doesNotMatch(page, /permanent|delete_provider_session|list_provider_sessions|get_usage_source_summary/);
 });

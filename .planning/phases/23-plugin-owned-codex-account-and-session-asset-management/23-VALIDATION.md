@@ -52,7 +52,7 @@ created: 2026-08-17
 | 23-07-* | OAuth/action | 3 | D-08–D-12, D-20, D-24–D-25, D-40 | T23-01–T23-06 | fixed official endpoint/client、PKCE/state、fake exchange、Token/JSON import、path override reject、不 apply | Python protocol | `python3 -m pytest plugins/providers/builtin/codex/tests/test_oauth.py -q` | ✅ | ✅ green |
 | 23-08-* | apply/export | 4 | D-08, D-11–D-20, D-22–D-25, D-40 | T23-01, T23-04, T23-06 | backend-resolved effective home、rollback、external match、trusted save full export、action wiring | Python transaction | `python3 -m pytest plugins/providers/builtin/codex/tests/test_apply.py plugins/providers/builtin/codex/tests/test_account_export.py -q` | ✅ | ✅ green |
 | 23-09-* | session backend | 5 | D-26–D-32, D-40 | T23-03, T23-04, T23-06 | 30d、trusted ZIP handles、conflict/trash、shared lock、exact current quick repair/rollback | Python file/archive | `python3 -m pytest plugins/providers/builtin/codex/tests/test_session_assets.py -q` | ✅ | ✅ green |
-| 23-10-* | account UI | 5 | D-03–D-06, D-08–D-09, D-15–D-19, D-24, D-33–D-35, D-37 | T23-01–T23-06 | OAuth/Token JSON 双 tab、固定桌面列轨、移除 API Key/file actions、cache-first/background calibration、versioned redacted allowlist、explicit Apply/reapply/export/quota refresh、secret/path-free state | Node contract + typecheck | `cd mac-app && node --test tests/accountFeatureCodex.test.mjs tests/accountFeatureHost.test.mjs && ./node_modules/.bin/tsc --noEmit` | ✅ | ✅ green |
+| 23-10-* | account UI | 5 | D-03–D-06, D-08–D-09, D-15–D-19, D-24, D-33–D-35, D-37 | T23-01–T23-06 | OAuth/Token JSON 双 tab、响应式卡片网格、移除 API Key/file actions、cache-first/background calibration、versioned redacted allowlist、explicit Apply/reapply/export/quota refresh、secret/path-free state | Node contract + typecheck | `cd mac-app && node --test tests/accountFeatureCodex.test.mjs tests/accountFeatureHost.test.mjs && ./node_modules/.bin/tsc --noEmit` | ✅ | ✅ green |
 | 23-11-* | session UI | 6 | D-26–D-33, D-36–D-37, D-40 | T23-03, T23-04, T23-06 | 单页层级、cwd group → conversation rows、ZIP open/save handle、可逆操作、accessibility/responsive | Node contract + typecheck | `cd mac-app && node --test tests/accountFeatureCodex.test.mjs tests/accountFeatureHost.test.mjs && ./node_modules/.bin/tsc --noEmit` | ✅ | ✅ green |
 | 23-12-* | integration/regression | 7 | D-01–D-40 | T23-01–T23-06 | early import、enabled discovery、entry agreement、fixed OAuth/quota endpoints、trusted paths、shared lock、无 live coupling | Python + Rust + Node + TypeScript | `python3 -m pytest tests/test_account_features.py tests/test_packaging_socks_support.py plugins/providers/builtin/codex/tests -q && cargo test --manifest-path mac-app/src-tauri/Cargo.toml account_feature --lib && cd mac-app && node --test tests/accountFeature*.test.mjs && ./node_modules/.bin/tsc --noEmit` | ✅ | ✅ green |
 
@@ -81,7 +81,7 @@ created: 2026-08-17
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| system browser OAuth 与 loopback/manual callback UX | D-09–D-10, D-33–D-37 | 真实浏览器、焦点恢复和 macOS callback 需要安装态，且会涉及真实账号 | 仅在用户当前对话明确授权 build/package/install/launch 与测试账号后执行；验证双 tab、browser open、callback/fallback、Escape/focus restore |
+| system browser OAuth 与 loopback/manual callback UX | D-09–D-10, D-33–D-37 | 真实浏览器、焦点恢复和 macOS callback 需要安装态，且会涉及真实账号 | 仅在用户当前对话明确授权 build/package/install/launch 与测试账号后执行；验证双 tab、browser open、全阶段可取消/关闭、callback/fallback、localhost 确认页、Escape/focus restore |
 | light/dark/system、窄屏和 keyboard 视觉验证 | D-03–D-08, D-33–D-37 | 视觉层级、focus ring、换行和 native dialog 无法完全由 source contract 证明 | 获得明确安装态验证授权后，按 `23-UI-SPEC.md` Acceptance State Matrix 逐项核对 |
 | native file/save dialog cancel 与目标权限 | D-16, D-28–D-30 | macOS picker/save dialog 的真实行为需要安装态 | 仅在获授权的临时目录内导入/导出 synthetic fixture；取消不显示错误，不读写真实 home |
 | Vite source build 与 packaged-app 回归 | D-01–D-40 | 仓库规则要求当前对话明确授权 build/package/install/launch | ✅ 用户授权后由 combined wrapper 完成 build/package；挂载 DMG 并只读检查折叠侧栏、账号、确认框、native save panel、额度入口和 cwd group → conversation 展开结构。未安装到 `/Applications` |
@@ -111,6 +111,33 @@ created: 2026-08-17
 - Installed session baseline — 刷新 **32 个工作目录 / 74 个会话** 用时 **6001 ms**；会话扫描未包含在本次 1、2 优化中，仍是独立性能缺口。
 - 未主动执行 OAuth、apply/reapply、凭据导入导出或会话资产 mutation；因此这些 action 的安装包时延不作结论。
 
+### Account UI and localhost callback follow-up — 2026-08-23
+
+- 账号列表改为响应式卡片网格；窄屏自动单列，卡内身份、额度和操作保持稳定层级。
+- OAuth 弹窗在 begin/open/wait/exchange 全阶段允许取消或关闭；过期异步结果不会关闭后来重新打开的弹窗。
+- localhost 回调确认页使用 provider-neutral 的 OnlineWorker 文案，不显示 callback 参数或凭据；桌面与窄屏 source preview 已核对。
+- 当前会话与废纸篓搜索统一匹配标题、工作目录和 session id；废纸篓使用已加载结果做本地过滤。
+- `python3 -m pytest tests/test_account_features.py tests/test_packaging_socks_support.py tests/test_codex_runtime.py plugins/providers/builtin/codex/tests -q` — **71 passed**。
+- `cargo test --manifest-path mac-app/src-tauri/Cargo.toml account_feature --lib` — **10 passed**；`cargo fmt --manifest-path mac-app/src-tauri/Cargo.toml --check` — passed。
+- `cd mac-app && node --test tests/accountFeature*.test.mjs` — **10 passed**；`./node_modules/.bin/tsc --noEmit` — passed。
+- `git diff --check` — passed。
+- `bash build.sh` — passed；生成 `OnlineWorker_1.9.0_aarch64.dmg`，SHA-256 `aea1e9baeb4fa598201d332cd9dcb5aa626866abc6afb03b8c5e9f10c1f2ead7`。
+- `bash verify-packaged-fast.sh` 的重建和 DMG 校验通过；安装步骤发现两个已运行 3 天且不响应 SIGTERM 的旧 bot，因此脚本在覆盖安装前按预期失败。按明确 PID 强制停止旧实例后，`OnlineWorker/scripts/install-current-dmg.sh` 成功完成安装和重启；DMG 与 `/Applications` 内 app、bot、ccusage 哈希完全一致。
+- Installed-app read-only QA — 账号卡片显示 1 个当前 PRO 账号与 68% 周额度；添加账号弹窗双 tab、`关闭`、`取消`均可用；会话页扫描完成后显示 **35 个工作目录 / 79 个会话**。Codemaker 与 POPO bundled plugin manifest 存在，localhost callback 模板已嵌入应用二进制。
+- 未运行真实 OAuth，也未执行 apply/reapply、额度网络刷新、账号导入导出或会话 mutation。
+
+### Session project-card picker follow-up — 2026-08-23
+
+- 会话一级视图改为 `cwd`/project 卡片；卡片只显示项目摘要与最近会话，底部统一提供 `选择会话`。
+- 选择弹窗复用现有 `selected: Set<sessionId>`，支持 title/session id 搜索、全选当前结果、逐条选择、取消不提交和确认后仅替换当前工程选择。
+- `cd mac-app && node --test tests/accountFeature*.test.mjs` — **10 passed**。
+- `cd mac-app && ./node_modules/.bin/tsc --noEmit` — passed。
+- `git diff --check` — passed。
+- `bash build.sh` — passed；生成 40,896,350-byte `OnlineWorker_1.9.0_aarch64.dmg`，SHA-256 `ae1802ddd9bd0a900a42d3761f12b7bc493f5d738db288c6094ccc4521e92101`。
+- `bash verify-packaged-fast.sh` — build、DMG 校验通过；首次安装被两个不响应 SIGTERM 的旧 bot 阻塞。按明确 PID 停止旧实例后，`OnlineWorker/scripts/install-current-dmg.sh` 安装、重启通过，DMG 与安装版 app/bot/ccusage 哈希一致，Codemaker/POPO bundled manifests 存在。
+- Installed-app UI — 35 个工作目录 / 79 个会话正常加载；工程卡片底部 `选择会话` 对齐；弹窗搜索、全选、逐项选择、取消不提交、确认后 scoped selection 均通过。桌面 `1493 x 768` 与 Variant C 并排检查无 P0/P1/P2 问题。
+- 未执行真实会话导入、导出、移入废纸篓、恢复或 visibility repair mutation。
+
 ## Validation Sign-Off
 
 - [x] 所有规划能力都有自动验证层或 Wave 0 依赖
@@ -120,4 +147,4 @@ created: 2026-08-17
 - [x] 定向反馈延迟目标低于 30 秒，全量目标低于 120 秒
 - [x] `nyquist_compliant: true` 与 `wave_0_complete: true` 已设置
 
-**Approval:** source/package/read-only DMG QA passed 2026-08-18; real account/session mutations remain unverified
+**Approval:** source/package/installed-app read-only QA passed 2026-08-23; session card-picker packaged visual and selection-state QA passed, real account/session mutations remain unverified

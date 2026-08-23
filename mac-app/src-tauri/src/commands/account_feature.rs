@@ -28,6 +28,7 @@ const MAX_HOST_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_BROWSER_URL_BYTES: usize = 4096;
 const MAX_CALLBACK_PATH_BYTES: usize = 128;
 const MAX_REQUEST_TARGET_BYTES: usize = 8192;
+const LOOPBACK_CALLBACK_PAGE: &str = include_str!("account_feature_callback.html");
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -655,9 +656,12 @@ fn serve_loopback(
                         if target == callback_path
                             || target.starts_with(&(callback_path.clone() + "?")) =>
                     {
-                        let _ = stream.write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 38\r\nConnection: close\r\n\r\nAuthorization received. You may close.",
-                    );
+                        let headers = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Language: zh-CN\r\nContent-Length: {}\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'\r\nReferrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
+                            LOOPBACK_CALLBACK_PAGE.len()
+                        );
+                        let _ = stream.write_all(headers.as_bytes());
+                        let _ = stream.write_all(LOOPBACK_CALLBACK_PAGE.as_bytes());
                         set_loopback_result(
                             &shared,
                             LoopbackResult {
@@ -1295,6 +1299,11 @@ mod tests {
         let mut response = String::new();
         stream.read_to_string(&mut response).unwrap();
         assert!(response.starts_with("HTTP/1.1 200"));
+        assert!(response.contains("Content-Type: text/html; charset=utf-8"));
+        assert!(response.contains("Cache-Control: no-store"));
+        assert!(response.contains("浏览器授权已完成"));
+        assert!(response.contains("返回 OnlineWorker 查看结果"));
+        assert!(!response.contains("Codex"));
 
         let completed = await_loopback_session(&state, "feature-a", &session.handle_id).unwrap();
         assert_eq!(completed.status, "completed");
