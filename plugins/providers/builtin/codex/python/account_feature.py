@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import zipfile
-from datetime import UTC, datetime
 from typing import Any
 
 from plugins.providers.builtin.codex.python.account_store import AccountStore, AccountStoreError, operation_lock
@@ -57,8 +56,26 @@ def _failure(code: str) -> dict[str, object]:
         "invalid_token_response": "OpenAI 返回的 Token 数据不完整。",
         "missing_identity": "OAuth 账号缺少可识别的身份信息。",
         "apply_failed": "账号应用失败，原配置已恢复。",
+        "missing_access_token": "账号缺少可用的访问凭据。",
+        "unauthorized": "账号授权已失效，请重新导入。",
+        "token_refresh_failed": "账号授权刷新失败，请重新导入。",
+        "token_refresh_unavailable": "该账号无法自动刷新授权，请重新导入。",
+        "invalid_quota_response": "额度服务返回了无效数据，请稍后重试。",
+        "quota_request_failed": "额度刷新失败，请重试。",
+        "invalid_package_path": "请选择有效的会话包。",
+        "unsafe_export_path": "会话导出位置无效。",
+        "unsafe_session_path": "会话包包含不安全的路径。",
+        "empty_selection": "请先选择会话。",
+        "invalid_package": "会话包无效或已损坏。",
+        "unsupported_package": "不支持该版本的会话包。",
+        "integrity_failed": "会话包完整性校验失败。",
+        "identity_mismatch": "会话包身份校验失败。",
+        "invalid_session_kind": "会话类型无效。",
+        "trash_failed": "会话移入废纸篓失败。",
+        "restore_failed": "会话恢复失败。",
+        "repair_failed": "会话可见性修复失败。",
     }
-    return {"ok": False, "error": {"code": code, "message": messages.get(code, "账号操作失败。")}}
+    return {"ok": False, "error": {"code": code, "message": messages.get(code, "操作失败，请重试。")}}
 
 
 def _import_result(store: AccountStore, parsed: ParseBatchResult) -> dict[str, object]:
@@ -91,21 +108,11 @@ def _refresh_quota(store: AccountStore, account_id: str) -> None:
     try:
         quota = fetch_quota(record)
     except QuotaError as exc:
-        if exc.code == "unauthorized":
-            try:
-                record = refresh_oauth_record(record)
-                store.upsert(record)
-                quota = fetch_quota(record)
-            except QuotaError as refresh_error:
-                exc = refresh_error
-            else:
-                store.set_quota(account_id, quota)
-                return
-        quota = {
-            "status": "error",
-            "errorCode": exc.code,
-            "refreshedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        }
+        if exc.code != "unauthorized":
+            raise
+        record = refresh_oauth_record(record)
+        store.upsert(record)
+        quota = fetch_quota(record)
     store.set_quota(account_id, quota)
 
 

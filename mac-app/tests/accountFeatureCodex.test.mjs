@@ -42,6 +42,15 @@ test("account mutations keep existing rows visible during background refresh", a
   assert.doesNotMatch(loadBody, /setLoading\(true\)/, "background reload must not replace existing account rows");
 });
 
+test("account overview surfaces the effective Codex Home state", async () => {
+  const overview = await readFile(new URL("plugins/providers/builtin/codex/frontend/AccountOverview.tsx", repo), "utf8");
+  assert.match(overview, /value\.current/);
+  for (const state of ["unmanaged", "ambiguous"]) assert.match(overview, new RegExp(`currentState === "${state}"`));
+  for (const label of ["检测到未托管的当前账号", "当前凭据与多个账号匹配"]) assert.match(overview, new RegExp(label));
+  assert.match(overview, /const isCurrent = currentResolved && account\.isCurrent/);
+  assert.match(overview, /正在校准当前账号/);
+});
+
 test("account summary cache is versioned and only persists display-safe fields", async () => {
   const storage = await readFile(new URL("plugins/providers/builtin/codex/frontend/accountSummaryStorage.ts", repo), "utf8");
   assert.match(storage, /onlineworker\.codex\.account-summary\.v1/);
@@ -105,6 +114,19 @@ test("codex session assets are grouped, deferred and reversible", async () => {
   assert.doesNotMatch(page, /<details/);
   assert.doesNotMatch(page, /text-white/);
   assert.doesNotMatch(page, /permanent|delete_provider_session|list_provider_sessions|get_usage_source_summary/);
+});
+
+test("session assets keep list loading ahead of usage and expose structured results", async () => {
+  const page = await readFile(new URL("plugins/providers/builtin/codex/frontend/SessionAssetsPage.tsx", repo), "utf8");
+  assert.doesNotMatch(page, /useEffect\(\(\) => \{ void loadUsage\(\); \}, \[loadUsage\]\)/);
+  assert.match(page, /if \(!loading\) void loadUsage\(\)/);
+  assert.match(page, /let cachedUsage/);
+  for (const field of ["imported", "skipped", "conflict", "fileName", "rowsChanged", "rolloutsChanged"]) {
+    assert.match(page, new RegExp(field));
+  }
+  assert.match(page, /usageError/);
+  assert.match(page, /重试统计/);
+  assert.doesNotMatch(page, /:\s*"\$0"/);
 });
 
 test("destructive and credential mutations use the plugin confirmation dialog", async () => {

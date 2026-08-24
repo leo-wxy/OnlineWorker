@@ -148,6 +148,18 @@ created: 2026-08-17
 - Installed-app UI — 35 个工作目录 / 79 个会话正常加载；工程卡片底部 `选择会话` 对齐；弹窗搜索、全选、逐项选择、取消不提交、确认后 scoped selection 均通过。桌面 `1493 x 768` 与 Variant C 并排检查无 P0/P1/P2 问题。
 - 未执行真实会话导入、导出、移入废纸篓、恢复或 visibility repair mutation。
 
+### Codex state and session feedback follow-up — 2026-08-24
+
+- 当前账号标记以 `accounts.list.current` 的 live 判定为准；缓存账号卡片在判定返回前显示“校准中”，并明确提示 unmanaged / ambiguous 状态。
+- 额度刷新失败保留上一次成功快照并返回可见错误，不再用 error snapshot 覆盖有效额度。
+- 会话导入、导出、移入废纸篓、恢复和可见性修复展示 backend structured result；统计失败保留当前进程内的上次结果并提供重试。
+- 会话首屏先完成 `sessions.list`，再后台执行 `sessions.usage`；未引入 Cockpit 的持久化增量 SQLite 索引，冷启动统计扫描仍属于后续性能工作。
+- `python3 -m pytest -q plugins/providers/builtin/codex/tests` — **47 passed**。
+- `node --test mac-app/tests/accountFeature*.test.mjs` — **13 passed**；`cd mac-app && ./node_modules/.bin/tsc --noEmit` — passed。
+- `bash build.sh` — passed；生成 40,940,751-byte `OnlineWorker_1.10.0_aarch64.dmg`，SHA-256 `fd120b2a45a2a97fca95a06876c688cecf2c69603f4f18cde02a8810cd49d55e`。
+- `bash verify-packaged-fast.sh` 的构建和 DMG 校验通过；安装首次被两个不响应正常停止的旧 bot 阻塞。按明确 PID 停止旧实例后，`OnlineWorker/scripts/install-current-dmg.sh` 安装和重启通过，DMG 与 `/Applications` 的 app/bot/ccusage hashes 一致，Codemaker/POPO bundled manifests 存在。
+- 未执行真实额度请求、apply/reapply、账号导入导出或会话 mutation。
+
 ## Validation Sign-Off
 
 ### Review remediation follow-up — 2026-08-23

@@ -5,6 +5,9 @@ from datetime import UTC, datetime
 
 import pytest
 
+from plugins.providers.builtin.codex.python import account_feature as account_feature_module
+from plugins.providers.builtin.codex.python.account_feature import handle_account_feature
+from plugins.providers.builtin.codex.python.account_store import AccountStore
 from plugins.providers.builtin.codex.python.compat import parse_cockpit_tools
 from plugins.providers.builtin.codex.python.quota import QuotaError, USAGE_ENDPOINT, fetch_quota, parse_quota, refresh_oauth_record
 
@@ -71,3 +74,33 @@ def test_refresh_preserves_account_identity():
     assert refreshed.identity_key == record().identity_key
     assert refreshed.credentials["access_token"] == "new-access"
     assert refreshed.credentials["refresh_token"] == "new-refresh"
+
+
+def test_failed_refresh_preserves_last_successful_quota(account_store_root, monkeypatch):
+    store = AccountStore(account_store_root)
+    account = record()
+    previous = {
+        "status": "ok",
+        "planType": "pro",
+        "primary": {"remainingPercent": 58},
+        "refreshedAt": "2026-08-18T00:00:00Z",
+    }
+    store.upsert(account)
+    store.set_quota(account.identity_key, previous)
+
+    def fail_refresh(_record):
+        raise QuotaError("quota_request_failed")
+
+    monkeypatch.setattr(account_feature_module, "fetch_quota", fail_refresh)
+
+    result = handle_account_feature(
+        action="accounts.refresh",
+        payload={"accountIds": [account.identity_key]},
+        context={"data_root": str(account_store_root)},
+    )
+
+    assert result == {
+        "ok": False,
+        "error": {"code": "quota_request_failed", "message": "额度刷新失败，请重试。"},
+    }
+    assert store.list_redacted()[0]["quota"] == previous

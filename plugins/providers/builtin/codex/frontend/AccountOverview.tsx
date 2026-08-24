@@ -40,8 +40,12 @@ function sourceLabel(source: string, authMode: string) {
   return authLabel(authMode);
 }
 
+type CurrentAccountState = "matched" | "unmanaged" | "ambiguous" | "none";
+
 export function AccountOverview({ api }: { api: AccountFeatureApi }) {
   const [accounts, setAccounts] = useState<AccountSummary[]>(loadAccountSummaries);
+  const [currentState, setCurrentState] = useState<CurrentAccountState>("none");
+  const [currentResolved, setCurrentResolved] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(accounts.length === 0);
   const [busy, setBusy] = useState("");
@@ -56,6 +60,9 @@ export function AccountOverview({ api }: { api: AccountFeatureApi }) {
     try {
       const value = pluginResult(await api.invoke("accounts.list"));
       const next = parseAccountSummaries(value.accounts);
+      const state = (value.current as { state?: unknown } | undefined)?.state;
+      setCurrentState(state === "matched" || state === "unmanaged" || state === "ambiguous" ? state : "none");
+      setCurrentResolved(true);
       setAccounts(next);
       saveAccountSummaries(next);
       setSelected((current) => new Set([...current].filter((id) => next.some((account) => account.id === id))));
@@ -114,9 +121,11 @@ export function AccountOverview({ api }: { api: AccountFeatureApi }) {
 
       {surface === "accounts" ? <>
         <section className="flex min-w-0 flex-col gap-4">
-          {(message || error) && <div className="codex-account-notices" aria-live="polite">
+          {(message || error || currentState === "unmanaged" || currentState === "ambiguous") && <div className="codex-account-notices" aria-live="polite">
             {message && <p className="rounded-lg border border-[var(--ow-green)] bg-[var(--ow-green-soft)] px-4 py-2.5 text-sm font-semibold text-[var(--ow-green)]">{message}</p>}
             {error && <p role="alert" className="rounded-lg border border-[var(--ow-red)] bg-[var(--ow-red-soft)] px-4 py-2.5 text-sm font-semibold text-[var(--ow-red)]">{error}</p>}
+            {currentState === "unmanaged" && <p className="rounded-lg border border-[var(--ow-amber)] bg-[var(--ow-amber-soft)] px-4 py-2.5 text-sm font-semibold text-[var(--ow-warning-text)]">检测到未托管的当前账号。导入后再决定是否加入账号库。</p>}
+            {currentState === "ambiguous" && <p className="rounded-lg border border-[var(--ow-amber)] bg-[var(--ow-amber-soft)] px-4 py-2.5 text-sm font-semibold text-[var(--ow-warning-text)]">当前凭据与多个账号匹配，无法确认正在使用的账号。</p>}
           </div>}
 
           {loading ? (
@@ -145,7 +154,7 @@ export function AccountOverview({ api }: { api: AccountFeatureApi }) {
               <div className="codex-account-list-toolbar">
                 <div className="codex-account-toolbar-summary">
                   <h2 className="text-sm font-bold text-[var(--ow-text)]">账号库</h2>
-                  <p className="mt-0.5 text-xs text-[var(--ow-muted)]">{accounts.length} 个账号 · {accounts.filter((account) => account.isCurrent).length} 个正在使用</p>
+                  <p className="mt-0.5 text-xs text-[var(--ow-muted)]">{accounts.length} 个账号 · {currentResolved ? `${accounts.filter((account) => account.isCurrent).length} 个正在使用` : error ? "当前账号状态未知" : "正在校准当前账号"}</p>
                 </div>
                 <div className="codex-account-toolbar-selection">
                   <label>
@@ -163,19 +172,20 @@ export function AccountOverview({ api }: { api: AccountFeatureApi }) {
               <div className="codex-account-list-body">
                 {accounts.map((account) => {
                   const quota = account.quota;
+                  const isCurrent = currentResolved && account.isCurrent;
                   const windows = [["primary", quotaLabel(quota?.primary, "短周期"), quota?.primary], ["secondary", quotaLabel(quota?.secondary, "周"), quota?.secondary]] as const;
-                  return <article key={account.id} className={`codex-account-row ${account.isCurrent ? "codex-account-row-current" : ""}`}>
+                  return <article key={account.id} className={`codex-account-row ${isCurrent ? "codex-account-row-current" : ""}`}>
                     <div className="codex-account-row-identity">
                       <input aria-label={`选择 ${account.stableIdentityDisplay}`} type="checkbox" checked={selected.has(account.id)} onChange={(event) => setSelected((current) => { const next = new Set(current); event.target.checked ? next.add(account.id) : next.delete(account.id); return next; })} />
                       <div className="codex-account-identity-copy">
                         <div className="codex-account-identity-heading">
                           <h3>{account.stableIdentityDisplay}</h3>
                           <div className="codex-account-badges">
-                            <span className={`codex-account-state ${account.isCurrent ? "codex-account-state-current" : "codex-account-state-idle"}`}><span aria-hidden="true" />{account.isCurrent ? "当前账号" : "未应用"}</span>
+                            <span className={`codex-account-state ${isCurrent ? "codex-account-state-current" : "codex-account-state-idle"}`}><span aria-hidden="true" />{currentResolved ? isCurrent ? "当前账号" : "未应用" : "校准中"}</span>
                             {quota?.planType && <span className="codex-account-plan">{quota.planType}</span>}
                           </div>
                         </div>
-                        <p className="codex-account-identity-meta"><span>{sourceLabel(account.source, account.authMode)}</span><span aria-hidden="true">·</span><span>{account.isCurrent ? "Codex Home 使用中" : "等待应用"}</span></p>
+                        <p className="codex-account-identity-meta"><span>{sourceLabel(account.source, account.authMode)}</span><span aria-hidden="true">·</span><span>{currentResolved ? isCurrent ? "Codex Home 使用中" : "等待应用" : "正在读取 Codex Home"}</span></p>
                       </div>
                     </div>
 
@@ -195,7 +205,7 @@ export function AccountOverview({ api }: { api: AccountFeatureApi }) {
                     </div>
 
                     <div className="codex-account-row-actions">
-                      <button type="button" className={`codex-account-primary-action ${account.isCurrent ? "ow-btn" : "codex-account-apply"} rounded-xl px-4 py-2.5 text-sm font-bold`} disabled={Boolean(busy)} onClick={() => setPendingApply(account)}>{busy === `apply:${account.id}` ? "正在应用…" : account.isCurrent ? "重新应用" : "应用"}</button>
+                      <button type="button" className={`codex-account-primary-action ${isCurrent ? "ow-btn" : "codex-account-apply"} rounded-xl px-4 py-2.5 text-sm font-bold`} disabled={Boolean(busy)} onClick={() => setPendingApply(account)}>{busy === `apply:${account.id}` ? "正在应用…" : isCurrent ? "重新应用" : "应用"}</button>
                       <div className="codex-account-secondary-actions">
                         <button type="button" className="codex-account-secondary-action" disabled={Boolean(busy)} onClick={() => void run(`refresh:${account.id}`, async () => { pluginResult(await api.invoke("accounts.refresh", { accountIds: [account.id] })); setMessage("额度已刷新"); })}>{busy === `refresh:${account.id}` ? "刷新中…" : "刷新"}</button>
                         <button type="button" className="codex-account-secondary-action" disabled={Boolean(busy)} onClick={() => void run("export", () => exportIds([account.id]), false)}>{busy === "export" ? "导出中…" : "导出"}</button>
@@ -212,7 +222,7 @@ export function AccountOverview({ api }: { api: AccountFeatureApi }) {
           open={Boolean(pendingApply)}
           title="应用此账号？"
           description="这只会更新当前 Codex 凭据文件，不会停止、重启或重新连接任何进程。"
-          confirmLabel={pendingApply?.isCurrent ? "重新应用" : "应用"}
+          confirmLabel={pendingApply && currentResolved && pendingApply.isCurrent ? "重新应用" : "应用"}
           onClose={() => setPendingApply(null)}
           onConfirm={() => {
             const account = pendingApply;
@@ -220,7 +230,7 @@ export function AccountOverview({ api }: { api: AccountFeatureApi }) {
             setPendingApply(null);
             void run(`apply:${account.id}`, async () => {
               pluginResult(await api.invoke("accounts.apply", { accountId: account.id }));
-              setMessage(account.isCurrent ? "当前账号已重新应用。" : "账号已应用到当前 Codex Home。");
+              setMessage(currentResolved && account.isCurrent ? "当前账号已重新应用。" : "账号已应用到当前 Codex Home。");
             });
           }}
         />

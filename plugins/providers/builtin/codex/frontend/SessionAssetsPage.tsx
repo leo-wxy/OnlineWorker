@@ -27,8 +27,30 @@ interface SessionGroup {
   sessions: SessionRow[];
 }
 
-function compactNumber(value: number | undefined) {
-  return new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
+let cachedUsage: UsageSummary | null = null;
+
+function resultMessage(value: Record<string, unknown>) {
+  const importResult = value.importResult as { items?: Array<{ status?: string }>; imported?: number } | undefined;
+  if (importResult) {
+    const items = Array.isArray(importResult.items) ? importResult.items : [];
+    const imported = importResult.imported ?? items.filter((item) => item.status === "imported").length;
+    const skipped = items.filter((item) => item.status === "skipped").length;
+    const conflict = items.filter((item) => item.status === "conflict").length;
+    return `会话导入完成 · 新增 ${imported} · 跳过 ${skipped} · 冲突 ${conflict}`;
+  }
+  const exported = value.export as { fileName?: string; count?: number } | undefined;
+  if (exported) return `已导出 ${exported.count ?? 0} 条会话${exported.fileName ? ` · ${exported.fileName}` : ""}`;
+  const trash = value.trash as { count?: number } | undefined;
+  if (trash) return `已将 ${trash.count ?? 0} 条会话移到废纸篓`;
+  const restore = value.restore as { count?: number } | undefined;
+  if (restore) return `已恢复 ${restore.count ?? 0} 条会话`;
+  const repair = value.repair as { rowsChanged?: number; rolloutsChanged?: number } | undefined;
+  if (repair) return `可见性修复完成 · 索引 ${repair.rowsChanged ?? 0} · 会话 ${repair.rolloutsChanged ?? 0}`;
+  return "会话操作完成";
+}
+
+function compactNumber(value: number) {
+  return new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
 function groupLabel(cwd: string) {
@@ -64,14 +86,14 @@ function shortId(value: string) {
 
 export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
-  const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [usage, setUsage] = useState<UsageSummary | null>(() => cachedUsage);
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState<SessionKind>("conversation");
   const [trash, setTrash] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
-  const [usageLoading, setUsageLoading] = useState(true);
+  const [usageLoading, setUsageLoading] = useState(usage === null);
   const [busy, setBusy] = useState(false);
   const [pendingAction, setPendingAction] = useState<"repair" | "trash" | null>(null);
   const [pickerGroup, setPickerGroup] = useState<SessionGroup | null>(null);
@@ -79,6 +101,7 @@ export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
   const [draftSelected, setDraftSelected] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [usageError, setUsageError] = useState("");
   const pickerDialogRef = useRef<HTMLDialogElement>(null);
 
   const load = useCallback(async () => {
@@ -96,18 +119,21 @@ export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
 
   const loadUsage = useCallback(async () => {
     setUsageLoading(true);
+    setUsageError("");
     try {
       const value = pluginResult(await api.invoke("sessions.usage"), "会话操作失败");
-      setUsage((value.usage30d as UsageSummary) || {});
-    } catch {
-      setUsage(null);
+      const next = (value.usage30d as UsageSummary) || {};
+      setUsage(next);
+      cachedUsage = next;
+    } catch (reason) {
+      setUsageError(reason instanceof Error ? reason.message : "用量统计失败，请重试");
     } finally {
       setUsageLoading(false);
     }
   }, [api]);
 
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { void loadUsage(); }, [loadUsage]);
+  useEffect(() => { if (!loading) void loadUsage(); }, [loading, loadUsage]);
   useEffect(() => {
     const dialog = pickerDialogRef.current;
     if (!dialog) return;
@@ -115,7 +141,7 @@ export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
     if (!pickerGroup && dialog.open) dialog.close();
   }, [pickerGroup]);
 
-  const run = async (action: () => Promise<Record<string, unknown> | null>, success: string, reload = true) => {
+  const run = async (action: () => Promise<Record<string, unknown> | null>, reload = true, refreshUsage = false) => {
     setBusy(true);
     setError("");
     setMessage("");
@@ -123,10 +149,9 @@ export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
       const actionResult = await action();
       if (!actionResult) return;
       const value = pluginResult(actionResult, "会话操作失败");
-      const detail = (value.importResult || value.trash || value.restore || value.repair || value.export) as { count?: number; imported?: number } | undefined;
-      const count = detail?.count ?? detail?.imported;
-      setMessage(`${success}${typeof count === "number" ? ` · ${count} 条` : ""}`);
+      setMessage(resultMessage(value));
       if (reload) await load();
+      if (refreshUsage) void loadUsage();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "会话操作失败");
     } finally {
@@ -145,7 +170,7 @@ export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
       .some((value) => value.toLocaleLowerCase().includes(needle)));
   }, [pickerGroup, pickerQuery]);
   const pickerAllSelected = pickerSessions.length > 0 && pickerSessions.every((item) => draftSelected.has(item.sessionId));
-  const metric = (value: number | undefined) => usageLoading ? "—" : usage ? compactNumber(value) : "不可用";
+  const metric = (value: number | undefined) => usageLoading && !usage ? "—" : typeof value === "number" ? compactNumber(value) : "不可用";
 
   const openSessionPicker = (group: SessionGroup) => {
     const groupIds = group.sessions.map((session) => session.sessionId);
@@ -194,9 +219,9 @@ export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
       <div className="codex-session-metrics grid gap-3">
         <div className="codex-session-period-card ow-page-frame rounded-[22px] p-4">
           <p className="text-sm font-extrabold text-[var(--ow-text)]">近 30 天</p>
-          <p className="mt-1 text-xs font-semibold text-[var(--ow-blue)]">{usageLoading ? "正在统计" : "Codex 本地数据"}</p>
+          <p className="mt-1 text-xs font-semibold text-[var(--ow-blue)]">{usageLoading ? "正在更新统计" : usageError ? "统计未更新" : "Codex 本地数据"}</p>
         </div>
-        {[["输入", metric(usage?.inputTokens)], ["缓存", metric(usage?.cachedInputTokens)], ["输出", metric(usage?.outputTokens)], ["合计", metric(usage?.totalTokens)], ["费用", usageLoading ? "—" : usage?.cost?.status === "unavailable" ? "不可用" : "$0"]].map(([label, value]) => <div key={label} className="codex-session-metric-card ow-page-frame-soft rounded-[22px] p-4"><span className="block text-xs font-semibold text-[var(--ow-muted)]">{label}</span><strong className="mt-2 block text-xl font-extrabold tracking-[-0.03em] text-[var(--ow-text)]">{value}</strong></div>)}
+        {[["输入", metric(usage?.inputTokens)], ["缓存", metric(usage?.cachedInputTokens)], ["输出", metric(usage?.outputTokens)], ["合计", metric(usage?.totalTokens)], ["费用", usageLoading && !usage ? "—" : "不可用"]].map(([label, value]) => <div key={label} className="codex-session-metric-card ow-page-frame-soft rounded-[22px] p-4"><span className="block text-xs font-semibold text-[var(--ow-muted)]">{label}</span><strong className="mt-2 block text-xl font-extrabold tracking-[-0.03em] text-[var(--ow-text)]">{value}</strong></div>)}
       </div>
 
       <div className="codex-session-toolbar ow-toolbar rounded-[22px] p-3">
@@ -211,16 +236,17 @@ export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
           <button type="submit" className="ow-btn rounded-xl px-4 py-2.5 text-sm font-semibold">搜索</button>
         </form>
         <div className="codex-session-tool-actions flex flex-wrap gap-2">
-          <button type="button" className="ow-btn rounded-xl px-3 py-2.5 text-sm font-semibold" disabled={busy} onClick={() => void run(importZip, "会话资产已导入")}>导入 ZIP</button>
+          <button type="button" className="ow-btn rounded-xl px-3 py-2.5 text-sm font-semibold" disabled={busy} onClick={() => void run(importZip, true, true)}>导入 ZIP</button>
           <button type="button" className="ow-btn rounded-xl px-3 py-2.5 text-sm font-semibold" disabled={busy || trash} onClick={() => setPendingAction("repair")}>修复可见性</button>
           <button type="button" className={`rounded-xl px-3 py-2.5 text-sm font-semibold ${trash ? "ow-btn-primary" : "ow-btn"}`} disabled={busy} onClick={() => setTrash((value) => !value)}>{trash ? "返回当前会话" : "废纸篓"}</button>
-          <button type="button" className="ow-btn rounded-xl px-3 py-2.5 text-sm font-semibold" disabled={busy} onClick={() => { void load(); void loadUsage(); }}>刷新</button>
+          <button type="button" className="ow-btn rounded-xl px-3 py-2.5 text-sm font-semibold" disabled={busy} onClick={() => void load().then(loadUsage)}>刷新</button>
         </div>
       </div>
 
-      {(message || error) && <div className="codex-account-notices" aria-live="polite">
+      {(message || error || usageError) && <div className="codex-account-notices" aria-live="polite">
         {message && <p className="border-b border-[var(--ow-green)] bg-[var(--ow-green-soft)] px-4 py-2.5 text-sm font-semibold text-[var(--ow-green)]">{message}</p>}
         {error && <p role="alert" className="border-b border-[var(--ow-red)] bg-[var(--ow-red-soft)] px-4 py-2.5 text-sm font-semibold text-[var(--ow-red)]">{error}</p>}
+        {usageError && <p role="alert" className="flex items-center justify-between gap-3 border-b border-[var(--ow-amber)] bg-[var(--ow-amber-soft)] px-4 py-2.5 text-sm font-semibold text-[var(--ow-warning-text)]"><span>{usageError}</span><button type="button" className="codex-account-text-action" disabled={usageLoading} onClick={() => void loadUsage()}>重试统计</button></p>}
       </div>}
 
       <div className="codex-session-list ow-page-frame min-w-0 overflow-hidden rounded-[28px]">
@@ -231,8 +257,8 @@ export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
           </div>
           <div className="codex-session-batch-actions flex flex-wrap gap-2">
             {ids.length > 0 && <button type="button" className="ow-btn rounded-xl px-3 py-2 text-sm font-semibold" disabled={busy} onClick={() => setSelected(new Set())}>清除选择</button>}
-            <button type="button" className="ow-btn rounded-xl px-3 py-2 text-sm font-semibold" disabled={busy || !ids.length || trash} onClick={() => void run(exportZip, "会话资产已导出", false)}>导出选中</button>
-            {!trash ? <button type="button" className="rounded-xl bg-[var(--ow-red)] px-3 py-2 text-sm font-semibold text-[var(--ow-on-accent)] disabled:opacity-40" disabled={busy || !ids.length} onClick={() => setPendingAction("trash")}>移到废纸篓</button> : <button type="button" className="ow-btn-primary rounded-xl px-3 py-2 text-sm font-semibold" disabled={busy || !ids.length} onClick={() => void run(() => api.invoke("sessions.restore", { sessionIds: ids }), "会话已恢复")}>恢复</button>}
+            <button type="button" className="ow-btn rounded-xl px-3 py-2 text-sm font-semibold" disabled={busy || !ids.length || trash} onClick={() => void run(exportZip, false)}>导出选中</button>
+            {!trash ? <button type="button" className="rounded-xl bg-[var(--ow-red)] px-3 py-2 text-sm font-semibold text-[var(--ow-on-accent)] disabled:opacity-40" disabled={busy || !ids.length} onClick={() => setPendingAction("trash")}>移到废纸篓</button> : <button type="button" className="ow-btn-primary rounded-xl px-3 py-2 text-sm font-semibold" disabled={busy || !ids.length} onClick={() => void run(() => api.invoke("sessions.restore", { sessionIds: ids }), true, true)}>恢复</button>}
           </div>
         </div>
 
@@ -325,9 +351,9 @@ export function SessionAssetsPage({ api }: { api: AccountFeatureApi }) {
           const action = pendingAction;
           setPendingAction(null);
           if (action === "trash") {
-            void run(() => api.invoke("sessions.trash", { sessionIds: ids }), "已移到废纸篓，可在废纸篓中恢复");
+            void run(() => api.invoke("sessions.trash", { sessionIds: ids }), true, true);
           } else if (action === "repair") {
-            void run(() => api.invoke("sessions.repair"), "可见性修复完成");
+            void run(() => api.invoke("sessions.repair"));
           }
         }}
       />

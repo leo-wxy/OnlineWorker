@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import pytest
 
 from plugins.providers.builtin.codex.python import session_assets, session_package
+from plugins.providers.builtin.codex.python.account_feature import _failure
 from plugins.providers.builtin.codex.python.session_assets import (
     SessionAssetError,
     list_sessions,
@@ -182,3 +183,19 @@ def test_zip_import_rejects_excess_total_uncompressed_size(tmp_path, monkeypatch
 
     with pytest.raises(SessionAssetError, match="invalid_package"):
         import_sessions(tmp_path / "target-home", archive)
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        ("empty_selection", "请先选择会话。"),
+        ("invalid_package", "会话包无效或已损坏。"),
+        ("integrity_failed", "会话包完整性校验失败。"),
+        ("trash_failed", "会话移入废纸篓失败。"),
+        ("restore_failed", "会话恢复失败。"),
+        ("repair_failed", "会话可见性修复失败。"),
+        ("action_failed", "操作失败，请重试。"),
+    ],
+)
+def test_session_errors_use_session_language(code, message):
+    assert _failure(code)["error"]["message"] == message
