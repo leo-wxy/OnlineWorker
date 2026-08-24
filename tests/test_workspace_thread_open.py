@@ -289,6 +289,8 @@ async def test_workspace_overview_only_builds_topic_buttons_for_active_threads(m
     assert "当前活跃任务" in text
     assert "Inactive (1):" in text
     assert "旧会话" in text
+    assert text.startswith("📂 [codex] onlineWorker\n")
+    assert "/Users/" not in text
     reply_markup = kwargs["reply_markup"]
     button_texts = [button.text for row in reply_markup.inline_keyboard for button in row]
     assert button_texts == ["📌 当前活跃任务"]
@@ -582,7 +584,7 @@ async def test_thread_open_renames_existing_topic_when_codex_title_changed(monke
     save_storage_mock.assert_called()
     assert send_to_group.await_count == 2
     assert send_to_group.await_args_list[0].args[2] == "thread `90abcdef` ✅ 已存在，跳转中。"
-    assert send_to_group.await_args_list[1].args[2] == "路径: /Users/example/Projects/onlineWorker"
+    assert send_to_group.await_args_list[1].args[2] == "工作区: [codex] onlineWorker"
 
 
 @pytest.mark.asyncio
@@ -877,7 +879,7 @@ async def test_thread_open_customprovider_status_message_avoids_markdown_parse_r
     header_args = send_to_group.await_args_list[1].args
     assert status_args[2] == "✅ thread Ql0W0uPX 新建 topic id=4257"
     assert "parse_mode" not in status_kwargs
-    assert header_args[2] == "路径: /Users/example/Projects/onlineWorker"
+    assert header_args[2] == "工作区: [customprovider] onlineWorker"
 
 
 @pytest.mark.asyncio

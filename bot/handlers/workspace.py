@@ -129,11 +129,11 @@ async def _try_rename_forum_topic(bot, group_chat_id: int, topic_id: int | None,
 
 
 def _workspace_topic_header_text(ws_info: WorkspaceInfo) -> str:
-    return f"路径: {ws_info.path}"
-
-
-def _thread_topic_header_text(ws_info: WorkspaceInfo, thread_info: ThreadInfo) -> str:
-    return f"路径: {ws_info.path}"
+    return "工作区: " + _make_workspace_topic_name(
+        ws_info.tool,
+        ws_info.name,
+        _workspace_path_for_topic_hint(ws_info),
+    )
 
 
 async def _upsert_pinned_topic_header(
@@ -264,7 +264,7 @@ async def _ensure_thread_topic_header(
         bot=bot,
         group_chat_id=group_chat_id,
         topic_id=topic_id,
-        text=_thread_topic_header_text(ws_info, thread_info),
+        text=_workspace_topic_header_text(ws_info),
         current_message_id=thread_info.header_message_id,
     )
     if next_message_id != thread_info.header_message_id:
@@ -607,7 +607,7 @@ def make_ws_open_callback_handler(state: AppState, group_chat_id: int) -> Callba
                 )
                 await _send_to_group(
                     bot, group_chat_id,
-                    f"workspace `{name}` 已打开。\nPath: `{existing_ws.path}`",
+                    f"workspace `{name}` 已打开。",
                     topic_id=existing_topic_id,
                     parse_mode="Markdown",
                 )
@@ -690,10 +690,14 @@ def make_ws_open_callback_handler(state: AppState, group_chat_id: int) -> Callba
 
         thread_count = len(ws_info.threads)
         ws_topic_id = _workspace_topic_id(state, ws_info)
+        workspace_label = _make_workspace_topic_name(
+            tool_name,
+            name,
+            _workspace_path_for_topic_hint(ws_info),
+        )
         await _send_to_group(
             bot, group_chat_id,
-            f"✅ `[{tool_name}] {name}` 已打开\n"
-            f"路径：`{path}`\n"
+            f"✅ `{workspace_label}` 已打开\n"
             f"已同步 {thread_count} 个最新 thread。",
             topic_id=ws_topic_id,
             parse_mode="Markdown",
@@ -1300,7 +1304,12 @@ async def _send_workspace_thread_overview(
     active_threads = [item for item in display_threads if item["is_active"]]
     inactive_threads = [item for item in display_threads if not item["is_active"]]
 
-    lines = [f"📂 [{tool_name}] {name}", f"Path: {ws_info.path}", ""]
+    workspace_label = _make_workspace_topic_name(
+        tool_name,
+        name,
+        _workspace_path_for_topic_hint(ws_info),
+    )
+    lines = [f"📂 {workspace_label}", ""]
 
     if active_threads:
         lines.append(f"Active ({len(active_threads)}):")

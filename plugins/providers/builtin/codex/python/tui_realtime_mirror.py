@@ -432,6 +432,9 @@ async def _mark_watch_idle_or_complete(
     now: float,
 ) -> None:
     _mark_watch_idle(watch, now)
+    if _uses_shared_live_transport(state) and watch.turn_started_sent:
+        _set_watch_poll_interval(watch, ACTIVE_POLL_INTERVAL_SECONDS, now)
+        return
     if (
         not _should_auto_watch_bound_codex_threads(state)
         or not watch.turn_started_sent

@@ -2217,6 +2217,13 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             f"thread={thread_id[:8] if thread_id else '?'}"
         )
         publish_session_message_event(state, event)
+        if (
+            event.payload.get("_mirroredOnly") is True
+            and thread_id
+            and event.provider
+            and thread_id in state.get_provider_runtime(event.provider).watched_threads
+        ):
+            return
 
         ctx = EventContext(
             event=event,

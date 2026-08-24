@@ -205,7 +205,7 @@ async def test_open_workspace_migrates_matching_legacy_name_key_to_path_key(monk
 
 
 @pytest.mark.asyncio
-async def test_workspace_topic_header_pins_full_path(monkeypatch):
+async def test_workspace_topic_header_pins_compact_workspace_label(monkeypatch):
     monkeypatch.setattr(workspace_module, "save_storage", lambda storage: None)
 
     bot = HeaderBot()
@@ -214,6 +214,7 @@ async def test_workspace_topic_header_pins_full_path(monkeypatch):
         name="sample_audio_module",
         path="/Users/example/Projects/worktree/sample_app/module_source/sample_audio_module",
         tool="claude",
+        daemon_workspace_id="claude:/Users/example/Projects/worktree/sample_app/module_source/sample_audio_module",
         header_message_id=None,
     )
 
@@ -227,7 +228,7 @@ async def test_workspace_topic_header_pins_full_path(monkeypatch):
 
     assert ws.header_message_id == 2001
     assert bot.sent_messages[0]["message_thread_id"] == 11858
-    assert bot.sent_messages[0]["text"] == "路径: /Users/example/Projects/worktree/sample_app/module_source/sample_audio_module"
+    assert bot.sent_messages[0]["text"] == "工作区: [claude] sample_audio_module @ worktree/sample_app"
     assert bot.unpinned_topics == [
         {
             "chat_id": GROUP_CHAT_ID,
@@ -244,7 +245,7 @@ async def test_workspace_topic_header_pins_full_path(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_thread_topic_header_edits_existing_message_with_preview_and_path(monkeypatch):
+async def test_thread_topic_header_edits_existing_message_with_compact_workspace_label(monkeypatch):
     monkeypatch.setattr(workspace_module, "save_storage", lambda storage: None)
 
     bot = HeaderBot()
@@ -253,6 +254,7 @@ async def test_thread_topic_header_edits_existing_message_with_preview_and_path(
         name="sample_audio_module",
         path="/Users/example/Projects/worktree/sample_app/module_source/sample_audio_module",
         tool="claude",
+        daemon_workspace_id="claude:/Users/example/Projects/worktree/sample_app/module_source/sample_audio_module",
     )
     thread = ThreadInfo(
         thread_id="00000000-0000-4000-8000-000000000007",
@@ -288,6 +290,6 @@ async def test_thread_topic_header_edits_existing_message_with_preview_and_path(
         {
             "chat_id": GROUP_CHAT_ID,
             "message_id": 3456,
-            "text": "路径: /Users/example/Projects/worktree/sample_app/module_source/sample_audio_module",
+            "text": "工作区: [claude] sample_audio_module @ worktree/sample_app",
         }
     ]

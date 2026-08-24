@@ -10,6 +10,7 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(?P<text>.+?)\s*$")
 _BULLET_RE = re.compile(r"^[-*+]\s+(?P<text>.+?)\s*$")
 _ORDERED_RE = re.compile(r"^(?P<index>\d+)\.\s+(?P<text>.+?)\s*$")
 _LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
+_LOCAL_FILE_LINK_RE = re.compile(r"\[([^\]]+)\]\((?:<)?/(?!/)[^)]+(?:>)?\)")
 _INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
 _BOLD_RE = re.compile(r"\*\*([^*\n]+)\*\*|__([^_\n]+)__")
 _ITALIC_RE = re.compile(r"(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)")
@@ -25,6 +26,18 @@ class TelegramRenderedText:
 
 def _utf16_len(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
+
+
+def _compact_local_file_links(text: str) -> str:
+    lines: list[str] = []
+    in_code_block = False
+    for line in text.splitlines():
+        if _CODE_FENCE_RE.match(line.strip()):
+            in_code_block = not in_code_block
+        elif not in_code_block:
+            line = _LOCAL_FILE_LINK_RE.sub(lambda match: f"`{match.group(1)}`", line)
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def _placeholder_substitute(
@@ -206,7 +219,7 @@ def format_telegram_assistant_final_text(
     *,
     max_length: int = 4096,
 ) -> TelegramRenderedText:
-    normalized = (text or "").strip()
+    normalized = _compact_local_file_links((text or "").strip())
     if not normalized:
         return TelegramRenderedText(text="", parse_mode=None, fallback_text="")
 

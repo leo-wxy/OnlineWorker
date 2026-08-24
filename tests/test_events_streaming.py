@@ -28,6 +28,35 @@ class RecordingNotificationRouter:
 
 
 @pytest.mark.asyncio
+async def test_watched_thread_keeps_mirrored_hook_off_telegram():
+    state = AppState()
+    codex_state.get_runtime(state).watched_threads["tid-123"] = SimpleNamespace()
+    bot = SimpleNamespace(
+        send_message=AsyncMock(),
+        edit_message_text=AsyncMock(),
+    )
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID)
+
+    await handler(
+        "app-server-event",
+        {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "item/completed",
+                "params": {
+                    "threadId": "tid-123",
+                    "_mirroredOnly": True,
+                },
+            },
+        },
+    )
+
+    bot.send_message.assert_not_awaited()
+    bot.edit_message_text.assert_not_awaited()
+    assert state.message_bus.recent_events()
+
+
+@pytest.mark.asyncio
 async def test_codex_desktop_hook_events_reach_bus_and_notification_without_topic():
     from plugins.providers.builtin.codex.python.adapter import CodexAdapter
 

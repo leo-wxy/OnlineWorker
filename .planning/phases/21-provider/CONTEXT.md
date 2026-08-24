@@ -271,3 +271,30 @@ Verification:
 - After restart, live inventory reported `0` Codex child threads in OnlineWorker state, `0` internal activity/title threads, and `0` classified abnormal Telegram routes.
 - Logging regression passed `13` tests; the installed runtime produced `0` new `httpx` request lines and all local log generations contained `0` unredacted Telegram Bot URLs.
 - `OnlineWorker_1.8.3_aarch64.dmg` was rebuilt and installed; DMG SHA-256: `f45e6ee501337b9ba33288177abd9b8d2832931938d0d807ff55eb62939629a1`.
+
+## Implementation Record — 2026-08-24 (Codex Active-Writer Queue And Shared-Live Final Delivery Follow-Up)
+
+Implemented a post-close reliability follow-up for Codex Desktop-owned sessions.
+
+Verified root cause:
+
+- Codex Desktop and OnlineWorker use independent app-servers and cannot own the same thread writer concurrently.
+- In App/shared-live mode, commentary idle polling could complete a turn before the real final response arrived.
+- Starting a session-file watcher for an `unknown` shared-live session could create a second user-visible message source.
+
+Implemented behavior:
+
+- `thread not found` still triggers resume and retry; `already has an active writer` falls back to the official `codex queue --thread <THREAD> --message <TEXT>` command.
+- Text and image attachments remain supported by the queue fallback.
+- App/shared-live sessions wait for the real final event instead of synthesizing completion from commentary idle.
+- Shared-live fallback watches remain on the active polling interval while a turn is open.
+- `unknown` shared-live sessions do not automatically start a second session-file message source.
+
+Verification:
+
+- Codex runtime and realtime-mirror regression: `42 passed`.
+- `git diff --check` passed with no unresolved conflicts.
+- The combined wrapper built and installed `OnlineWorker_1.10.0_aarch64.dmg`; DMG SHA-256: `37fc10af4d762bf61cfd7af94e77a4b4b196cd5c8dea91caf422664ec7ec4a33`.
+- The first install attempt found two pre-existing bot processes that did not stop within the helper timeout. After terminating those exact stale processes, installation and restart completed successfully.
+- Installed app, bot, and usage-sidecar hashes matched the mounted DMG. The bundled `codemaker` provider and `popo` notification manifests were present, and the installed App, main bot, and account worker remained running after startup.
+- Real Telegram acceptance remains pending; this record does not replace the canonical Phase 21 closeout.

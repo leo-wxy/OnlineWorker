@@ -27,6 +27,19 @@ def test_format_telegram_assistant_final_text_uses_telegram_supported_newlines()
     assert "1. 步骤一\n2. 步骤二" in result.text
 
 
+def test_format_telegram_assistant_final_text_compacts_local_file_links():
+    result = format_telegram_assistant_final_text(
+        "已完成：[AddAccountModal.tsx](/Users/example/Projects/demo/AddAccountModal.tsx)\n\n"
+        "```markdown\n[保留示例](/Users/example/Projects/demo/example.md)\n```"
+    )
+
+    assert result.parse_mode == "HTML"
+    assert "<code>AddAccountModal.tsx</code>" in result.text
+    assert "/Users/example/Projects/demo/AddAccountModal.tsx" not in result.text
+    assert "`AddAccountModal.tsx`" in result.fallback_text
+    assert "[保留示例](/Users/example/Projects/demo/example.md)" in result.fallback_text
+
+
 def test_format_telegram_assistant_final_text_falls_back_when_markup_exceeds_budget():
     result = format_telegram_assistant_final_text(
         "```python\nprint('x')\n```",
