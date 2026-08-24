@@ -666,6 +666,49 @@ async def test_sync_codex_tui_realtime_once_does_not_watch_existing_unmanaged_th
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("trust_state", "rollout_state", "expects_polling"),
+    [
+        ("verified", "running", False),
+        ("review_required", "running", True),
+        ("verified", "unavailable", True),
+    ],
+)
+async def test_shared_live_unknown_thread_polls_only_when_hook_ingress_is_unavailable(
+    tmp_path,
+    trust_state,
+    rollout_state,
+    expects_polling,
+):
+    from plugins.providers.builtin.codex.python.tui_realtime_mirror import sync_codex_tui_realtime_once
+
+    state, ws, session_file, sessions_dir = _make_state(tmp_path)
+    state.config = _make_shared_live_app_mode_config()
+    state.set_adapter(
+        "codex",
+        SimpleNamespace(
+            external_event_status={
+                "trustState": trust_state,
+                "rollout": {"state": rollout_state},
+            }
+        ),
+    )
+    ws.threads["tid-1"].source = "unknown"
+    ws.threads["tid-1"].is_active = True
+    handler = AsyncMock()
+    _append_session_meta(session_file, thread_id="tid-1", cwd=ws.path)
+
+    await sync_codex_tui_realtime_once(
+        state,
+        handler,
+        sessions_dir=str(sessions_dir),
+    )
+
+    assert ("tid-1" in codex_state.get_runtime(state).watched_threads) is expects_polling
+    handler.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_sync_codex_tui_realtime_once_does_not_emit_session_file_updates_for_shared_live_thread(tmp_path):
     from plugins.providers.builtin.codex.python.tui_realtime_mirror import sync_codex_tui_realtime_once
 

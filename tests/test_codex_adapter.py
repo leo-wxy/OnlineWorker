@@ -376,6 +376,24 @@ async def test_hook_start_and_notify_completion_share_one_turn_sequence():
 
 
 @pytest.mark.asyncio
+async def test_session_end_releases_desktop_rollout_watch():
+    adapter = CodexAdapter()
+    adapter.on_event(AsyncMock())
+    rollout = MagicMock()
+    adapter._desktop_rollout_ingress = rollout
+
+    result = await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "SessionEnd",
+            "session_id": "desktop-session",
+        }
+    )
+
+    assert result == {"accepted": True, "emitted": 0}
+    rollout.release_session.assert_called_once_with("desktop-session")
+
+
+@pytest.mark.asyncio
 async def test_connect_disables_websocket_message_size_limit_for_large_resume_payloads():
     ws = AsyncMock()
     ws.recv = AsyncMock(

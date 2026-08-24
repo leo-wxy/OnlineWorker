@@ -125,6 +125,19 @@ def _uses_shared_live_transport(state: AppState) -> bool:
     return live_transport in {"shared_ws", "shared_unix"}
 
 
+def _has_verified_rollout_ingress(state: AppState) -> bool:
+    adapter = state.get_adapter("codex")
+    status = getattr(adapter, "external_event_status", None)
+    if not isinstance(status, dict):
+        return False
+    rollout = status.get("rollout")
+    return (
+        str(status.get("trustState") or "").strip().lower() == "verified"
+        and isinstance(rollout, dict)
+        and str(rollout.get("state") or "").strip().lower() == "running"
+    )
+
+
 def _should_watch_thread_from_session_file(state: AppState, thread) -> bool:
     if _should_auto_watch_bound_codex_threads(state):
         return True
@@ -326,9 +339,19 @@ def _ensure_bound_codex_thread_watches(
         for thread_id, thread in (getattr(ws, "threads", {}) or {}).items():
             if getattr(thread, "archived", False):
                 continue
-            if not _should_watch_thread_from_session_file(state, thread):
-                continue
             topic_id = _thread_topic_id(state, ws, thread)
+            source = str(getattr(thread, "source", "") or "").strip().lower()
+            needs_polling_fallback = (
+                _uses_shared_live_transport(state)
+                and topic_id is not None
+                and source == "unknown"
+                and not _has_verified_rollout_ingress(state)
+            )
+            if (
+                not _should_watch_thread_from_session_file(state, thread)
+                and not needs_polling_fallback
+            ):
+                continue
 
             runtime = codex_state.get_runtime(state)
             watch = runtime.watched_threads.get(thread_id)

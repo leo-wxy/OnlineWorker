@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from bot.events import make_event_handler
-from core.state import AppState
-from core.storage import AppStorage, WorkspaceInfo
+from core.state import AppState, StreamingTurn
+from core.storage import AppStorage, ThreadInfo, WorkspaceInfo
 from plugins.providers.builtin.codex.python.adapter import CodexAdapter
 from plugins.providers.builtin.codex.python.external_ingress import (
     CodexDesktopRolloutIngress,
@@ -81,6 +81,208 @@ async def test_large_rollout_history_does_not_consume_one_fd_per_file(
         after = len(os.listdir("/dev/fd"))
         assert len(ingress._rollouts) == 80
         assert after - before < 16
+    finally:
+        await ingress.close()
+
+
+@pytest.mark.asyncio
+async def test_start_restores_only_bound_unfinished_rollout_watch(tmp_path: Path):
+    active_session_id = "11111111-2222-4333-8444-555555555557"
+    completed_session_id = "11111111-2222-4333-8444-555555555558"
+    turn_id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeee10"
+    sessions_dir = tmp_path / "sessions"
+    day_dir = sessions_dir / "2026" / "08" / "24"
+    day_dir.mkdir(parents=True)
+    active_rollout = day_dir / f"rollout-2026-08-24T17-00-00-{active_session_id}.jsonl"
+    completed_rollout = day_dir / f"rollout-2026-08-24T16-00-00-{completed_session_id}.jsonl"
+    for path, session_id, completed in (
+        (active_rollout, active_session_id, False),
+        (completed_rollout, completed_session_id, True),
+    ):
+        rows = [
+            {
+                "type": "session_meta",
+                "payload": {
+                    "id": session_id,
+                    "cwd": "/Users/example/Projects/live-workspace",
+                },
+            },
+        ]
+        if not completed:
+            rows.extend(
+                [
+                    {"type": "event_msg", "payload": {"blob": "x" * 300_000}},
+                    {"type": "turn_context", "payload": {"turn_id": turn_id}},
+                    {
+                        "type": "event_msg",
+                        "payload": {"type": "task_started", "turn_id": turn_id},
+                    },
+                    {"type": "event_msg", "payload": {"blob": "y" * 300_000}},
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "role": "assistant",
+                            "phase": "commentary",
+                            "content": [{"type": "output_text", "text": "仍在执行"}],
+                            "internal_chat_message_metadata_passthrough": {
+                                "turn_id": turn_id
+                            },
+                        },
+                    },
+                ]
+            )
+        else:
+            rows.extend(
+                [
+                    {"type": "turn_context", "payload": {"turn_id": turn_id}},
+                    {
+                        "type": "event_msg",
+                        "payload": {"type": "task_started", "turn_id": turn_id},
+                    },
+                    {
+                        "type": "event_msg",
+                        "payload": {"type": "task_complete", "turn_id": turn_id},
+                    },
+                ]
+            )
+        _append_jsonl(path, *rows)
+
+    workspace = WorkspaceInfo(
+        name="live-workspace",
+        path="/Users/example/Projects/live-workspace",
+        tool="codex",
+        daemon_workspace_id="codex:live-workspace",
+    )
+    workspace.threads[active_session_id] = ThreadInfo(
+        thread_id=active_session_id,
+        topic_id=14623,
+        source="unknown",
+    )
+    workspace.threads[completed_session_id] = ThreadInfo(
+        thread_id=completed_session_id,
+        topic_id=14624,
+        source="unknown",
+    )
+    adapter = SimpleNamespace(
+        ingest_external_hook_payload=AsyncMock(
+            return_value={"accepted": True, "emitted": 1}
+        ),
+        has_authoritative_live_session=MagicMock(return_value=False),
+    )
+    ingress = CodexDesktopRolloutIngress(
+        adapter=adapter,
+        state=AppState(
+            storage=AppStorage(workspaces={"codex:live-workspace": workspace})
+        ),
+        sessions_dir=str(sessions_dir),
+    )
+
+    await ingress.start()
+    try:
+        assert set(ingress._active_watches) == {active_session_id}
+        adapter.ingest_external_hook_payload.reset_mock()
+
+        for index in range(2):
+            _append_jsonl(
+                active_rollout,
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "role": "assistant",
+                        "phase": "commentary",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": f"恢复后的过程消息 {index + 1}",
+                            }
+                        ],
+                        "internal_chat_message_metadata_passthrough": {
+                            "turn_id": turn_id
+                        },
+                    },
+                },
+            )
+            await _wait_until(
+                lambda: adapter.ingest_external_hook_payload.await_count == index + 1,
+                timeout=1.0,
+            )
+
+        assert [
+            call.args[0]["message"]
+            for call in adapter.ingest_external_hook_payload.await_args_list
+        ] == ["恢复后的过程消息 1", "恢复后的过程消息 2"]
+    finally:
+        await ingress.close()
+
+
+@pytest.mark.asyncio
+async def test_primary_hook_arms_one_active_kqueue_watch_for_commentary(tmp_path: Path):
+    session_id = "11111111-2222-4333-8444-555555555557"
+    turn_id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeee10"
+    sessions_dir = tmp_path / "sessions"
+    day_dir = sessions_dir / "2026" / "08" / "24"
+    day_dir.mkdir(parents=True)
+    rollout = day_dir / f"rollout-2026-08-24T17-00-00-{session_id}.jsonl"
+    _append_jsonl(
+        rollout,
+        {
+            "type": "session_meta",
+            "payload": {
+                "id": session_id,
+                "cwd": "/Users/example/Projects/live-workspace",
+            },
+        },
+        {"type": "turn_context", "payload": {"turn_id": turn_id}},
+    )
+    adapter = SimpleNamespace(
+        ingest_external_hook_payload=AsyncMock(
+            return_value={"accepted": True, "emitted": 1}
+        ),
+        has_authoritative_live_session=MagicMock(return_value=False),
+    )
+    ingress = CodexDesktopRolloutIngress(
+        adapter=adapter,
+        state=AppState(storage=AppStorage()),
+        sessions_dir=str(sessions_dir),
+    )
+
+    await ingress.start()
+    try:
+        ingress.record_primary_event(session_id, turn_id, "started")
+        assert set(ingress._active_watches) == {session_id}
+
+        _append_jsonl(
+            rollout,
+            {
+                "type": "response_item",
+                "payload": {
+                    "role": "assistant",
+                    "phase": "commentary",
+                    "content": [{"type": "output_text", "text": "事件驱动已恢复"}],
+                    "internal_chat_message_metadata_passthrough": {
+                        "turn_id": turn_id
+                    },
+                },
+            },
+        )
+        await _wait_until(
+            lambda: adapter.ingest_external_hook_payload.await_count == 1,
+            timeout=1.0,
+        )
+
+        adapter.ingest_external_hook_payload.assert_awaited_once_with(
+            {
+                "hook_event_name": "AgentMessage",
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "cwd": "/Users/example/Projects/live-workspace",
+                "message": "事件驱动已恢复",
+                "phase": "commentary",
+                "source": "codex_rollout",
+            }
+        )
+        ingress.record_primary_event(session_id, turn_id, "completed")
+        assert session_id not in ingress._active_watches
     finally:
         await ingress.close()
 
@@ -207,6 +409,111 @@ async def test_desktop_rollout_completion_enters_bus_without_topic(tmp_path: Pat
     state.message_bus.notification_summary.build_completed_notification.assert_awaited_once()
     assert notifications.events[0].task_id == turn_id
     bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_desktop_rollout_commentary_edits_existing_telegram_placeholder(
+    tmp_path: Path,
+):
+    session_id = "11111111-2222-4333-8444-555555555556"
+    turn_id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeef"
+    workspace_path = "/Users/example/Projects/desktop-workspace"
+    topic_id = 14623
+    rollout_path = str(
+        tmp_path / f"rollout-2026-08-24T16-00-00-{session_id}.jsonl"
+    )
+    workspace = WorkspaceInfo(
+        name="desktop-workspace",
+        path=workspace_path,
+        tool="codex",
+        topic_id=topic_id,
+        daemon_workspace_id="codex:desktop-workspace",
+    )
+    workspace.threads[session_id] = ThreadInfo(
+        thread_id=session_id,
+        topic_id=topic_id,
+        streaming_msg_id=14724,
+        source="unknown",
+    )
+    state = AppState(
+        storage=AppStorage(workspaces={"codex:desktop-workspace": workspace})
+    )
+    state.streaming_turns[session_id] = StreamingTurn(
+        message_id=14724,
+        topic_id=topic_id,
+        turn_id=turn_id,
+    )
+    bot = SimpleNamespace(
+        send_message=AsyncMock(),
+        delete_message=AsyncMock(),
+        edit_message_text=AsyncMock(),
+    )
+    adapter = CodexAdapter()
+    adapter.register_workspace_cwd("codex:desktop-workspace", workspace_path)
+    adapter.on_event(make_event_handler(state, bot, GROUP_CHAT_ID))
+    ingress = CodexDesktopRolloutIngress(
+        adapter=adapter,
+        state=state,
+        sessions_dir=str(tmp_path),
+        fallback_grace_seconds=0,
+    )
+    ingress._loop = asyncio.get_running_loop()
+    ingress._closed = False
+
+    try:
+        await adapter.ingest_external_hook_payload(
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "cwd": workspace_path,
+                "prompt": "验证 Desktop 过程消息",
+            }
+        )
+        for row in (
+            {
+                "type": "session_meta",
+                "payload": {"id": session_id, "cwd": workspace_path},
+            },
+            {
+                "type": "turn_context",
+                "payload": {"turn_id": "00000000-1111-4222-8333-444444444444"},
+            },
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "agent_message",
+                    "phase": "commentary",
+                    "message": "正在核对真实事件链。",
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "role": "assistant",
+                    "phase": "commentary",
+                    "content": [
+                        {"type": "output_text", "text": "正在核对真实事件链。"}
+                    ],
+                    "internal_chat_message_metadata_passthrough": {
+                        "turn_id": turn_id
+                    },
+                },
+            },
+        ):
+            await ingress._process_rollout_line(
+                rollout_path,
+                json.dumps(row, ensure_ascii=False).encode("utf-8"),
+            )
+        await _wait_until(lambda: bot.edit_message_text.await_count == 1)
+        await asyncio.sleep(0.05)
+    finally:
+        await ingress.close()
+
+    assert bot.edit_message_text.await_count == 1
+    assert "正在核对真实事件链" in bot.edit_message_text.await_args.kwargs["text"]
+    assert "思考中" not in bot.edit_message_text.await_args.kwargs["text"]
+    assert state.streaming_turns[session_id].turn_id == turn_id
 
 
 @pytest.mark.asyncio
@@ -383,6 +690,14 @@ def test_rollout_ingress_skips_onlineworker_owned_and_live_sessions(tmp_path: Pa
 
     workspace.threads.clear()
     adapter.has_authoritative_live_session.return_value = True
+    assert ingress._should_publish_session(session_id) is False
+
+    adapter.has_authoritative_live_session.return_value = False
+    workspace.threads[session_id] = ThreadInfo(
+        thread_id=session_id,
+        source="unknown",
+    )
+    state.get_provider_runtime("codex").watched_threads[session_id] = SimpleNamespace()
     assert ingress._should_publish_session(session_id) is False
 
 

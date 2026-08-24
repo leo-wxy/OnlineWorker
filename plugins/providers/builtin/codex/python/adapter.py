@@ -424,6 +424,7 @@ class CodexAdapter:
         if event_name not in {
             "SessionStart",
             "UserPromptSubmit",
+            "AgentMessage",
             "Stop",
             "AgentTurnComplete",
             "SessionEnd",
@@ -515,6 +516,10 @@ class CodexAdapter:
         session["workspace_id"] = workspace_id
 
         if event_name == "SessionEnd":
+            ingress = self._desktop_rollout_ingress
+            release = getattr(ingress, "release_session", None)
+            if callable(release):
+                release(session_id)
             self._external_hook_sessions.pop(session_id, None)
             return {"accepted": True, "emitted": 0}
 
@@ -578,6 +583,51 @@ class CodexAdapter:
                     "_mirroredOnly": True,
                 },
             )
+            return {"accepted": True, "emitted": emitted + 1}
+
+        if event_name == "AgentMessage":
+            text = str(payload.get("message") or "").strip()
+            phase = str(payload.get("phase") or "").strip()
+            turn_id = (
+                str(payload.get("turn_id") or "").strip()
+                or str(session.get("turn_id") or "").strip()
+            )
+            if phase != "commentary" or not text or not turn_id:
+                return {"accepted": True, "emitted": 0}
+            if str(session.get("terminal_emitted_turn_id") or "").strip() == turn_id:
+                return {"accepted": True, "emitted": 0, "deduped": True}
+            emitted = 0
+            if str(session.get("started_turn_id") or "").strip() != turn_id:
+                await self._emit_external_hook_event(
+                    workspace_id,
+                    "turn/started",
+                    {
+                        "threadId": session_id,
+                        "turn": {"id": turn_id, "threadId": session_id},
+                        "_mirroredOnly": True,
+                    },
+                )
+                session["started_turn_id"] = turn_id
+                emitted += 1
+            await self._emit_external_hook_event(
+                workspace_id,
+                "item/completed",
+                {
+                    "threadId": session_id,
+                    "turnId": turn_id,
+                    "item": {
+                        "type": "agentMessage",
+                        "text": text,
+                        "phase": "commentary",
+                        "threadId": session_id,
+                        "turn": {"id": turn_id},
+                    },
+                    "_mirroredOnly": True,
+                    "_externalSource": self._external_payload_source(payload),
+                },
+            )
+            session["turn_id"] = turn_id
+            session["turn_open"] = True
             return {"accepted": True, "emitted": emitted + 1}
 
         notify_prefix_emitted = 0

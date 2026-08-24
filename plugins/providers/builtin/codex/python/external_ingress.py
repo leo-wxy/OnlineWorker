@@ -6,12 +6,14 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+import select
 import sys
 from typing import Any
 
 from watchfiles import Change, awatch
 
 from plugins.providers.builtin.codex.python.storage_runtime import (
+    find_session_file,
     is_codex_user_visible_session,
 )
 
@@ -20,6 +22,19 @@ logger = logging.getLogger(__name__)
 
 _OWNED_THREAD_SOURCES = {"app", "provider", "telegram_new_thread"}
 _ROLLOUT_FALLBACK_GRACE_SECONDS = 1.0
+_ACTIVE_WATCH_FLAGS = (
+    getattr(select, "KQ_NOTE_WRITE", 0)
+    | getattr(select, "KQ_NOTE_EXTEND", 0)
+    | getattr(select, "KQ_NOTE_ATTRIB", 0)
+    | getattr(select, "KQ_NOTE_DELETE", 0)
+    | getattr(select, "KQ_NOTE_RENAME", 0)
+    | getattr(select, "KQ_NOTE_REVOKE", 0)
+)
+_ACTIVE_RELOAD_FLAGS = (
+    getattr(select, "KQ_NOTE_DELETE", 0)
+    | getattr(select, "KQ_NOTE_RENAME", 0)
+    | getattr(select, "KQ_NOTE_REVOKE", 0)
+)
 
 
 @dataclass
@@ -42,6 +57,12 @@ class _RolloutCursor:
     path: str
     offset: int = 0
     partial: bytes = b""
+
+
+@dataclass
+class _ActiveWatch:
+    fd: int
+    path: str
 
 
 def _thread_id_from_rollout_path(path: str) -> str:
@@ -116,6 +137,9 @@ class CodexDesktopRolloutIngress:
         self._stop_event: asyncio.Event | None = None
         self._drain_task: asyncio.Task | None = None
         self._fallback_tasks: dict[tuple[str, str, str], asyncio.Task] = {}
+        self._active_kqueue = None
+        self._active_watches: dict[str, _ActiveWatch] = {}
+        self._active_sessions_by_fd: dict[int, str] = {}
         self._closed = True
 
     @property
@@ -146,7 +170,14 @@ class CodexDesktopRolloutIngress:
         self._stop_event = asyncio.Event()
         self._closed = False
         try:
+            if hasattr(select, "kqueue") and hasattr(self._loop, "add_reader"):
+                self._active_kqueue = select.kqueue()
+                self._loop.add_reader(
+                    self._active_kqueue.fileno(),
+                    self._on_active_kqueue_ready,
+                )
             self._seed_existing_rollouts()
+            self._restore_bound_active_watches()
             self._watch_task = self._loop.create_task(
                 self._watch_changes(),
                 name="codex-desktop-rollout-fsevents",
@@ -171,6 +202,11 @@ class CodexDesktopRolloutIngress:
         self._closed = True
         if self._stop_event is not None:
             self._stop_event.set()
+        if self._loop is not None and self._active_kqueue is not None:
+            try:
+                self._loop.remove_reader(self._active_kqueue.fileno())
+            except Exception:
+                pass
 
         current = asyncio.current_task()
         tasks = (
@@ -190,6 +226,15 @@ class CodexDesktopRolloutIngress:
             task.cancel()
         if pending_tasks:
             await asyncio.gather(*pending_tasks, return_exceptions=True)
+
+        for session_id in list(self._active_watches):
+            self._release_active_watch(session_id)
+        if self._active_kqueue is not None:
+            try:
+                self._active_kqueue.close()
+            except Exception:
+                pass
+        self._active_kqueue = None
 
         self._loop = None
         self._stop_event = None
@@ -211,9 +256,168 @@ class CodexDesktopRolloutIngress:
             if state.session_id != session_id:
                 continue
             if event_kind == "started":
+                state.turn_id = turn_id
                 state.started_turn_id = turn_id
             elif event_kind == "completed":
                 state.terminal_turn_ids.add(turn_id)
+        if event_kind == "started":
+            if self._arm_active_watch(session_id):
+                self._state.get_provider_runtime("codex").watched_threads.pop(
+                    session_id,
+                    None,
+                )
+            else:
+                self._activate_polling_fallback(session_id)
+        elif event_kind == "completed":
+            self._release_active_watch(session_id)
+
+    def release_session(self, session_id: str) -> None:
+        self._release_active_watch(session_id)
+
+    def _rollout_path_for_session(self, session_id: str) -> str | None:
+        for path, state in self._rollouts.items():
+            if state.session_id == session_id:
+                return path
+        return find_session_file(session_id, self._sessions_dir)
+
+    def _restore_bound_active_watches(self) -> None:
+        restored = 0
+        for state in self._rollouts.values():
+            turn_id = state.turn_id
+            if (
+                not state.user_visible
+                or not turn_id
+                or turn_id in state.terminal_turn_ids
+                or not self._should_publish_session(state.session_id)
+            ):
+                continue
+            found = self._state.find_thread_by_id_global(state.session_id)
+            if not found:
+                continue
+            workspace, thread = found
+            workspace_id = (
+                self._state.get_workspace_storage_key(workspace)
+                or workspace.daemon_workspace_id
+                or f"{workspace.tool}:{workspace.name}"
+            )
+            if self._state.get_thread_topic_id(workspace_id, workspace, thread) is None:
+                continue
+            if self._arm_active_watch(state.session_id):
+                restored += 1
+            else:
+                self._activate_polling_fallback(state.session_id)
+        if restored:
+            logger.info(
+                "[codex-external-ingress] 已恢复 active rollout 事件监听 count=%s",
+                restored,
+            )
+
+    def _arm_active_watch(self, session_id: str) -> bool:
+        if self._closed or self._active_kqueue is None:
+            return False
+        path = self._rollout_path_for_session(session_id)
+        if not path:
+            return False
+        path = os.path.abspath(path)
+        current = self._active_watches.get(session_id)
+        if current is not None and current.path == path:
+            return True
+        if current is not None:
+            self._release_active_watch(session_id)
+
+        try:
+            baseline = os.path.getsize(path)
+            fd = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+        except OSError:
+            return False
+        try:
+            event = select.kevent(
+                fd,
+                filter=select.KQ_FILTER_VNODE,
+                flags=select.KQ_EV_ADD | select.KQ_EV_ENABLE | select.KQ_EV_CLEAR,
+                fflags=_ACTIVE_WATCH_FLAGS,
+            )
+            self._active_kqueue.control([event], 0, 0)
+        except Exception:
+            os.close(fd)
+            return False
+
+        if path not in self._cursors:
+            self._seed_rollout_state(path)
+        cursor = self._cursors.setdefault(path, _RolloutCursor(path=path))
+        cursor.offset = baseline
+        cursor.partial = b""
+        self._active_watches[session_id] = _ActiveWatch(fd=fd, path=path)
+        self._active_sessions_by_fd[fd] = session_id
+        self._pending_files.add(path)
+        self._ensure_drain_task()
+        logger.info(
+            "[codex-external-ingress] hook 已接管 active rollout session=%s",
+            session_id[:12],
+        )
+        return True
+
+    def _release_active_watch(self, session_id: str) -> None:
+        watch = self._active_watches.pop(session_id, None)
+        if watch is None:
+            return
+        self._active_sessions_by_fd.pop(watch.fd, None)
+        if self._active_kqueue is not None:
+            try:
+                event = select.kevent(
+                    watch.fd,
+                    filter=select.KQ_FILTER_VNODE,
+                    flags=select.KQ_EV_DELETE,
+                )
+                self._active_kqueue.control([event], 0, 0)
+            except Exception:
+                pass
+        try:
+            os.close(watch.fd)
+        except OSError:
+            pass
+
+    def _activate_polling_fallback(self, session_id: str) -> None:
+        found = self._state.find_thread_by_id_global(session_id)
+        if not found:
+            return
+        workspace, _thread = found
+        from plugins.providers.builtin.codex.python.tui_realtime_mirror import (
+            watch_codex_thread,
+        )
+
+        watch_codex_thread(self._state, workspace, session_id)
+        logger.warning(
+            "[codex-external-ingress] active kqueue 不可用，启用轮询兜底 session=%s",
+            session_id[:12],
+        )
+
+    def _on_active_kqueue_ready(self) -> None:
+        if self._closed or self._active_kqueue is None:
+            return
+        try:
+            events = self._active_kqueue.control(None, 512, 0)
+        except Exception:
+            logger.warning(
+                "[codex-external-ingress] active kqueue 读取失败，切换轮询兜底",
+                exc_info=True,
+            )
+            for session_id in list(self._active_watches):
+                self._release_active_watch(session_id)
+                self._activate_polling_fallback(session_id)
+            return
+
+        for event in events:
+            session_id = self._active_sessions_by_fd.get(int(event.ident))
+            watch = self._active_watches.get(session_id or "")
+            if watch is None:
+                continue
+            if int(event.fflags or 0) & _ACTIVE_RELOAD_FLAGS:
+                self._release_active_watch(session_id)
+                self._activate_polling_fallback(session_id)
+                continue
+            self._pending_files.add(watch.path)
+        self._ensure_drain_task()
 
     def _cancel_fallback(self, key: tuple[str, str, str]) -> None:
         task = self._fallback_tasks.pop(key, None)
@@ -253,7 +457,7 @@ class CodexDesktopRolloutIngress:
                 return
             if key[2] == "started":
                 state.started_turn_id = key[1]
-            else:
+            elif key[2] == "completed":
                 state.terminal_turn_ids.add(key[1])
                 logger.info(
                     "[codex-external-ingress] rollout fallback 已接收 completion session=%s turn=%s",
@@ -469,6 +673,18 @@ class CodexDesktopRolloutIngress:
             role = str(payload.get("role") or "")
             phase = str(payload.get("phase") or "")
             text = _content_text(payload)
+            metadata = payload.get("internal_chat_message_metadata_passthrough")
+            if not isinstance(metadata, dict):
+                metadata = {}
+            response_turn_id = str(
+                payload.get("turn_id")
+                or payload.get("turnId")
+                or metadata.get("turn_id")
+                or metadata.get("turnId")
+                or ""
+            ).strip()
+            if response_turn_id:
+                state.turn_id = response_turn_id
             if role == "user" and text:
                 state.prompt = text
             elif role == "assistant" and phase == "final_answer" and text:
@@ -489,21 +705,51 @@ class CodexDesktopRolloutIngress:
         if not self._should_publish_session(state.session_id):
             return
 
-        if row_type == "response_item" and str(payload.get("role") or "") == "user":
-            if not state.prompt or not state.turn_id or state.started_turn_id == state.turn_id:
+        if row_type == "response_item":
+            role = str(payload.get("role") or "")
+            if role == "user":
+                if not state.prompt or not state.turn_id or state.started_turn_id == state.turn_id:
+                    return
+                key = (state.session_id, state.turn_id, "started")
+                self._schedule_fallback(
+                    key,
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "session_id": state.session_id,
+                        "turn_id": state.turn_id,
+                        "cwd": state.cwd,
+                        "prompt": state.prompt,
+                        "source": "codex_rollout",
+                    },
+                    state,
+                )
                 return
-            key = (state.session_id, state.turn_id, "started")
-            self._schedule_fallback(
-                key,
+
+            phase = str(payload.get("phase") or "").strip()
+            text = _content_text(payload)
+            metadata = payload.get("internal_chat_message_metadata_passthrough")
+            if not isinstance(metadata, dict):
+                metadata = {}
+            turn_id = str(
+                payload.get("turn_id")
+                or payload.get("turnId")
+                or metadata.get("turn_id")
+                or metadata.get("turnId")
+                or ""
+            ).strip()
+            if role != "assistant" or phase != "commentary" or not text or not turn_id:
+                return
+            state.turn_id = turn_id
+            await self._adapter.ingest_external_hook_payload(
                 {
-                    "hook_event_name": "UserPromptSubmit",
+                    "hook_event_name": "AgentMessage",
                     "session_id": state.session_id,
-                    "turn_id": state.turn_id,
+                    "turn_id": turn_id,
                     "cwd": state.cwd,
-                    "prompt": state.prompt,
+                    "message": text,
+                    "phase": phase,
                     "source": "codex_rollout",
-                },
-                state,
+                }
             )
             return
 
@@ -537,6 +783,8 @@ class CodexDesktopRolloutIngress:
         )
 
     def _should_publish_session(self, session_id: str) -> bool:
+        if session_id in self._state.get_provider_runtime("codex").watched_threads:
+            return False
         live_check = getattr(self._adapter, "has_authoritative_live_session", None)
         if callable(live_check) and live_check(session_id):
             return False
