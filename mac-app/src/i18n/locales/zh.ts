@@ -390,6 +390,7 @@ export const zhTexts: AppTexts = {
       outputTokens: "输出",
       cacheCreationTokens: "缓存写入",
       cacheReadTokens: "缓存读取",
+      cacheUtilization: "缓存利用率",
       totalTokens: "总量",
       totalCost: "费用",
       updatedAt: (value: string) => `更新于 ${value}`,

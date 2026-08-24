@@ -16,6 +16,14 @@ function formatCost(value?: number | null) {
   return `$${value.toFixed(2)}`;
 }
 
+function formatCacheUtilization(inputTokens: number, cacheCreationTokens: number, cacheReadTokens: number) {
+  const inputSideTokens = inputTokens + cacheCreationTokens + cacheReadTokens;
+  if (inputSideTokens === 0) {
+    return "-";
+  }
+  return `${((cacheReadTokens / inputSideTokens) * 100).toFixed(1)}%`;
+}
+
 function describeUnknownError(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
@@ -397,6 +405,7 @@ export function UsageBrowser() {
                   <th className="px-4 py-3 font-semibold">{t.usage.outputTokens}</th>
                   <th className="px-4 py-3 font-semibold">{t.usage.cacheCreationTokens}</th>
                   <th className="px-4 py-3 font-semibold">{t.usage.cacheReadTokens}</th>
+                  <th className="px-4 py-3 font-semibold">{t.usage.cacheUtilization}</th>
                   <th className="px-4 py-3 font-semibold">{t.usage.totalTokens}</th>
                   <th className="px-4 py-3 font-semibold">{t.usage.totalCost}</th>
                 </tr>
@@ -409,6 +418,7 @@ export function UsageBrowser() {
                     <td className="px-4 py-3">{formatNumber(day.outputTokens)}</td>
                     <td className="px-4 py-3">{formatNumber(day.cacheCreationTokens)}</td>
                     <td className="px-4 py-3">{formatNumber(day.cacheReadTokens)}</td>
+                    <td className="px-4 py-3">{formatCacheUtilization(day.inputTokens, day.cacheCreationTokens, day.cacheReadTokens)}</td>
                     <td className="px-4 py-3">{formatNumber(day.totalTokens)}</td>
                     <td className="px-4 py-3">{formatCost(day.totalCostUsd)}</td>
                   </tr>

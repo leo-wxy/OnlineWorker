@@ -111,7 +111,7 @@ def _cost(row: dict[str, Any]) -> float | None:
 def _run_ccusage_summary(request: UsageSummaryRequest) -> dict[str, Any]:
     binary = resolve_ccusage_binary()
     args = [
-        str(binary), request.source_id, "daily", "--json", "--no-cost", "--offline",
+        str(binary), request.source_id, "daily", "--json", "--offline",
         "--since", request.start_date, "--until", request.end_date,
     ]
     if request.timezone and request.timezone != "local":

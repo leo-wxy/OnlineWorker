@@ -18,6 +18,7 @@ def test_ccusage_runtime_normalizes_daily_rows(monkeypatch, tmp_path: Path):
             "daily": [{
                 "date": "2026-07-11", "inputTokens": 10, "outputTokens": 2,
                 "cacheCreationTokens": 3, "cacheReadTokens": 7, "totalTokens": 22,
+                "costUSD": 1.25,
             }]
         }) + "\nJSON\n",
         encoding="utf-8",
@@ -31,7 +32,7 @@ def test_ccusage_runtime_normalizes_daily_rows(monkeypatch, tmp_path: Path):
     assert result["days"] == [{
         "date": "2026-07-11", "inputTokens": 10, "outputTokens": 2,
         "cacheCreationTokens": 3, "cacheReadTokens": 7, "totalTokens": 22,
-        "totalCostUsd": None,
+        "totalCostUsd": 1.25,
     }]
 
 
@@ -64,6 +65,7 @@ def test_ccusage_runtime_reuses_unchanged_builtin_source(monkeypatch, tmp_path: 
 
     assert first["days"] == second["days"]
     assert len(calls) == 1
+    assert "--no-cost" not in calls[0]
 
     session_file.write_text("first\nsecond\n", encoding="utf-8")
     refreshed = get_usage_source_summary(

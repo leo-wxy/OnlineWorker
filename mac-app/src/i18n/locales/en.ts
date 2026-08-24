@@ -395,6 +395,7 @@ export const enTexts: AppTexts = {
       outputTokens: "Output",
       cacheCreationTokens: "Cache Write",
       cacheReadTokens: "Cache Read",
+      cacheUtilization: "Cache Utilization",
       totalTokens: "Total",
       totalCost: "Cost",
       updatedAt: (value: string) => `Updated ${value}`,

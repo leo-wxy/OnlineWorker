@@ -94,6 +94,11 @@ test("usage browser discovers all usage sources from the usage catalog", () => {
   assert.match(page, /t\.usage\.endDate/);
   assert.match(page, /t\.usage\.chartTitle/);
   assert.match(page, /summary\.days\.map/);
+  assert.match(page, /function formatCacheUtilization\(inputTokens: number, cacheCreationTokens: number, cacheReadTokens: number\)/);
+  assert.match(page, /const inputSideTokens = inputTokens \+ cacheCreationTokens \+ cacheReadTokens;/);
+  assert.match(page, /cacheReadTokens \/ inputSideTokens/);
+  assert.match(page, /t\.usage\.cacheUtilization/);
+  assert.match(page, /formatCacheUtilization\(day\.inputTokens, day\.cacheCreationTokens, day\.cacheReadTokens\)/);
   assert.match(page, /maxTokens/);
   assert.match(page, /height:\s*`\$\{height\}px`/);
   assert.match(page, /background:/);

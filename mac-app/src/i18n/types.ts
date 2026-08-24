@@ -303,6 +303,7 @@ export interface AppTexts {
     outputTokens: string;
     cacheCreationTokens: string;
     cacheReadTokens: string;
+    cacheUtilization: string;
     totalTokens: string;
     totalCost: string;
     updatedAt: (value: string) => string;
