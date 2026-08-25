@@ -836,6 +836,7 @@ Plans:
 Latest verification:
 
 - Phase 21 closed on 2026-08-15 with canonical `21-VERIFICATION.md` status `passed`. Focused Codex ingress, Hook, EventBus, workspace, logging, and version checks passed; the installed `v1.8.4` runtime suppressed a real child session before publication, retained zero classified child/internal state or routes, and ran with the provider IPC chain healthy. The final standalone Telegram visual comparison was explicitly waived by the user and is not represented as passed.
+- A 2026-08-24 post-close follow-up fixed delayed previous-turn Hook completion bypassing Telegram deduplication after the next turn became current. The deterministic duplicate-send regression and related provider suites passed `178` tests, including two macOS FSEvents checks rerun outside the sandbox. The combined `1.10.0` package was rebuilt, installed, and restarted with matching binary hashes; real Telegram acceptance for the duplicate-message scenario remains pending.
 
 Success Criteria (what must be TRUE):
 

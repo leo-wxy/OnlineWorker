@@ -298,3 +298,30 @@ Verification:
 - The first install attempt found two pre-existing bot processes that did not stop within the helper timeout. After terminating those exact stale processes, installation and restart completed successfully.
 - Installed app, bot, and usage-sidecar hashes matched the mounted DMG. The bundled `codemaker` provider and `popo` notification manifests were present, and the installed App, main bot, and account worker remained running after startup.
 - Real Telegram acceptance remains pending; this record does not replace the canonical Phase 21 closeout.
+
+## Implementation Record — 2026-08-24 (Turn-Scoped Telegram Deduplication Follow-Up)
+
+Implemented a post-close reliability fix for delayed Codex completion events crossing the next turn boundary.
+
+Verified root cause:
+
+- A real session trace showed one provider turn completing two different Telegram messages.
+- The rollout completion path synchronized the first final reply, then the next turn replaced `thread_current_runs[thread_id]`.
+- A delayed Hook completion for the previous turn checked only the new current run, missed the previous turn's synchronized ledger entry, and published the old final reply again.
+- Concurrent Hook dispatch exposed the ordering window; polling fallback was not active in the captured incident.
+
+Implemented behavior:
+
+- Provider final-reply and notification deduplication now resolves the run by the event `turn_id` before falling back to the thread's current run.
+- Run status and notification claims can update the matching historical turn without mutating the next active turn.
+- An already-synchronized delayed `turn/completed` for a non-current turn is ignored before it can complete or clear the active turn.
+- Hook delivery remains asynchronous; turn-scoped visible-message idempotency closes the duplicate-output race without adding another queue or ledger.
+
+Verification:
+
+- The deterministic regression reproduced the defect before the repair with `send_count == 2` where one Telegram message was expected.
+- Provider state, Telegram streaming, adapter, external-ingress, and owner-bridge regression passed: `176` sandbox-compatible tests plus `2` macOS FSEvents tests rerun outside the sandbox, `178 passed` total.
+- The combined wrapper rebuilt `OnlineWorker_1.10.0_aarch64.dmg`; the installed artifact SHA-256 was `a2ce0d3c1294bdfefd6830984a0d1ace3c29e69ade171871abc9e136fbcbee48`.
+- The first fast-install attempt stopped before replacement because two stale bot processes exceeded the helper timeout. After those exact old processes exited, the repository install helper completed replacement and restart.
+- Installed app, bot, and usage-sidecar hashes matched the mounted DMG. The packaged `codemaker` provider and `popo` notification manifests were present, and the installed App, main bot, and account worker remained running after startup.
+- Real Telegram acceptance for the duplicate-message scenario remains pending.

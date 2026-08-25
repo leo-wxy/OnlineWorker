@@ -1796,6 +1796,119 @@ async def test_codex_delayed_final_events_emit_notification_when_reply_already_s
 
 
 @pytest.mark.asyncio
+async def test_codex_delayed_old_hook_during_new_turn_start_does_not_duplicate_tg():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-123"] = ThreadInfo(
+        thread_id="tid-123",
+        topic_id=3794,
+        preview="跨 turn 重复 final 去重验证",
+        archived=False,
+    )
+    state = AppState(storage=AppStorage(workspaces={"codex:onlineWorker": ws}))
+    old_run = state.start_provider_run(
+        "codex",
+        workspace_id="codex:onlineWorker",
+        thread_id="tid-123",
+        turn_id="turn-old",
+    )
+    state.mark_provider_run(
+        "codex",
+        thread_id="tid-123",
+        status="completed",
+        final_reply_synced_to_tg=True,
+        notification_emitted=True,
+    )
+    state.message_bus.notification_summary.build_completed_notification = AsyncMock(
+        return_value=SimpleNamespace(
+            task_name_override="旧任务已完成",
+            task_summary_override="旧任务已完成",
+            message="完成摘要：旧任务已完成",
+        )
+    )
+
+    new_send_started = asyncio.Event()
+    release_new_send = asyncio.Event()
+    send_count = 0
+
+    async def send_message(**kwargs):
+        nonlocal send_count
+        send_count += 1
+        if send_count == 1:
+            new_send_started.set()
+            await release_new_send.wait()
+        return SimpleNamespace(message_id=5000 + send_count)
+
+    bot = SimpleNamespace(
+        send_message=AsyncMock(side_effect=send_message),
+        delete_message=AsyncMock(),
+        edit_message_text=AsyncMock(),
+    )
+    notifications = RecordingNotificationRouter()
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID, notification_router=notifications)
+
+    def event(method, turn_id, **params):
+        return (
+            "app-server-event",
+            {
+                "workspace_id": "codex:onlineWorker",
+                "message": {
+                    "method": method,
+                    "params": {
+                        "threadId": "tid-123",
+                        "turnId": turn_id,
+                        **params,
+                    },
+                },
+            },
+        )
+
+    new_turn_task = asyncio.create_task(
+        handler(*event("turn/started", "turn-new", turn={"id": "turn-new"}))
+    )
+    await asyncio.wait_for(new_send_started.wait(), timeout=1)
+
+    await handler(*event("turn/started", "turn-old", turn={"id": "turn-old"}))
+    await handler(
+        *event(
+            "item/completed",
+            "turn-old",
+            item={
+                "type": "agentMessage",
+                "threadId": "tid-123",
+                "phase": "final_answer",
+                "text": "旧任务最终回复",
+            },
+        )
+    )
+    await handler(
+        *event(
+            "turn/completed",
+            "turn-old",
+            turn={"id": "turn-old", "status": "completed"},
+        )
+    )
+
+    release_new_send.set()
+    await new_turn_task
+
+    current_run = state.get_provider_current_run("codex", "tid-123")
+    assert send_count == 1
+    bot.edit_message_text.assert_not_awaited()
+    assert notifications.events == []
+    assert current_run is not None
+    assert current_run.turn_id == "turn-new"
+    assert current_run.status == "started"
+    assert old_run.final_reply_synced_to_tg is True
+    assert state.streaming_turns["tid-123"].turn_id == "turn-new"
+
+
+@pytest.mark.asyncio
 async def test_codex_item_and_turn_completed_race_emits_one_notification(monkeypatch):
     entered_summary = asyncio.Event()
     release_summary = asyncio.Event()

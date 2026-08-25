@@ -705,18 +705,34 @@ class AppState:
             return None
         return runtime.runs.get(run_id)
 
+    def get_provider_run_for_turn(
+        self,
+        tool_name: str,
+        thread_id: str,
+        turn_id: str,
+    ) -> Optional[ProviderRunState]:
+        run = self.get_provider_runtime(tool_name).runs.get(str(turn_id))
+        if run is None or run.thread_id != thread_id:
+            return None
+        return run
+
     def mark_provider_run(
         self,
         tool_name: str,
         *,
         thread_id: str,
+        turn_id: Optional[str] = None,
         status: Optional[str] = None,
         final_reply_synced_to_tg: Optional[bool] = None,
         notification_emitted: Optional[bool] = None,
         first_progress_at: Optional[bool] = None,
         session_tab_visible_at: Optional[bool] = None,
     ) -> Optional[ProviderRunState]:
-        run = self.get_provider_current_run(tool_name, thread_id)
+        run = (
+            self.get_provider_run_for_turn(tool_name, thread_id, turn_id)
+            if turn_id
+            else self.get_provider_current_run(tool_name, thread_id)
+        )
         if run is None:
             return None
         now = time.time()

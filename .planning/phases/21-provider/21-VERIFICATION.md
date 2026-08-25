@@ -38,6 +38,15 @@ Phase 21 achieved its goal: provider-owned visibility is applied before shared p
 - The installed runtime produced no new request-level `httpx` log lines, and active local logs contained zero unredacted Telegram Bot URLs.
 - `OnlineWorker_1.8.4_aarch64.dmg` built and installed successfully; SHA-256: `e0f841b09f57d4151fcdce2997b5234a00aa23c6948d01b419ee3858d6bd817c`.
 
+## Post-Close Reliability Follow-Up — 2026-08-24
+
+- A delayed previous-turn Hook completion could bypass Telegram deduplication after the next turn replaced the thread's current-run pointer.
+- Deduplication and notification claims now resolve the provider run by event `turn_id`, and already-synchronized stale completion no longer mutates the active turn.
+- The focused regression failed before the repair with two Telegram sends for one completed turn and passed after the repair.
+- Provider state, Telegram streaming, adapter, external-ingress, and owner-bridge regression passed: `176` sandbox-compatible tests plus `2` macOS FSEvents tests rerun outside the sandbox, `178 passed` total.
+- The combined wrapper rebuilt and installed `OnlineWorker_1.10.0_aarch64.dmg` with SHA-256 `a2ce0d3c1294bdfefd6830984a0d1ace3c29e69ade171871abc9e136fbcbee48`; installed binary hashes matched the mounted DMG and the required private plugin manifests were present.
+- Real Telegram acceptance for this duplicate-message scenario remains unverified; the canonical 2026-08-15 closeout evidence above is unchanged.
+
 ## Human Verification Closeout
 
 The standalone live Telegram visual comparison was not rerun after the final cleanup. The user explicitly requested Phase 21 closeout on 2026-08-15, accepting this item as a documented waiver. The real installed child-suppression event, route/state inventory, Topic cleanup, and installed package checks remain the closure evidence; no visual pass is claimed.
