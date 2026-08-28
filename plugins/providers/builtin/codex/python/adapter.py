@@ -14,6 +14,7 @@ from contextlib import suppress
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
 import uuid
@@ -31,6 +32,7 @@ from plugins.providers.builtin.codex.python.transport import (
 logger = logging.getLogger(__name__)
 DEFAULT_APPROVALS_REVIEWER = "user"
 PENDING_THREAD_START_TTL_SECONDS = 120.0
+IDLE_RELEASE_DELAY_SECONDS = 1.0
 _INTERNAL_HOOK_PROMPT_PREFIXES = (
     "You write the one-line activity update displayed beneath an existing Codex task title.",
     "You are a helpful assistant. You will be presented with a user prompt, and your job is to provide a short title for a task",
@@ -87,6 +89,14 @@ class CodexAdapter:
         }
         self._authoritative_live_sessions: set[str] = set()
         self._hidden_live_sessions: set[str] = set()
+        self._supports_idle_restart = False
+        self._idle_restart_handler = None
+        self._idle_check_task: Optional[asyncio.Task] = None
+        self._idle_restart_task: Optional[asyncio.Task] = None
+        self._activity_sequence = 0
+        self._released_threads: set[str] = set()
+        self._pending_server_requests: set[Any] = set()
+        self._event_worker_busy = False
         # 最近协议收发摘要，用于 1006 / EOF 断线诊断
         self._recent_inbound_messages: deque[str] = deque(maxlen=6)
         self._recent_outbound_messages: deque[str] = deque(maxlen=6)
@@ -181,6 +191,14 @@ class CodexAdapter:
         self._record_protocol_message("inbound", resp_raw)
         resp = json.loads(resp_raw)
         logger.info(f"app-server initialize 响应：{json.dumps(resp)[:200]}")
+        server = resp.get("result") or {}
+        version = re.search(r"/(\d+)\.(\d+)\.(\d+)", str(server.get("userAgent") or ""))
+        # SIGHUP graceful drain is verified on 0.150; older/unknown servers stay untouched.
+        self._supports_idle_restart = bool(
+            version and tuple(map(int, version.groups())) >= (0, 150, 0)
+            and server.get("platformFamily") == "unix"
+            and self._transport != "stdio"
+        )
 
         # id=1 已被 initialize 消耗
         self._next_id = 2
@@ -194,6 +212,12 @@ class CodexAdapter:
 
     async def disconnect(self) -> None:
         """断开连接，取消所有后台任务。"""
+        idle_tasks = [task for task in (self._idle_check_task, self._idle_restart_task)
+                      if task and not task.done() and task is not asyncio.current_task()]
+        for task in idle_tasks:
+            task.cancel()
+        if idle_tasks:
+            await asyncio.gather(*idle_tasks, return_exceptions=True)
         await self.stop_desktop_rollout_ingress()
         self._connected = False
         self._disconnect_notified = True
@@ -225,7 +249,98 @@ class CodexAdapter:
 
     @property
     def connected(self) -> bool:
-        return self._connected
+        return self._connected or self.idle_restart_in_progress
+
+    @property
+    def idle_restart_in_progress(self) -> bool:
+        return self._idle_restart_task is not None and not self._idle_restart_task.done()
+
+    def configure_idle_restart(self, handler) -> None:
+        """Install only for an OnlineWorker-owned Unix server, never an attached server."""
+        self._idle_restart_handler = handler
+        if handler and not self._supports_idle_restart:
+            logger.warning("[writer-release] 当前 app-server 未确认支持安全空闲回收，保持原连接")
+
+    def _schedule_idle_release(self) -> None:
+        if not self._idle_restart_handler or not self._supports_idle_restart or self.idle_restart_in_progress:
+            return
+        if self._idle_check_task and not self._idle_check_task.done():
+            if self._idle_check_task is not asyncio.current_task():
+                self._idle_check_task.cancel()
+
+        async def check() -> None:
+            try:
+                await asyncio.sleep(IDLE_RELEASE_DELAY_SECONDS)
+                await self._release_idle_backend()
+            except Exception as exc:
+                logger.warning("[writer-release] 空闲回收未完成，保留恢复路径：%s", exc)
+
+        self._idle_check_task = asyncio.create_task(check(), name="codex-idle-release")
+
+    async def _release_idle_backend(self) -> None:
+        if (not self._idle_restart_handler or not self._supports_idle_restart
+                or not self._connected or self.idle_restart_in_progress):
+            return
+        await self._event_queue.join()
+        await self._server_request_queue.join()
+        if self._pending or self._pending_server_requests:
+            return
+        sequence = self._activity_sequence
+        loaded = await self._call("thread/loaded/list", {"limit": 100})
+        # ponytail: skip incomplete pages; paginate if a backend routinely loads over 100 threads.
+        if not isinstance(loaded, dict) or loaded.get("nextCursor"):
+            return
+        thread_ids = loaded.get("data")
+        if not isinstance(thread_ids, list) or not thread_ids:
+            return
+        for thread_id in thread_ids:
+            if not isinstance(thread_id, str) or not thread_id:
+                return
+            result = await self._call("thread/read", {"threadId": thread_id, "includeTurns": False})
+            status = (result.get("thread") or {}).get("status") if isinstance(result, dict) else None
+            if not isinstance(status, dict) or status.get("type") != "idle":
+                return
+        if sequence != self._activity_sequence:
+            self._schedule_idle_release()
+            return
+        if (self._pending or self._pending_server_requests
+                or self._event_worker_busy
+                or not self._event_queue.empty() or not self._server_request_queue.empty()):
+            return
+        self._idle_restart_task = asyncio.create_task(
+            self._restart_idle_backend(thread_ids), name="codex-idle-restart",
+        )
+        await asyncio.shield(self._idle_restart_task)
+
+    def _handoff_released_sessions(self) -> None:
+        if not self._event_worker_busy and self._event_queue.empty():
+            self._authoritative_live_sessions.difference_update(self._released_threads)
+
+    async def _restart_idle_backend(self, thread_ids: list[str]) -> None:
+        try:
+            url, process = await self._idle_restart_handler()
+            # The native process has exited: finish its receiver before reusing this adapter.
+            self._connected = False
+            tasks = [task for task in (self._recv_task, self._heartbeat_task) if task and not task.done()]
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            if self._ws:
+                await self._ws.close()
+                self._ws = None
+            self._released_threads.update(thread_ids)
+            self._released_threads.update(self._authoritative_live_sessions)
+            self._pending_server_requests.clear()
+            self._handoff_released_sessions()
+            await self.connect(url, process=process)
+            logger.info("[writer-release] 已释放 %s 个空闲任务的 writer，连接已恢复", len(thread_ids))
+        except Exception:
+            self._connected = False
+            self._idle_restart_task = None
+            await self.stop_desktop_rollout_ingress()
+            self._notify_disconnect_callbacks_once()
+            raise
 
     # ------------------------------------------------------------------
     # 事件订阅（与 DaemonClient 签名完全一致）
@@ -776,8 +891,15 @@ class CodexAdapter:
 
     async def _call(self, method: str, params: dict) -> Any:
         """发送 JSON-RPC 请求，等待响应，返回 result。"""
+        if self.idle_restart_in_progress:
+            await asyncio.shield(self._idle_restart_task)
         if not self._connected:
             raise RuntimeError("未连接到 app-server")
+        if method not in {"thread/read", "thread/list", "thread/loaded/list"}:
+            self._activity_sequence += 1
+        thread_id = str(params.get("threadId") or "")
+        if method == "turn/start" and thread_id in self._released_threads:
+            await self.resume_thread(self._thread_workspace_map.get(thread_id, ""), thread_id)
 
         req_id = self._next_id
         self._next_id += 1
@@ -789,7 +911,7 @@ class CodexAdapter:
         payload = json.dumps({"id": req_id, "method": method, "params": params})
         try:
             await self._send_raw(payload)
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             current_fut = self._pending.pop(req_id, None) or fut
             if current_fut.done():
                 with suppress(Exception, asyncio.CancelledError):
@@ -800,10 +922,17 @@ class CodexAdapter:
 
         try:
             result = await asyncio.wait_for(fut, timeout=30.0)
+            if method == "thread/resume":
+                self._released_threads.discard(thread_id)
+                if thread_id:
+                    self._authoritative_live_sessions.add(thread_id)
+                self._schedule_idle_release()
             return result
         except asyncio.TimeoutError:
             self._pending.pop(req_id, None)
             raise TimeoutError(f"app-server RPC 超时：method={method}")
+        finally:
+            self._pending.pop(req_id, None)
 
     # ------------------------------------------------------------------
     # RPC 方法（与 DaemonClient 签名完全一致）
@@ -1039,6 +1168,7 @@ class CodexAdapter:
             raise RuntimeError("未连接到 app-server")
         response = json.dumps({"id": request_id, "result": result})
         await self._send_raw(response)
+        self._pending_server_requests.discard(request_id)
         decision = ""
         if isinstance(result, dict):
             decision = str(result.get("decision") or "")
@@ -1272,6 +1402,8 @@ class CodexAdapter:
         self._pending.clear()
 
     def _notify_disconnect_callbacks_once(self) -> None:
+        if self.idle_restart_in_progress:
+            return
         if self._disconnect_notified:
             return
         self._disconnect_notified = True
@@ -1431,15 +1563,33 @@ class CodexAdapter:
         try:
             while True:
                 method, envelope = await self._event_queue.get()
+                self._event_worker_busy = True
                 try:
+                    delivered = True
                     for cb in self._event_callbacks:
                         try:
                             await cb(method, envelope)
                         except Exception as e:
+                            delivered = False
                             event_method = envelope.get("message", {}).get("method", "?")
                             logger.error(f"事件回调异常 method={event_method}：{e}")
+                    message = envelope.get("message", {})
+                    params = message.get("params", {})
+                    if message.get("method") == "turn/completed" and not params.get("_mirroredOnly"):
+                        thread_id = self._extract_thread_id_from_event_params(params)
+                        turn_id = str((params.get("turn") or {}).get("id") or params.get("turnId") or "")
+                        if delivered and thread_id and turn_id:
+                            # Keep the existing fallback dedupe ledger across writer handoff.
+                            session = self._external_hook_sessions.setdefault(thread_id, {})
+                            session["terminal_emitted_turn_id"] = turn_id
+                            self._record_external_primary_event(
+                                {"source": "codex_app_server"}, thread_id, turn_id, "completed",
+                            )
+                        self._schedule_idle_release()
                 finally:
+                    self._event_worker_busy = False
                     self._event_queue.task_done()
+                    self._handoff_released_sessions()
         except asyncio.CancelledError:
             logger.info("事件分发循环被取消")
 
@@ -1493,6 +1643,8 @@ class CodexAdapter:
             # 关键决策（Pitfall 1）：只派发给 on_server_request 回调，
             # 不同时包装为 app-server-event。避免 events.py 中两条路径都触发导致重复。
             logger.debug(f"收到 server request id={msg_id} method={method}")
+            self._activity_sequence += 1
+            self._pending_server_requests.add(msg_id)
             if self._server_request_callbacks:
                 self._ensure_server_request_worker()
                 await self._server_request_queue.put((method, params, msg_id))
@@ -1509,6 +1661,9 @@ class CodexAdapter:
                 fut.set_result(msg.get("result"))
 
         elif method and msg_id is None:
+            self._activity_sequence += 1
+            if method == "serverRequest/resolved":
+                self._pending_server_requests.discard(params.get("requestId"))
             # ── Server notification（事件）──
             # 先维护 thread_id → workspace_id 映射，再包装事件信封。
             # 这样像 turn/started 这类首个事件，如果携带 cwd，也能在当前事件内解析到 workspace。
@@ -1543,7 +1698,9 @@ class CodexAdapter:
             ):
                 self._hidden_live_sessions.add(thread_id)
                 return
-            if thread_id:
+            if thread_id and method == "thread/closed":
+                self._authoritative_live_sessions.discard(thread_id)
+            elif thread_id:
                 self._authoritative_live_sessions.add(thread_id)
             self._update_thread_workspace_map(method, params)
             workspace_id = self._resolve_workspace_id_from_params(params)

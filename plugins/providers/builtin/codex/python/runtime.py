@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import logging
 import os
+import signal
 import tomllib
 import urllib.error
 import urllib.request
@@ -1880,6 +1881,26 @@ async def sync_existing_topics_after_startup(manager, bot) -> None:
 
 async def setup_adapter_connection(manager, bot, adapter) -> None:
     await manager._setup_provider_connection("codex", bot, adapter)
+    configure_idle_release(adapter, manager.state.app_server_proc)
+
+
+def configure_idle_release(adapter, proc: Optional[AppServerProcess]) -> None:
+    if (not isinstance(proc, AppServerProcess) or not isinstance(adapter, CodexAdapter)
+            or proc.protocol != "unix" or not proc.owned_unix or proc._attached_existing
+            or proc._proc is None or not hasattr(signal, "SIGHUP")):
+        return
+
+    async def restart() -> tuple[str, asyncio.subprocess.Process]:
+        process = proc._proc
+        if process is None:
+            raise RuntimeError("托管 app-server 进程不存在")
+        # Native SIGHUP drains active turns and cannot escalate to a forced shutdown.
+        process.send_signal(signal.SIGHUP)
+        await process.wait()
+        url = await proc.start()
+        return url, proc._proc
+
+    adapter.configure_idle_restart(restart)
 
 
 def resolve_reconnect_topic_id(manager, provider_name: str):
@@ -2083,6 +2104,9 @@ async def monitor_process_health(
     while True:
         await asyncio.sleep(check_interval)
 
+        adapter = manager.state.get_adapter("codex")
+        if isinstance(adapter, CodexAdapter) and adapter.idle_restart_in_progress:
+            continue
         if not proc.running:
             logger.error("[monitor] 检测到 app-server 进程已停止，触发重连…")
             log_app_server_process_snapshot(proc, reason="process_monitor_detected_exit")

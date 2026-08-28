@@ -1,3 +1,10 @@
+import asyncio
+import json
+import os
+import shutil
+import signal
+import tempfile
+import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -7,6 +14,110 @@ from config import Config, ToolConfig
 from core.state import AppState, PendingApproval
 from core.storage import AppStorage, ThreadInfo, WorkspaceInfo
 from plugins.providers.builtin.codex.python import runtime as codex_runtime
+from plugins.providers.builtin.codex.python.adapter import CodexAdapter
+from plugins.providers.builtin.codex.python.process import AppServerProcess
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owned,attached", [(True, False), (False, False), (True, True)])
+async def test_idle_release_only_signals_own_server(owned, attached):
+    adapter = CodexAdapter()
+    adapter._supports_idle_restart = True
+    proc = AppServerProcess(protocol="unix", owned_unix=owned)
+    proc._attached_existing = attached
+    process = MagicMock()
+    process.wait = AsyncMock(return_value=0)
+    proc._proc = process
+    proc.start = AsyncMock(return_value="unix:///tmp/ow-test.sock")
+
+    codex_runtime.configure_idle_release(adapter, proc)
+    if owned and not attached:
+        assert await adapter._idle_restart_handler() == ("unix:///tmp/ow-test.sock", process)
+        process.send_signal.assert_called_once_with(signal.SIGHUP)
+        process.wait.assert_awaited_once()
+        proc.start.assert_awaited_once()
+        process.terminate.assert_not_called()
+        process.kill.assert_not_called()
+    else:
+        assert adapter._idle_restart_handler is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.environ.get("ONLINEWORKER_RUN_CODEX_NATIVE_TESTS") != "1",
+    reason="Opt-in native Codex check; uses isolated synthetic sessions and no model requests",
+)
+async def test_native_idle_release_allows_another_writer_and_later_resume(tmp_path, monkeypatch):
+    codex_bin = shutil.which("codex")
+    if not codex_bin or not hasattr(signal, "SIGHUP"):
+        pytest.skip("Requires Codex 0.150+ on Unix")
+    env = os.environ.copy()
+    env["CODEX_HOME"] = str(tmp_path)
+    env.pop("OPENAI_API_KEY", None)
+    env.pop("CODEX_API_KEY", None)
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.process._build_subprocess_env", lambda: env,
+    )
+    # Short paths stay below the Unix-domain-socket path length limit on macOS.
+    with tempfile.TemporaryDirectory(prefix="ow-writer-", dir="/tmp") as socket_dir:
+        owner_proc = AppServerProcess(
+            codex_bin=codex_bin, protocol="unix", owned_unix=True,
+            listen_url=f"unix://{socket_dir}/owner.sock",
+        )
+        peer_proc = AppServerProcess(
+            codex_bin=codex_bin, protocol="unix", owned_unix=True,
+            listen_url=f"unix://{socket_dir}/peer.sock",
+        )
+        owner, peer = CodexAdapter(), CodexAdapter()
+        try:
+            owner_url = await owner_proc.start()
+            await owner.connect(owner_url, process=owner_proc._proc)
+            if not owner._supports_idle_restart:
+                pytest.skip("Installed Codex does not advertise verified graceful-restart support")
+            peer_url = await peer_proc.start()
+            await peer.connect(peer_url, process=peer_proc._proc)
+            codex_runtime.configure_idle_release(owner, owner_proc)
+            thread_id = str(uuid.uuid4())
+            rollout = tmp_path / "sessions" / "2026" / "01" / "01" / f"rollout-2026-01-01T00-00-00-{thread_id}.jsonl"
+            rollout.parent.mkdir(parents=True)
+            rows = [
+                {"timestamp": "2026-01-01T00:00:00Z", "type": "session_meta", "payload": {
+                    "id": thread_id, "timestamp": "2026-01-01T00:00:00Z", "cwd": str(tmp_path),
+                    "originator": "writer-smoke", "cli_version": "0.150.0", "source": "cli",
+                    "model_provider": "openai",
+                }},
+                {"timestamp": "2026-01-01T00:00:01Z", "type": "response_item", "payload": {
+                    "type": "message", "role": "user", "content": [{"type": "input_text", "text": "Synthetic task"}],
+                }},
+                {"timestamp": "2026-01-01T00:00:02Z", "type": "response_item", "payload": {
+                    "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Done"}],
+                }},
+            ]
+            rollout.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+            await owner.resume_thread("ws", thread_id)
+            with pytest.raises(RuntimeError, match="active writer"):
+                await peer.resume_thread("ws", thread_id)
+            first_pid = owner_proc._proc.pid
+            before = asyncio.get_running_loop().time()
+            # A real idle resume must schedule release without a synthetic completion event.
+            await asyncio.wait_for(owner._idle_check_task, timeout=20)
+            assert owner_proc._proc.pid != first_pid
+            assert owner.connected
+            assert not owner.has_authoritative_live_session(thread_id)
+            assert (await peer.resume_thread("ws", thread_id))["thread"]["id"] == thread_id
+            with pytest.raises(RuntimeError, match="active writer"):
+                await owner.resume_thread("ws", thread_id)
+            await peer.disconnect()
+            await peer_proc.stop()
+            assert (await owner.resume_thread("ws", thread_id))["thread"]["id"] == thread_id
+            assert thread_id not in owner._released_threads
+            assert owner.has_authoritative_live_session(thread_id)
+            print(f"native writer release: {asyncio.get_running_loop().time() - before:.2f}s including reattach checks; no model requests sent")
+        finally:
+            await peer.disconnect()
+            await owner.disconnect()
+            await peer_proc.stop()
+            await owner_proc.stop()
 
 
 def test_build_status_lines_reports_codex_hook_review_after_connected_status():

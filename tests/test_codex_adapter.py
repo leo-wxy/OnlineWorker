@@ -16,6 +16,161 @@ def _fake_create_task(coro, name=None):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("other_status", ["idle", "active", "systemError", "unknown"])
+async def test_idle_release_checks_every_loaded_thread(other_status):
+    adapter = CodexAdapter()
+    adapter._connected = True
+    adapter._supports_idle_restart = True
+    restart = AsyncMock(return_value=("unix:///tmp/ow-test.sock", MagicMock()))
+    adapter.configure_idle_restart(restart)
+    adapter.connect = AsyncMock()
+    adapter._authoritative_live_sessions.update({"done-thread", "other-thread"})
+    adapter._call = AsyncMock(side_effect=[
+        {"data": ["done-thread", "other-thread"], "nextCursor": None},
+        {"thread": {"status": {"type": "idle"}}},
+        {"thread": {"status": {"type": other_status}}},
+    ])
+
+    await adapter._release_idle_backend()
+
+    if other_status == "idle":
+        restart.assert_awaited_once()
+        adapter.connect.assert_awaited_once()
+        assert not adapter.has_authoritative_live_session("done-thread")
+        assert adapter._released_threads == {"done-thread", "other-thread"}
+    else:
+        restart.assert_not_awaited()
+        assert adapter.has_authoritative_live_session("done-thread")
+
+
+@pytest.mark.asyncio
+async def test_idle_release_aborts_if_a_send_starts_during_idle_probe():
+    adapter = CodexAdapter()
+    adapter._connected = True
+    adapter._supports_idle_restart = True
+    restart = AsyncMock()
+    adapter.configure_idle_restart(restart)
+
+    async def probe(method, params):
+        if method == "thread/loaded/list":
+            return {"data": ["done-thread"]}
+        adapter._activity_sequence += 1
+        return {"thread": {"status": {"type": "idle"}}}
+
+    adapter._call = AsyncMock(side_effect=probe)
+    await adapter._release_idle_backend()
+    restart.assert_not_awaited()
+    await adapter.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_send_waits_for_idle_restart_and_resumes_released_thread():
+    adapter = CodexAdapter()
+    adapter._connected = False
+    adapter._released_threads.add("done-thread")
+    release = asyncio.Event()
+    calls = []
+
+    async def restart():
+        await release.wait()
+        adapter._connected = True
+
+    async def send_raw(payload):
+        request = json.loads(payload)
+        calls.append(request["method"])
+        await adapter._dispatch(json.dumps({"id": request["id"], "result": {"ok": True}}))
+
+    adapter._send_raw = send_raw
+    adapter._idle_restart_task = asyncio.create_task(restart())
+    send = asyncio.create_task(adapter.send_user_message("ws", "done-thread", "continue"))
+    await asyncio.sleep(0)
+    assert adapter.connected
+    assert not calls
+    release.set()
+    await asyncio.wait_for(send, timeout=1)
+    assert calls == ["thread/resume", "turn/start"]
+    assert "done-thread" not in adapter._released_threads
+
+
+@pytest.mark.asyncio
+async def test_idle_release_waits_for_final_callback_and_ignores_hook_events(monkeypatch):
+    monkeypatch.setattr("plugins.providers.builtin.codex.python.adapter.IDLE_RELEASE_DELAY_SECONDS", 0)
+    adapter = CodexAdapter()
+    adapter._connected = True
+    adapter._supports_idle_restart = True
+    adapter.configure_idle_restart(AsyncMock())
+    adapter._release_idle_backend = AsyncMock()
+    callback_started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def callback(method, envelope):
+        callback_started.set()
+        await release.wait()
+
+    adapter.on_event(callback)
+    await adapter._dispatch(json.dumps({
+        "method": "turn/completed",
+        "params": {"threadId": "done-thread", "turn": {"id": "done-turn"}},
+    }))
+    await callback_started.wait()
+    adapter._release_idle_backend.assert_not_awaited()
+    release.set()
+    await adapter._event_queue.join()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    adapter._release_idle_backend.assert_awaited_once()
+    adapter._released_threads.add("done-thread")
+    adapter._handoff_released_sessions()
+    duplicate = await adapter.ingest_external_hook_payload({
+        "hook_event_name": "AgentTurnComplete", "session_id": "done-thread",
+        "turn_id": "done-turn", "last_assistant_message": "already sent", "source": "codex_notify",
+    })
+    assert duplicate.get("deduped") is True
+    assert duplicate["emitted"] == 0
+    await adapter._emit_external_hook_event("ws", "turn/completed", {"_mirroredOnly": True})
+    adapter._release_idle_backend.assert_awaited_once()
+    await adapter.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_idle_release_keeps_unresolved_server_requests_until_native_resolution():
+    adapter = CodexAdapter()
+    adapter._connected = True
+    adapter._supports_idle_restart = True
+    restart = AsyncMock(return_value=("unix:///tmp/ow-test.sock", MagicMock()))
+    adapter.configure_idle_restart(restart)
+    adapter.connect = AsyncMock()
+    adapter._call = AsyncMock(side_effect=[
+        {"data": ["done-thread"]}, {"thread": {"status": {"type": "idle"}}},
+    ])
+    await adapter._dispatch(json.dumps({"id": 7, "method": "item/tool/requestUserInput", "params": {}}))
+    await adapter._release_idle_backend()
+    adapter._call.assert_not_awaited()
+    restart.assert_not_awaited()
+    await adapter._dispatch(json.dumps({"method": "serverRequest/resolved", "params": {"requestId": 7}}))
+    await adapter._release_idle_backend()
+    restart.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_idle_restart_failure_notifies_regular_recovery_once():
+    adapter = CodexAdapter()
+    adapter._connected = True
+    adapter._supports_idle_restart = True
+    adapter.configure_idle_restart(AsyncMock(side_effect=RuntimeError("restart failed")))
+    adapter._call = AsyncMock(side_effect=[
+        {"data": ["done-thread"]}, {"thread": {"status": {"type": "idle"}}},
+    ])
+    disconnected = MagicMock()
+    adapter.on_disconnect(disconnected)
+    with pytest.raises(RuntimeError, match="restart failed"):
+        await adapter._release_idle_backend()
+    adapter._notify_disconnect_callbacks_once()
+    disconnected.assert_called_once()
+    assert not adapter.connected
+
+
+@pytest.mark.asyncio
 async def test_real_codex_hook_event_marks_installed_definition_verified():
     callback = AsyncMock()
     adapter = CodexAdapter()
@@ -448,10 +603,11 @@ async def test_connect_uses_stdio_process_when_url_is_stdio():
 
 
 @pytest.mark.asyncio
-async def test_connect_uses_unix_socket_for_unix_endpoint(tmp_path):
+@pytest.mark.parametrize("version,supported", [("0.149.1", False), ("0.150.0", True), ("unknown", False)])
+async def test_connect_uses_unix_socket_for_unix_endpoint(tmp_path, version, supported):
     ws = AsyncMock()
     ws.recv = AsyncMock(
-        return_value='{"id": 1, "result": {"userAgent": "test", "codexHome": "/tmp", "platformFamily": "unix", "platformOs": "macos"}}'
+        return_value=json.dumps({"id": 1, "result": {"userAgent": f"Codex/{version}", "codexHome": "/tmp", "platformFamily": "unix", "platformOs": "macos"}})
     )
     socket_path = tmp_path / "codex.sock"
     adapter = CodexAdapter()
@@ -478,6 +634,7 @@ async def test_connect_uses_unix_socket_for_unix_endpoint(tmp_path):
         compression=None,
     )
     assert adapter._transport == "unix"
+    assert adapter._supports_idle_restart is supported
 
 
 @pytest.mark.asyncio
