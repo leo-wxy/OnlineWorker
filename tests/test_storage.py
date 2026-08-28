@@ -767,6 +767,86 @@ def test_list_codex_sessions_merges_sqlite_jsonl_and_running_state(tmp_path, mon
     assert all(item["workspace"] == "/tmp/workspace" for item in result)
 
 
+def test_list_codex_sessions_follows_latest_workspace_without_duplicate_rows(tmp_path, monkeypatch):
+    from plugins.providers.builtin.codex.python import storage_runtime
+
+    session_id = "moved-session"
+    old_workspace = "/tmp/sample-project-old"
+    current_workspace = "/tmp/sample-project"
+    rows = [
+        {"type": "session_meta", "payload": {
+            "id": session_id, "cwd": old_workspace, "source": "vscode",
+            "timestamp": "2026-08-20T10:00:00Z",
+        }},
+        {"type": "turn_context", "payload": {"cwd": current_workspace}},
+        {"type": "turn_context", "payload": {"cwd": "sample-project"}},
+    ]
+    (tmp_path / "rollout-moved-session.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(storage_runtime, "_load_codex_thread_names", lambda: {session_id: "Moved task"})
+    monkeypatch.setattr(storage_runtime, "_query_codex_active_thread_rows_by_workspace", lambda: (
+        {current_workspace: {session_id}},
+        {current_workspace: [{"id": session_id, "createdAt": 1000, "updatedAt": 2000}]},
+    ))
+
+    sessions = list_codex_sessions(limit=20, sessions_dir=str(tmp_path))
+
+    assert [(row["id"], row["workspace"]) for row in sessions] == [(session_id, current_workspace)]
+    assert storage_runtime.scan_codex_session_cwds(str(tmp_path)) == [{
+        "path": current_workspace, "name": "sample-project", "thread_count": 1,
+    }]
+
+
+def test_temporary_workspace_groups_queries_without_changing_session_cwd(tmp_path, monkeypatch):
+    from plugins.providers.builtin.codex.python import storage_runtime
+
+    root = "/Users/example/Documents/Codex"
+    paths = {
+        "temp-a": f"{root}/2026-08-19/new-chat",
+        "temp-b": f"{root}/2026-08-20/new-chat",
+        "temp-c": f"{root}/2026-08-21/named-task",
+        "temp-new": root,
+        "project": "/Users/example/Projects/new-chat",
+        "nested-project": f"{root}/regular-project",
+        "lookalike": f"{root}-other/2026-08-21/new-chat",
+        "archived-temp": f"{root}/2026-08-18/new-chat",
+    }
+    db_path = tmp_path / "state_5.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE threads (id TEXT, cwd TEXT, title TEXT, created_at INT, updated_at INT, source TEXT, archived INT)")
+        conn.executemany("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?)", [
+            (tid, cwd, f"Title {tid}", index, index, "vscode", int(tid == "archived-temp"))
+            for index, (tid, cwd) in enumerate(paths.items(), 1)
+        ])
+    for tid, cwd in paths.items():
+        rows = [
+            {"type": "session_meta", "payload": {"id": tid, "cwd": cwd, "source": "vscode"}},
+            {"type": "event_msg", "payload": {"type": "task_started", "turn_id": f"turn-{tid}"}},
+        ]
+        (tmp_path / f"rollout-{tid}.jsonl").write_text(
+            "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8",
+        )
+    real_expanduser = os.path.expanduser
+    monkeypatch.setattr(storage_runtime.os.path, "expanduser", lambda path: (
+        str(db_path) if path == "~/.codex/state_5.sqlite" else real_expanduser(path)
+    ))
+    monkeypatch.setattr(storage_runtime, "_load_codex_thread_names", lambda: {})
+
+    workspaces = storage_runtime.scan_codex_session_cwds(str(tmp_path))
+    grouped = next(row for row in workspaces if row["path"] == root)
+    assert grouped == {"path": root, "name": "临时会话", "thread_count": 5}
+    assert len(workspaces) == 4
+    temporary_ids = {"temp-a", "temp-b", "temp-c", "temp-new", "archived-temp"}
+    assert {row["id"] for row in list_codex_threads_by_cwd(root, sessions_dir=str(tmp_path))} == temporary_ids
+    assert query_codex_active_thread_ids(root) == temporary_ids - {"archived-temp"}
+    assert query_codex_running_thread_ids(root, sessions_dir=str(tmp_path)) == temporary_ids
+    assert query_codex_active_thread_ids(paths["temp-a"]) == {"temp-a"}
+    sessions = list_codex_sessions(sessions_dir=str(tmp_path))
+    assert {row["id"]: row["workspace"] for row in sessions} == paths
+    assert {row["id"] for row in sessions if row.get("workspaceGroup") == root} == temporary_ids
+
+
 def test_read_thread_history_preserves_phase_from_session_jsonl(tmp_path):
     sessions_dir = tmp_path / "sessions"
     day_dir = sessions_dir / "2026" / "04" / "04"

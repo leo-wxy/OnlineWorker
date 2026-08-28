@@ -69,7 +69,22 @@ function isPlaceholderTitle(title, sessionId) {
   if (!text) {
     return true;
   }
-  return text === normalizedString(sessionId);
+  return text === normalizedString(sessionId) || /^#{1,6}\s+Referenced (?:chats|files)\b/i.test(text);
+}
+
+export function sessionWorkspaceGroup(session) {
+  const workspace = normalizedString(session?.workspace);
+  const group = normalizedString(session?.raw?.workspaceGroup);
+  return group && (workspace === group || workspace.startsWith(`${group}/`)) ? group : workspace;
+}
+
+function liveActivityWorkspace(activity, session) {
+  const path = normalizedString(activity.workspacePath);
+  const id = normalizedString(activity.workspaceId).replace(`${activity.providerId}:`, "");
+  const previous = normalizedString(session?.workspace);
+  const workspace = [path, id, previous].find((value) => /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value))
+    || path || previous || id;
+  return workspace === session?.raw?.workspaceGroup && previous ? previous : workspace;
 }
 
 function normalizeActivityTimestamp(value) {
@@ -121,24 +136,31 @@ export function cloneSessionEntry(session) {
 export function mergeSessionListSnapshot(previousSessions, nextSessions, options = {}) {
   const preserveOnEmpty = options?.preserveOnEmpty === true;
   if (preserveOnEmpty && (nextSessions ?? []).length === 0 && (previousSessions ?? []).length > 0) {
-    return (previousSessions ?? []).map(cloneSessionEntry);
+    return mergeSessionListSnapshot([], previousSessions).map(cloneSessionEntry);
   }
 
   const previousByKey = new Map(
     (previousSessions ?? []).map((session) => [`${session.type}:${session.id}`, session]),
   );
 
-  return (nextSessions ?? []).map((session) => {
+  const seen = new Set();
+  return (nextSessions ?? []).filter((session) => {
+    const key = `${session.type}:${session.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).map((session) => {
     const key = `${session.type}:${session.id}`;
     const previous = previousByKey.get(key);
     if (!previous) {
-      return session;
+      return isPlaceholderTitle(session.title, session.id) ? { ...session, title: session.id } : session;
     }
 
     const mergedRaw = mergeRawSessionSummary(previous.raw ?? {}, session.raw ?? {});
     const nextTitle = normalizedString(session.title);
     const previousTitle = normalizedString(previous.title);
-    const mergedTitle = nextTitle || previousTitle || session.id;
+    const mergedTitle = !isPlaceholderTitle(nextTitle, session.id) ? nextTitle
+      : !isPlaceholderTitle(previousTitle, session.id) ? previousTitle : session.id;
 
     return {
       ...session,
@@ -219,7 +241,7 @@ export function mergeLiveSessionActivities(sessions, activities) {
       .filter((activity) => activity?.providerId && activity?.sessionId)
       .map((activity) => `${activity.providerId}:${activity.sessionId}`),
   );
-  const nextSessions = sessions.map((session) => ({
+  const nextSessions = mergeSessionListSnapshot([], sessions).map((session) => ({
     ...session,
     raw: {
       ...(session.raw ?? {}),
@@ -242,11 +264,11 @@ export function mergeLiveSessionActivities(sessions, activities) {
       continue;
     }
     const key = `${activity.providerId}:${activity.sessionId}`;
-    const title = normalizedString(activity.title);
+    const title = isPlaceholderTitle(activity.title, activity.sessionId) ? "" : normalizedString(activity.title);
     const preview = formatSessionPreviewText(
       activity.lastAssistantMessage || activity.lastFinalMessage || activity.lastUserMessage || title,
     );
-    const workspace = normalizedString(activity.workspacePath) || normalizedString(activity.workspaceId);
+    const workspace = liveActivityWorkspace(activity, nextSessions[sessionIndex.get(key)]);
     const providerActive = activity.status === "running" || activity.lastEventKind === "message.assistant.delta";
     const updatedAt = normalizeActivityTimestamp(activity.updatedAt);
 
@@ -269,13 +291,14 @@ export function mergeLiveSessionActivities(sessions, activities) {
       nextSessions[sessionIndex.get(key)] = {
         ...session,
         workspace: workspace || session.workspace,
-        title: !isPlaceholderTitle(session.title, session.id) ? session.title : title || session.title,
+        title: !isPlaceholderTitle(session.title, session.id) ? session.title : title || session.id,
         archived: Boolean(session.archived),
         raw,
       };
       continue;
     }
 
+    sessionIndex.set(key, nextSessions.length);
     nextSessions.push({
       id: activity.sessionId,
       type: activity.providerId,

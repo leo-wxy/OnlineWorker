@@ -349,6 +349,7 @@ export const zhTexts: AppTexts = {
       waitingExpired: "长时间仍未拿到完整回复，你可以手动刷新查看最新状态。",
       you: "你",
       workspaceFallback: "（未知）",
+      temporaryWorkspace: "临时会话",
       attachFile: "添加文件",
       attachImage: "添加图片",
       stagingAttachments: "正在准备附件...",

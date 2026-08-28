@@ -7,6 +7,8 @@ export function sessionPreviewFromRaw(raw?: Record<string, unknown> | null): str
 
 export function sessionPreviewText(session: UnifiedSession): string | null;
 
+export function sessionWorkspaceGroup(session: UnifiedSession): string;
+
 export function cloneSessionEntry(session: UnifiedSession): UnifiedSession;
 
 export function mergeSessionListSnapshot(

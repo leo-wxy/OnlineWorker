@@ -2896,6 +2896,8 @@ async def test_provider_owner_bridge_list_sessions_returns_cached_snapshot_witho
                     "id": "tid-cached",
                     "title": "Cached",
                     "workspace": "/tmp/cached",
+                    "workspaceGroup": "/tmp",
+                    "workspaceGroupKind": "temporary",
                     "archived": False,
                     "providerActive": True,
                     "updatedAt": 20,
@@ -2924,6 +2926,9 @@ async def test_provider_owner_bridge_list_sessions_returns_cached_snapshot_witho
 
     assert first == second
     assert calls["count"] == 1
+    assert first["sessions"][0]["workspace"] == "/tmp/cached"
+    assert first["sessions"][0]["workspaceGroup"] == "/tmp"
+    assert first["sessions"][0]["workspaceGroupKind"] == "temporary"
 
 
 @pytest.mark.asyncio

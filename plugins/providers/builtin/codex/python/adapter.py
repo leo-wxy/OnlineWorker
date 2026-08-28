@@ -24,6 +24,7 @@ from typing import Any, Callable, Awaitable, Optional
 import websockets
 import websockets.exceptions
 
+from plugins.providers.builtin.codex.python import storage_runtime
 from plugins.providers.builtin.codex.python.transport import (
     is_unix_endpoint,
     resolve_unix_socket_path,
@@ -944,6 +945,9 @@ class CodexAdapter:
 
     async def list_threads(self, workspace_id: str, limit: int = 20) -> list[dict]:
         cwd = self._workspace_cwd_map.get(workspace_id)
+        if cwd and storage_runtime.codex_temporary_workspace_root(cwd) == cwd.rstrip("/"):
+            # Group membership is read-only; keep existing task-to-workspace routes.
+            return await asyncio.to_thread(storage_runtime.list_codex_threads_by_cwd, cwd, limit)
         params: dict[str, Any] = {"limit": limit}
         if cwd:
             params["cwd"] = cwd
@@ -1037,7 +1041,7 @@ class CodexAdapter:
             "approvalsReviewer": DEFAULT_APPROVALS_REVIEWER,
         }
         cwd = self._workspace_cwd_map.get(workspace_id)
-        if cwd:
+        if cwd and storage_runtime.codex_temporary_workspace_root(cwd) != cwd.rstrip("/"):
             params["cwd"] = cwd
         return await self._call("thread/resume", params)
 
@@ -1076,7 +1080,7 @@ class CodexAdapter:
             "approvalsReviewer": DEFAULT_APPROVALS_REVIEWER,
         }
         cwd = self._workspace_cwd_map.get(workspace_id)
-        if cwd:
+        if cwd and storage_runtime.codex_temporary_workspace_root(cwd) != cwd.rstrip("/"):
             params["cwd"] = cwd
         if approval_policy is None or sandbox_policy is None:
             stored_approval_policy, stored_sandbox_policy = self._load_thread_runtime_policy(thread_id)

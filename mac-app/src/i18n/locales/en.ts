@@ -354,6 +354,7 @@ export const enTexts: AppTexts = {
       waitingExpired: "Still no completed reply after extended waiting. You can refresh to check the latest state.",
       you: "You",
       workspaceFallback: "(unknown)",
+      temporaryWorkspace: "Temporary sessions",
       attachFile: "Attach file",
       attachImage: "Attach image",
       stagingAttachments: "Preparing attachments...",

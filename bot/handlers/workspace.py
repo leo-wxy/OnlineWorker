@@ -843,6 +843,16 @@ def make_thread_open_callback_handler(state: AppState, group_chat_id: int) -> Ca
             await query.answer("❌ Thread 未找到", show_alert=True)
             return
 
+        # A grouped workspace is another entry point, not a new session binding.
+        for existing_ws in storage.workspaces.values():
+            if existing_ws is ws_info or existing_ws.tool != ws_info.tool:
+                continue
+            existing_thread = existing_ws.threads.get(full_tid)
+            if existing_thread and _thread_topic_id(state, existing_ws, existing_thread) is not None:
+                ws_info, thread_info = existing_ws, existing_thread
+                local_fallback_threads = None
+                break
+
         # 创建前刷新 preview，避免使用 state.json 中过期的缓存名称。
         previous_preview = thread_info.preview
         preview_changed = False

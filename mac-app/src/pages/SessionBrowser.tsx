@@ -25,6 +25,7 @@ import {
   mergeLiveSessionActivities,
   nextSelectedSessionId,
   resolveSessionSnapshotUpdate,
+  sessionWorkspaceGroup,
 } from "../utils/sessionBrowserState.js";
 import { createSingleFlightByKey } from "../utils/singleFlight.js";
 import {
@@ -142,6 +143,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
   const loadingProvidersRef = useRef<Set<ProviderFilter>>(new Set());
   const providerLoadFlightsRef = useRef(createSingleFlightByKey<ProviderFilter>());
   const emptyForceRefreshAttemptsRef = useRef<Map<ProviderFilter, number>>(new Map());
+  const refreshedLiveMetadataRef = useRef<Map<ProviderFilter, string>>(new Map());
   const loadTokenRef = useRef(0);
   const retryTimerRef = useRef<number | null>(null);
   const visibleProviders = useMemo(
@@ -397,6 +399,19 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
   ]);
 
   const providerListReady = loadedProvidersRef.current.has(providerFilter);
+  const liveMetadataKey = useMemo(() => taskBoardActivities
+    .filter((activity) => activity.providerId === providerFilter && activity.sessionId)
+    .map((activity) => JSON.stringify([activity.sessionId, activity.status, activity.workspacePath || activity.workspaceId]))
+    .sort().join("\n"), [providerFilter, taskBoardActivities]);
+
+  useEffect(() => {
+    if (!active || !providerFilter || !providerListReady || loading) return;
+    if (refreshedLiveMetadataRef.current.get(providerFilter) === liveMetadataKey) return;
+    if (!liveMetadataKey && !refreshedLiveMetadataRef.current.has(providerFilter)) return;
+    // Refresh metadata on task/workspace/status changes, never on text deltas.
+    refreshedLiveMetadataRef.current.set(providerFilter, liveMetadataKey);
+    void loadProvider(providerFilter, { force: true, forceRefresh: true });
+  }, [active, providerFilter, providerListReady, loading, liveMetadataKey, loadProvider]);
 
   const unifiedSessions = useMemo<UnifiedSession[]>(() => {
     const sessions = genericSessionsByProvider[providerFilter] ?? [];
@@ -409,10 +424,17 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     );
   }, [genericSessionsByProvider, providerFilter, providerListReady, taskBoardActivities]);
 
+  const archiveFilteredSessions = useMemo(() => unifiedSessions.filter(
+    (session) => archiveFilter === "archived" ? session.archived : !session.archived,
+  ), [unifiedSessions, archiveFilter]);
+
   const workspaces = useMemo(() => {
-    const list = Array.from(new Set(unifiedSessions.map(s => s.workspace)));
+    const list = Array.from(new Set(archiveFilteredSessions.map(sessionWorkspaceGroup)));
     return list.sort();
-  }, [unifiedSessions]);
+  }, [archiveFilteredSessions]);
+  const selectedWorkspaceSession = unifiedSessions.find((session) => session.workspace === selectedWorkspace);
+  const selectedWorkspaceGroup = selectedWorkspaceSession
+    ? sessionWorkspaceGroup(selectedWorkspaceSession) : selectedWorkspace;
 
   const refreshCurrentProvider = useCallback(async () => {
     await loadProvider(providerFilter, {
@@ -423,7 +445,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
   }, [loadProvider, providerFilter]);
 
   const startNewSession = useCallback(async () => {
-    const workspacePath = selectedWorkspace || workspaces[0] || "";
+    const workspacePath = selectedWorkspaceGroup || workspaces[0] || "";
     if (!providerFilter || !workspacePath || creatingSession) {
       setCreateSessionError(t.sessions.newSessionNoWorkspace);
       return;
@@ -446,7 +468,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
   }, [
     creatingSession,
     providerFilter,
-    selectedWorkspace,
+    selectedWorkspaceGroup,
     t.sessions,
     workspaces,
   ]);
@@ -647,19 +669,14 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
   }, [loadProvider, newSessionComposer, taskBoardActivities]);
 
   useEffect(() => {
-    if (selectedWorkspace && workspaces.length > 0 && !workspaces.includes(selectedWorkspace)) {
+    if (selectedWorkspaceGroup && workspaces.length > 0 && !workspaces.includes(selectedWorkspaceGroup)) {
       setSelectedWorkspace(null);
     }
-  }, [workspaces, selectedWorkspace]);
+  }, [workspaces, selectedWorkspaceGroup]);
 
-  const filteredSessions = useMemo(() => {
-    return unifiedSessions.filter(s => {
-      if (selectedWorkspace && s.workspace !== selectedWorkspace) return false;
-      if (archiveFilter === "active" && s.archived) return false;
-      if (archiveFilter === "archived" && !s.archived) return false;
-      return true;
-    });
-  }, [unifiedSessions, selectedWorkspace, archiveFilter]);
+  const filteredSessions = useMemo(() => archiveFilteredSessions.filter(
+    (session) => !selectedWorkspaceGroup || sessionWorkspaceGroup(session) === selectedWorkspaceGroup,
+  ), [archiveFilteredSessions, selectedWorkspaceGroup]);
 
   const selectedSession = useMemo(() => {
     return unifiedSessions.find(s => s.id === selectedSessionId) || null;
@@ -729,10 +746,11 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
       <div className="flex flex-1 gap-3 overflow-hidden p-3">
         <WorkspaceSidebar
           workspaces={workspaces}
-          sessions={unifiedSessions}
+          sessions={archiveFilteredSessions}
           providerFilter={providerFilter}
           providerLabels={providerLabels}
-          selectedWorkspace={selectedWorkspace}
+          selectedWorkspace={selectedWorkspaceGroup}
+          temporaryWorkspaceLabel={t.sessions.temporaryWorkspace}
           loading={waitingForProviderList}
           noSessionsLabel={waitingForProviderList ? t.common.loading : t.sessions.noSessions}
           onSelectWorkspace={setSelectedWorkspace}

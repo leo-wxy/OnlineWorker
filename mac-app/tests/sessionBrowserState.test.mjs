@@ -8,6 +8,7 @@ import {
   nextSelectedSessionId,
   resolveSessionSnapshotUpdate,
   sessionPreviewText,
+  sessionWorkspaceGroup,
 } from "../src/utils/sessionBrowserState.js";
 
 function session(overrides = {}) {
@@ -21,6 +22,21 @@ function session(overrides = {}) {
     ...overrides,
   };
 }
+
+test("provider workspace grouping preserves the real task directory and normal projects", () => {
+  const root = "/Users/example/Documents/Codex";
+  const task = session({
+    workspace: `${root}/2026-08-19/new-chat`,
+    raw: { workspaceGroup: root, workspaceGroupKind: "temporary" },
+  });
+  assert.equal(sessionWorkspaceGroup(task), root);
+  assert.equal(sessionWorkspaceGroup(session({ workspace: "/tmp/new-chat" })), "/tmp/new-chat");
+  const activity = { providerId: "codex", sessionId: task.id, status: "running", workspacePath: root };
+  const merged = mergeLiveSessionActivities([task], [activity]);
+  assert.equal(merged[0].workspace, task.workspace);
+  assert.equal(sessionWorkspaceGroup(merged[0]), root);
+  assert.equal(sessionWorkspaceGroup({ ...task, workspace: "/tmp/moved-project" }), "/tmp/moved-project");
+});
 
 test("sessionPreviewText prefers live assistant summary and trims boilerplate", () => {
   const preview = sessionPreviewText(session({
@@ -382,4 +398,58 @@ test("mergeLiveSessionActivities clears stale live markers when activity disappe
   assert.equal(merged[0].raw.providerActive, false);
   assert.equal(merged[0].raw.highlightedThreadPreview, "");
   assert.equal(merged[0].raw.lastAssistantMessage, "");
+});
+
+test("session snapshots keep one row per provider and session across workspace moves", () => {
+  const rows = [
+    session({ workspace: "/tmp/current-project" }),
+    session({ workspace: "/tmp/old-project" }),
+    session({ type: "claude", workspace: "/tmp/other-project" }),
+  ];
+  const merged = mergeSessionListSnapshot([], rows);
+
+  assert.deepEqual(merged.map(({ type, id, workspace }) => ({ type, id, workspace })), [
+    { type: "codex", id: "thread-a", workspace: "/tmp/current-project" },
+    { type: "claude", id: "thread-a", workspace: "/tmp/other-project" },
+  ]);
+  assert.equal(mergeLiveSessionActivities(rows, []).length, 2);
+});
+
+test("duplicate live activities do not create duplicate clickable session rows", () => {
+  const activity = {
+    providerId: "codex", sessionId: "thread-live", status: "running",
+    workspacePath: "/tmp/sample-project", title: "Sample task",
+  };
+
+  assert.equal(mergeLiveSessionActivities([], [activity, { ...activity }]).length, 1);
+});
+
+test("live workspace labels never replace a known absolute directory", () => {
+  const rows = [session({ workspace: "/tmp/sample-project" })];
+  const activity = {
+    providerId: "codex", sessionId: "thread-a", status: "running",
+    workspacePath: "sample-project", workspaceId: "codex:sample-project",
+  };
+
+  assert.equal(mergeLiveSessionActivities(rows, [activity])[0].workspace, "/tmp/sample-project");
+  assert.equal(mergeLiveSessionActivities([], [{
+    ...activity, workspaceId: "codex:/tmp/sample-project",
+  }])[0].workspace, "/tmp/sample-project");
+  assert.equal(mergeLiveSessionActivities(rows, [{
+    ...activity, workspacePath: "/tmp/moved-project",
+  }])[0].workspace, "/tmp/moved-project");
+});
+
+test("reference boilerplate is not a task title while native metadata is loading", () => {
+  const live = mergeLiveSessionActivities([], [{
+    providerId: "codex", sessionId: "thread-live", status: "running",
+    workspacePath: "/tmp/sample-project",
+    title: "## Referenced chats with Codex: These are live references to Codex tasks",
+  }]);
+  assert.equal(live[0].title, "thread-live");
+
+  const hydrated = mergeSessionListSnapshot(live, [session({
+    id: "thread-live", title: "Implement sample feature", workspace: "/tmp/sample-project",
+  })]);
+  assert.equal(hydrated[0].title, "Implement sample feature");
 });

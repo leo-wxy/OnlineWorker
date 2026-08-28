@@ -508,7 +508,8 @@ async def test_thread_open_rejects_inactive_thread_without_creating_topic(monkey
 
 
 @pytest.mark.asyncio
-async def test_thread_open_renames_existing_topic_when_codex_title_changed(monkeypatch):
+@pytest.mark.parametrize("from_group", [False, True])
+async def test_thread_open_renames_existing_topic_when_codex_title_changed(monkeypatch, from_group):
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
@@ -536,6 +537,16 @@ async def test_thread_open_renames_existing_topic_when_codex_title_changed(monke
 
     query = MagicMock()
     query.data = "thread_open:codex:onlineWorker:tid-1234567890abcdef"
+    if from_group:
+        group = WorkspaceInfo(
+            name="临时会话", path="/tmp/temporary", tool="codex",
+            daemon_workspace_id="codex:temporary",
+            threads={"tid-1234567890abcdef": ThreadInfo(
+                thread_id="tid-1234567890abcdef", preview="grouped task", is_active=True,
+            )},
+        )
+        storage.workspaces["codex:temporary"] = group
+        query.data = make_thread_open_callback_data("codex:temporary", "tid-1234567890abcdef")
     query.answer = AsyncMock()
     query.get_bot.return_value = bot
 
@@ -585,6 +596,9 @@ async def test_thread_open_renames_existing_topic_when_codex_title_changed(monke
     assert send_to_group.await_count == 2
     assert send_to_group.await_args_list[0].args[2] == "thread `90abcdef` ✅ 已存在，跳转中。"
     assert send_to_group.await_args_list[1].args[2] == "工作区: [codex] onlineWorker"
+    if from_group:
+        assert group.threads["tid-1234567890abcdef"].topic_id is None
+        assert storage.workspaces["codex:onlineWorker"] is ws
 
 
 @pytest.mark.asyncio
@@ -824,8 +838,8 @@ async def test_thread_open_customprovider_status_message_avoids_markdown_parse_r
         topic_id=3160,
         daemon_workspace_id="customprovider:onlineWorker",
     )
-    ws.threads["ses_2ac5d4905ffeIe8iB6Ql0W0uPX"] = ThreadInfo(
-        thread_id="ses_2ac5d4905ffeIe8iB6Ql0W0uPX",
+    ws.threads["ses_example_0000000000sample01"] = ThreadInfo(
+        thread_id="ses_example_0000000000sample01",
         topic_id=None,
         preview="Quick check-in",
         archived=False,
@@ -840,7 +854,7 @@ async def test_thread_open_customprovider_status_message_avoids_markdown_parse_r
     bot.create_forum_topic = AsyncMock(return_value=MagicMock(message_thread_id=4257))
 
     query = MagicMock()
-    query.data = "thread_open:customprovider:onlineWorker:ses_2ac5d4905ffeIe8iB6Ql0W0uP"
+    query.data = "thread_open:customprovider:onlineWorker:ses_example_0000000000sample0"
     query.answer = AsyncMock()
     query.get_bot.return_value = bot
 
@@ -851,7 +865,7 @@ async def test_thread_open_customprovider_status_message_avoids_markdown_parse_r
         "bot.handlers.workspace.list_provider_threads",
         lambda tool_name, path, limit=100: [
             {
-                "id": "ses_2ac5d4905ffeIe8iB6Ql0W0uPX",
+                "id": "ses_example_0000000000sample01",
                 "preview": "Quick check-in",
                 "updatedAt": 123,
             }
@@ -877,7 +891,7 @@ async def test_thread_open_customprovider_status_message_avoids_markdown_parse_r
     status_args = send_to_group.await_args_list[0].args
     status_kwargs = send_to_group.await_args_list[0].kwargs
     header_args = send_to_group.await_args_list[1].args
-    assert status_args[2] == "✅ thread Ql0W0uPX 新建 topic id=4257"
+    assert status_args[2] == "✅ thread sample01 新建 topic id=4257"
     assert "parse_mode" not in status_kwargs
     assert header_args[2] == "工作区: [customprovider] onlineWorker"
 

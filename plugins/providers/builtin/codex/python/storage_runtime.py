@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -55,19 +56,35 @@ def _load_codex_thread_names() -> dict[str, str]:
     return names
 
 
+def codex_temporary_workspace_root(path: str) -> str:
+    # ponytail: recognize the Desktop date/slug layout; custom layouts stay separate.
+    match = re.fullmatch(r"(/.+/Documents/Codex)(?:/\d{4}-\d{2}-\d{2}/[^/]+)?/?", path)
+    return match.group(1) if match else ""
+
+
+def _codex_workspace_matches(cwd: str, workspace: str) -> bool:
+    return cwd.rstrip("/") == workspace.rstrip("/") or (
+        bool(codex_temporary_workspace_root(cwd))
+        and codex_temporary_workspace_root(cwd) == workspace.rstrip("/")
+    )
+
+
 def scan_codex_session_cwds(sessions_dir: Optional[str] = None) -> list[dict]:
     """
     扫描 ~/.codex/sessions/ 中所有 session 的 cwd，去重后返回列表。
     每项：{"path": "/abs/path", "name": "<basename>", "thread_count": <int>}
     按最近活跃时间倒序排列（取目录 mtime）。
     """
-    cwd_counts = dict(_build_codex_session_index(sessions_dir).get("workspace_counts", {}))
+    cwd_counts: dict[str, int] = {}
+    for cwd, threads in _build_codex_session_index(sessions_dir)["threads_by_workspace"].items():
+        workspace = codex_temporary_workspace_root(cwd) or cwd
+        cwd_counts[workspace] = cwd_counts.get(workspace, 0) + len(threads)
 
     result = []
     for path, count in cwd_counts.items():
         result.append({
             "path": path,
-            "name": os.path.basename(path),
+            "name": "临时会话" if codex_temporary_workspace_root(path) == path else os.path.basename(path),
             "thread_count": count,
         })
     result.sort(key=lambda x: x["thread_count"], reverse=True)
@@ -173,6 +190,7 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
                                 meta_row = {
                                     "id": tid,
                                     "cwd": cwd,
+                                    "source": payload.get("source") or "local",
                                     "preview": None,
                                     "createdAt": created_at,
                                     "updatedAt": created_at,
@@ -191,6 +209,11 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
                     latest_event_at,
                     _parse_codex_timestamp_ms(row.get("timestamp")),
                 )
+                if meta_row is not None and row.get("type") == "turn_context":
+                    payload = row.get("payload", {})
+                    cwd = payload.get("cwd") if isinstance(payload, dict) else None
+                    if isinstance(cwd, str) and os.path.isabs(cwd):
+                        meta_row["cwd"] = cwd
 
                 if preview is None and row.get("type") == "response_item":
                     payload = row.get("payload", {})
@@ -286,6 +309,7 @@ def _build_codex_session_index(
             thread_map = threads_by_workspace.setdefault(workspace, {})
             item = {
                 "id": meta["id"],
+                "source": meta.get("source"),
                 "preview": meta.get("preview"),
                 "createdAt": int(meta.get("createdAt") or 0),
                 "updatedAt": int(meta.get("updatedAt") or 0),
@@ -501,7 +525,11 @@ def list_codex_session_meta_threads_by_cwd(
     limit: int = 20,
 ) -> list[dict]:
     threads_by_workspace = dict(_build_codex_session_index(sessions_dir).get("threads_by_workspace", {}))
-    result = list(dict(threads_by_workspace.get(cwd, {})).values())
+    result = [
+        thread for path, threads in threads_by_workspace.items()
+        if _codex_workspace_matches(path, cwd)
+        for thread in threads.values()
+    ]
     result.sort(
         key=lambda item: (
             int(item.get("createdAt") or 0),
@@ -521,19 +549,23 @@ def query_codex_active_thread_ids(
 
     db_path = os.path.expanduser("~/.codex/state_5.sqlite")
     active_ids: set[str] = set()
+    workspace_path = workspace_path.rstrip("/") or "/"
+    grouped = codex_temporary_workspace_root(workspace_path) == workspace_path
 
     try:
         if os.path.exists(db_path):
             conn = sqlite3.connect(db_path)
             rows = conn.execute(
-                "SELECT id, source FROM threads WHERE cwd = ? AND archived = 0",
-                (workspace_path,)
+                "SELECT id, source, cwd FROM threads WHERE archived = 0 "
+                "AND (cwd = ? OR (? AND instr(cwd, ? || '/') = 1))",
+                (workspace_path, grouped, workspace_path),
             ).fetchall()
             conn.close()
             active_ids.update(
                 row[0]
                 for row in rows
                 if is_codex_user_visible_session(row[1] or "")
+                and _codex_workspace_matches(row[2] or "", workspace_path)
             )
     except Exception:
         pass
@@ -546,7 +578,11 @@ def query_codex_running_thread_ids(
     sessions_dir: Optional[str] = None,
 ) -> set[str]:
     running_ids_by_workspace = dict(_build_codex_session_index(sessions_dir).get("running_ids_by_workspace", {}))
-    return set(running_ids_by_workspace.get(workspace_path, set()))
+    return {
+        thread_id for cwd, thread_ids in running_ids_by_workspace.items()
+        if _codex_workspace_matches(cwd, workspace_path)
+        for thread_id in thread_ids
+    }
 
 
 def find_session_file(thread_id: str, sessions_dir: Optional[str] = None) -> Optional[str]:
@@ -752,19 +788,21 @@ def list_codex_threads_by_cwd(
     db_path = os.path.expanduser("~/.codex/state_5.sqlite")
     thread_names = _load_codex_thread_names()
     rows: list[dict] = []
+    cwd = cwd.rstrip("/") or "/"
+    grouped = codex_temporary_workspace_root(cwd) == cwd
 
     try:
         if os.path.exists(db_path):
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             rows = conn.execute("""
-                SELECT id, title, created_at, updated_at, source
+                SELECT id, title, created_at, updated_at, source, cwd
                 FROM threads
-                WHERE cwd = ?
-                  AND archived = 0
+                WHERE archived = 0
+                  AND (cwd = ? OR (? AND instr(cwd, ? || '/') = 1))
                 ORDER BY created_at DESC
                 LIMIT ?
-            """, (cwd, limit * 3)).fetchall()
+            """, (cwd, grouped, cwd, -1 if grouped else limit * 3)).fetchall()
             conn.close()
     except Exception:
         rows = []
@@ -773,6 +811,7 @@ def list_codex_threads_by_cwd(
     for meta in list_codex_session_meta_threads_by_cwd(cwd, sessions_dir=sessions_dir, limit=limit * 3):
         result_by_id[meta["id"]] = {
             "id": meta["id"],
+            "source": meta.get("source") or "local",
             "title": thread_names.get(str(meta["id"])),
             "preview": meta.get("preview"),
             "createdAt": int(meta.get("createdAt") or 0),
@@ -780,11 +819,12 @@ def list_codex_threads_by_cwd(
         }
 
     for r in rows:
-        if not is_codex_user_visible_session(r["source"] or ""):
+        if not is_codex_user_visible_session(r["source"] or "") or not _codex_workspace_matches(r["cwd"], cwd):
             continue
         tid = r["id"]
         item = {
             "id": tid,
+            "source": r["source"] or "local",
             "title": thread_names.get(str(tid)),
             "preview": r["title"] or None,
             "createdAt": r["created_at"] or 0,
@@ -823,6 +863,10 @@ def list_codex_sessions(
     threads_by_workspace = dict(index.get("threads_by_workspace", {}))
     running_ids_by_workspace = dict(index.get("running_ids_by_workspace", {}))
     active_ids_by_workspace, sqlite_threads_by_workspace = _query_codex_active_thread_rows_by_workspace()
+    active_workspace_by_id = {
+        thread_id: workspace for workspace, thread_ids in active_ids_by_workspace.items()
+        for thread_id in thread_ids
+    }
     workspaces = sorted(
         set(workspace_counts) | set(threads_by_workspace) | set(active_ids_by_workspace) | set(sqlite_threads_by_workspace),
         key=lambda item: (
@@ -873,7 +917,7 @@ def list_codex_sessions(
         )
         for item in merged_items:
             thread_id = str(item.get("id") or "").strip()
-            if not thread_id:
+            if not thread_id or active_workspace_by_id.get(thread_id, workspace_path) != workspace_path:
                 continue
             session_rows.append(
                 {
@@ -886,6 +930,8 @@ def list_codex_sessions(
                     ).strip() or thread_id,
                     "preview": str(item.get("preview") or "").strip(),
                     "workspace": workspace_path,
+                    "workspaceGroup": codex_temporary_workspace_root(workspace_path),
+                    "workspaceGroupKind": "temporary" if codex_temporary_workspace_root(workspace_path) else "",
                     "archived": bool(active_ids) and thread_id not in active_ids,
                     "providerActive": thread_id in running_ids,
                     "updatedAt": int(item.get("updatedAt") or 0),
@@ -901,7 +947,10 @@ def list_codex_sessions(
             str(item.get("id") or ""),
         )
     )
-    return session_rows[:limit]
+    unique_rows = {}
+    for row in session_rows:
+        unique_rows.setdefault(row["id"], row)
+    return list(unique_rows.values())[:limit]
 
 
 def list_codex_subagent_thread_ids(thread_ids: list[str]) -> set[str]:

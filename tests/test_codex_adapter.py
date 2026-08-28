@@ -926,6 +926,30 @@ async def test_resume_thread_passes_registered_workspace_cwd():
 
 
 @pytest.mark.asyncio
+async def test_temporary_workspace_uses_native_session_cwd_but_starts_new_tasks_in_group_root(monkeypatch):
+    from plugins.providers.builtin.codex.python import storage_runtime
+
+    root = "/Users/example/Documents/Codex"
+    adapter = CodexAdapter()
+    adapter.register_workspace_cwd("temporary", root)
+    adapter._call = AsyncMock(return_value={"id": "new-task"})
+    adapter._load_thread_runtime_policy = lambda _tid: (None, None)
+    monkeypatch.setattr(storage_runtime, "list_codex_threads_by_cwd", lambda cwd, limit=20: [
+        {"id": "old-task", "source": "vscode", "title": "Existing task"},
+        {"id": "new-task", "source": "vscode", "title": "New task"},
+    ])
+
+    assert {row["id"] for row in await adapter.list_threads("temporary")} == {"old-task", "new-task"}
+    adapter._call.assert_not_awaited()
+    await adapter.start_thread("temporary")
+    assert adapter._call.await_args.args[1]["cwd"] == root
+    await adapter.resume_thread("temporary", "old-task")
+    assert "cwd" not in adapter._call.await_args.args[1]
+    await adapter.send_user_message("temporary", "old-task", "continue")
+    assert "cwd" not in adapter._call.await_args.args[1]
+
+
+@pytest.mark.asyncio
 async def test_send_user_message_passes_registered_workspace_cwd():
     adapter = CodexAdapter()
     adapter._workspace_cwd_map["codex:onlineWorker"] = "/Users/example/Projects/onlineWorker"

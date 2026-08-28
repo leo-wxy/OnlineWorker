@@ -14,6 +14,36 @@ def _route_store(tmp_path) -> ImRouteStore:
     return ImRouteStore(tmp_path / "im-routes.sqlite3")
 
 
+def test_grouped_session_lookup_keeps_existing_active_provider_route(tmp_path, monkeypatch):
+    group = WorkspaceInfo(name="temporary", path="/tmp/group", tool="codex",
+                          threads={"session-1": ThreadInfo(thread_id="session-1", topic_id=99)})
+    other = WorkspaceInfo(name="other", path="/tmp/other", tool="claude",
+                          threads={"session-1": ThreadInfo(thread_id="session-1")})
+    original = WorkspaceInfo(name="original", path="/tmp/original", tool="codex",
+                             threads={"session-1": ThreadInfo(thread_id="session-1")})
+    state = AppState(storage=AppStorage(workspaces={"group": group, "other": other, "original": original}))
+    store = _route_store(tmp_path)
+    state.set_im_route_store(store, GROUP_CHAT_ID)
+    state.bind_telegram_session_topic("other", other, other.threads["session-1"], 44)
+    assert state.find_thread_by_id_global("session-1") == (group, group.threads["session-1"])
+
+    state.bind_telegram_session_topic("original", original, original.threads["session-1"], 33)
+    original.threads["session-1"].topic_id = None  # SQLite is authoritative, not the compatibility mirror.
+    assert state.find_thread_by_id_global("session-1") == (original, original.threads["session-1"])
+    assert len(store.list_routes()) == 2
+
+    state.invalidate_telegram_topic(33)
+    assert state.find_thread_by_id_global("session-1") == (group, group.threads["session-1"])
+    assert state.find_thread_by_id_global("missing") is None
+    def unavailable_route_store(*args):
+        raise OSError("route store unavailable")
+
+    monkeypatch.setattr(state, "get_thread_topic_id", unavailable_route_store)
+    assert state.find_thread_by_id_global("session-1") == (group, group.threads["session-1"])
+    group.threads["unique"] = ThreadInfo(thread_id="unique")
+    assert state.find_thread_by_id_global("unique") == (group, group.threads["unique"])
+
+
 def test_migrates_telegram_json_topics_to_generic_im_routes(tmp_path):
     storage = AppStorage(
         global_topic_ids={"codex": 11},

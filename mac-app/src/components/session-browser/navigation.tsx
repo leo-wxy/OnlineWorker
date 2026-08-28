@@ -1,7 +1,7 @@
 import type { MouseEvent, ReactNode } from "react";
 import type { ArchiveNotice } from "./archive";
 import { ArchiveNoticeBanner } from "./archive";
-import { sessionPreviewText } from "../../utils/sessionBrowserState.js";
+import { sessionPreviewText, sessionWorkspaceGroup } from "../../utils/sessionBrowserState.js";
 import {
   StatePanel,
   getProviderUi,
@@ -70,6 +70,7 @@ export function WorkspaceSidebar({
   selectedWorkspace,
   loading = false,
   noSessionsLabel,
+  temporaryWorkspaceLabel,
   onSelectWorkspace,
   onOpenWorkspaceContextMenu,
 }: {
@@ -80,6 +81,7 @@ export function WorkspaceSidebar({
   selectedWorkspace: string | null;
   loading?: boolean;
   noSessionsLabel: string;
+  temporaryWorkspaceLabel: string;
   onSelectWorkspace: (workspace: string | null) => void;
   onOpenWorkspaceContextMenu?: (event: MouseEvent<HTMLElement>, workspace: string) => void;
 }) {
@@ -103,8 +105,10 @@ export function WorkspaceSidebar({
         ) : workspaces.length === 0 ? (
           <StatePanel message={noSessionsLabel} />
         ) : workspaces.map((ws) => {
-          const name = ws.split("/").pop() || ws;
-          const count = sessions.filter((session) => session.workspace === ws).length;
+          const groupedSessions = sessions.filter((session) => sessionWorkspaceGroup(session) === ws);
+          const name = groupedSessions.some((session) => session.raw.workspaceGroup === ws && session.raw.workspaceGroupKind === "temporary")
+            ? temporaryWorkspaceLabel : ws.split("/").pop() || ws;
+          const count = groupedSessions.length;
           const isActive = selectedWorkspace === ws;
           const providerUi = getProviderUi(providerFilter, providerLabels[providerFilter]);
           const activeClasses = isActive

@@ -573,14 +573,26 @@ class AppState:
     # ------------------------------------------------------------------
 
     def find_thread_by_id_global(self, thread_id: str) -> Optional[tuple[WorkspaceInfo, ThreadInfo]]:
-        """按 thread_id 在所有 workspace 中查找，返回 (WorkspaceInfo, ThreadInfo) 或 None。"""
+        """按 thread_id 查找，优先同 provider 已绑定的记录，避免分组遮住原 IM 路由。"""
         if not self.storage:
             return None
-        for ws in self.storage.workspaces.values():
-            t = ws.threads.get(thread_id)
-            if t:
-                return ws, t
-        return None
+        matches = [
+            (workspace_id, ws, ws.threads[thread_id])
+            for workspace_id, ws in self.storage.workspaces.items()
+            if thread_id in ws.threads
+        ]
+        if not matches:
+            return None
+        _, fallback_ws, fallback_thread = matches[0]
+        if len(matches) > 1:
+            try:
+                for workspace_id, ws, thread in matches:
+                    if ws.tool == fallback_ws.tool and self.get_thread_topic_id(workspace_id, ws, thread) is not None:
+                        return ws, thread
+            except Exception:
+                # An unavailable outbound route store must not block provider execution.
+                logger.debug("Session route preference unavailable", exc_info=True)
+        return fallback_ws, fallback_thread
 
     def find_thread_by_topic_id(self, topic_id: int) -> Optional[tuple[WorkspaceInfo, ThreadInfo]]:
         """返回 (WorkspaceInfo, ThreadInfo) 或 None。"""

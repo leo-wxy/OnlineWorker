@@ -243,6 +243,7 @@ export interface AppTexts {
     envMaskedHint: string;
   };
   sessions: {
+    temporaryWorkspace: string;
     refresh: string;
     activeSummary: (active: number, archived: number) => string;
     sessionsCount: (count: number) => string;

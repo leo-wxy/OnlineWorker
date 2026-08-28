@@ -973,6 +973,9 @@ class ProviderOwnerBridge:
                         source = str(session.get("source") or "").strip()
                         if source:
                             row["source"] = source
+                        for field in ("workspaceGroup", "workspaceGroupKind"):
+                            if isinstance(session.get(field), str):
+                                row[field] = session[field].strip()
                         sessions.append(row)
                     sessions.extend(_state_only_session_rows(self.state, provider_id, facts, seen))
                     sessions.sort(
