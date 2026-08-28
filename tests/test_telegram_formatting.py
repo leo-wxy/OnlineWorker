@@ -49,3 +49,28 @@ def test_format_telegram_assistant_final_text_falls_back_when_markup_exceeds_bud
     assert result.parse_mode is None
     assert result.text == "```python\nprint('x')\n```"
     assert result.fallback_text == result.text
+
+
+def test_format_telegram_assistant_final_text_strips_internal_citation_blocks():
+    internal_blocks = (
+        "<oai-mem-citation>\n"
+        "<citation_entries>MEMORY.md:1-1</citation_entries>\n"
+        "<rollout_ids>example-id</rollout_ids>\n"
+        "</oai-mem-citation>",
+        "<citation_entries>MEMORY.md:1-1</citation_entries>\n"
+        "<rollout_ids>example-id</rollout_ids>",
+    )
+
+    for internal_block in internal_blocks:
+        result = format_telegram_assistant_final_text(
+            f"播放验证完成\n\n{internal_block}"
+        )
+
+        assert result.text == "播放验证完成"
+        assert result.fallback_text == "播放验证完成"
+
+    inline_marker = format_telegram_assistant_final_text(
+        "正文中讨论 <oai-mem-citation> 标记时应保留"
+    )
+    assert "oai-mem-citation" in inline_marker.text
+    assert "oai-mem-citation" in inline_marker.fallback_text

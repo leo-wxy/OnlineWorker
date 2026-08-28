@@ -15,6 +15,10 @@ _INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
 _BOLD_RE = re.compile(r"\*\*([^*\n]+)\*\*|__([^_\n]+)__")
 _ITALIC_RE = re.compile(r"(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)")
 _STRIKE_RE = re.compile(r"~~([^~\n]+)~~")
+_INTERNAL_CITATION_SUFFIXES = (
+    ("<oai-mem-citation>", "</oai-mem-citation>"),
+    ("<citation_entries>", "</rollout_ids>"),
+)
 
 
 @dataclass(frozen=True)
@@ -38,6 +42,19 @@ def _compact_local_file_links(text: str) -> str:
             line = _LOCAL_FILE_LINK_RE.sub(lambda match: f"`{match.group(1)}`", line)
         lines.append(line)
     return "\n".join(lines)
+
+
+def _strip_internal_citation_suffix(text: str) -> str:
+    stripped = text.rstrip()
+    for opening, closing in _INTERNAL_CITATION_SUFFIXES:
+        start = stripped.rfind(opening)
+        if (
+            start >= 0
+            and stripped.endswith(closing)
+            and (start == 0 or stripped[start - 1] == "\n")
+        ):
+            return stripped[:start].rstrip()
+    return text
 
 
 def _placeholder_substitute(
@@ -219,7 +236,9 @@ def format_telegram_assistant_final_text(
     *,
     max_length: int = 4096,
 ) -> TelegramRenderedText:
-    normalized = _compact_local_file_links((text or "").strip())
+    normalized = _compact_local_file_links(
+        _strip_internal_citation_suffix((text or "").strip())
+    )
     if not normalized:
         return TelegramRenderedText(text="", parse_mode=None, fallback_text="")
 
