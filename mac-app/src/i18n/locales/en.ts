@@ -305,24 +305,11 @@ export const enTexts: AppTexts = {
       groupIdentity: (title: string, chatType: string, forumBadge: string) =>
         `${title} (${chatType}) ${forumBadge}`,
     },
-    cliChecker: {
-      title: "CLI Dependencies",
-      allInstalled: "All installed",
-      missingCount: (count: number) => `${count} missing`,
-      installViaNpm: "Install via npm",
-      installViaOfficialInstaller: "Install via the official installer",
-      installManually: (bin: string) =>
-        `Install ${bin} manually and ensure it is in PATH`,
-      installInstructions: (label: string) =>
-        `${label} install instructions:`,
-      docs: "Docs",
-    },
     config: {
       yamlTab: "config.yaml",
       envTab: ".env",
       reveal: "Show",
       conceal: "Hide",
-      cliCheckerHint: "CLI dependencies are detected from your current config.",
       rawFilesTitle: "Raw Files",
       rawFilesDescription: "Open low-level configuration only when the normal settings panels are not enough.",
       yamlDescription: "Provider flags, autostart behavior, ports, and runtime defaults.",
@@ -478,8 +465,6 @@ export const enTexts: AppTexts = {
       saving: "Saving...",
       enable: "Enable",
       autostart: "Autostart",
-      civilityModeTitle: "Civility mode",
-      civilityModeDescription: "Rewrite abusive language into neutral wording before sending.",
       cliConfigTitle: "CLI configuration",
       externalCliBin: "Launch command",
       externalCliProxyAliasTitle: "Fixed Unix proxy alias",

@@ -15,7 +15,7 @@ const sessionMarkdownComponent = readFileSync(
 );
 const markdown = readFileSync(join(root, "src", "utils", "sessionMarkdown.js"), "utf8");
 const staticMarkdown = readFileSync(
-  join(root, "src", "utils", "sessionMarkdownStatic.js"),
+  join(__dirname, "sessionMarkdownStatic.js"),
   "utf8",
 );
 

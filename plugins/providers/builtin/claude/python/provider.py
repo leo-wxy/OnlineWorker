@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from core.providers.contracts import (
     ProviderDescriptor,
     ProviderFactsHooks,
@@ -33,30 +31,6 @@ from plugins.providers.builtin.claude.python import runtime
 from plugins.providers.builtin.claude.python import storage_runtime
 
 
-def _scan_workspaces(*, sessions_dir: Optional[str] = None):
-    return storage_runtime.scan_claude_session_cwds(sessions_dir=sessions_dir)
-
-
-def _list_threads(workspace_path: str, limit: int = 20):
-    return storage_runtime.list_claude_threads_by_cwd(workspace_path, limit=limit)
-
-
-def _query_active_thread_ids(workspace_path: str):
-    return storage_runtime.query_claude_active_session_ids(workspace_path)
-
-
-def _query_running_thread_ids(workspace_path: str):
-    return storage_runtime.query_claude_running_session_ids(workspace_path)
-
-
-def _read_thread_history(thread_id: str, *, limit: int = 10, sessions_dir: Optional[str] = None):
-    return storage_runtime.read_claude_thread_history(
-        thread_id,
-        sessions_dir=sessions_dir,
-        limit=limit,
-    )
-
-
 def create_provider_descriptor() -> ProviderDescriptor:
     metadata = metadata_from_builtin_provider_manifest(__file__)
     capabilities = metadata.capabilities
@@ -64,11 +38,11 @@ def create_provider_descriptor() -> ProviderDescriptor:
         name="claude",
         metadata=metadata,
         facts=ProviderFactsHooks(
-            scan_workspaces=_scan_workspaces,
-            list_threads=_list_threads,
-            read_thread_history=_read_thread_history,
-            query_active_thread_ids=_query_active_thread_ids,
-            query_running_thread_ids=_query_running_thread_ids,
+            scan_workspaces=storage_runtime.scan_claude_session_cwds,
+            list_threads=storage_runtime.list_claude_threads_by_cwd,
+            read_thread_history=storage_runtime.read_claude_thread_history,
+            query_active_thread_ids=storage_runtime.query_claude_active_session_ids,
+            query_running_thread_ids=storage_runtime.query_claude_running_session_ids,
             include_state_only_thread=lambda thread_info: (
                 str(getattr(thread_info, "source", "") or "").strip().lower() == "app"
                 and bool(getattr(thread_info, "is_active", False))
@@ -89,14 +63,12 @@ def create_provider_descriptor() -> ProviderDescriptor:
             reply_question=runtime.reply_question_via_adapter,
             parse_approval_request=runtime.parse_approval_request,
             parse_question_request=runtime.parse_question_request,
-            handle_approval_callback=runtime.handle_approval_callback,
             server_request_methods=("item/commandExecution/requestApproval",),
         ),
         workspace_hooks=ProviderWorkspaceHooks(
             normalize_server_threads=default_normalize_server_threads,
             sync_existing_thread_history=runtime.sync_existing_thread_history,
             prefer_provider_thread_overview=True,
-            thread_control_intro_extra=runtime.thread_control_intro_extra,
         ),
         thread_hooks=ProviderThreadHooks(
             resolve_adapter=resolve_default_thread_adapter,

@@ -14,6 +14,7 @@ import {
   buildSnapshotSignature,
   countAssistantEntries,
   hasSessionSnapshotChanged,
+  loadSnapshotIfCurrent,
   pollAssistantReply,
   startActiveSessionRefresh,
 } from "../../utils/sessionPolling.js";
@@ -91,6 +92,7 @@ export function GenericProviderChat({
   const endRef = useRef<HTMLDivElement>(null);
   const replyWatchTokenRef = useRef(0);
   const messagesRef = useRef<SessionTurn[]>([]);
+  const snapshotGenerationRef = useRef(0);
   const liveRefreshBlockedRef = useRef(true);
   const liveStreamReadyRef = useRef(false);
   const hasLoadedRef = useRef(false);
@@ -125,6 +127,7 @@ export function GenericProviderChat({
   }, []);
 
   useEffect(() => {
+    snapshotGenerationRef.current += 1;
     liveStreamReadyRef.current = false;
     setActiveSession(session);
   }, [session.id, session.type, session.workspace]);
@@ -157,17 +160,25 @@ export function GenericProviderChat({
     }
     setLoading(true);
     setError(null);
+    const snapshotGeneration = snapshotGenerationRef.current;
     try {
       const turns = await fetchProviderSession(activeSession.type, activeSession.id, activeSession.workspace);
+      if (snapshotGeneration !== snapshotGenerationRef.current) {
+        return;
+      }
       const nextTurns = overlayPendingUserTurn(turns, sessionOverlayRaw);
       const overlayed = nextTurns !== turns;
       applyMessages(nextTurns, "auto");
       hasLoadedRef.current = true;
       setReplyWatchState((current) => overlayed ? (current ?? "background") : (current === "expired" ? null : current));
     } catch (loadError) {
-      setError((loadError as Error).message);
+      if (snapshotGeneration === snapshotGenerationRef.current) {
+        setError((loadError as Error).message);
+      }
     } finally {
-      setLoading(false);
+      if (snapshotGeneration === snapshotGenerationRef.current) {
+        setLoading(false);
+      }
     }
   }, [
     activeSession.id,
@@ -183,8 +194,12 @@ export function GenericProviderChat({
     if (mode === "new-session") {
       return;
     }
+    const snapshotGeneration = snapshotGenerationRef.current;
     try {
       const turns = await fetchProviderSession(activeSession.type, activeSession.id, activeSession.workspace);
+      if (snapshotGeneration !== snapshotGenerationRef.current) {
+        return;
+      }
       const nextTurns = overlayPendingUserTurn(turns, sessionOverlayRaw);
       const overlayed = nextTurns !== turns;
       hasLoadedRef.current = true;
@@ -195,6 +210,9 @@ export function GenericProviderChat({
       applyMessages(nextTurns, "auto");
       setReplyWatchState((current) => overlayed ? (current ?? "background") : (current === "expired" ? null : current));
     } catch (loadError) {
+      if (snapshotGeneration !== snapshotGenerationRef.current) {
+        return;
+      }
       if (messagesRef.current.length === 0) {
         setError((loadError as Error).message);
       } else {
@@ -260,7 +278,11 @@ export function GenericProviderChat({
     if (nextMessages === previousMessages) {
       return;
     }
+    snapshotGenerationRef.current += 1;
     applyMessages(nextMessages, "auto");
+    hasLoadedRef.current = true;
+    setLoading(false);
+    setError(null);
     if (shouldClearReplyWatch(previousMessages, nextMessages, event)) {
       cancelReplyWatch();
     }
@@ -289,11 +311,17 @@ export function GenericProviderChat({
       intervalMs: 3000,
       getCurrentSnapshot: () => messagesRef.current,
       loadSnapshot: async () => {
-        return overlayPendingUserTurn(await fetchProviderSession(
-          activeSession.type,
-          activeSession.id,
-          activeSession.workspace,
-        ), sessionOverlayRaw);
+        const snapshot = await loadSnapshotIfCurrent(
+          () => fetchProviderSession(
+            activeSession.type,
+            activeSession.id,
+            activeSession.workspace,
+          ),
+          () => snapshotGenerationRef.current,
+        );
+        return snapshot === null
+          ? messagesRef.current
+          : overlayPendingUserTurn(snapshot, sessionOverlayRaw);
       },
       onSnapshot: (snapshot) => {
         const overlayed = Boolean(
@@ -343,6 +371,7 @@ export function GenericProviderChat({
 
     setSending(true);
     setError(null);
+    snapshotGenerationRef.current += 1;
     applyMessages(optimisticMessages, "smooth");
     setReplyWatchState("foreground");
 
@@ -374,6 +403,7 @@ export function GenericProviderChat({
         throw new Error("provider did not return a real session id");
       }
       if (remappedSessionId && remappedSessionId !== activeSession.id) {
+        snapshotGenerationRef.current += 1;
         const nextSession = {
           ...activeSession,
           id: remappedSessionId,
@@ -398,11 +428,17 @@ export function GenericProviderChat({
               id: remappedSessionId,
             }
           : activeSession;
-        const snapshot = await fetchProviderSession(
-          currentSession.type,
-          currentSession.id,
-          currentSession.workspace,
+        const snapshot = await loadSnapshotIfCurrent(
+          () => fetchProviderSession(
+            currentSession.type,
+            currentSession.id,
+            currentSession.workspace,
+          ),
+          () => snapshotGenerationRef.current,
         );
+        if (snapshot === null) {
+          return messagesRef.current;
+        }
         const overlaySnapshot = overlayPendingUserTurn(snapshot, {
           lastUserMessage: trimmedText,
           lastEventKind: "message.user.accepted",

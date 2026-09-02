@@ -5,7 +5,8 @@
 # Pipeline:
 #   1. PyInstaller: main.py → dist/onlineworker-bot (single binary)
 #   2. Copy sidecar binary with target-triple suffix to mac-app/src-tauri/binaries/
-#   3. Tauri build: produce .dmg in mac-app/src-tauri/target/release/bundle/dmg/
+#   3. Build pinned ccusage sidecar
+#   4. Tauri build: produce .dmg in mac-app/src-tauri/target/release/bundle/dmg/
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -151,7 +152,7 @@ echo ""
 
 cleanup_previous_bundle_outputs
 
-# Step 1: Use arm64 Python for PyInstaller
+# Configure arm64 Python for PyInstaller
 PYTHON_ARM64="${PYTHON_ARM64:-$HOME/.pyenv/versions/3.13.1/bin/python3}"
 if [ ! -f "$PYTHON_ARM64" ]; then
 	echo "ERROR: arm64 Python not found at $PYTHON_ARM64"
@@ -159,14 +160,14 @@ if [ ! -f "$PYTHON_ARM64" ]; then
 fi
 PYINSTALLER_CMD="$PYTHON_ARM64 -m PyInstaller"
 
-# Step 2: Build Python bot binary
+# Step 1: Build Python bot binary
 echo "=== Step 1/4: PyInstaller build ==="
 cd "$PROJECT_ROOT"
 $PYINSTALLER_CMD onlineworker.spec --clean --noconfirm
 echo "Binary: $(ls -lh dist/onlineworker-bot)"
 echo ""
 
-# Step 3: Copy binary with target-triple suffix for Tauri sidecar
+# Step 2: Copy binary with target-triple suffix for Tauri sidecar
 echo "=== Step 2/4: Copy bot sidecar ==="
 mkdir -p "$PROJECT_ROOT/mac-app/src-tauri/binaries"
 cp "$PROJECT_ROOT/dist/onlineworker-bot" \
@@ -175,7 +176,7 @@ chmod +x "$PROJECT_ROOT/mac-app/src-tauri/binaries/onlineworker-bot-${TARGET_TRI
 echo "Sidecar: mac-app/src-tauri/binaries/onlineworker-bot-${TARGET_TRIPLE}"
 echo ""
 
-# Step 4: Build pinned ccusage sidecar
+# Step 3: Build pinned ccusage sidecar
 echo "=== Step 3/4: Build ccusage sidecar ==="
 CCUSAGE_MANIFEST="$PROJECT_ROOT/third_party/ccusage/rust/crates/ccusage/Cargo.toml"
 CCUSAGE_TARGET_DIR="$PROJECT_ROOT/third_party/ccusage/rust/target"
@@ -191,7 +192,7 @@ chmod +x "$PROJECT_ROOT/mac-app/src-tauri/binaries/ccusage-${TARGET_TRIPLE}"
 echo "Sidecar: mac-app/src-tauri/binaries/ccusage-${TARGET_TRIPLE}"
 echo ""
 
-# Step 5: Build Tauri app (produces .dmg)
+# Step 4: Build Tauri app (produces .dmg)
 echo "=== Step 4/4: Tauri build ==="
 ensure_npm
 hash -r

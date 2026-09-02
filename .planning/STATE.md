@@ -2,27 +2,27 @@
 gsd_state_version: 1.0
 milestone: general-ai-capability-and-session-operations
 milestone_name: General AI Capability and Session Operations
-current_phase: 23 — Plugin-Owned Codex Account and Session Asset Management
-current_plan: none
-status: Phase 23 complete; account entry scope and row-alignment follow-up source verified
-stopped_at: Phase 23 OAuth/Token-only entry and fixed account row tracks source verification complete
-last_updated: "2026-08-18T23:37:51+08:00"
+current_phase: 24 — Runtime Authority and Durability Hardening
+current_plan: 24-07
+status: Phase 24 repository-local work source verified through 24-08; 24-07 blocked
+stopped_at: Completed Phase 24 24-08 source verification
+last_updated: "2026-08-30T21:38:31+08:00"
 progress:
-  total_phases: 18
+  total_phases: 19
   completed_phases: 12
-  total_plans: 49
-  completed_plans: 37
-  percent: 76
-current_phase_name: Plugin-Owned Codex Account and Session Asset Management
+  total_plans: 57
+  completed_plans: 44
+  percent: 77
+current_phase_name: Runtime Authority and Durability Hardening
 ---
 
 # Project State
 
-**Updated:** 2026-08-18
+**Updated:** 2026-08-30
 **Current milestone:** General AI Capability and Session Operations
-**Current phase:** 23 — Plugin-Owned Codex Account and Session Asset Management
-**Status:** Phase 23 complete; account entry scope and row-alignment follow-up source verified
-**Current plan:** None
+**Current phase:** 24 — Runtime Authority and Durability Hardening
+**Status:** Phase 24 repository-local work source verified through 24-08; 24-07 blocked
+**Current plan:** 24-07 — cross-owner steer/interrupt and TG output loop
 **Last archived milestone:** v1.2.1
 
 ## Current Status
@@ -51,6 +51,7 @@ current_phase_name: Plugin-Owned Codex Account and Session Asset Management
 - Phase 21 is complete and installed-app verified. Provider-owned visibility now suppresses Codex child/internal sessions before EventBus and unbound Topic materialization, provider-native titles are shared across Desktop and Telegram, stale child/internal state and routes reconcile to zero without deleting provider history, and the installed `v1.8.4` runtime passed a real child-suppression smoke. The remaining standalone Telegram visual comparison was explicitly waived at closeout and is not claimed as passed.
 - Phase 22 is source verified through 22-06. System/Light/Dark persistence, first-frame bootstrap, shared main/menubar synchronization, semantic tokens, all existing UI surfaces, and the stable theme development guide are implemented. Frontend regression passed 183 tests, TypeScript and Vite production build passed, and installed-app visual/native-window verification remains pending explicit permission.
 - Phase 23 is complete. The independent Codex plugin exposes OAuth and Token / JSON account entry, Cockpit-compatible export, explicit apply/reapply, official manual quota refresh, encrypted storage, and offline session assets. Dedicated API Key and local-file add actions were removed in a later scope reduction while historical credential shapes remain readable/exportable. A 2026-08-18 performance follow-up replaced per-action Python cold starts with one independent resident account-feature worker and added a versioned redacted account-summary cache with background calibration. Combined build/install verification passed for that performance follow-up; session refresh still took 6.0 s and remains separate.
+- Phase 24 repository-local work is source verified through 24-08. Cross-owner queue remains honest while 24-07 stays blocked on unavailable Codex owner control.
 - Phase 17's intermediate preview/cache/hydration fixes and their earlier installed evidence are consolidated in `17-01-SUMMARY.md`; `17-VERIFICATION.md` is the canonical closure result.
 
 ## Archived Milestone
@@ -81,13 +82,14 @@ current_phase_name: Plugin-Owned Codex Account and Session Asset Management
 | 21. Provider Child-Session Visibility | Completed; canonical verification and installed child-suppression smoke passed | None; standalone live Telegram visual comparison was waived and remains unclaimed |
 | 22. Dark Mode Support | Source verified through `22-06` | Await explicit permission for installed-app visual and native-window verification |
 | 23. Plugin-Owned Codex Account and Session Asset Management | Completed; OAuth/Token-only entry and fixed row tracks source/visual verified; earlier resident cache path installed verified | Current follow-up is not packaged; session refresh remains 6.0 s and real mutations remain unverified |
+| 24. Runtime Authority and Durability Hardening | Repository-local work source verified through `24-08`; `24-07` blocked | Obtain a supported Codex owner endpoint/interrupt API or split 24-07 into a later capability phase |
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 **Core value:** Developers can reliably control local AI coding CLI workflows from an installed Mac app while receiving timely remote notifications and final results through supported notification channels.
-**Current focus:** Phase 23 closed with OAuth/Token-only account entry and fixed row alignment source verified; current follow-up packaging and session refresh performance remain open
+**Current focus:** Phase 24 repository-local stability work is source verified; 24-07 remains externally blocked
 
 ## Key Preserved Decisions
 
@@ -218,9 +220,19 @@ See: `.planning/PROJECT.md` (updated 2026-07-11)
 - Phase 22 source verification completed on 2026-08-16: all 6 plans are implemented, frontend regression passed `183` tests, TypeScript and Vite build passed, and independent reviews found no remaining P0/P1 issue. Installed-app visual/native-window verification was not run and remains unclaimed pending explicit permission.
 - Phase 23 planned on 2026-08-17: 12 plans across 7 waves cover independent enabled-builtin discovery, generic account-feature worker/native capabilities, Cockpit-compatible account transfer, encrypted storage, explicit Apply/export, and current-home offline session assets.
 - Phase 23 completed on 2026-08-18: all 12 plans are implemented; manual official quota refresh and explicit reapply were added under the plugin boundary; session UI groups 71 conversations into 31 default-collapsed cwd/project groups; Python `51`, Rust `11`, Node `5`, TypeScript, combined `OnlineWorker_1.9.0_aarch64.dmg`, and mounted-DMG visual QA passed. Installation and real account/session mutations remain unclaimed.
+- Phase 24 added on 2026-08-30: runtime authority and durability hardening is ordered from low-impact EventBus retention through failure semantics, canonical projection, provider ingress authority, lifecycle ownership, and persistence recovery.
+- Phase 24 `24-01` source verified on 2026-08-30: EventBus dedupe keys now leave memory with their recent-event entry; focused regression passed `26` tests and no build/package/install was run.
+- Phase 24 `24-02` source verified on 2026-08-30: owner-bridge failures stay errors, Task Board and Menubar preserve last-known-good activity state, and focused Node contracts passed `29` tests without build/package/install.
+- Phase 24 `24-03` source verified on 2026-08-30: canonical duplicate handlers are suppressed without blocking bus-failure fallback, old turn progress/terminal events cannot regress current activity, and frontend stale snapshot races are guarded; focused Python passed `133`, owner-bridge Python passed `63`, Node passed `42`, and no build/package/install was run.
+- Phase 24 `24-04` source verified on 2026-08-30: app-server, hook, notify, and rollout share a bounded category-level source claim; focused adapter tests passed `59`, adjacent ingress/owner/event-stream tests passed `126`, and no build/package/install was run.
+- Phase 24 `24-05` source verified on 2026-08-30: session streams and bot service lifecycle now use stream id/generation/pid ownership so stale cleanup, monitor, and restart work cannot replace newer instances.
+- Phase 24 `24-05` follow-up on 2026-08-30: service guard now reads App exit state explicitly and cannot autostart during shutdown; targeted Rust regression passed.
+- Phase 24 `24-06` source verified on 2026-08-30: critical Python/Rust state writes are atomic and recoverable, route migration resumes per candidate, archive normal flow has one canonical writer, and shared-live TUI no longer starts the legacy parallel poll chain. Final focused gates passed `479` tests with `1 skipped`; no build/package/install/restart was run.
+- Phase 24 `24-07` opened on 2026-08-30 after a real active-writer gap was confirmed. Queue disposition/TG wording/fail-closed interrupt/commentary regressions pass (`4` focused; related files `105 passed, 1 skipped`), but Codex Desktop owner endpoint and real interrupt are not discoverable, so the phase remains open.
+- Phase 24 `24-08` completed on 2026-08-30: local-owner failures no longer publish accepted, provider overlay backup/schema safety is enforced, stale service restarts are regression-covered, Python passed `81` with `1 skipped`, and Rust passed `255`.
 
 ## Session Continuity
 
-Last session: 2026-08-18T14:57:34+08:00
-Stopped at: Phase 23 complete
+Last session: 2026-08-30T21:38:31+08:00
+Stopped at: Completed Phase 24 24-08 source verification
 Resume file: none

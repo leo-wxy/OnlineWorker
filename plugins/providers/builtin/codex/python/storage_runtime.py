@@ -13,8 +13,13 @@ CODEX_SESSIONS_DIR = "~/.codex/sessions"
 _CODEX_SESSION_FILE_CACHE: dict[str, dict[str, object]] = {}
 
 
-def is_codex_user_visible_session(source=None, *, thread_source=None) -> bool:
+def is_codex_user_visible_session(source=None, *, thread_source=None, cwd=None) -> bool:
     """统一判断 Codex session 是否应作为顶层用户会话展示。"""
+    if cwd:
+        session_cwd = os.path.realpath(os.path.expanduser(str(cwd)))
+        memories_root = os.path.realpath(os.path.expanduser("~/.codex/memories"))
+        if session_cwd == memories_root or session_cwd.startswith(memories_root + os.sep):
+            return False
     if str(thread_source or "").strip().lower() == "subagent":
         return False
     if not source or source == "vscode":
@@ -170,11 +175,12 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
                         _parse_codex_timestamp_ms(candidate.get("timestamp")),
                         _parse_codex_timestamp_ms(payload.get("timestamp")),
                     )
+                    cwd = payload.get("cwd") or candidate.get("cwd")
                     if is_codex_user_visible_session(
                         payload.get("source"),
                         thread_source=payload.get("thread_source"),
+                        cwd=cwd,
                     ):
-                        cwd = payload.get("cwd") or candidate.get("cwd")
                         if isinstance(cwd, str) and cwd and os.path.isabs(cwd):
                             tid = (
                                 payload.get("id")
@@ -273,7 +279,7 @@ def _query_codex_active_thread_rows_by_workspace() -> tuple[dict[str, set[str]],
         return active_ids_by_workspace, rows_by_workspace
 
     for row in rows:
-        if not is_codex_user_visible_session(row["source"] or ""):
+        if not is_codex_user_visible_session(row["source"] or "", cwd=row["cwd"]):
             continue
         workspace_path = str(row["cwd"] or "").strip()
         thread_id = str(row["id"] or "").strip()
@@ -344,38 +350,6 @@ def _extract_codex_thread_id_from_filename(fname: str) -> str:
     if len(parts) < 6:
         return ""
     return "-".join(parts[-5:])
-
-
-def _read_codex_first_user_preview_from_file(fpath: str) -> Optional[str]:
-    """读取 session jsonl 中第一条真实用户输入，作为 /list 预览。"""
-    try:
-        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-            next(f, None)
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if obj.get("type") != "response_item":
-                    continue
-                payload = obj.get("payload", {})
-                if payload.get("role") != "user":
-                    continue
-                for c in payload.get("content", []):
-                    if c.get("type") != "input_text":
-                        continue
-                    text = (c.get("text") or "").strip()
-                    if not text:
-                        continue
-                    if text.startswith("#") or text.startswith("<"):
-                        continue
-                    return text
-    except Exception:
-        return None
-    return None
 
 
 def _normalize_turn_text(text: str) -> str:
@@ -564,7 +538,7 @@ def query_codex_active_thread_ids(
             active_ids.update(
                 row[0]
                 for row in rows
-                if is_codex_user_visible_session(row[1] or "")
+                if is_codex_user_visible_session(row[1] or "", cwd=row[2])
                 and _codex_workspace_matches(row[2] or "", workspace_path)
             )
     except Exception:
@@ -819,7 +793,9 @@ def list_codex_threads_by_cwd(
         }
 
     for r in rows:
-        if not is_codex_user_visible_session(r["source"] or "") or not _codex_workspace_matches(r["cwd"], cwd):
+        if not is_codex_user_visible_session(
+            r["source"] or "", cwd=r["cwd"]
+        ) or not _codex_workspace_matches(r["cwd"], cwd):
             continue
         tid = r["id"]
         item = {
@@ -985,6 +961,7 @@ def list_codex_subagent_thread_ids(thread_ids: list[str]) -> set[str]:
                 thread_source=(
                     row["thread_source"] if "thread_source" in row.keys() else None
                 ),
+                cwd=row["cwd"] if "cwd" in row.keys() else None,
             )
         }
     except Exception:

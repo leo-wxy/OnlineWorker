@@ -201,14 +201,6 @@ def build_approval_reply(approval, action: str) -> tuple[str, dict]:
     return "✅ 已允许", {"behavior": "allow"}
 
 
-async def handle_approval_callback(state, approval, action: str, query, msg_id: int) -> bool:
-    return False
-
-
-def thread_control_intro_extra(thread_id: str, state_text: str) -> str:
-    return ""
-
-
 async def sync_existing_thread_history(
     *,
     bot,

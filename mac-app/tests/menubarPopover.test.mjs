@@ -80,6 +80,10 @@ test("menubar refreshes provider sessions without overlapping snapshot loads", (
     /load_provider_sessions_with_overlays\(&app, &provider_id, force_refresh\)/,
   );
   assert.match(rustSource, /tokio::join!\(/);
+  assert.match(
+    rustSource,
+    /usage_providers\?,\s*activities\?,\s*session_candidates,/,
+  );
   assert.match(rustSource, /let mut tasks = JoinSet::new\(\)/);
   assert.match(rustSource, /get_usage_source_catalog\(app\.clone\(\)\)/);
   assert.match(rustSource, /source\.provider_id\.as_deref\(\) == Some\(provider_id\)/);
@@ -93,6 +97,11 @@ test("menubar refreshes provider sessions without overlapping snapshot loads", (
     /onFocusChanged[\s\S]*if \(!focused\)[\s\S]*loadSnapshot\(false\)/,
   );
   assert.match(source, /const snapshotLoadInFlight = useRef\(false\)/);
+  assert.match(source, /const snapshotEventSequence = useRef\(0\)/);
+  assert.match(source, /const latestSnapshotEpoch = useRef\(0\)/);
+  assert.match(source, /next\.generatedAtEpoch < latestSnapshotEpoch\.current/);
+  assert.match(source, /eventSequence === snapshotEventSequence\.current/);
+  assert.match(source, /if \(applySnapshot\(payload\)\) \{\s*snapshotEventSequence\.current \+= 1;/);
   assert.match(source, /if \(snapshotLoadInFlight\.current\) \{\s*return;\s*\}/);
   assert.match(source, /snapshotLoadInFlight\.current = false/);
   assert.match(rustSource, /MENUBAR_PROVIDER_LOAD_TIMEOUT: Duration = Duration::from_secs\(3\)/);

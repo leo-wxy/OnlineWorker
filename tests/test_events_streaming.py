@@ -28,6 +28,56 @@ class RecordingNotificationRouter:
 
 
 @pytest.mark.asyncio
+async def test_duplicate_canonical_event_runs_provider_handler_once():
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=3794,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-123"] = ThreadInfo(
+        thread_id="tid-123",
+        topic_id=3794,
+        archived=False,
+    )
+    state = AppState(storage=AppStorage(workspaces={"codex:onlineWorker": ws}))
+    message_bus = state.message_bus
+    bot = SimpleNamespace(edit_forum_topic=AsyncMock())
+    handler = make_event_handler(state, bot, GROUP_CHAT_ID)
+
+    def title_event(title: str) -> dict:
+        return {
+            "workspace_id": "codex:onlineWorker",
+            "message": {
+                "method": "session.title_updated",
+                "params": {"threadId": "tid-123", "title": title},
+            },
+        }
+
+    with patch("bot.events.save_storage"):
+        await handler("app-server-event", title_event("First title"))
+        await handler("app-server-event", title_event("First title"))
+        await handler("app-server-event", title_event("Second title"))
+
+    assert bot.edit_forum_topic.await_count == 2
+    assert ws.threads["tid-123"].preview == "Second title"
+    assert [event["kind"] for event in message_bus.recent_events()] == [
+        "session.title_updated",
+        "session.title_updated",
+    ]
+
+    def fail_publish(_event):
+        raise RuntimeError("bus unavailable")
+
+    state.message_bus = SimpleNamespace(publish=fail_publish)
+    with patch("bot.events.save_storage"):
+        await handler("app-server-event", title_event("Third title"))
+    assert bot.edit_forum_topic.await_count == 3
+    assert ws.threads["tid-123"].preview == "Third title"
+
+
+@pytest.mark.asyncio
 async def test_watched_thread_keeps_mirrored_hook_off_telegram():
     state = AppState()
     codex_state.get_runtime(state).watched_threads["tid-123"] = SimpleNamespace()

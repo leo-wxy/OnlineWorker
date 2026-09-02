@@ -17,9 +17,7 @@ mod provider_status;
 #[path = "dashboard/recent_activity.rs"]
 mod recent_activity;
 pub use self::dashboard_types::*;
-use provider_status::{
-    build_provider_statuses, has_subservice_problem, is_hidden_provider, read_provider_snapshots,
-};
+use provider_status::{build_provider_statuses, has_subservice_problem, read_provider_snapshots};
 #[cfg(test)]
 use provider_status::{
     read_provider_runtime_status_via_owner_bridge_with_timeout, resolve_builtin_provider_snapshots,
@@ -60,20 +58,9 @@ pub(crate) async fn compute_dashboard_state(
     let dir = ensure_data_dir()?;
     let service = snapshot_service_status(state).await?;
     let now = SystemTime::now();
-    let (managed_service_running, last_started_at) = {
-        let bot = state.lock().await;
-        (bot.running, bot.last_started_at)
-    };
     let (config_ready, missing_config_fields) = read_config_readiness(&dir)?;
     let provider_configs = read_provider_snapshots(&dir)?;
-    let providers = build_provider_statuses(
-        provider_configs,
-        &dir,
-        service.running,
-        managed_service_running,
-        last_started_at,
-        now,
-    );
+    let providers = build_provider_statuses(provider_configs, &dir, service.running);
 
     let telegram = if service.running {
         read_telegram_polling_diagnostic(&dir, now)
@@ -100,7 +87,7 @@ pub(crate) fn build_dashboard_state(input: DashboardComputationInput) -> Dashboa
     let visible_providers: Vec<ProviderDashboardStatus> = input
         .providers
         .into_iter()
-        .filter(|provider| !is_hidden_provider(&provider.id) && provider.managed)
+        .filter(|provider| provider.managed)
         .collect();
     let telegram = match input.telegram_connected {
         Some(true) => ConnectionStatus::Connected,
@@ -586,9 +573,6 @@ mod tests {
             }],
             std::path::Path::new("/tmp"),
             true,
-            true,
-            Some(SystemTime::UNIX_EPOCH),
-            SystemTime::UNIX_EPOCH + Duration::from_secs(60),
         );
 
         assert_eq!(providers[0].health, ServiceHealth::Stopped);
@@ -628,9 +612,6 @@ mod tests {
             }],
             &temp_dir,
             true,
-            true,
-            Some(SystemTime::UNIX_EPOCH),
-            SystemTime::UNIX_EPOCH + Duration::from_secs(60),
         );
 
         assert_ne!(providers[0].health, ServiceHealth::Stopped);
@@ -689,9 +670,6 @@ mod tests {
             }],
             &temp_dir,
             true,
-            true,
-            Some(SystemTime::UNIX_EPOCH),
-            SystemTime::UNIX_EPOCH + Duration::from_secs(60),
         );
 
         assert_eq!(providers[0].health, ServiceHealth::Healthy);
@@ -750,9 +728,6 @@ mod tests {
             }],
             &temp_dir,
             true,
-            true,
-            Some(SystemTime::UNIX_EPOCH),
-            SystemTime::UNIX_EPOCH + Duration::from_secs(60),
         );
 
         assert_eq!(providers[0].health, ServiceHealth::Degraded);
@@ -813,9 +788,6 @@ mod tests {
             }],
             &temp_dir,
             true,
-            true,
-            Some(SystemTime::UNIX_EPOCH),
-            SystemTime::UNIX_EPOCH + Duration::from_secs(60),
         );
 
         assert_eq!(providers[0].health, ServiceHealth::Healthy);
@@ -860,9 +832,6 @@ mod tests {
             }],
             &temp_dir,
             true,
-            true,
-            Some(SystemTime::UNIX_EPOCH),
-            SystemTime::UNIX_EPOCH + Duration::from_secs(60),
         );
 
         assert_eq!(providers[0].health, ServiceHealth::Unknown);
@@ -1202,12 +1171,9 @@ providers:
         });
         std::fs::write(&state_path, serde_json::to_string(&payload).unwrap()).unwrap();
 
-        let summary = read_recent_activity_summary_from_paths_with_provider_sessions(
-            &dir,
-            None,
-            &HashMap::new(),
-        )
-        .expect("recent activity");
+        let summary =
+            read_recent_activity_summary_from_paths_with_provider_sessions(&dir, &HashMap::new())
+                .expect("recent activity");
         assert_eq!(
             summary.active_workspace_id.as_deref(),
             Some("primary:onlineWorker")
@@ -1277,7 +1243,6 @@ providers:
         write_preview("first snapshot");
         let first = read_recent_activity_summary_cached_with_now(
             &dir,
-            None,
             &provider_sessions("first snapshot"),
             base,
         )
@@ -1290,7 +1255,6 @@ providers:
         write_preview("second snapshot");
         let cached = read_recent_activity_summary_cached_with_now(
             &dir,
-            None,
             &provider_sessions("second snapshot"),
             base + Duration::from_secs(RECENT_ACTIVITY_CACHE_TTL.as_secs() / 2),
         )
@@ -1302,7 +1266,6 @@ providers:
 
         let refreshed = read_recent_activity_summary_cached_with_now(
             &dir,
-            None,
             &provider_sessions("second snapshot"),
             base + RECENT_ACTIVITY_CACHE_TTL + Duration::from_secs(1),
         )
@@ -1459,7 +1422,6 @@ providers:
 
         let summary = read_recent_activity_summary_from_paths_with_provider_sessions(
             &dir,
-            None,
             &HashMap::from([(
                 "overlay-tool".to_string(),
                 vec![ProviderSessionRow {
@@ -1500,7 +1462,6 @@ providers:
         let workspace_path = "/Users/example/Projects/provider-owned-workspace";
         let summary = read_recent_activity_summary_from_paths_with_provider_sessions(
             &dir,
-            None,
             &HashMap::from([(
                 "claude".to_string(),
                 vec![ProviderSessionRow {

@@ -196,52 +196,6 @@ def _save_notify_forward_argv(path: Path, argv: list[str]) -> bool:
     return True
 
 
-def remove_onlineworker_codex_event_hooks(
-    *,
-    hooks_path: str | None = None,
-) -> dict[str, Any]:
-    resolved_path = _default_codex_hooks_path(hooks_path)
-    path = Path(resolved_path)
-    if not path.exists():
-        return {
-            "state": "removed",
-            "hooksPath": resolved_path,
-            "removedEvents": [],
-            "changed": False,
-        }
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    hooks = payload.get("hooks") if isinstance(payload, dict) else None
-    if not isinstance(hooks, dict):
-        raise ValueError("Codex hooks 配置 hooks 不是对象")
-
-    removed_events: list[str] = []
-    changed = False
-    for event_name in CODEX_EXTERNAL_EVENT_HOOK_NAMES:
-        entries = hooks.get(event_name)
-        if entries is None:
-            continue
-        if not isinstance(entries, list):
-            raise ValueError(f"Codex hooks.{event_name} 不是数组")
-        preserved = [
-            entry for entry in entries if not _is_onlineworker_codex_hook_entry(entry)
-        ]
-        if preserved != entries:
-            hooks[event_name] = preserved
-            removed_events.append(event_name)
-            changed = True
-    if changed:
-        _atomic_write_text(
-            path,
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        )
-    return {
-        "state": "removed",
-        "hooksPath": resolved_path,
-        "removedEvents": removed_events,
-        "changed": changed,
-    }
-
-
 def install_onlineworker_codex_notify(
     data_dir: str,
     *,

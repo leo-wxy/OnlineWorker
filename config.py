@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any, Optional
 from dotenv import dotenv_values
 
+from core.atomic_file import atomic_write_text
+
 from core.ai.config import (
     load_ai_config,
 )
@@ -1214,8 +1216,10 @@ def load_config(path: str = DEFAULT_CONFIG_PATH, *, data_dir: str | None = None)
         if loaded.document_changed:
             should_persist = True
         if should_persist:
-            with open(loaded.config_path, "w", encoding="utf-8") as f:
-                yaml.safe_dump(loaded.data, f, allow_unicode=True, sort_keys=False)
+            atomic_write_text(
+                loaded.config_path,
+                yaml.safe_dump(loaded.data, allow_unicode=True, sort_keys=False),
+            )
 
     return Config(
         telegram_token=telegram_token,

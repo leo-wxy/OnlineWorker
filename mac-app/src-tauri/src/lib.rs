@@ -47,8 +47,8 @@ use commands::provider_sessions::{
 use commands::provider_usage::{get_usage_source_catalog, get_usage_source_summary};
 use commands::service::{
     check_cli, service_restart, service_start, service_status, service_stop,
-    shutdown_managed_processes_for_app_exit, snapshot_service_status, start_service_internal,
-    BotState, ServiceStatus,
+    shutdown_managed_processes_for_app_exit, snapshot_service_status,
+    start_service_internal_at_generation, BotState, ServiceStatus,
 };
 use commands::support_bundle::{
     export_support_bundle, reveal_support_bundle, run_support_diagnostics,
@@ -288,8 +288,10 @@ fn should_auto_start_service_in_session(
     status: &ServiceStatus,
     session_auto_start_enabled: bool,
     config_auto_start_enabled: bool,
+    app_is_exiting: bool,
 ) -> bool {
-    session_auto_start_enabled
+    !app_is_exiting
+        && session_auto_start_enabled
         && config_auto_start_enabled
         && should_auto_start_service_after_launch(status)
 }
@@ -302,9 +304,9 @@ fn spawn_service_guard_loop(app_handle: tauri::AppHandle, state: Arc<Mutex<BotSt
         loop {
             match snapshot_service_status(&state).await {
                 Ok(status) => {
-                    let session_auto_start_enabled = {
+                    let (session_auto_start_enabled, generation) = {
                         let bot = state.lock().await;
-                        bot.session_auto_start_enabled
+                        (bot.session_auto_start_enabled, bot.generation)
                     };
                     let config_auto_start_enabled = read_provider_runtime_policies_from_disk()
                         .map(|policies| {
@@ -318,12 +320,19 @@ fn spawn_service_guard_loop(app_handle: tauri::AppHandle, state: Arc<Mutex<BotSt
                         &status,
                         session_auto_start_enabled,
                         config_auto_start_enabled,
+                        app_handle.state::<AppExitState>().is_exiting(),
                     ) {
                         last_guard_state = Some("starting");
                         eprintln!(
                             "[app] service guard: service not running while config/session auto-start are enabled, starting now"
                         );
-                        match start_service_internal(&app_handle, &state).await {
+                        match start_service_internal_at_generation(
+                            &app_handle,
+                            &state,
+                            Some(generation),
+                        )
+                        .await
+                        {
                             Ok(message) => {
                                 eprintln!("[app] service guard: {}", message);
                             }
@@ -741,6 +750,7 @@ mod tests {
             },
             true,
             true,
+            false,
         ));
         assert!(!should_auto_start_service_in_session(
             &ServiceStatus {
@@ -749,6 +759,7 @@ mod tests {
             },
             false,
             true,
+            false,
         ));
         assert!(!should_auto_start_service_in_session(
             &ServiceStatus {
@@ -756,6 +767,7 @@ mod tests {
                 pid: None,
             },
             true,
+            false,
             false,
         ));
         assert!(should_auto_start_service_in_session(
@@ -763,6 +775,16 @@ mod tests {
                 running: false,
                 pid: None,
             },
+            true,
+            true,
+            false,
+        ));
+        assert!(!should_auto_start_service_in_session(
+            &ServiceStatus {
+                running: false,
+                pid: None,
+            },
+            true,
             true,
             true,
         ));

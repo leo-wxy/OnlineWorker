@@ -34,6 +34,13 @@ logger = logging.getLogger(__name__)
 DEFAULT_APPROVALS_REVIEWER = "user"
 PENDING_THREAD_START_TTL_SECONDS = 120.0
 IDLE_RELEASE_DELAY_SECONDS = 1.0
+_INGRESS_SOURCE_CLAIM_LIMIT = 500
+_INGRESS_SOURCE_PRIORITY = {
+    "codex_rollout": 1,
+    "codex_notify": 2,
+    "codex_hook": 3,
+    "codex_app_server": 4,
+}
 _INTERNAL_HOOK_PROMPT_PREFIXES = (
     "You write the one-line activity update displayed beneath an existing Codex task title.",
     "You are a helpful assistant. You will be presented with a user prompt, and your job is to provide a short title for a task",
@@ -89,6 +96,9 @@ class CodexAdapter:
             "detail": "",
         }
         self._authoritative_live_sessions: set[str] = set()
+        self._ingress_source_claims: dict[
+            tuple[str, str, str], dict[str, Any]
+        ] = {}
         self._hidden_live_sessions: set[str] = set()
         self._supports_idle_restart = False
         self._idle_restart_handler = None
@@ -138,6 +148,21 @@ class CodexAdapter:
             if isinstance(item, dict):
                 thread_id = item.get("threadId") or item.get("thread_id")
         return str(thread_id) if thread_id else None
+
+    @staticmethod
+    def _extract_turn_id_from_event_params(params: dict[str, Any]) -> Optional[str]:
+        turn_id = params.get("turnId") or params.get("turn_id")
+        if not turn_id:
+            turn = params.get("turn")
+            if isinstance(turn, dict):
+                turn_id = turn.get("id") or turn.get("turnId") or turn.get("turn_id")
+        if not turn_id:
+            item = params.get("item")
+            if isinstance(item, dict):
+                turn_id = item.get("turnId") or item.get("turn_id")
+                if not turn_id and isinstance(item.get("turn"), dict):
+                    turn_id = item["turn"].get("id")
+        return str(turn_id) if turn_id else None
 
     # ------------------------------------------------------------------
     # 连接管理
@@ -485,6 +510,177 @@ class CodexAdapter:
     def _external_payload_source(payload: dict[str, Any]) -> str:
         return str(payload.get("source") or "codex_hook").strip().lower()
 
+    @classmethod
+    def _external_ingress_source(cls, payload: dict[str, Any]) -> str:
+        source = cls._external_payload_source(payload)
+        return source if source in {
+            "codex_hook", "codex_notify", "codex_rollout",
+        } else "codex_hook"
+
+    @staticmethod
+    def _ingress_source_claim_key(
+        session_id: str,
+        turn_id: str,
+        event_kind: str,
+    ) -> tuple[str, str, str]:
+        return session_id, turn_id, event_kind
+
+    def _reserve_ingress_source_claim(
+        self,
+        session_id: str,
+        turn_id: str,
+        event_kind: str,
+        source: str,
+    ) -> tuple[bool, dict[str, Any] | None]:
+        key = self._ingress_source_claim_key(session_id, turn_id, event_kind)
+        current = self._ingress_source_claims.get(key)
+        if current:
+            if current["committed"]:
+                return current["source"] == source, current if current["source"] == source else None
+            if current["source"] == source:
+                current["waiters"] += 1
+                return True, current
+            if _INGRESS_SOURCE_PRIORITY[source] <= _INGRESS_SOURCE_PRIORITY[current["source"]]:
+                return False, None
+        elif len(self._ingress_source_claims) >= _INGRESS_SOURCE_CLAIM_LIMIT:
+            # ponytail: bounded O(500) scan; add an index only if this ceiling grows.
+            committed_key = next((
+                claim_key
+                for claim_key, claim in self._ingress_source_claims.items()
+                if claim["committed"]
+            ), None)
+            if committed_key is None:
+                return False, None
+            self._ingress_source_claims.pop(committed_key)
+
+        candidate = {
+            "source": source,
+            "committed": False,
+            "waiters": 1,
+        }
+        self._ingress_source_claims[key] = candidate
+        return True, candidate
+
+    def _commit_ingress_source_claim(
+        self,
+        key: tuple[str, str, str],
+        candidate: dict[str, Any] | None,
+    ) -> bool:
+        if candidate is None or self._ingress_source_claims.get(key) is not candidate:
+            return False
+        candidate["committed"] = True
+        candidate["waiters"] = 0
+        return True
+
+    def _release_pending_ingress_source_claim(
+        self,
+        key: tuple[str, str, str],
+        candidate: dict[str, Any],
+    ) -> None:
+        if self._ingress_source_claims.get(key) is not candidate or candidate["committed"]:
+            return
+        candidate["waiters"] -= 1
+        if candidate["waiters"] <= 0:
+            self._ingress_source_claims.pop(key, None)
+
+    def _commit_app_server_ingress_source_claim(
+        self,
+        session_id: str,
+        turn_id: str,
+        event_kind: str,
+    ) -> bool:
+        key = self._ingress_source_claim_key(session_id, turn_id, event_kind)
+        current = self._ingress_source_claims.get(key)
+        if current and current["committed"]:
+            return current["source"] == "codex_app_server"
+        if current is None and len(self._ingress_source_claims) >= _INGRESS_SOURCE_CLAIM_LIMIT:
+            evicted_key = next((
+                claim_key
+                for claim_key, claim in self._ingress_source_claims.items()
+                if claim["committed"]
+            ), next(iter(self._ingress_source_claims)))
+            self._ingress_source_claims.pop(evicted_key)
+        self._ingress_source_claims[key] = {
+            "source": "codex_app_server",
+            "committed": True,
+            "waiters": 0,
+        }
+        return True
+
+    async def _claim_external_ingress_source(
+        self,
+        payload: dict[str, Any],
+        session_id: str,
+        turn_id: str,
+        event_kind: str,
+    ) -> tuple[bool, str]:
+        source = self._external_ingress_source(payload)
+        key = self._ingress_source_claim_key(session_id, turn_id, event_kind)
+        current = self._ingress_source_claims.get(key)
+        if current and current["committed"]:
+            if current["source"] == source:
+                return True, ""
+            reason = (
+                "authoritative_live_source"
+                if current["source"] == "codex_app_server"
+                else "source_claimed"
+            )
+            return False, reason
+        if session_id in self._authoritative_live_sessions:
+            self._commit_app_server_ingress_source_claim(session_id, turn_id, event_kind)
+            return False, "authoritative_live_source"
+
+        accepted, candidate = self._reserve_ingress_source_claim(
+            session_id, turn_id, event_kind, source,
+        )
+        if not accepted or candidate is None:
+            return False, (
+                "source_claimed" if key in self._ingress_source_claims
+                else "source_claim_capacity"
+            )
+        if candidate["committed"]:
+            return True, ""
+        try:
+            await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            self._release_pending_ingress_source_claim(key, candidate)
+            raise
+
+        if session_id in self._authoritative_live_sessions:
+            self._commit_app_server_ingress_source_claim(session_id, turn_id, event_kind)
+        if not self._commit_ingress_source_claim(key, candidate):
+            owner = self._ingress_source_claims.get(key, {}).get("source")
+            return False, (
+                "authoritative_live_source"
+                if owner == "codex_app_server"
+                else "source_claimed"
+            )
+        return True, ""
+
+    @classmethod
+    def _app_server_ingress_claim(
+        cls,
+        method: str,
+        params: dict[str, Any],
+    ) -> tuple[str, str] | None:
+        event_kind = None
+        if method == "turn/started":
+            event_kind = "started"
+        elif method == "turn/completed":
+            event_kind = "completed"
+        elif method == "item/agentMessage/delta":
+            event_kind = "commentary"
+        elif method == "item/completed":
+            item = params.get("item")
+            if isinstance(item, dict) and item.get("type") == "agentMessage":
+                phase = item.get("phase")
+                if phase == "commentary":
+                    event_kind = "commentary"
+                elif phase == "final_answer":
+                    event_kind = "completed"
+        turn_id = cls._extract_turn_id_from_event_params(params)
+        return (turn_id, event_kind) if turn_id and event_kind else None
+
     def _record_external_primary_event(
         self,
         payload: dict[str, Any],
@@ -492,7 +688,7 @@ class CodexAdapter:
         turn_id: str,
         event_kind: str,
     ) -> None:
-        if self._external_payload_source(payload) == "codex_rollout":
+        if self._external_ingress_source(payload) == "codex_rollout":
             return
         ingress = self._desktop_rollout_ingress
         recorder = getattr(ingress, "record_primary_event", None)
@@ -566,6 +762,7 @@ class CodexAdapter:
 
         source = payload.get("source")
         thread_source = payload.get("thread_source") or payload.get("threadSource")
+        cwd = payload.get("cwd")
         transcript_path = str(
             payload.get("transcript_path") or payload.get("transcriptPath") or ""
         ).strip()
@@ -580,11 +777,13 @@ class CodexAdapter:
                         thread_source = meta_payload.get("thread_source") or meta_payload.get(
                             "threadSource"
                         )
+                        cwd = cwd or meta_payload.get("cwd")
             except (OSError, json.JSONDecodeError):
                 pass
         if not is_codex_user_visible_session(
             source,
             thread_source=thread_source,
+            cwd=cwd,
         ) or session_id in list_codex_subagent_thread_ids([session_id]):
             self._hidden_live_sessions.add(session_id)
             return {
@@ -619,7 +818,10 @@ class CodexAdapter:
             }
         if not self._event_callbacks:
             return {"accepted": False, "reason": "event_callback_unavailable"}
-        if self.has_authoritative_live_session(session_id):
+        if (
+            event_name in {"SessionStart", "SessionEnd"}
+            and self.has_authoritative_live_session(session_id)
+        ):
             return {
                 "accepted": True,
                 "emitted": 0,
@@ -650,14 +852,20 @@ class CodexAdapter:
                 or ""
             ).strip()
             turn_id = str(payload.get("turn_id") or "").strip() or str(uuid.uuid4())
-            self._record_external_primary_event(
-                payload,
-                session_id,
-                turn_id,
-                "started",
-            )
             if str(session.get("started_turn_id") or "").strip() == turn_id:
                 return {"accepted": True, "emitted": 0, "deduped": True}
+            claimed, reason = await self._claim_external_ingress_source(
+                payload, session_id, turn_id, "started",
+            )
+            if not claimed:
+                return {
+                    "accepted": True,
+                    "emitted": 0,
+                    "suppressed": reason,
+                }
+            self._record_external_primary_event(
+                payload, session_id, turn_id, "started",
+            )
             emitted = 0
             if not session.get("session_created_emitted"):
                 await self._emit_external_hook_event(
@@ -712,19 +920,35 @@ class CodexAdapter:
                 return {"accepted": True, "emitted": 0}
             if str(session.get("terminal_emitted_turn_id") or "").strip() == turn_id:
                 return {"accepted": True, "emitted": 0, "deduped": True}
+            claimed, reason = await self._claim_external_ingress_source(
+                payload, session_id, turn_id, "commentary",
+            )
+            if not claimed:
+                return {
+                    "accepted": True,
+                    "emitted": 0,
+                    "suppressed": reason,
+                }
             emitted = 0
             if str(session.get("started_turn_id") or "").strip() != turn_id:
-                await self._emit_external_hook_event(
-                    workspace_id,
-                    "turn/started",
-                    {
-                        "threadId": session_id,
-                        "turn": {"id": turn_id, "threadId": session_id},
-                        "_mirroredOnly": True,
-                    },
+                started_claimed, _ = await self._claim_external_ingress_source(
+                    payload, session_id, turn_id, "started",
                 )
-                session["started_turn_id"] = turn_id
-                emitted += 1
+                if started_claimed:
+                    self._record_external_primary_event(
+                        payload, session_id, turn_id, "started",
+                    )
+                    await self._emit_external_hook_event(
+                        workspace_id,
+                        "turn/started",
+                        {
+                            "threadId": session_id,
+                            "turn": {"id": turn_id, "threadId": session_id},
+                            "_mirroredOnly": True,
+                        },
+                    )
+                    session["started_turn_id"] = turn_id
+                    emitted += 1
             await self._emit_external_hook_event(
                 workspace_id,
                 "item/completed",
@@ -739,7 +963,7 @@ class CodexAdapter:
                         "turn": {"id": turn_id},
                     },
                     "_mirroredOnly": True,
-                    "_externalSource": self._external_payload_source(payload),
+                    "_externalSource": self._external_ingress_source(payload),
                 },
             )
             session["turn_id"] = turn_id
@@ -748,26 +972,34 @@ class CodexAdapter:
 
         notify_prefix_emitted = 0
         if event_name == "AgentTurnComplete":
-            external_source = self._external_payload_source(payload)
+            external_source = self._external_ingress_source(payload)
             turn_id = str(payload.get("turn_id") or "").strip() or str(uuid.uuid4())
+            if str(session.get("terminal_emitted_turn_id") or "").strip() == turn_id:
+                return {"accepted": True, "emitted": 0, "deduped": True}
+            claimed, reason = await self._claim_external_ingress_source(
+                payload, session_id, turn_id, "completed",
+            )
+            if not claimed:
+                return {
+                    "accepted": True,
+                    "emitted": 0,
+                    "suppressed": reason,
+                }
+            self._record_external_primary_event(
+                payload, session_id, turn_id, "completed",
+            )
             already_started = (
                 str(session.get("started_turn_id") or "").strip() == turn_id
             )
+            emit_prefix = False
             if not already_started:
-                self._record_external_primary_event(
-                    payload,
-                    session_id,
-                    turn_id,
-                    "started",
+                emit_prefix, _ = await self._claim_external_ingress_source(
+                    payload, session_id, turn_id, "started",
                 )
-            self._record_external_primary_event(
-                payload,
-                session_id,
-                turn_id,
-                "completed",
-            )
-            if str(session.get("terminal_emitted_turn_id") or "").strip() == turn_id:
-                return {"accepted": True, "emitted": 0, "deduped": True}
+                if emit_prefix:
+                    self._record_external_primary_event(
+                        payload, session_id, turn_id, "started",
+                    )
             input_messages = payload.get("input_messages")
             if isinstance(input_messages, str):
                 prompts = [input_messages.strip()] if input_messages.strip() else []
@@ -780,7 +1012,7 @@ class CodexAdapter:
             else:
                 prompts = []
             prompt = "\n\n".join(prompts)
-            if not already_started and not session.get("session_created_emitted"):
+            if emit_prefix and not session.get("session_created_emitted"):
                 await self._emit_external_hook_event(
                     workspace_id,
                     "session.created",
@@ -793,7 +1025,7 @@ class CodexAdapter:
                 )
                 session["session_created_emitted"] = True
                 notify_prefix_emitted += 1
-            if not already_started:
+            if emit_prefix:
                 if prompt:
                     await self._emit_external_hook_event(
                         workspace_id,
@@ -825,20 +1057,25 @@ class CodexAdapter:
             session["turn_id"] = turn_id
             session["turn_open"] = True
             session.pop("terminal_emitted_turn_id", None)
-
-        turn_id = (
-            str(payload.get("turn_id") or "").strip()
-            or str(session.get("turn_id") or "").strip()
-            or str(uuid.uuid4())
-        )
-        if str(session.get("terminal_emitted_turn_id") or "").strip() == turn_id:
-            return {"accepted": True, "emitted": 0, "deduped": True}
-        if event_name == "Stop":
+        else:
+            turn_id = (
+                str(payload.get("turn_id") or "").strip()
+                or str(session.get("turn_id") or "").strip()
+                or str(uuid.uuid4())
+            )
+            if str(session.get("terminal_emitted_turn_id") or "").strip() == turn_id:
+                return {"accepted": True, "emitted": 0, "deduped": True}
+            claimed, reason = await self._claim_external_ingress_source(
+                payload, session_id, turn_id, "completed",
+            )
+            if not claimed:
+                return {
+                    "accepted": True,
+                    "emitted": 0,
+                    "suppressed": reason,
+                }
             self._record_external_primary_event(
-                payload,
-                session_id,
-                turn_id,
-                "completed",
+                payload, session_id, turn_id, "completed",
             )
 
         final_text = str(
@@ -972,6 +1209,7 @@ class CodexAdapter:
                 if not is_codex_user_visible_session(
                     thread.get("source"),
                     thread_source=thread_source,
+                    cwd=thread.get("cwd") or cwd,
                 ):
                     if thread_id:
                         self._hidden_live_sessions.add(thread_id)
@@ -1104,6 +1342,35 @@ class CodexAdapter:
                 params.get("sandboxPolicy") or "-",
             )
         return await self._call("turn/start", params)
+
+    async def turn_steer(
+        self,
+        workspace_id: str,
+        thread_id: str,
+        expected_turn_id: str,
+        text: str,
+        attachments: list[dict[str, Any]] | None = None,
+    ) -> dict:
+        if thread_id and workspace_id:
+            self._thread_workspace_map[thread_id] = workspace_id
+        input_items: list[dict[str, Any]] = []
+        if text:
+            input_items.append({"type": "text", "text": text})
+        for attachment in attachments or []:
+            if not isinstance(attachment, dict):
+                continue
+            kind = str(attachment.get("kind") or "").strip().lower()
+            path = str(attachment.get("path") or "").strip()
+            if kind == "image" and path:
+                input_items.append({"type": "localImage", "path": path})
+        return await self._call(
+            "turn/steer",
+            {
+                "threadId": thread_id,
+                "expectedTurnId": expected_turn_id,
+                "input": input_items,
+            },
+        )
 
     async def list_models(self, *, include_hidden: bool = False, limit: int = 20) -> list[dict]:
         """读取 codex app-server 暴露的模型列表。"""
@@ -1586,9 +1853,6 @@ class CodexAdapter:
                             # Keep the existing fallback dedupe ledger across writer handoff.
                             session = self._external_hook_sessions.setdefault(thread_id, {})
                             session["terminal_emitted_turn_id"] = turn_id
-                            self._record_external_primary_event(
-                                {"source": "codex_app_server"}, thread_id, turn_id, "completed",
-                            )
                         self._schedule_idle_release()
                 finally:
                     self._event_worker_busy = False
@@ -1681,6 +1945,7 @@ class CodexAdapter:
                 return
             source = params.get("source")
             thread_source = params.get("thread_source") or params.get("threadSource")
+            cwd = params.get("cwd")
             for nested_key in ("thread", "item", "turn"):
                 nested = params.get(nested_key)
                 if not isinstance(nested, dict):
@@ -1689,7 +1954,13 @@ class CodexAdapter:
                     source = nested.get("source")
                 if not thread_source:
                     thread_source = nested.get("thread_source") or nested.get("threadSource")
-            if not is_codex_user_visible_session(source, thread_source=thread_source):
+                if not cwd:
+                    cwd = nested.get("cwd")
+            if not is_codex_user_visible_session(
+                source,
+                thread_source=thread_source,
+                cwd=cwd,
+            ):
                 if thread_id:
                     self._hidden_live_sessions.add(thread_id)
                 return
@@ -1706,6 +1977,19 @@ class CodexAdapter:
                 self._authoritative_live_sessions.discard(thread_id)
             elif thread_id:
                 self._authoritative_live_sessions.add(thread_id)
+            app_server_claim = self._app_server_ingress_claim(method, params)
+            if thread_id and app_server_claim:
+                turn_id, event_kind = app_server_claim
+                if not self._commit_app_server_ingress_source_claim(
+                    thread_id, turn_id, event_kind,
+                ):
+                    return
+                self._record_external_primary_event(
+                    {"source": "codex_app_server"},
+                    thread_id,
+                    turn_id,
+                    event_kind,
+                )
             self._update_thread_workspace_map(method, params)
             workspace_id = self._resolve_workspace_id_from_params(params)
             envelope = {

@@ -709,7 +709,7 @@ async fn refresh_menubar_popover_snapshot(
     let snapshot = build_popover_snapshot(
         current_epoch_seconds(),
         usage_providers?,
-        activities.unwrap_or_default(),
+        activities?,
         session_candidates,
     );
     store.replace(snapshot.clone());

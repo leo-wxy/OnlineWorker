@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Optional
 from config import get_data_dir
 from core.telegram_formatting import format_telegram_assistant_final_text
 from core.providers.lifecycle_runtime import _save_storage_via_lifecycle
-from core.providers.message_runtime import _interrupt_active_turn
 from core.providers.thread_runtime import interrupt_default_thread
 from plugins.providers.builtin.codex.python.adapter import CodexAdapter
 from plugins.providers.builtin.codex.python.approval_policy import (
@@ -995,9 +994,6 @@ async def handle_local_owner(
         await enqueue_codex_tui_message(
             state,
             ws_info,
-            context.bot,
-            group_chat_id,
-            src_topic_id or _thread_topic_id(state, ws_info, thread_info) or 0,
             thread_info.thread_id,
             text,
         )
@@ -1017,6 +1013,7 @@ async def handle_local_owner(
             tg_send_failed_text(e),
             topic_id=src_topic_id,
         )
+        return None
     return True
 
 
@@ -1151,6 +1148,9 @@ async def prepare_send(
 ) -> bool:
     workspace_id = ws_info.daemon_workspace_id
     thread_id = str(getattr(thread_info, "thread_id", "") or "")
+    active_turn = state.streaming_turns.get(thread_id)
+    if active_turn is not None and active_turn.turn_id and not active_turn.completed:
+        return True
     thread_source = str(getattr(thread_info, "source", "") or "").strip().lower()
     should_materialize_app_thread = (
         thread_source == "app"
@@ -1167,13 +1167,6 @@ async def prepare_send(
             str(original_thread_id)[:8],
             new_thread_id[:8],
         )
-    await _interrupt_active_turn(
-        state,
-        adapter,
-        workspace_id,
-        thread_info.thread_id,
-        label="codex",
-    )
     return True
 
 
@@ -1187,7 +1180,7 @@ async def _queue_codex_message(
     thread_id: str,
     text: str,
     attachments=None,
-) -> None:
+) -> dict:
     tool_cfg = state.config.get_tool("codex") if state.config is not None else None
     codex_bin = str(getattr(tool_cfg, "bin", "") or "codex")
     command = [codex_bin, "queue", "--thread", thread_id, "--message", text]
@@ -1222,9 +1215,10 @@ async def _queue_codex_message(
         detail = output.splitlines()[-1][:300] if output else "unknown error"
         raise RuntimeError(f"codex queue 发送失败：{detail}")
     logger.info(
-        "[provider-message] active writer thread 已通过 codex queue 投递 thread=%s",
+        "[provider-message] active writer thread 已通过 codex queue 排队 thread=%s",
         thread_id[:12],
     )
+    return {"status": "queued", "reason": "active_writer"}
 
 
 async def send_message(
@@ -1240,17 +1234,24 @@ async def send_message(
     text,
     has_photo: bool,
     attachments=None,
-) -> None:
+) -> dict:
     from plugins.providers.builtin.codex.python.tui_realtime_mirror import (
         seed_codex_watch_baseline,
         watch_codex_thread,
     )
+    from plugins.providers.builtin.codex.python.tui_bridge import (
+        uses_codex_shared_live_transport,
+    )
 
-    seed_codex_watch_baseline(state, ws_info, thread_info.thread_id)
-    codex_state.mark_send_started(state, thread_info.thread_id)
+    should_watch_session_file = not uses_codex_shared_live_transport(state)
+    if should_watch_session_file:
+        seed_codex_watch_baseline(state, ws_info, thread_info.thread_id)
     state.mark_provider_task_summary("codex", thread_info.thread_id, text)
     workspace_id = ws_info.daemon_workspace_id
     thread_id = thread_info.thread_id
+    active_turn = state.streaming_turns.get(thread_id)
+    if active_turn is not None and (active_turn.completed or not active_turn.turn_id):
+        active_turn = None
 
     async def send() -> None:
         if attachments:
@@ -1263,32 +1264,73 @@ async def send_message(
             return
         await adapter.send_user_message(workspace_id, thread_id, text)
 
-    try:
-        await send()
-    except Exception as exc:
-        if _is_codex_active_writer_error(exc):
-            await _queue_codex_message(state, ws_info, thread_id, text, attachments)
-        elif not is_codex_unmaterialized_error(exc):
-            raise
-        else:
-            logger.warning(
-                "[provider-message] turn/start 未找到 thread，resume 后重试 thread=%s",
-                thread_id[:12],
+    delivery = {"status": "sent"}
+    if active_turn is not None:
+        try:
+            await adapter.turn_steer(
+                workspace_id,
+                thread_id,
+                active_turn.turn_id,
+                text,
+                attachments=attachments,
             )
-            try:
-                await adapter.resume_thread(workspace_id, thread_id)
-                await send()
-            except Exception as recovery_exc:
-                if not _is_codex_active_writer_error(recovery_exc):
-                    raise
-                await _queue_codex_message(
+            delivery = {"status": "steered"}
+        except Exception as exc:
+            message = str(exc).lower()
+            if (
+                _is_codex_active_writer_error(exc)
+                or "expected active turn id" in message
+                or "cannot steer a review turn" in message
+                or "cannot steer a compact turn" in message
+            ):
+                delivery = await _queue_codex_message(
                     state,
                     ws_info,
                     thread_id,
                     text,
                     attachments,
                 )
-    watch_codex_thread(state, ws_info, thread_info.thread_id)
+            elif "no active turn to steer" in message or is_codex_unmaterialized_error(exc):
+                active_turn = None
+            else:
+                raise
+
+    if active_turn is None:
+        codex_state.mark_send_started(state, thread_id)
+        try:
+            await send()
+        except Exception as exc:
+            if _is_codex_active_writer_error(exc):
+                delivery = await _queue_codex_message(
+                    state,
+                    ws_info,
+                    thread_id,
+                    text,
+                    attachments,
+                )
+            elif not is_codex_unmaterialized_error(exc):
+                raise
+            else:
+                logger.warning(
+                    "[provider-message] turn/start 未找到 thread，resume 后重试 thread=%s",
+                    thread_id[:12],
+                )
+                try:
+                    await adapter.resume_thread(workspace_id, thread_id)
+                    await send()
+                except Exception as recovery_exc:
+                    if not _is_codex_active_writer_error(recovery_exc):
+                        raise
+                    delivery = await _queue_codex_message(
+                        state,
+                        ws_info,
+                        thread_id,
+                        text,
+                        attachments,
+                    )
+    if should_watch_session_file:
+        watch_codex_thread(state, ws_info, thread_info.thread_id)
+    return delivery
 
 
 def resolve_thread_adapter(state, ws):
@@ -1327,10 +1369,16 @@ async def activate_new_thread(
         seed_codex_watch_baseline,
         watch_codex_thread,
     )
+    from plugins.providers.builtin.codex.python.tui_bridge import (
+        uses_codex_shared_live_transport,
+    )
 
-    seed_codex_watch_baseline(state, ws, thread_id)
+    should_watch_session_file = not uses_codex_shared_live_transport(state)
+    if should_watch_session_file:
+        seed_codex_watch_baseline(state, ws, thread_id)
     await adapter.send_user_message(workspace_id, thread_id, initial_text)
-    watch_codex_thread(state, ws, thread_id)
+    if should_watch_session_file:
+        watch_codex_thread(state, ws, thread_id)
 
 
 async def archive_thread(state, ws, thread_id: str, active_adapter) -> None:
@@ -1359,7 +1407,14 @@ async def interrupt_thread(
 ) -> None:
     if not turn_id:
         raise RuntimeError("当前没有可中断的活跃任务。")
-    await interrupt_default_thread(state, ws, thread_info, active_adapter, turn_id)
+    try:
+        await interrupt_default_thread(state, ws, thread_info, active_adapter, turn_id)
+    except Exception as exc:
+        if _is_codex_active_writer_error(exc):
+            raise RuntimeError(
+                "当前会话由其他 Codex owner 控制；普通消息只能排队，无法立即中断。"
+            ) from exc
+        raise
 
 
 def normalize_server_threads(server_threads: list[dict], *, limit: int) -> list[dict]:
@@ -2123,7 +2178,6 @@ async def monitor_process_health(
 async def start_runtime(manager, bot, tool_cfg) -> None:
     from plugins.providers.builtin.codex.python.tui_bridge import (
         is_codex_local_owner_mode,
-        start_codex_tui_sync_loop,
         uses_codex_shared_live_transport,
     )
     from plugins.providers.builtin.codex.python.tui_realtime_mirror import (
@@ -2139,10 +2193,6 @@ async def start_runtime(manager, bot, tool_cfg) -> None:
             logger.info("codex 运行于 TUI 本地主控模式：不启动 shared app-server，TG 通过本地 host/runtime 注入，输出由本地 mirror 同步")
         else:
             logger.info("codex 运行于 App 本地 owner 模式：不启动 shared app-server，由 bot 进程托管本地 codex host/runtime")
-        sync_task = manager.get_tui_sync_task("codex")
-        if sync_task is None or sync_task.done():
-            sync_task = start_codex_tui_sync_loop(manager.state, bot, manager.gid)
-            manager.set_tui_sync_task("codex", sync_task)
         mirror_task = manager.get_tui_mirror_task("codex")
         if mirror_task is None or mirror_task.done():
             mirror_task = start_codex_tui_realtime_mirror_loop(

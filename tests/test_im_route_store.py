@@ -270,6 +270,38 @@ def test_json_migration_runs_once_and_does_not_reactivate_archived_routes(tmp_pa
     assert route.status == "archived"
 
 
+def test_json_migration_resumes_missing_rows_after_partial_run(tmp_path):
+    storage = AppStorage(
+        global_topic_ids={"codex": 11},
+        workspaces={
+            "codex:/repo": WorkspaceInfo(
+                name="repo",
+                path="/repo",
+                tool="codex",
+                topic_id=22,
+                threads={"session-1": ThreadInfo(thread_id="session-1", topic_id=33)},
+            )
+        },
+    )
+    store = _route_store(tmp_path)
+    store.upsert_telegram_agent_route(GROUP_CHAT_ID, 11, "codex", source="migrated")
+
+    store.migrate_telegram_json_topics(storage, GROUP_CHAT_ID)
+
+    assert store.get_telegram_agent_topic_id(GROUP_CHAT_ID, "codex") == 11
+    assert store.get_telegram_workspace_topic_id(
+        GROUP_CHAT_ID,
+        agent_provider="codex",
+        workspace_id="codex:/repo",
+    ) == 22
+    assert store.get_telegram_session_topic_id(
+        GROUP_CHAT_ID,
+        agent_provider="codex",
+        workspace_id="codex:/repo",
+        session_id="session-1",
+    ) == 33
+
+
 def test_json_migration_does_not_replace_new_active_sqlite_route(tmp_path):
     storage = AppStorage(
         workspaces={

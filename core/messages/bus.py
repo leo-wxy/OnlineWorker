@@ -37,6 +37,10 @@ class MessageEventBus:
         if event.dedupe_key:
             self._seen_dedupe_keys.add(event.dedupe_key)
 
+        if len(self._events) == self.max_events:
+            evicted = self._events[0]
+            if evicted.dedupe_key:
+                self._seen_dedupe_keys.discard(evicted.dedupe_key)
         self._events.append(event)
         self._activity_projection.update(event)
         self.notification_summary.observe(event)

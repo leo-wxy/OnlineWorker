@@ -166,16 +166,6 @@ export default function App() {
     let disposed = false;
     const channel = new Channel<TaskBoardActivityStreamEvent>();
 
-    invoke<TaskBoardSessionActivity[]>("get_task_board_session_activities")
-      .then((activities) => {
-        if (!disposed) {
-          setTaskBoardActivities(activities);
-        }
-      })
-      .catch((error) => {
-        console.warn("Failed to load task board activity badge state", error);
-      });
-
     channel.onmessage = (event) => {
       if (event.kind === "snapshot") {
         setTaskBoardActivities(event.activities ?? []);
@@ -480,7 +470,6 @@ export default function App() {
               <TaskBoard
                 onOpenSession={handleOpenTaskSession}
                 sessionActivities={taskBoardActivities}
-                onSessionActivitiesChange={setTaskBoardActivities}
               />
             </div>
           )}

@@ -9,7 +9,7 @@ import zipfile
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from plugins.providers.builtin.codex.python.account_store import atomic_write
-from plugins.providers.builtin.codex.python.session_assets import SessionAssetError, _index_entries, _scan_rollout, _write_index, list_sessions
+from plugins.providers.builtin.codex.python.session_assets import SessionAssetError, _index_entries, _write_index, list_sessions
 
 
 KIND = "codex-session-export"

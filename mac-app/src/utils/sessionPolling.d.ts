@@ -10,6 +10,11 @@ export function hasSessionSnapshotChanged<T>(
   getSignature?: (snapshot: T[] | null | undefined) => string,
 ): boolean;
 
+export function loadSnapshotIfCurrent<T>(
+  loadSnapshot: () => Promise<T>,
+  getGeneration: () => number,
+): Promise<T | null>;
+
 export function startActiveSessionRefresh<T>(options: {
   intervalMs?: number;
   getCurrentSnapshot: () => T[];
@@ -46,16 +51,3 @@ export function pollAssistantReply<T>(options: {
   assistantAppeared: boolean;
   cancelled: boolean;
 }>;
-
-export function pollForSettledAssistantReply<T>(options: {
-  loadSnapshot: () => Promise<T[]>;
-  getAssistantCount: (snapshot: T[]) => number;
-  getSignature: (snapshot: T[]) => string;
-  baselineAssistantCount: number;
-  baselineSnapshot?: T[];
-  onUpdate?: (snapshot: T[]) => void;
-  intervalMs?: number;
-  maxAttempts?: number;
-  stablePollsRequired?: number;
-  shouldContinue?: () => boolean;
-}): Promise<T[]>;

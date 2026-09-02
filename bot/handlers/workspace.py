@@ -43,7 +43,6 @@ from bot.thread_controls import send_thread_control_panel
 from bot.utils import TopicNotFoundError
 from bot.handlers.workspace_helpers import (
     THREAD_OPEN_V2_PREFIX as _THREAD_OPEN_V2_PREFIX,
-    build_history_sync_batches as _build_history_sync_batches,
     format_history_turn_message as _format_history_turn_message,
     get_workspace_callback_identity as _get_workspace_callback_identity,
     history_turn_signature as _history_turn_signature,
@@ -51,8 +50,6 @@ from bot.handlers.workspace_helpers import (
     make_workspace_topic_name as _make_workspace_topic_name,
     make_thread_open_token as _make_thread_open_token,
     make_thread_topic_name as _make_thread_topic_name,
-    normalize_history_turn_timestamp as _normalize_history_turn_timestamp,
-    normalize_workspace_topic_label as _normalize_workspace_topic_label,
     workspace_path_for_topic_hint as _workspace_path_for_topic_hint,
     workspace_path_topic_hint as _workspace_path_topic_hint,
 )

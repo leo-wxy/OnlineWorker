@@ -9,6 +9,19 @@ NEEDS_ATTENTION_STATUS = "needs_attention"
 RUNNING_STATUS = "running"
 COMPLETED_STATUS = "completed"
 FAILED_STATUS = "failed"
+TURN_SCOPED_ACTIVITY_KINDS = {
+    "message.assistant.delta",
+    "message.assistant.final",
+    "item.started",
+    "item.completed",
+    "shell.command.completed",
+    "turn.completed",
+    "turn.failed",
+    "approval.requested",
+    "approval.answered",
+    "question.requested",
+    "question.answered",
+}
 UUID_TITLE_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
@@ -113,6 +126,7 @@ def _is_user_interruption(event: MessageEvent) -> bool:
 class SessionActivityProjection:
     def __init__(self) -> None:
         self._activities: dict[str, SessionActivity] = {}
+        self._turn_ids: dict[str, str] = {}
 
     def update(self, event: MessageEvent) -> None:
         if not event.provider_id or not event.session_id:
@@ -121,6 +135,7 @@ class SessionActivityProjection:
         key = f"{event.provider_id}:{event.session_id}"
         if event.kind == "session.archived":
             self._activities.pop(key, None)
+            self._turn_ids.pop(key, None)
             return
 
         activity = self._activities.get(key)
@@ -130,6 +145,17 @@ class SessionActivityProjection:
                 session_id=event.session_id,
             )
             self._activities[key] = activity
+
+        current_turn_id = self._turn_ids.get(key, "")
+        if (
+            event.kind in TURN_SCOPED_ACTIVITY_KINDS
+            and current_turn_id
+            and event.turn_id
+            and event.turn_id != current_turn_id
+        ):
+            return
+        if event.turn_id and (event.kind == "turn.started" or not current_turn_id):
+            self._turn_ids[key] = event.turn_id
 
         if event.workspace_id:
             activity.workspace_id = event.workspace_id

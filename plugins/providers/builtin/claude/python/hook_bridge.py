@@ -10,6 +10,8 @@ import sys
 import tempfile
 from typing import Any
 
+from core.atomic_file import atomic_write_text
+
 
 CLAUDE_HOOK_SETTINGS_FILENAME = "claude_hook_settings.json"
 CLAUDE_MANAGED_BLOCKING_HOOK_TIMEOUT_SECONDS = 86400
@@ -214,12 +216,10 @@ def _load_claude_settings_payload(settings_path: str) -> tuple[dict[str, Any] | 
 
 
 def _persist_claude_settings_payload(settings_path: str, payload: dict[str, Any]) -> None:
-    parent = os.path.dirname(settings_path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(settings_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+    atomic_write_text(
+        settings_path,
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+    )
 
 
 def install_onlineworker_claude_hooks(
@@ -383,8 +383,10 @@ def write_claude_hook_settings(data_dir: str) -> str:
         include_marker=False,
         blocking_interactions=True,
     )
-    with open(settings_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+    atomic_write_text(
+        settings_path,
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+    )
     return settings_path
 
 

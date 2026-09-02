@@ -652,6 +652,7 @@ class CodexDesktopRolloutIngress:
             state.user_visible = is_codex_user_visible_session(
                 state.source,
                 thread_source=state.thread_source,
+                cwd=state.cwd,
             )
         elif row_type == "turn_context":
             state.turn_id = str(
@@ -784,9 +785,6 @@ class CodexDesktopRolloutIngress:
 
     def _should_publish_session(self, session_id: str) -> bool:
         if session_id in self._state.get_provider_runtime("codex").watched_threads:
-            return False
-        live_check = getattr(self._adapter, "has_authoritative_live_session", None)
-        if callable(live_check) and live_check(session_id):
             return False
         found = self._state.find_thread_by_id_global(session_id)
         if not found:

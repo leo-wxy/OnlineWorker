@@ -25,6 +25,7 @@ pub struct BotState {
     pub auto_restart: bool,
     pub session_auto_start_enabled: bool,
     pub last_started_at: Option<SystemTime>,
+    pub(crate) generation: u64,
 }
 
 impl BotState {
@@ -37,6 +38,7 @@ impl BotState {
             auto_restart: true,
             session_auto_start_enabled: true,
             last_started_at: None,
+            generation: 0,
         }
     }
 }
@@ -494,6 +496,14 @@ fn apply_manual_stop_policy(bot: &mut BotState) {
     bot.session_auto_start_enabled = false;
 }
 
+fn service_owner_matches(bot: &BotState, generation: u64, pid: u32) -> bool {
+    bot.generation == generation && bot.pid == Some(pid)
+}
+
+fn service_restart_is_still_owned(bot: &BotState, generation: u64) -> bool {
+    bot.generation == generation && bot.auto_restart && !bot.running && !bot.starting
+}
+
 pub(crate) fn should_attempt_background_service_recovery(
     status: &ServiceStatus,
     session_auto_start_enabled: bool,
@@ -505,6 +515,7 @@ pub(crate) fn should_attempt_background_service_recovery(
 pub async fn shutdown_managed_processes_for_app_exit(state: &Arc<Mutex<BotState>>) {
     let cleanup_policy = cleanup_policy_from_config();
     let mut bot = state.lock().await;
+    bot.generation = bot.generation.wrapping_add(1);
     apply_manual_stop_policy(&mut bot);
     let tracked_pid = bot.pid;
     if let Some(child) = bot.child.take() {
@@ -521,7 +532,14 @@ pub async fn shutdown_managed_processes_for_app_exit(state: &Arc<Mutex<BotState>
 }
 
 /// Internal: do the actual sidecar spawn. Stores child in state, starts monitor task.
-async fn do_spawn(app: &AppHandle, state: &Arc<Mutex<BotState>>) -> Result<u32, String> {
+async fn do_spawn(
+    app: &AppHandle,
+    state: &Arc<Mutex<BotState>>,
+    generation: u64,
+) -> Result<u32, String> {
+    if state.lock().await.generation != generation {
+        return Err("Service start superseded".to_string());
+    }
     let dir = ensure_data_dir()?;
     let dir_str = dir.to_string_lossy().to_string();
     eprintln!("[service] do_spawn: data_dir={}", dir_str);
@@ -551,6 +569,11 @@ async fn do_spawn(app: &AppHandle, state: &Arc<Mutex<BotState>>) -> Result<u32, 
     // Store child in state
     {
         let mut bot = state.lock().await;
+        if bot.generation != generation {
+            drop(bot);
+            let _ = child.kill();
+            return Err("Service start superseded".to_string());
+        }
         bot.pid = Some(pid);
         bot.child = Some(child);
         bot.running = true;
@@ -561,7 +584,7 @@ async fn do_spawn(app: &AppHandle, state: &Arc<Mutex<BotState>>) -> Result<u32, 
     // Monitor process in background for crash detection + auto-restart
     let state_clone = state.clone();
     let app_clone = app.clone();
-    start_monitor(rx, state_clone, app_clone);
+    start_monitor(rx, state_clone, app_clone, generation, pid);
 
     eprintln!("[service] do_spawn: complete, pid={}", pid);
     Ok(pid)
@@ -572,6 +595,8 @@ fn start_monitor(
     mut rx: tauri::async_runtime::Receiver<CommandEvent>,
     state: Arc<Mutex<BotState>>,
     app: AppHandle,
+    generation: u64,
+    pid: u32,
 ) {
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
@@ -587,6 +612,9 @@ fn start_monitor(
                     let should_restart;
                     {
                         let mut bot = state.lock().await;
+                        if !service_owner_matches(&bot, generation, pid) {
+                            break;
+                        }
                         bot.running = false;
                         bot.starting = false;
                         bot.child = None;
@@ -603,7 +631,18 @@ fn start_monitor(
 
                     if should_restart {
                         tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-                        let _ = do_spawn(&app, &state).await;
+                        let still_owned = {
+                            let bot = state.lock().await;
+                            service_restart_is_still_owned(&bot, generation)
+                        };
+                        if still_owned {
+                            let _ = start_service_internal_at_generation(
+                                &app,
+                                &state,
+                                Some(generation),
+                            )
+                            .await;
+                        }
                     }
                     break;
                 }
@@ -698,9 +737,9 @@ pub(crate) async fn ensure_service_running_if_needed(
     state: &Arc<Mutex<BotState>>,
 ) -> Result<ServiceStatus, String> {
     let status = snapshot_service_status(state).await?;
-    let (session_auto_start_enabled, starting) = {
+    let (session_auto_start_enabled, starting, generation) = {
         let bot = state.lock().await;
-        (bot.session_auto_start_enabled, bot.starting)
+        (bot.session_auto_start_enabled, bot.starting, bot.generation)
     };
     if starting {
         return Ok(status);
@@ -725,7 +764,7 @@ pub(crate) async fn ensure_service_running_if_needed(
     eprintln!(
         "[service] background recovery: service stopped while autostart is enabled, starting now"
     );
-    match start_service_internal(app, state).await {
+    match start_service_internal_at_generation(app, state, Some(generation)).await {
         Ok(message) => {
             eprintln!("[service] background recovery: {}", message);
             snapshot_service_status(state).await
@@ -741,14 +780,29 @@ pub(crate) async fn start_service_internal(
     app: &AppHandle,
     state: &Arc<Mutex<BotState>>,
 ) -> Result<String, String> {
+    start_service_internal_at_generation(app, state, None).await
+}
+
+pub(crate) async fn start_service_internal_at_generation(
+    app: &AppHandle,
+    state: &Arc<Mutex<BotState>>,
+    expected_generation: Option<u64>,
+) -> Result<String, String> {
     eprintln!("[service] service_start called");
     let cleanup_policy = cleanup_policy_from_config();
 
-    {
+    let generation = {
         let mut bot = state.lock().await;
         if bot.starting {
             return Ok("Start already in progress".to_string());
         }
+        if let Some(expected) = expected_generation {
+            if bot.generation != expected {
+                return Ok("Start cancelled".to_string());
+            }
+        }
+        bot.generation = bot.generation.wrapping_add(1);
+        let generation = bot.generation;
         let tracked_pid = bot.pid;
         if let Some(child) = bot.child.take() {
             let _ = child.kill();
@@ -760,7 +814,8 @@ pub(crate) async fn start_service_internal(
         apply_service_start_policy(&mut bot);
         drop(bot);
         cleanup_tracked_process_tree(tracked_pid);
-    }
+        generation
+    };
 
     eprintln!("[service_start] 先停止 bot 并清理本地接口...");
     cleanup_managed_processes(cleanup_policy);
@@ -769,11 +824,13 @@ pub(crate) async fn start_service_internal(
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
     eprintln!("[service] calling do_spawn...");
-    let pid = match do_spawn(app, state).await {
+    let pid = match do_spawn(app, state, generation).await {
         Ok(pid) => pid,
         Err(error) => {
             let mut bot = state.lock().await;
-            bot.starting = false;
+            if bot.generation == generation {
+                bot.starting = false;
+            }
             return Err(error);
         }
     };
@@ -879,9 +936,9 @@ mod tests {
         cleanup_owner_bridge_socket_files_in_dir, cleanup_process_matchers, command_program_token,
         compute_service_status, managed_bot_cleanup_pids_from_rows, overlay_env_spec,
         overlay_env_spec_from_app_env, pid_parent_pairs_from_output, pids_from_bot_process_rows,
-        process_tree_pids, read_env_key, select_primary_pid,
-        should_attempt_background_service_recovery, BotState, ManagedProcessCleanupPolicy,
-        LEGACY_OWNER_BRIDGE_SOCKET_FILENAME,
+        process_tree_pids, read_env_key, select_primary_pid, service_owner_matches,
+        service_restart_is_still_owned, should_attempt_background_service_recovery, BotState,
+        ManagedProcessCleanupPolicy, LEGACY_OWNER_BRIDGE_SOCKET_FILENAME,
     };
     use std::collections::HashMap;
     use std::fs;
@@ -958,6 +1015,23 @@ mod tests {
         apply_service_start_policy(&mut bot);
         assert!(bot.auto_restart);
         assert!(bot.session_auto_start_enabled);
+    }
+
+    #[test]
+    fn stale_service_monitor_and_restart_do_not_own_new_process() {
+        let mut bot = BotState::new();
+        bot.generation = 2;
+        bot.pid = Some(22);
+
+        assert!(!service_owner_matches(&bot, 1, 11));
+        assert!(!service_owner_matches(&bot, 1, 22));
+        assert!(service_owner_matches(&bot, 2, 22));
+
+        bot.running = false;
+        assert!(!service_restart_is_still_owned(&bot, 1));
+        assert!(service_restart_is_still_owned(&bot, 2));
+        apply_manual_stop_policy(&mut bot);
+        assert!(!service_restart_is_still_owned(&bot, 2));
     }
 
     #[test]

@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
+from core.atomic_file import atomic_write_text
+
 
 STORAGE_PATH = "onlineworker_state.json"
 
@@ -118,18 +120,11 @@ def _workspace_info_to_dict(ws: WorkspaceInfo) -> dict:
     }
 
 
-def load_storage(path: str = STORAGE_PATH) -> AppStorage:
-    """从 JSON 文件加载持久化状态，文件不存在时返回空状态。"""
-    if path == STORAGE_PATH:
-        from config import get_data_dir
-        dd = get_data_dir()
-        if dd is not None:
-            path = os.path.join(dd, STORAGE_PATH)
-
-    if not os.path.exists(path):
-        return AppStorage()
+def _load_storage_path(path: str) -> AppStorage:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError("onlineworker_state root must be an object")
     workspaces = {
         name: _workspace_info_from_dict(name, info)
         for name, info in data.get("workspaces", {}).items()
@@ -139,6 +134,25 @@ def load_storage(path: str = STORAGE_PATH) -> AppStorage:
         active_workspace=data.get("active_workspace"),
         global_topic_ids=data.get("global_topic_ids", {}),
     )
+
+
+def load_storage(path: str = STORAGE_PATH) -> AppStorage:
+    """从 JSON 文件加载持久化状态，主文件损坏时读取最后有效备份。"""
+    if path == STORAGE_PATH:
+        from config import get_data_dir
+        dd = get_data_dir()
+        if dd is not None:
+            path = os.path.join(dd, STORAGE_PATH)
+
+    backup_path = path + ".bak"
+    if not os.path.exists(path) and not os.path.exists(backup_path):
+        return AppStorage()
+    try:
+        return _load_storage_path(path)
+    except (OSError, ValueError, TypeError, KeyError):
+        if not os.path.exists(backup_path):
+            raise
+        return _load_storage_path(backup_path)
 
 
 def save_storage(storage: AppStorage, path: str = STORAGE_PATH) -> None:
@@ -155,7 +169,6 @@ def save_storage(storage: AppStorage, path: str = STORAGE_PATH) -> None:
         },
         "active_workspace": storage.active_workspace,
     }
-    tmp_path = path + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, path)
+    payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    atomic_write_text(path + ".bak", payload)
+    atomic_write_text(path, payload)

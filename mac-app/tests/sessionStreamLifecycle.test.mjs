@@ -38,6 +38,7 @@ test("startSessionStreamLifecycle starts stream, forwards events, and stops on c
     },
     invokeImpl: async (command, args) => {
       invocations.push({ command, args });
+      return command.startsWith("start_") ? 7 : undefined;
     },
   });
 
@@ -51,9 +52,46 @@ test("startSessionStreamLifecycle starts stream, forwards events, and stops on c
   assert.equal(receivedEvents.length, 1);
   assert.equal(receivedEvents[0].kind, "assistant_completed");
 
+  await Promise.resolve();
+
   cleanup?.();
   await Promise.resolve();
 
   assert.equal(invocations.length, 2);
   assert.equal(invocations[1].command, "stop_customprovider_session_stream");
+  assert.deepEqual(invocations[1].args, { streamId: 7 });
+});
+
+test("startSessionStreamLifecycle stops a stream that resolves after cleanup", async () => {
+  const invocations = [];
+  let resolveStart;
+  const startResult = new Promise((resolve) => {
+    resolveStart = resolve;
+  });
+
+  const cleanup = startSessionStreamLifecycle({
+    enabled: true,
+    startCommand: "start_customprovider_session_stream",
+    stopCommand: "stop_customprovider_session_stream",
+    startArgs: { sessionId: "session-1" },
+    createChannel: () => ({ onmessage: null }),
+    onEvent: () => {},
+    invokeImpl: async (command, args) => {
+      invocations.push({ command, args });
+      return command.startsWith("start_") ? startResult : undefined;
+    },
+  });
+
+  cleanup?.();
+  assert.equal(invocations.length, 1);
+
+  resolveStart(9);
+  await startResult;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(invocations.length, 2);
+  assert.deepEqual(invocations[1], {
+    command: "stop_customprovider_session_stream",
+    args: { streamId: 9 },
+  });
 });

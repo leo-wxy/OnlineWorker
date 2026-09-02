@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::ipc::Channel;
 
-use super::config::ensure_data_dir;
+use super::config::{atomic_write, ensure_data_dir};
 use super::provider_bridge_common::provider_owner_bridge_socket_path;
 
 const TASK_BOARD_STATE_FILE: &str = "task_board_state.json";
@@ -258,11 +258,37 @@ fn remove_session_ref(list: &mut Vec<TaskBoardSessionRef>, provider_id: &str, se
     list.retain(|item| !same_session(item, provider_id, session_id));
 }
 
-pub fn load_task_board_state_from_path(path: &Path) -> TaskBoardState {
-    let Ok(raw) = std::fs::read_to_string(path) else {
-        return TaskBoardState::default();
-    };
-    serde_json::from_str::<TaskBoardState>(&raw).unwrap_or_default()
+fn task_board_state_backup_path(path: &Path) -> PathBuf {
+    path.with_extension("json.bak")
+}
+
+fn parse_task_board_state(path: &Path) -> Result<TaskBoardState, String> {
+    let raw =
+        std::fs::read_to_string(path).map_err(|e| format!("read task board state failed: {e}"))?;
+    serde_json::from_str::<TaskBoardState>(&raw)
+        .map_err(|e| format!("parse task board state failed: {e}"))
+}
+
+pub fn load_task_board_state_from_path(path: &Path) -> Result<TaskBoardState, String> {
+    if !path.exists() {
+        let backup_path = task_board_state_backup_path(path);
+        return if backup_path.exists() {
+            parse_task_board_state(&backup_path)
+        } else {
+            Ok(TaskBoardState::default())
+        };
+    }
+    match parse_task_board_state(path) {
+        Ok(state) => Ok(state),
+        Err(primary_error) => {
+            let backup_path = task_board_state_backup_path(path);
+            if backup_path.exists() {
+                parse_task_board_state(&backup_path)
+            } else {
+                Err(primary_error)
+            }
+        }
+    }
 }
 
 fn save_task_board_state_to_path(path: &Path, state: &TaskBoardState) -> Result<(), String> {
@@ -272,10 +298,9 @@ fn save_task_board_state_to_path(path: &Path, state: &TaskBoardState) -> Result<
     }
     let payload = serde_json::to_string_pretty(state)
         .map_err(|e| format!("serialize task board state failed: {e}"))?;
-    let tmp_path = path.with_extension("json.tmp");
-    std::fs::write(&tmp_path, payload)
-        .map_err(|e| format!("write task board state tmp failed: {e}"))?;
-    std::fs::rename(&tmp_path, path)
+    atomic_write(&task_board_state_backup_path(path), payload.as_bytes())
+        .map_err(|e| format!("write task board state backup failed: {e}"))?;
+    atomic_write(path, payload.as_bytes())
         .map_err(|e| format!("replace task board state failed: {e}"))?;
     Ok(())
 }
@@ -285,7 +310,7 @@ where
     F: FnOnce(&mut TaskBoardState),
 {
     let path = task_board_state_path()?;
-    let mut state = load_task_board_state_from_path(&path);
+    let mut state = load_task_board_state_from_path(&path)?;
     state.version = 1;
     mutate(&mut state);
     save_task_board_state_to_path(&path, &state)?;
@@ -294,16 +319,13 @@ where
 
 #[tauri::command]
 pub async fn get_task_board_state() -> Result<TaskBoardState, String> {
-    Ok(load_task_board_state_from_path(&task_board_state_path()?))
+    load_task_board_state_from_path(&task_board_state_path()?)
 }
 
 #[tauri::command]
 pub async fn get_task_board_session_activities() -> Result<Vec<TaskBoardSessionActivity>, String> {
     let data_dir = ensure_data_dir()?;
     let socket_path = provider_owner_bridge_socket_path(&data_dir);
-    if !socket_path.exists() {
-        return Ok(Vec::new());
-    }
     tauri::async_runtime::spawn_blocking(move || {
         read_task_board_session_activities_from_socket_path_with_timeout(
             &socket_path,
@@ -671,8 +693,28 @@ mod tests {
             "onlineworker-task-board-missing-{}",
             now_epoch_seconds()
         ));
-        let state = load_task_board_state_from_path(&dir.join(TASK_BOARD_STATE_FILE));
+        let state = load_task_board_state_from_path(&dir.join(TASK_BOARD_STATE_FILE))
+            .expect("missing state");
         assert_eq!(state, TaskBoardState::default());
+    }
+
+    #[test]
+    fn corrupt_task_board_state_recovers_from_backup() {
+        let dir = std::env::temp_dir().join(format!(
+            "onlineworker-task-board-recovery-{}-{}",
+            std::process::id(),
+            now_epoch_seconds()
+        ));
+        let path = dir.join(TASK_BOARD_STATE_FILE);
+        let mut state = TaskBoardState::default();
+        upsert_session_ref(&mut state.pinned, "codex", "thread-a");
+        save_task_board_state_to_path(&path, &state).expect("save state");
+        fs::write(&path, "{broken").expect("corrupt primary");
+
+        let recovered = load_task_board_state_from_path(&path).expect("recover backup");
+
+        assert_eq!(recovered.pinned, state.pinned);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -163,23 +163,10 @@ class ImRouteStore:
         space_id = str(chat_id)
         now = _now()
         with self._connect() as conn:
-            existing_count = conn.execute(
-                """
-                SELECT COUNT(*) FROM im_routes
-                WHERE im_provider = 'telegram'
-                  AND im_account_id = ?
-                  AND im_space_id = ?
-                  AND route_scope != 'unknown'
-                """,
-                (account_id, space_id),
-            ).fetchone()[0]
-            if existing_count:
-                return
-
             for tool_name, topic_id in sorted(storage.global_topic_ids.items()):
                 if topic_id is None:
                     continue
-                self._upsert_route_conn(
+                self._migrate_route_conn(
                     conn,
                     im_provider="telegram",
                     im_account_id=account_id,
@@ -200,7 +187,7 @@ class ImRouteStore:
             for workspace_id, ws in sorted(storage.workspaces.items()):
                 tool_name = str(getattr(ws, "tool", "") or _infer_tool_from_workspace_id(workspace_id))
                 if ws.topic_id is not None:
-                    self._upsert_route_conn(
+                    self._migrate_route_conn(
                         conn,
                         im_provider="telegram",
                         im_account_id=account_id,
@@ -220,7 +207,7 @@ class ImRouteStore:
                 for session_id, thread in sorted(ws.threads.items()):
                     if thread.topic_id is None:
                         continue
-                    self._upsert_route_conn(
+                    self._migrate_route_conn(
                         conn,
                         im_provider="telegram",
                         im_account_id=account_id,
@@ -673,6 +660,53 @@ class ImRouteStore:
             """,
             tuple(values[column] for column in columns),
         )
+
+    def _migrate_route_conn(self, conn: sqlite3.Connection, **kwargs) -> None:
+        clauses = [
+            "im_provider = ?",
+            "im_account_id = ?",
+            "im_space_id = ?",
+            "route_scope = ?",
+            "agent_provider = ?",
+            "route_scope != 'unknown'",
+        ]
+        params: list[object] = [
+            kwargs["im_provider"],
+            kwargs["im_account_id"],
+            kwargs["im_space_id"],
+            kwargs["route_scope"],
+            kwargs.get("agent_provider"),
+        ]
+        for column in ("workspace_id", "session_id"):
+            value = kwargs.get(column)
+            if value is None:
+                clauses.append(f"{column} IS NULL")
+            else:
+                clauses.append(f"{column} = ?")
+                params.append(value)
+        existing = conn.execute(
+            f"""
+            SELECT 1 FROM im_routes
+            WHERE ({' AND '.join(clauses)})
+               OR (
+                    im_provider = ?
+                AND im_account_id = ?
+                AND im_space_id = ?
+                AND im_entry_id = ?
+                AND route_scope != 'unknown'
+               )
+            LIMIT 1
+            """,
+            (
+                *params,
+                kwargs["im_provider"],
+                kwargs["im_account_id"],
+                kwargs["im_space_id"],
+                kwargs["im_entry_id"],
+            ),
+        ).fetchone()
+        if existing is None:
+            self._upsert_route_conn(conn, **kwargs)
 
     def _close_existing_active_target_routes(
         self,

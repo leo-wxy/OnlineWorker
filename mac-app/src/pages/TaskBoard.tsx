@@ -43,7 +43,6 @@ export interface TaskBoardOpenSessionTarget {
 interface Props {
   onOpenSession: (target: TaskBoardOpenSessionTarget) => void;
   sessionActivities?: TaskBoardSessionActivity[];
-  onSessionActivitiesChange?: (activities: TaskBoardSessionActivity[]) => void;
 }
 
 const DEFAULT_TASK_BOARD_STATE: TaskBoardState = {
@@ -54,11 +53,9 @@ const DEFAULT_TASK_BOARD_STATE: TaskBoardState = {
 const PINNED_PREVIEW_HYDRATION_LIMIT = 12;
 const LOW_SIGNAL_PREVIEW_HYDRATION_LIMIT = 16;
 const SESSION_PREVIEW_HYDRATION_TIMEOUT_MS = 1200;
-const TASK_BOARD_ACTIVITY_REFRESH_TIMEOUT_MS = 1500;
 const TASK_BOARD_DETAIL_TURN_LIMIT = 6;
 
 interface RefreshOptions {
-  includeActivities?: boolean;
   forceProviderRefresh?: boolean;
 }
 
@@ -121,28 +118,6 @@ async function readSessionLastMessageWithTimeout(
       readSessionLastMessage(session),
       new Promise<null>((resolve) => {
         timer = window.setTimeout(() => resolve(null), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer !== null) {
-      window.clearTimeout(timer);
-    }
-  }
-}
-
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  label: string,
-): Promise<T> {
-  let timer: number | null = null;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timer = window.setTimeout(() => {
-          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-        }, timeoutMs);
       }),
     ]);
   } finally {
@@ -506,7 +481,6 @@ function BoardLane({
 export function TaskBoard({
   onOpenSession,
   sessionActivities: sharedSessionActivities,
-  onSessionActivitiesChange,
 }: Props) {
   const { t } = useI18n();
   const [providers, setProviders] = useState<ProviderMetadata[]>([]);
@@ -538,7 +512,7 @@ export function TaskBoard({
     [providers],
   );
 
-  const refresh = useCallback(async ({ includeActivities = true, forceProviderRefresh = false }: RefreshOptions = {}) => {
+  const refresh = useCallback(async ({ forceProviderRefresh = false }: RefreshOptions = {}) => {
     if (refreshInFlightRef.current) {
       return;
     }
@@ -552,26 +526,9 @@ export function TaskBoard({
         invoke<DashboardState>("get_dashboard_state"),
         invoke<TaskBoardState>("get_task_board_state"),
       ]);
-      const nextSessionActivities = includeActivities
-        ? await withTimeout(
-          invoke<TaskBoardSessionActivity[]>("get_task_board_session_activities"),
-          TASK_BOARD_ACTIVITY_REFRESH_TIMEOUT_MS,
-          "load task board session activities",
-        ).catch((activityError) => {
-          console.warn("Failed to load task board session activity projection", activityError);
-          return [];
-        })
-        : null;
       setProviders(nextProviders);
       setDashboardState(nextDashboard);
       setTaskBoardState(nextTaskBoardState);
-      if (nextSessionActivities !== null) {
-        if (onSessionActivitiesChange) {
-          onSessionActivitiesChange(nextSessionActivities);
-        } else {
-          setLocalSessionActivities(nextSessionActivities);
-        }
-      }
       setNowMs(Date.now());
       setError(null);
       setLoading(false);
@@ -620,18 +577,18 @@ export function TaskBoard({
       setLoading(false);
       setRefreshing(false);
     }
-  }, [onSessionActivitiesChange, t.sessions.workspaceFallback]);
+  }, [t.sessions.workspaceFallback]);
 
   useEffect(() => {
     let cancelled = false;
 
     void (async () => {
-      await refresh({ includeActivities: true });
+      await refresh();
       if (cancelled || hasHydratedProviderSessionsRef.current) {
         return;
       }
       hasHydratedProviderSessionsRef.current = true;
-      await refresh({ includeActivities: false, forceProviderRefresh: true });
+      await refresh({ forceProviderRefresh: true });
     })();
 
     return () => {
@@ -944,7 +901,7 @@ export function TaskBoard({
       }
 
       setSelectedApprovalTaskIds((current) => current.filter((id) => !succeededTaskIds.includes(id)));
-      await refresh({ includeActivities: true, forceProviderRefresh: true });
+      await refresh({ forceProviderRefresh: true });
     } finally {
       setBusyApprovalTaskIds((current) => current.filter((id) => !taskIds.includes(id)));
     }
@@ -987,7 +944,7 @@ export function TaskBoard({
           </div>
           <button
             type="button"
-            onClick={() => void refresh({ includeActivities: true, forceProviderRefresh: true })}
+            onClick={() => void refresh({ forceProviderRefresh: true })}
             disabled={refreshing}
             className="ow-btn inline-flex h-10 items-center gap-2 rounded-2xl px-4 text-sm font-extrabold text-[var(--ow-text)] disabled:opacity-60"
             title={t.taskBoard.refresh}

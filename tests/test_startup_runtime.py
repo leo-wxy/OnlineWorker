@@ -1158,8 +1158,6 @@ async def test_post_init_prefers_external_codex_ws_server_without_spawning_proce
         "_cleanup_archived_threads",
         new=AsyncMock(),
     ), patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.start_codex_tui_sync_loop",
-    ) as sync_mock, patch(
         "plugins.providers.builtin.codex.python.tui_realtime_mirror.start_codex_tui_realtime_mirror_loop",
         return_value=tui_mirror_task,
     ) as mirror_mock:
@@ -1167,7 +1165,6 @@ async def test_post_init_prefers_external_codex_ws_server_without_spawning_proce
 
     proc_cls.assert_not_called()
     connect_mock.assert_awaited_once_with(manager, bot, None, "ws://127.0.0.1:4722")
-    sync_mock.assert_not_called()
     mirror_mock.assert_called_once_with(state, bot, cfg.group_chat_id)
     assert manager.get_tui_sync_task("codex") is None
     assert manager.get_tui_mirror_task("codex") is tui_mirror_task
@@ -1211,8 +1208,6 @@ async def test_post_init_can_disable_codex_shared_live_sync_even_when_owner_uses
         "_cleanup_archived_threads",
         new=AsyncMock(),
     ), patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.start_codex_tui_sync_loop",
-    ) as sync_mock, patch(
         "plugins.providers.builtin.codex.python.tui_realtime_mirror.start_codex_tui_realtime_mirror_loop",
         return_value=tui_mirror_task,
     ) as mirror_mock:
@@ -1220,7 +1215,6 @@ async def test_post_init_can_disable_codex_shared_live_sync_even_when_owner_uses
 
     proc_cls.assert_not_called()
     connect_mock.assert_awaited_once_with(manager, bot, None, "ws://127.0.0.1:4722")
-    sync_mock.assert_not_called()
     mirror_mock.assert_called_once_with(state, bot, cfg.group_chat_id)
     assert manager.get_tui_sync_task("codex") is None
     assert manager.get_tui_mirror_task("codex") is tui_mirror_task
@@ -1261,8 +1255,6 @@ async def test_post_init_prefers_existing_codex_ws_service_without_spawning_proc
         "_cleanup_archived_threads",
         new=AsyncMock(),
     ), patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.start_codex_tui_sync_loop",
-    ) as sync_mock, patch(
         "plugins.providers.builtin.codex.python.tui_realtime_mirror.start_codex_tui_realtime_mirror_loop",
         return_value=tui_mirror_task,
     ) as mirror_mock:
@@ -1270,7 +1262,6 @@ async def test_post_init_prefers_existing_codex_ws_service_without_spawning_proc
 
     proc_cls.assert_not_called()
     connect_mock.assert_awaited_once_with(manager, bot, None, "ws://127.0.0.1:4722")
-    sync_mock.assert_not_called()
     mirror_mock.assert_called_once_with(state, bot, cfg.group_chat_id)
     assert manager.get_tui_sync_task("codex") is None
     assert manager.get_tui_mirror_task("codex") is tui_mirror_task
@@ -1324,8 +1315,6 @@ async def test_post_init_shared_unix_uses_onlineworker_owned_socket(
         "_cleanup_archived_threads",
         new=AsyncMock(),
     ), patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.start_codex_tui_sync_loop",
-    ) as sync_mock, patch(
         "plugins.providers.builtin.codex.python.tui_realtime_mirror.start_codex_tui_realtime_mirror_loop",
         return_value=tui_mirror_task,
     ) as mirror_mock:
@@ -1339,7 +1328,6 @@ async def test_post_init_shared_unix_uses_onlineworker_owned_socket(
         owned_unix=True,
     )
     connect_mock.assert_awaited_once_with(manager, bot, proc, managed_url)
-    sync_mock.assert_not_called()
     mirror_mock.assert_called_once_with(state, bot, cfg.group_chat_id)
     assert manager.get_tui_sync_task("codex") is None
     assert manager.get_tui_mirror_task("codex") is tui_mirror_task
@@ -1372,8 +1360,6 @@ async def test_post_init_in_tui_control_mode_starts_local_runtime_without_persis
     bot = MagicMock()
     bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=3169))
     bot.send_message = AsyncMock()
-
-    tui_sync_task = MagicMock()
     tui_mirror_task = MagicMock()
 
     with patch("plugins.providers.builtin.codex.python.runtime.AppServerProcess") as proc_cls, patch(
@@ -1383,9 +1369,6 @@ async def test_post_init_in_tui_control_mode_starts_local_runtime_without_persis
         "_cleanup_archived_threads",
         new=AsyncMock(),
     ), patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.start_codex_tui_sync_loop",
-        return_value=tui_sync_task,
-    ), patch(
         "plugins.providers.builtin.codex.python.tui_realtime_mirror.start_codex_tui_realtime_mirror_loop",
         return_value=tui_mirror_task,
     ):
@@ -1394,7 +1377,7 @@ async def test_post_init_in_tui_control_mode_starts_local_runtime_without_persis
     proc_cls.assert_not_called()
     connect_mock.assert_not_awaited()
     assert state.app_server_proc is None
-    assert manager.get_tui_sync_task("codex") is tui_sync_task
+    assert manager.get_tui_sync_task("codex") is None
     assert manager.get_tui_mirror_task("codex") is tui_mirror_task
     assert codex_state.get_runtime(state).mirror_task is tui_mirror_task
 
@@ -1446,8 +1429,6 @@ async def test_post_init_in_app_mode_cleans_stale_codex_tui_host_artifacts(tmp_p
         "_cleanup_archived_threads",
         new=AsyncMock(),
     ), patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.start_codex_tui_sync_loop",
-    ) as sync_mock, patch(
         "plugins.providers.builtin.codex.python.tui_realtime_mirror.start_codex_tui_realtime_mirror_loop",
         return_value=tui_mirror_task,
     ) as mirror_mock:
@@ -1458,7 +1439,6 @@ async def test_post_init_in_app_mode_cleans_stale_codex_tui_host_artifacts(tmp_p
 
     proc_cls.assert_called_once()
     connect_mock.assert_awaited_once_with(manager, bot, proc, "stdio://")
-    sync_mock.assert_not_called()
     mirror_mock.assert_called_once_with(state, bot, cfg.group_chat_id)
     assert manager.get_tui_mirror_task("codex") is tui_mirror_task
     assert codex_state.get_runtime(state).mirror_task is tui_mirror_task
@@ -1492,8 +1472,6 @@ async def test_post_init_in_tui_control_mode_reuses_existing_server_without_pers
     bot = MagicMock()
     bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=3169))
     bot.send_message = AsyncMock()
-
-    tui_sync_task = MagicMock()
     tui_mirror_task = MagicMock()
 
     with patch("plugins.providers.builtin.codex.python.runtime.AppServerProcess") as proc_cls, patch(
@@ -1503,9 +1481,6 @@ async def test_post_init_in_tui_control_mode_reuses_existing_server_without_pers
         "_cleanup_archived_threads",
         new=AsyncMock(),
     ), patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.start_codex_tui_sync_loop",
-        return_value=tui_sync_task,
-    ), patch(
         "plugins.providers.builtin.codex.python.tui_realtime_mirror.start_codex_tui_realtime_mirror_loop",
         return_value=tui_mirror_task,
     ):
@@ -1514,7 +1489,7 @@ async def test_post_init_in_tui_control_mode_reuses_existing_server_without_pers
     proc_cls.assert_not_called()
     connect_mock.assert_not_awaited()
     assert state.app_server_proc is None
-    assert manager.get_tui_sync_task("codex") is tui_sync_task
+    assert manager.get_tui_sync_task("codex") is None
     assert manager.get_tui_mirror_task("codex") is tui_mirror_task
     assert codex_state.get_runtime(state).mirror_task is tui_mirror_task
 
@@ -1554,8 +1529,6 @@ async def test_post_init_in_hybrid_control_mode_reuses_existing_server_with_pers
         "_cleanup_archived_threads",
         new=AsyncMock(),
     ), patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.start_codex_tui_sync_loop",
-    ) as sync_mock, patch(
         "plugins.providers.builtin.codex.python.tui_realtime_mirror.start_codex_tui_realtime_mirror_loop",
         return_value=tui_mirror_task,
     ) as mirror_mock:
@@ -1563,7 +1536,6 @@ async def test_post_init_in_hybrid_control_mode_reuses_existing_server_with_pers
 
     proc_cls.assert_not_called()
     connect_mock.assert_awaited_once_with(manager, bot, None, "ws://127.0.0.1:4722")
-    sync_mock.assert_not_called()
     mirror_mock.assert_called_once_with(state, bot, cfg.group_chat_id)
     assert manager.get_tui_sync_task("codex") is None
     assert manager.get_tui_mirror_task("codex") is tui_mirror_task
@@ -1930,8 +1902,6 @@ async def test_post_init_passes_codex_unix_url_to_app_server_process(tmp_path):
         "plugins.providers.builtin.codex.python.runtime.ensure_codex_remote_message_proxy",
         new=AsyncMock(return_value=f"unix://{tmp_path / 'proxy.sock'}"),
     ) as proxy_mock, patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.start_codex_tui_sync_loop",
-    ) as sync_mock, patch(
         "plugins.providers.builtin.codex.python.tui_realtime_mirror.start_codex_tui_realtime_mirror_loop",
         return_value=mirror_task,
     ) as mirror_mock, patch(
@@ -1951,7 +1921,6 @@ async def test_post_init_passes_codex_unix_url_to_app_server_process(tmp_path):
     )
     connect_mock.assert_awaited_once_with(manager, bot, proc, socket_url)
     proxy_mock.assert_awaited_once_with(state, socket_url)
-    sync_mock.assert_not_called()
     mirror_mock.assert_called_once_with(state, bot, cfg.group_chat_id)
     assert manager.get_tui_sync_task("codex") is None
     assert manager.get_tui_mirror_task("codex") is mirror_task

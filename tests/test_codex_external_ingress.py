@@ -660,7 +660,7 @@ async def test_desktop_rollout_subagent_never_enters_provider_event_path(tmp_pat
     adapter.ingest_external_hook_payload.assert_not_awaited()
 
 
-def test_rollout_ingress_skips_onlineworker_owned_and_live_sessions(tmp_path: Path):
+def test_rollout_ingress_defers_live_source_arbitration_to_adapter(tmp_path: Path):
     session_id = "33333333-4444-4555-8666-777777777777"
     workspace = WorkspaceInfo(
         name="owned-workspace",
@@ -690,7 +690,7 @@ def test_rollout_ingress_skips_onlineworker_owned_and_live_sessions(tmp_path: Pa
 
     workspace.threads.clear()
     adapter.has_authoritative_live_session.return_value = True
-    assert ingress._should_publish_session(session_id) is False
+    assert ingress._should_publish_session(session_id) is True
 
     adapter.has_authoritative_live_session.return_value = False
     workspace.threads[session_id] = ThreadInfo(

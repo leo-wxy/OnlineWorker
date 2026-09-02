@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from plugins.providers.builtin.codex.python.account_model import AccountRecord, classify_external_account, decode_jwt_payload
-from plugins.providers.builtin.codex.python.account_store import AccountStore, AccountStoreError, atomic_write, operation_lock
+from plugins.providers.builtin.codex.python.account_store import AccountStore, atomic_write, operation_lock
 from plugins.providers.builtin.codex.python.compat import export_cockpit_tools, parse_local_auth
 from plugins.providers.builtin.codex.python.transport import default_codex_home
 

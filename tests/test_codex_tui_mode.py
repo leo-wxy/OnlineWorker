@@ -132,15 +132,12 @@ async def test_message_handler_in_app_ws_mode_routes_to_codex_tui_host():
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    enqueue_mock.assert_awaited_once_with(
-        state,
-        ws,
-        ctx.bot,
-        GROUP_CHAT_ID,
-        100,
-        "tid-1",
-        "你好",
-    )
+        enqueue_mock.assert_awaited_once_with(
+            state,
+            ws,
+            "tid-1",
+            "你好",
+        )
     adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_not_awaited()
     assert ws.threads["tid-1"].preview == "你好"
@@ -277,6 +274,68 @@ async def test_message_handler_in_app_stdio_owner_bridge_mode_uses_app_adapter_f
     enqueue_mock.assert_not_awaited()
     adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_awaited_once_with("codex:onlineWorker", "tid-1", "你好")
+    ctx.bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_message_handler_queues_active_writer_without_status_message():
+    from bot.handlers.message import make_message_handler
+
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        topic_id=50,
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
+    storage.workspaces["codex:onlineWorker"] = ws
+    cfg = Config(
+        telegram_token="token",
+        allowed_user_id=1,
+        group_chat_id=GROUP_CHAT_ID,
+        log_level="INFO",
+        tools=[
+            ToolConfig(
+                name="codex",
+                enabled=True,
+                bin="codex",
+                protocol="stdio",
+                live_transport="owner_bridge",
+                control_mode="app",
+            )
+        ],
+        delete_archived_topics=True,
+    )
+    adapter = MagicMock()
+    adapter.connected = True
+    adapter.send_user_message = AsyncMock(
+        side_effect=RuntimeError("thread tid-1 already has an active writer")
+    )
+    state = AppState(storage=storage, config=cfg)
+    state.set_adapter("codex", adapter)
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message = MagicMock()
+    update.effective_message.message_id = 9001
+    update.effective_message.text = "继续"
+    update.effective_message.caption = None
+    update.effective_message.photo = None
+    update.effective_message.document = None
+    update.effective_message.message_thread_id = 100
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+
+    with patch(
+        "plugins.providers.builtin.codex.python.runtime._queue_codex_message",
+        new=AsyncMock(return_value={"status": "queued", "reason": "active_writer"}),
+    ) as queue_mock:
+        await make_message_handler(state, GROUP_CHAT_ID)(update, ctx)
+
+    queue_mock.assert_awaited_once_with(state, ws, "tid-1", "继续", None)
     ctx.bot.send_message.assert_not_awaited()
 
 
@@ -508,15 +567,12 @@ async def test_message_handler_in_app_ws_mode_uses_tui_host_without_materialized
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    enqueue_mock.assert_awaited_once_with(
-        state,
-        ws,
-        ctx.bot,
-        GROUP_CHAT_ID,
-        100,
-        "tid-1",
-        "你好",
-    )
+        enqueue_mock.assert_awaited_once_with(
+            state,
+            ws,
+            "tid-1",
+            "你好",
+        )
     adapter.resume_thread.assert_not_awaited()
     adapter.send_user_message.assert_not_awaited()
     assert ws.threads["tid-1"].preview == "你好"
@@ -606,9 +662,6 @@ async def test_message_handler_in_app_ws_mode_waits_for_reconnected_codex_adapte
     enqueue_mock.assert_awaited_once_with(
         state,
         ws,
-        ctx.bot,
-        GROUP_CHAT_ID,
-        100,
         "tid-1",
         "你好",
     )
@@ -688,15 +741,12 @@ async def test_message_handler_in_app_ws_mode_reports_unconnected_after_reconnec
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    enqueue_mock.assert_awaited_once_with(
-        state,
-        ws,
-        ctx.bot,
-        GROUP_CHAT_ID,
-        100,
-        "tid-1",
-        "你好",
-    )
+        enqueue_mock.assert_awaited_once_with(
+            state,
+            ws,
+            "tid-1",
+            "你好",
+        )
     disconnected_adapter.resume_thread.assert_not_awaited()
     disconnected_adapter.send_user_message.assert_not_awaited()
     save_storage_mock.assert_called_once()
@@ -774,15 +824,12 @@ async def test_message_handler_in_app_ws_mode_interrupts_active_turn_before_send
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    enqueue_mock.assert_awaited_once_with(
-        state,
-        ws,
-        ctx.bot,
-        GROUP_CHAT_ID,
-        100,
-        "tid-1",
-        "你好",
-    )
+        enqueue_mock.assert_awaited_once_with(
+            state,
+            ws,
+            "tid-1",
+            "你好",
+        )
     adapter.resume_thread.assert_not_awaited()
     adapter.turn_interrupt.assert_not_awaited()
     adapter.send_user_message.assert_not_awaited()
@@ -851,15 +898,12 @@ async def test_message_handler_in_app_ws_mode_continues_when_interrupt_fails():
         handler = make_message_handler(state, GROUP_CHAT_ID)
         await handler(update, ctx)
 
-    enqueue_mock.assert_awaited_once_with(
-        state,
-        ws,
-        ctx.bot,
-        GROUP_CHAT_ID,
-        100,
-        "tid-1",
-        "你好",
-    )
+        enqueue_mock.assert_awaited_once_with(
+            state,
+            ws,
+            "tid-1",
+            "你好",
+        )
     adapter.turn_interrupt.assert_not_awaited()
     adapter.send_user_message.assert_not_awaited()
 
@@ -2245,341 +2289,6 @@ async def test_list_thread_handler_includes_codex_jsonl_only_main_thread(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_sync_codex_tui_final_replies_once_pushes_new_assistant_reply_to_topic():
-    from plugins.providers.builtin.codex.python.tui_bridge import sync_codex_tui_final_replies_once
-
-    storage = AppStorage()
-    ws = WorkspaceInfo(
-        name="onlineWorker",
-        path="/Users/example/Projects/onlineWorker",
-        tool="codex",
-        topic_id=50,
-        daemon_workspace_id="codex:onlineWorker",
-    )
-    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
-    storage.workspaces["codex:onlineWorker"] = ws
-    state = AppState(storage=storage)
-
-    bot = MagicMock()
-    bot.send_message = AsyncMock()
-
-    with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        return_value=[
-            {"role": "user", "text": "你好", "phase": ""},
-            {"role": "assistant", "text": "这是最终回复", "timestamp": "2026-04-04T05:00:10Z", "phase": "final_answer"},
-        ],
-    ):
-        await sync_codex_tui_final_replies_once(state, bot, GROUP_CHAT_ID)
-
-    kwargs = bot.send_message.call_args.kwargs
-    assert kwargs["chat_id"] == GROUP_CHAT_ID
-    assert kwargs["message_thread_id"] == 100
-    assert kwargs["text"] == "这是最终回复"
-    assert codex_state.get_runtime(state).last_synced_assistant["tid-1"] == "2026-04-04T05:00:10Z\n这是最终回复"
-
-
-@pytest.mark.asyncio
-async def test_sync_codex_tui_final_replies_once_skips_already_synced_reply():
-    from plugins.providers.builtin.codex.python.tui_bridge import sync_codex_tui_final_replies_once
-
-    storage = AppStorage()
-    ws = WorkspaceInfo(
-        name="onlineWorker",
-        path="/Users/example/Projects/onlineWorker",
-        tool="codex",
-        topic_id=50,
-        daemon_workspace_id="codex:onlineWorker",
-    )
-    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
-    storage.workspaces["codex:onlineWorker"] = ws
-    state = AppState(storage=storage)
-    codex_state.get_runtime(state).last_synced_assistant["tid-1"] = "2026-04-04T05:00:10Z\n这是最终回复"
-
-    bot = MagicMock()
-    bot.send_message = AsyncMock()
-
-    with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        return_value=[
-            {"role": "user", "text": "你好", "phase": ""},
-            {"role": "assistant", "text": "这是最终回复", "timestamp": "2026-04-04T05:00:10Z", "phase": "final_answer"},
-        ],
-    ):
-        await sync_codex_tui_final_replies_once(state, bot, GROUP_CHAT_ID)
-
-    bot.send_message.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_sync_codex_tui_final_replies_once_only_pushes_final_answer():
-    from plugins.providers.builtin.codex.python.tui_bridge import sync_codex_tui_final_replies_once
-
-    storage = AppStorage()
-    ws = WorkspaceInfo(
-        name="onlineWorker",
-        path="/Users/example/Projects/onlineWorker",
-        tool="codex",
-        topic_id=50,
-        daemon_workspace_id="codex:onlineWorker",
-    )
-    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
-    storage.workspaces["codex:onlineWorker"] = ws
-    state = AppState(storage=storage)
-
-    bot = MagicMock()
-    bot.send_message = AsyncMock()
-
-    with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        return_value=[
-            {"role": "assistant", "text": "处理中进度", "timestamp": "2026-04-04T05:00:00Z", "phase": "commentary"},
-            {"role": "assistant", "text": "真正最终回复", "timestamp": "2026-04-04T05:00:10Z", "phase": "final_answer"},
-        ],
-    ):
-        await sync_codex_tui_final_replies_once(state, bot, GROUP_CHAT_ID)
-
-    kwargs = bot.send_message.call_args.kwargs
-    assert kwargs["text"] == "真正最终回复"
-
-
-@pytest.mark.asyncio
-async def test_sync_codex_tui_final_replies_once_skips_commentary_only_history():
-    from plugins.providers.builtin.codex.python.tui_bridge import sync_codex_tui_final_replies_once
-
-    storage = AppStorage()
-    ws = WorkspaceInfo(
-        name="onlineWorker",
-        path="/Users/example/Projects/onlineWorker",
-        tool="codex",
-        topic_id=50,
-        daemon_workspace_id="codex:onlineWorker",
-    )
-    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
-    storage.workspaces["codex:onlineWorker"] = ws
-    state = AppState(storage=storage)
-
-    bot = MagicMock()
-    bot.send_message = AsyncMock()
-
-    with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        return_value=[
-            {"role": "assistant", "text": "处理中进度", "timestamp": "2026-04-04T05:00:00Z", "phase": "commentary"},
-        ],
-    ):
-        await sync_codex_tui_final_replies_once(state, bot, GROUP_CHAT_ID)
-
-    bot.send_message.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_sync_codex_tui_final_replies_once_skips_reply_already_sent_by_schedule():
-    from plugins.providers.builtin.codex.python.tui_bridge import sync_codex_tui_final_replies_once
-
-    storage = AppStorage()
-    ws = WorkspaceInfo(
-        name="onlineWorker",
-        path="/Users/example/Projects/onlineWorker",
-        tool="codex",
-        topic_id=50,
-        daemon_workspace_id="codex:onlineWorker",
-    )
-    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
-    storage.workspaces["codex:onlineWorker"] = ws
-    state = AppState(storage=storage)
-    codex_state.get_runtime(state).last_synced_assistant["tid-1"] = "2026-04-04T05:00:10Z\n真正最终回复"
-
-    bot = MagicMock()
-    bot.send_message = AsyncMock()
-
-    with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        return_value=[
-            {"role": "assistant", "text": "真正最终回复", "timestamp": "2026-04-04T05:00:10Z", "phase": "final_answer"},
-        ],
-    ):
-        await sync_codex_tui_final_replies_once(state, bot, GROUP_CHAT_ID)
-
-    bot.send_message.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_sync_codex_tui_final_replies_once_skips_reply_marked_by_live_event_text_signature():
-    from plugins.providers.builtin.codex.python.tui_bridge import sync_codex_tui_final_replies_once
-
-    storage = AppStorage()
-    ws = WorkspaceInfo(
-        name="onlineWorker",
-        path="/Users/example/Projects/onlineWorker",
-        tool="codex",
-        topic_id=50,
-        daemon_workspace_id="codex:onlineWorker",
-    )
-    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
-    storage.workspaces["codex:onlineWorker"] = ws
-    state = AppState(storage=storage)
-    codex_state.get_runtime(state).last_synced_assistant["tid-1"] = "__text__\n真正最终回复"
-
-    bot = MagicMock()
-    bot.send_message = AsyncMock()
-
-    with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        return_value=[
-            {"role": "assistant", "text": "真正最终回复", "timestamp": "2026-04-04T05:00:10Z", "phase": "final_answer"},
-        ],
-    ):
-        await sync_codex_tui_final_replies_once(state, bot, GROUP_CHAT_ID)
-
-    bot.send_message.assert_not_called()
-    assert codex_state.get_runtime(state).last_synced_assistant["tid-1"] == "2026-04-04T05:00:10Z\n真正最终回复"
-
-
-@pytest.mark.asyncio
-async def test_sync_codex_tui_final_replies_once_skips_reply_marked_by_run_state():
-    from plugins.providers.builtin.codex.python.tui_bridge import sync_codex_tui_final_replies_once
-
-    state, _, _ = make_codex_workspace_state()
-    codex_state.start_run(state,
-        workspace_id="codex:onlineWorker",
-        thread_id="tid-1",
-        turn_id="turn-live",
-    )
-    codex_state.mark_run(state,
-        thread_id="tid-1",
-        status="completed",
-        final_reply_synced_to_tg=True,
-    )
-
-    bot = MagicMock()
-    bot.send_message = AsyncMock()
-
-    with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        return_value=[
-            {
-                "role": "assistant",
-                "text": "直播链路已经同步过的最终回复",
-                "timestamp": "2026-04-04T05:00:10Z",
-                "phase": "final_answer",
-                "turn_id": "turn-live",
-            },
-        ],
-    ):
-        await sync_codex_tui_final_replies_once(state, bot, GROUP_CHAT_ID)
-
-    bot.send_message.assert_not_called()
-    assert (
-        codex_state.get_runtime(state).last_synced_assistant["tid-1"]
-        == "2026-04-04T05:00:10Z\n直播链路已经同步过的最终回复"
-    )
-
-
-@pytest.mark.asyncio
-async def test_sync_codex_tui_final_replies_once_revives_stale_archived_active_thread(monkeypatch):
-    from plugins.providers.builtin.codex.python.tui_bridge import sync_codex_tui_final_replies_once
-
-    storage = AppStorage()
-    ws = WorkspaceInfo(
-        name="onlineWorker",
-        path="/Users/example/Projects/onlineWorker",
-        tool="codex",
-        topic_id=50,
-        daemon_workspace_id="codex:onlineWorker",
-    )
-    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=True, is_active=False)
-    storage.workspaces["codex:onlineWorker"] = ws
-    state = AppState(storage=storage)
-
-    bot = MagicMock()
-    bot.send_message = AsyncMock()
-
-    monkeypatch.setattr(
-        "plugins.providers.builtin.codex.python.tui_bridge.query_provider_active_thread_ids",
-        lambda tool_name, workspace_path: {"tid-1"},
-        raising=False,
-    )
-
-    with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        return_value=[
-            {"role": "assistant", "text": "这是最终回复", "timestamp": "2026-04-04T05:00:10Z", "phase": "final_answer"},
-        ],
-    ):
-        await sync_codex_tui_final_replies_once(state, bot, GROUP_CHAT_ID)
-
-    kwargs = bot.send_message.call_args.kwargs
-    assert kwargs["message_thread_id"] == 100
-    assert kwargs["text"] == "这是最终回复"
-    assert ws.threads["tid-1"].archived is False
-    assert ws.threads["tid-1"].is_active is True
-
-
-@pytest.mark.asyncio
-async def test_schedule_codex_final_reply_marks_sent_reply_as_synced():
-    from plugins.providers.builtin.codex.python.tui_bridge import schedule_codex_final_reply
-
-    state = AppState(storage=AppStorage())
-    bot = MagicMock()
-    bot.send_message = AsyncMock()
-
-    with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        side_effect=[
-            [
-                {"role": "assistant", "text": "过程播报", "timestamp": "2026-04-04T05:00:01Z", "phase": "commentary"},
-                {"role": "assistant", "text": "真正最终回复", "timestamp": "2026-04-04T05:00:10Z", "phase": "final_answer"},
-            ],
-        ],
-    ):
-        task = schedule_codex_final_reply(
-            state,
-            bot,
-            GROUP_CHAT_ID,
-            100,
-            "tid-1",
-            baseline_len=0,
-            poll_interval=0.01,
-            max_wait_seconds=0.1,
-        )
-        await task
-
-    kwargs = bot.send_message.call_args.kwargs
-    assert kwargs["text"] == "真正最终回复"
-    assert codex_state.get_runtime(state).last_synced_assistant["tid-1"] == "2026-04-04T05:00:10Z\n真正最终回复"
-
-
-@pytest.mark.asyncio
-async def test_send_message_via_tui_bridge_baseline_counts_only_final_answers():
-    from plugins.providers.builtin.codex.python.tui_bridge import send_message_via_tui_bridge
-
-    state = AppState(storage=AppStorage())
-    ws = WorkspaceInfo(
-        name="onlineWorker",
-        path="/Users/example/Projects/onlineWorker",
-        tool="codex",
-        topic_id=50,
-        daemon_workspace_id="codex:onlineWorker",
-    )
-
-    with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        return_value=[
-            {"role": "assistant", "text": "过程播报1", "timestamp": "2026-04-04T05:00:01Z", "phase": "commentary"},
-            {"role": "assistant", "text": "最终回复1", "timestamp": "2026-04-04T05:00:02Z", "phase": "final_answer"},
-            {"role": "assistant", "text": "过程播报2", "timestamp": "2026-04-04T05:00:03Z", "phase": "commentary"},
-        ],
-    ), patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.send_message_via_tui_host",
-        new=AsyncMock(),
-    ):
-        baseline = await send_message_via_tui_bridge(state, ws, "tid-1", "你好")
-
-    assert baseline == 1
-
-
-@pytest.mark.asyncio
 async def test_send_message_via_tui_bridge_seeds_and_refreshes_watch_state():
     from plugins.providers.builtin.codex.python.tui_bridge import send_message_via_tui_bridge
 
@@ -2610,9 +2319,6 @@ async def test_send_message_via_tui_bridge_seeds_and_refreshes_watch_state():
     ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
 
     with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        return_value=[],
-    ), patch(
         "plugins.providers.builtin.codex.python.tui_bridge.seed_codex_watch_baseline",
     ) as seed_mock, patch(
         "plugins.providers.builtin.codex.python.tui_bridge.watch_codex_thread",
@@ -2620,9 +2326,8 @@ async def test_send_message_via_tui_bridge_seeds_and_refreshes_watch_state():
         "plugins.providers.builtin.codex.python.tui_bridge.send_message_via_tui_host",
         new=AsyncMock(),
     ):
-        baseline = await send_message_via_tui_bridge(state, ws, "tid-1", "你好")
+        await send_message_via_tui_bridge(state, ws, "tid-1", "你好")
 
-    assert baseline == 0
     seed_mock.assert_called_once_with(state, ws, "tid-1")
     watch_mock.assert_called_once_with(state, ws, "tid-1")
 
@@ -2660,9 +2365,6 @@ async def test_send_message_via_tui_bridge_uses_local_tui_host_client():
     state = AppState(storage=storage, config=cfg)
 
     with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        return_value=[],
-    ), patch(
         "plugins.providers.builtin.codex.python.tui_bridge.seed_codex_watch_baseline",
     ) as seed_mock, patch(
         "plugins.providers.builtin.codex.python.tui_bridge.watch_codex_thread",
@@ -2670,9 +2372,8 @@ async def test_send_message_via_tui_bridge_uses_local_tui_host_client():
         "plugins.providers.builtin.codex.python.tui_bridge.send_message_via_tui_host",
         new=AsyncMock(),
     ) as host_mock:
-        baseline = await send_message_via_tui_bridge(state, ws, "tid-1", "你好")
+        await send_message_via_tui_bridge(state, ws, "tid-1", "你好")
 
-    assert baseline == 0
     host_mock.assert_awaited_once_with(state, ws, "tid-1", "你好")
     seed_mock.assert_called_once_with(state, ws, "tid-1")
     watch_mock.assert_called_once_with(state, ws, "tid-1")
@@ -2712,9 +2413,6 @@ async def test_send_message_via_tui_bridge_in_app_mode_does_not_seed_or_watch_se
     state = AppState(storage=storage, config=cfg)
 
     with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        return_value=[],
-    ), patch(
         "plugins.providers.builtin.codex.python.tui_bridge.seed_codex_watch_baseline",
     ) as seed_mock, patch(
         "plugins.providers.builtin.codex.python.tui_bridge.watch_codex_thread",
@@ -2722,9 +2420,8 @@ async def test_send_message_via_tui_bridge_in_app_mode_does_not_seed_or_watch_se
         "plugins.providers.builtin.codex.python.tui_bridge.send_message_via_tui_host",
         new=AsyncMock(),
     ) as host_mock:
-        baseline = await send_message_via_tui_bridge(state, ws, "tid-1", "你好")
+        await send_message_via_tui_bridge(state, ws, "tid-1", "你好")
 
-    assert baseline == 0
     host_mock.assert_awaited_once_with(state, ws, "tid-1", "你好")
     seed_mock.assert_not_called()
     watch_mock.assert_not_called()
@@ -3348,9 +3045,6 @@ async def test_send_message_via_tui_bridge_propagates_local_host_error():
     state = AppState(storage=storage, config=cfg)
 
     with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        return_value=[],
-    ), patch(
         "plugins.providers.builtin.codex.python.tui_bridge.seed_codex_watch_baseline",
     ) as seed_mock, patch(
         "plugins.providers.builtin.codex.python.tui_bridge.watch_codex_thread",
@@ -3446,15 +3140,13 @@ async def test_enqueue_codex_tui_message_serializes_same_thread_sends():
     ), patch(
         "plugins.providers.builtin.codex.python.tui_bridge.get_persistent_codex_adapter",
         return_value=MagicMock(connected=True),
-    ), patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.schedule_codex_final_reply",
-    ) as schedule_mock:
+    ):
         first = asyncio.create_task(
-            enqueue_codex_tui_message(state, ws, bot, GROUP_CHAT_ID, 100, "tid-1", "first")
+            enqueue_codex_tui_message(state, ws, "tid-1", "first")
         )
         await asyncio.sleep(0)
         second = asyncio.create_task(
-            enqueue_codex_tui_message(state, ws, bot, GROUP_CHAT_ID, 100, "tid-1", "second")
+            enqueue_codex_tui_message(state, ws, "tid-1", "second")
         )
         await asyncio.sleep(0.01)
         assert events == ["start:first"]
@@ -3462,7 +3154,6 @@ async def test_enqueue_codex_tui_message_serializes_same_thread_sends():
         await asyncio.gather(first, second)
 
     assert events == ["start:first", "end:first", "start:second", "end:second"]
-    assert schedule_mock.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -3513,12 +3204,10 @@ async def test_enqueue_codex_tui_message_waits_until_thread_turn_completed():
     ), patch(
         "plugins.providers.builtin.codex.python.tui_bridge.get_persistent_codex_adapter",
         return_value=MagicMock(connected=True),
-    ), patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.schedule_codex_final_reply",
-    ) as schedule_mock:
+    ):
         release_task = asyncio.create_task(_release_gate())
         send_task = asyncio.create_task(
-            enqueue_codex_tui_message(state, ws, bot, GROUP_CHAT_ID, 100, "tid-1", "later")
+            enqueue_codex_tui_message(state, ws, "tid-1", "later")
         )
         await asyncio.sleep(0)
         send_mock.assert_not_awaited()
@@ -3527,87 +3216,6 @@ async def test_enqueue_codex_tui_message_waits_until_thread_turn_completed():
         await release_task
 
     send_mock.assert_awaited_once_with(state, ws, "tid-1", "later")
-    schedule_mock.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_enqueue_codex_tui_message_in_app_mode_skips_final_reply_polling():
-    from plugins.providers.builtin.codex.python.tui_bridge import enqueue_codex_tui_message
-
-    storage = AppStorage()
-    ws = WorkspaceInfo(
-        name="onlineWorker",
-        path="/Users/example/Projects/onlineWorker",
-        tool="codex",
-        topic_id=50,
-        daemon_workspace_id="codex:onlineWorker",
-    )
-    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
-    storage.workspaces["codex:onlineWorker"] = ws
-    cfg = Config(
-        telegram_token="token",
-        allowed_user_id=1,
-        group_chat_id=GROUP_CHAT_ID,
-        log_level="INFO",
-        tools=[
-            ToolConfig(
-                name="codex",
-                enabled=True,
-                bin="codex",
-                protocol="ws",
-                app_server_port=4722,
-                control_mode="app",
-            )
-        ],
-        delete_archived_topics=True,
-    )
-    state = AppState(storage=storage, config=cfg)
-    bot = MagicMock()
-
-    with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.send_message_via_tui_bridge",
-        new=AsyncMock(return_value=0),
-    ) as send_mock, patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.get_persistent_codex_adapter",
-        return_value=MagicMock(connected=True),
-    ), patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.schedule_codex_final_reply",
-    ) as schedule_mock:
-        baseline = await enqueue_codex_tui_message(state, ws, bot, GROUP_CHAT_ID, 100, "tid-1", "hello")
-
-    assert baseline == 0
-    send_mock.assert_awaited_once_with(state, ws, "tid-1", "hello")
-    schedule_mock.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_schedule_codex_final_reply_skips_when_realtime_mirror_already_synced_same_reply():
-    from plugins.providers.builtin.codex.python.tui_bridge import schedule_codex_final_reply
-
-    state = AppState(storage=AppStorage())
-    codex_state.get_runtime(state).last_synced_assistant["tid-1"] = "2026-04-04T05:00:10Z\n真正最终回复"
-    bot = MagicMock()
-    bot.send_message = AsyncMock()
-
-    with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        return_value=[
-            {"role": "assistant", "text": "真正最终回复", "timestamp": "2026-04-04T05:00:10Z", "phase": "final_answer"},
-        ],
-    ):
-        task = schedule_codex_final_reply(
-            state,
-            bot,
-            GROUP_CHAT_ID,
-            100,
-            "tid-1",
-            baseline_len=0,
-            poll_interval=0.01,
-            max_wait_seconds=0.05,
-        )
-        await task
-
-    bot.send_message.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -3697,95 +3305,3 @@ async def test_realtime_mirror_final_answer_with_existing_streaming_turn_sends_s
     assert codex_state.get_runtime(state).last_synced_assistant["tid-1"] == (
         "2026-04-04T05:00:10Z\n已修复当前会话同步，完成通知会使用最终回复摘要。"
     )
-
-
-@pytest.mark.asyncio
-async def test_prime_codex_tui_reply_state_records_latest_final_without_sending():
-    from plugins.providers.builtin.codex.python.tui_bridge import prime_codex_tui_reply_state
-
-    storage = AppStorage()
-    ws = WorkspaceInfo(
-        name="onlineWorker",
-        path="/Users/example/Projects/onlineWorker",
-        tool="codex",
-        topic_id=50,
-        daemon_workspace_id="codex:onlineWorker",
-    )
-    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=False)
-    storage.workspaces["codex:onlineWorker"] = ws
-    state = AppState(storage=storage)
-
-    with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        return_value=[
-            {"role": "assistant", "text": "过程播报", "timestamp": "2026-04-04T05:00:01Z", "phase": "commentary"},
-            {"role": "assistant", "text": "最终回复", "timestamp": "2026-04-04T05:00:10Z", "phase": "final_answer"},
-        ],
-    ):
-        await prime_codex_tui_reply_state(state)
-
-    assert codex_state.get_runtime(state).last_synced_assistant["tid-1"] == "2026-04-04T05:00:10Z\n最终回复"
-
-
-@pytest.mark.asyncio
-async def test_prime_codex_tui_reply_state_revives_stale_archived_active_thread(monkeypatch):
-    from plugins.providers.builtin.codex.python.tui_bridge import prime_codex_tui_reply_state
-
-    storage = AppStorage()
-    ws = WorkspaceInfo(
-        name="onlineWorker",
-        path="/Users/example/Projects/onlineWorker",
-        tool="codex",
-        topic_id=50,
-        daemon_workspace_id="codex:onlineWorker",
-    )
-    ws.threads["tid-1"] = ThreadInfo(thread_id="tid-1", topic_id=100, archived=True, is_active=False)
-    storage.workspaces["codex:onlineWorker"] = ws
-    state = AppState(storage=storage)
-
-    monkeypatch.setattr(
-        "plugins.providers.builtin.codex.python.tui_bridge.query_provider_active_thread_ids",
-        lambda tool_name, workspace_path: {"tid-1"},
-        raising=False,
-    )
-
-    with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.read_thread_history",
-        return_value=[
-            {"role": "assistant", "text": "最终回复", "timestamp": "2026-04-04T05:00:10Z", "phase": "final_answer"},
-        ],
-    ):
-        await prime_codex_tui_reply_state(state)
-
-    assert codex_state.get_runtime(state).last_synced_assistant["tid-1"] == "2026-04-04T05:00:10Z\n最终回复"
-    assert ws.threads["tid-1"].archived is False
-    assert ws.threads["tid-1"].is_active is True
-
-
-@pytest.mark.asyncio
-async def test_start_codex_tui_sync_loop_primes_before_polling():
-    from plugins.providers.builtin.codex.python.tui_bridge import start_codex_tui_sync_loop
-
-    state = AppState(storage=AppStorage())
-    bot = MagicMock()
-    calls = []
-
-    async def _fake_prime(_state):
-        calls.append("prime")
-
-    async def _fake_sync(_state, _bot, _group_chat_id):
-        calls.append("sync")
-        raise asyncio.CancelledError()
-
-    with patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.prime_codex_tui_reply_state",
-        new=AsyncMock(side_effect=_fake_prime),
-    ), patch(
-        "plugins.providers.builtin.codex.python.tui_bridge.sync_codex_tui_final_replies_once",
-        new=AsyncMock(side_effect=_fake_sync),
-    ):
-        task = start_codex_tui_sync_loop(state, bot, GROUP_CHAT_ID, poll_interval=0.01)
-        with pytest.raises(asyncio.CancelledError):
-            await task
-
-    assert calls == ["prime", "sync"]

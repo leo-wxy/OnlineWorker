@@ -64,6 +64,17 @@ export function MenubarPopover() {
   const [selectedTab, setSelectedTab] = useState(OVERVIEW_TAB_ID);
   const [providerIconUrls, setProviderIconUrls] = useState<Record<string, string>>({});
   const snapshotLoadInFlight = useRef(false);
+  const snapshotEventSequence = useRef(0);
+  const latestSnapshotEpoch = useRef(0);
+
+  const applySnapshot = useCallback((next: MenubarPopoverSnapshot) => {
+    if (next.generatedAtEpoch < latestSnapshotEpoch.current) {
+      return false;
+    }
+    latestSnapshotEpoch.current = next.generatedAtEpoch;
+    setSnapshot(next);
+    return true;
+  }, []);
 
   useEffect(() => {
     const previousHtmlBackground = document.documentElement.style.background;
@@ -92,11 +103,14 @@ export function MenubarPopover() {
     if (forceRefresh) {
       setLoading(true);
     }
+    const eventSequence = snapshotEventSequence.current;
     try {
       const next = await invoke<MenubarPopoverSnapshot>("get_menubar_popover_snapshot", {
         forceRefresh,
       });
-      setSnapshot(next);
+      if (eventSequence === snapshotEventSequence.current) {
+        applySnapshot(next);
+      }
       setError(null);
     } catch (loadError) {
       console.error("Failed to load menubar popover snapshot", loadError);
@@ -107,7 +121,7 @@ export function MenubarPopover() {
         setLoading(false);
       }
     }
-  }, []);
+  }, [applySnapshot]);
 
   useEffect(() => {
     let disposed = false;
@@ -115,7 +129,9 @@ export function MenubarPopover() {
 
     void listen<MenubarPopoverSnapshot>(SNAPSHOT_UPDATED_EVENT, ({ payload }) => {
       if (!disposed) {
-        setSnapshot(payload);
+        if (applySnapshot(payload)) {
+          snapshotEventSequence.current += 1;
+        }
         setError(null);
       }
     }).then((unlisten) => {
@@ -131,7 +147,7 @@ export function MenubarPopover() {
         unsubscribe();
       }
     };
-  }, [loadSnapshot]);
+  }, [applySnapshot, loadSnapshot]);
 
   useEffect(() => {
     let disposed = false;

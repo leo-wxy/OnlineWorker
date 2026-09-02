@@ -9,6 +9,7 @@ from core.messages.publishing import (
     publish_notification_activity,
     publish_question_answered,
     publish_session_archived,
+    publish_session_message_event,
     publish_user_message_accepted,
     publish_user_message_submitted,
 )
@@ -135,6 +136,94 @@ def test_message_event_bus_dedupes_by_key_before_projection_update():
     assert activity["lastUserMessage"] == "first"
     assert activity["updatedAt"] == 10
     assert len(bus.recent_events()) == 1
+
+
+def test_message_event_bus_forgets_dedupe_key_after_event_eviction():
+    bus = MessageEventBus(max_events=2)
+    first = create_message_event("turn.started", dedupe_key="first")
+
+    assert bus.publish(first) is True
+    assert bus.publish(create_message_event("turn.started", dedupe_key="first")) is False
+    assert bus.publish(create_message_event("turn.started", dedupe_key="second")) is True
+    assert bus.publish(create_message_event("turn.started", dedupe_key="third")) is True
+    assert bus.publish(create_message_event("turn.started", dedupe_key="first")) is True
+    assert len(bus.recent_events()) == 2
+
+
+def test_session_event_publish_distinguishes_duplicate_from_unavailable_bus():
+    event = SessionEvent(
+        provider="codex",
+        workspace_id="codex:/tmp/project",
+        thread_id="thread-a",
+        turn_id="turn-a",
+        kind="turn_started",
+        payload={},
+        raw_method="turn/started",
+    )
+    state = SimpleNamespace(message_bus=MessageEventBus())
+
+    assert publish_session_message_event(state, event) is True
+    assert publish_session_message_event(state, event) is False
+    assert publish_session_message_event(SimpleNamespace(), event) is None
+
+
+def test_projection_ignores_late_terminal_from_previous_turn():
+    bus = MessageEventBus()
+    bus.publish(
+        create_message_event(
+            "turn.started",
+            provider_id="codex",
+            session_id="thread-a",
+            turn_id="turn-new",
+            created_at=20,
+        )
+    )
+    bus.publish(
+        create_message_event(
+            "turn.completed",
+            provider_id="codex",
+            session_id="thread-a",
+            turn_id="turn-old",
+            created_at=30,
+        )
+    )
+
+    activity = bus.session_activity("codex", "thread-a")
+    assert activity["status"] == "running"
+    assert activity["activeTurnId"] == "turn-new"
+    assert activity["lastEventKind"] == "turn.started"
+    assert activity["updatedAt"] == 20
+
+
+def test_projection_ignores_late_progress_after_current_turn_completed():
+    bus = MessageEventBus()
+    bus.publish(
+        create_message_event(
+            "message.assistant.final",
+            provider_id="codex",
+            session_id="thread-a",
+            turn_id="turn-new",
+            payload={"text": "new answer"},
+            created_at=20,
+        )
+    )
+    bus.publish(
+        create_message_event(
+            "message.assistant.delta",
+            provider_id="codex",
+            session_id="thread-a",
+            turn_id="turn-old",
+            payload={"delta": "old progress"},
+            created_at=30,
+        )
+    )
+
+    activity = bus.session_activity("codex", "thread-a")
+    assert activity["status"] == "completed"
+    assert activity["activeTurnId"] == ""
+    assert activity["lastAssistantMessage"] == "new answer"
+    assert activity["lastEventKind"] == "message.assistant.final"
+    assert activity["updatedAt"] == 20
 
 
 def test_message_user_submitted_records_input_without_marking_running():

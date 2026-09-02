@@ -75,7 +75,6 @@ def _stub_main_dependencies(monkeypatch, run_polling_calls, cfg, dummy_filter, *
             Regex=lambda pattern: dummy_filter,
         ),
     )
-    monkeypatch.setattr(main, "CommandHandler", lambda *args, **kwargs: object())
     monkeypatch.setattr(main, "MessageHandler", lambda *args, **kwargs: object())
     monkeypatch.setattr(main, "CallbackQueryHandler", lambda *args, **kwargs: object())
     monkeypatch.setattr(main, "TypeHandler", lambda *args, **kwargs: object())
@@ -89,24 +88,9 @@ def _stub_main_dependencies(monkeypatch, run_polling_calls, cfg, dummy_filter, *
     monkeypatch.setattr(main.time, "sleep", lambda *_args, **_kwargs: None)
 
     for factory_name in (
-        "make_start_handler",
-        "make_ping_handler",
-        "make_echo_handler",
-        "make_status_handler",
-        "make_help_handler",
-        "make_active_handler",
-        "make_restart_handler",
-        "make_stop_handler",
-        "make_workspace_handler",
         "make_ws_open_callback_handler",
         "make_thread_open_callback_handler",
-        "make_cli_handler",
         "make_cli_callback_handler",
-        "make_new_thread_handler",
-        "make_list_thread_handler",
-        "make_archive_thread_handler",
-        "make_skills_handler",
-        "make_history_handler",
         "make_message_handler",
         "make_callback_handler",
     ):
@@ -331,7 +315,6 @@ def test_main_uses_stable_default_data_dir_when_flag_missing(monkeypatch, tmp_pa
             Regex=lambda pattern: dummy_filter,
         ),
     )
-    monkeypatch.setattr(main, "CommandHandler", lambda *args, **kwargs: object())
     monkeypatch.setattr(main, "MessageHandler", lambda *args, **kwargs: object())
     monkeypatch.setattr(main, "CallbackQueryHandler", lambda *args, **kwargs: object())
     monkeypatch.setattr(main, "TypeHandler", lambda *args, **kwargs: object())
@@ -347,24 +330,9 @@ def test_main_uses_stable_default_data_dir_when_flag_missing(monkeypatch, tmp_pa
     monkeypatch.setattr(main.time, "sleep", lambda *_args, **_kwargs: None)
 
     for factory_name in (
-        "make_start_handler",
-        "make_ping_handler",
-        "make_echo_handler",
-        "make_status_handler",
-        "make_help_handler",
-        "make_active_handler",
-        "make_restart_handler",
-        "make_stop_handler",
-        "make_workspace_handler",
         "make_ws_open_callback_handler",
         "make_thread_open_callback_handler",
-        "make_cli_handler",
         "make_cli_callback_handler",
-        "make_new_thread_handler",
-        "make_list_thread_handler",
-        "make_archive_thread_handler",
-        "make_skills_handler",
-        "make_history_handler",
         "make_message_handler",
         "make_callback_handler",
     ):

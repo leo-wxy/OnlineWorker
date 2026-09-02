@@ -667,7 +667,7 @@ async def test_codex_server_request_handler_allows_new_request():
 
 
 @pytest.mark.asyncio
-async def test_prepare_send_does_not_resume_imported_thread_before_send(monkeypatch):
+async def test_prepare_send_keeps_active_imported_turn_for_steer():
     storage = AppStorage()
     ws = WorkspaceInfo(
         name="onlineWorker",
@@ -687,13 +687,14 @@ async def test_prepare_send_does_not_resume_imported_thread_before_send(monkeypa
     ws.threads["thread-imported"] = thread_info
     storage.workspaces["codex:onlineWorker"] = ws
     state = AppState(storage=storage)
+    state.streaming_turns["thread-imported"] = SimpleNamespace(
+        turn_id="turn-live",
+        completed=False,
+    )
 
     adapter = MagicMock()
     adapter.start_thread = AsyncMock(return_value={"id": "thread-app-new"})
     adapter.resume_thread = AsyncMock(return_value={})
-
-    interrupt_mock = AsyncMock()
-    monkeypatch.setattr(codex_runtime, "_interrupt_active_turn", interrupt_mock)
 
     should_continue = await codex_runtime.prepare_send(
         state,
@@ -711,13 +712,6 @@ async def test_prepare_send_does_not_resume_imported_thread_before_send(monkeypa
     assert should_continue is True
     adapter.start_thread.assert_not_awaited()
     adapter.resume_thread.assert_not_awaited()
-    interrupt_mock.assert_awaited_once_with(
-        state,
-        adapter,
-        "codex:onlineWorker",
-        "thread-imported",
-        label="codex",
-    )
 
     assert set(ws.threads) == {"thread-imported"}
     assert ws.threads["thread-imported"] is thread_info
@@ -783,6 +777,166 @@ async def test_send_message_watches_codex_transcript_after_tg_send(monkeypatch):
     )
     assert seeded == [(state, ws, "thread-imported")]
     assert watched == [(state, ws, "thread-imported")]
+
+
+@pytest.mark.asyncio
+async def test_send_message_shared_live_transport_steers_active_turn(monkeypatch):
+    storage = AppStorage()
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    thread_info = ThreadInfo(thread_id="thread-live", source="app")
+    ws.threads[thread_info.thread_id] = thread_info
+    storage.workspaces[ws.daemon_workspace_id] = ws
+    state = AppState(storage=storage)
+    state.streaming_turns["thread-live"] = SimpleNamespace(
+        turn_id="turn-live",
+        completed=False,
+    )
+    adapter = MagicMock()
+    adapter.send_user_message = AsyncMock(return_value={})
+    adapter.turn_steer = AsyncMock(return_value={"turnId": "turn-live"})
+    seed_mock = MagicMock()
+    watch_mock = MagicMock()
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_bridge.uses_codex_shared_live_transport",
+        lambda _state: True,
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_realtime_mirror.seed_codex_watch_baseline",
+        seed_mock,
+    )
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_realtime_mirror.watch_codex_thread",
+        watch_mock,
+    )
+
+    result = await codex_runtime.send_message(
+        state,
+        adapter,
+        ws,
+        thread_info,
+        update=SimpleNamespace(),
+        context=SimpleNamespace(),
+        group_chat_id=1,
+        src_topic_id=206,
+        text="hello",
+        has_photo=False,
+    )
+
+    adapter.turn_steer.assert_awaited_once_with(
+        "codex:onlineWorker",
+        "thread-live",
+        "turn-live",
+        "hello",
+        attachments=None,
+    )
+    adapter.send_user_message.assert_not_awaited()
+    assert result == {"status": "steered"}
+    seed_mock.assert_not_called()
+    watch_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_message_starts_new_turn_when_steer_finds_no_active_turn(monkeypatch):
+    state = AppState(storage=AppStorage())
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    thread_info = ThreadInfo(thread_id="thread-live", source="app")
+    state.streaming_turns["thread-live"] = SimpleNamespace(
+        turn_id="turn-stale",
+        completed=False,
+    )
+    adapter = MagicMock()
+    adapter.turn_steer = AsyncMock(side_effect=RuntimeError("no active turn to steer"))
+    adapter.send_user_message = AsyncMock(return_value={})
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_bridge.uses_codex_shared_live_transport",
+        lambda _state: True,
+    )
+
+    result = await codex_runtime.send_message(
+        state,
+        adapter,
+        ws,
+        thread_info,
+        update=SimpleNamespace(),
+        context=SimpleNamespace(),
+        group_chat_id=1,
+        src_topic_id=206,
+        text="继续",
+        has_photo=False,
+    )
+
+    adapter.send_user_message.assert_awaited_once_with(
+        "codex:onlineWorker",
+        "thread-live",
+        "继续",
+    )
+    assert result == {"status": "sent"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [
+        "expected active turn id turn-old but found turn-new",
+        "cannot steer a review turn",
+        "cannot steer a compact turn",
+    ],
+)
+async def test_send_message_queues_when_active_turn_cannot_be_steered(monkeypatch, error):
+    state = AppState(storage=AppStorage())
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    thread_info = ThreadInfo(thread_id="thread-live", source="app")
+    state.streaming_turns["thread-live"] = SimpleNamespace(
+        turn_id="turn-old",
+        completed=False,
+    )
+    adapter = MagicMock()
+    adapter.turn_steer = AsyncMock(side_effect=RuntimeError(error))
+    adapter.send_user_message = AsyncMock(return_value={})
+    queue_mock = AsyncMock(return_value={"status": "queued", "reason": "active_writer"})
+    monkeypatch.setattr(codex_runtime, "_queue_codex_message", queue_mock)
+    monkeypatch.setattr(
+        "plugins.providers.builtin.codex.python.tui_bridge.uses_codex_shared_live_transport",
+        lambda _state: True,
+    )
+
+    result = await codex_runtime.send_message(
+        state,
+        adapter,
+        ws,
+        thread_info,
+        update=SimpleNamespace(),
+        context=SimpleNamespace(),
+        group_chat_id=1,
+        src_topic_id=206,
+        text="继续",
+        has_photo=False,
+    )
+
+    queue_mock.assert_awaited_once_with(
+        state,
+        ws,
+        "thread-live",
+        "继续",
+        None,
+    )
+    adapter.send_user_message.assert_not_awaited()
+    assert result == {"status": "queued", "reason": "active_writer"}
 
 
 @pytest.mark.asyncio
@@ -869,7 +1023,7 @@ async def test_send_message_queues_when_resume_finds_active_writer(monkeypatch):
     adapter.resume_thread = AsyncMock(
         side_effect=RuntimeError("thread thread-external already has an active writer")
     )
-    queue_mock = AsyncMock()
+    queue_mock = AsyncMock(return_value={"status": "queued", "reason": "active_writer"})
 
     monkeypatch.setattr(codex_runtime, "_queue_codex_message", queue_mock)
     monkeypatch.setattr(
@@ -881,7 +1035,7 @@ async def test_send_message_queues_when_resume_finds_active_writer(monkeypatch):
         lambda *_args: None,
     )
 
-    await codex_runtime.send_message(
+    result = await codex_runtime.send_message(
         state,
         adapter,
         ws,
@@ -905,6 +1059,41 @@ async def test_send_message_queues_when_resume_finds_active_writer(monkeypatch):
         "继续",
         None,
     )
+    assert result == {"status": "queued", "reason": "active_writer"}
+
+
+@pytest.mark.asyncio
+async def test_interrupt_active_writer_fails_closed_without_queue(monkeypatch):
+    state = AppState(storage=AppStorage())
+    ws = WorkspaceInfo(
+        name="onlineWorker",
+        path="/Users/example/Projects/onlineWorker",
+        tool="codex",
+        daemon_workspace_id="codex:onlineWorker",
+    )
+    thread_info = ThreadInfo(thread_id="thread-external", topic_id=206)
+    adapter = MagicMock()
+    adapter.turn_interrupt = AsyncMock(
+        side_effect=RuntimeError("thread thread-external already has an active writer")
+    )
+    queue_mock = AsyncMock()
+    monkeypatch.setattr(codex_runtime, "_queue_codex_message", queue_mock)
+
+    with pytest.raises(RuntimeError, match="普通消息只能排队，无法立即中断"):
+        await codex_runtime.interrupt_thread(
+            state,
+            ws,
+            thread_info,
+            adapter,
+            "turn-1",
+        )
+
+    adapter.turn_interrupt.assert_awaited_once_with(
+        "codex:onlineWorker",
+        "thread-external",
+        "turn-1",
+    )
+    queue_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -983,8 +1172,6 @@ async def test_prepare_send_reuses_app_thread_when_app_server_resume_succeeds(mo
     adapter.start_thread = AsyncMock(return_value={"id": "thread-should-not-happen"})
     adapter.resume_thread = AsyncMock(return_value={})
 
-    interrupt_mock = AsyncMock()
-    monkeypatch.setattr(codex_runtime, "_interrupt_active_turn", interrupt_mock)
     monkeypatch.setattr(codex_runtime, "_codex_thread_has_source_record", lambda workspace_path, thread_id: True)
 
     should_continue = await codex_runtime.prepare_send(
@@ -1003,13 +1190,6 @@ async def test_prepare_send_reuses_app_thread_when_app_server_resume_succeeds(mo
     assert should_continue is True
     adapter.resume_thread.assert_awaited_once_with("codex:onlineWorker", "thread-app")
     adapter.start_thread.assert_not_awaited()
-    interrupt_mock.assert_awaited_once_with(
-        state,
-        adapter,
-        "codex:onlineWorker",
-        "thread-app",
-        label="codex",
-    )
     assert ws.threads["thread-app"] is thread_info
     assert thread_info.source == "app"
 
@@ -1039,8 +1219,6 @@ async def test_prepare_send_materializes_app_thread_when_resume_reports_not_foun
         side_effect=RuntimeError("thread not found: thread-app-stale")
     )
 
-    interrupt_mock = AsyncMock()
-    monkeypatch.setattr(codex_runtime, "_interrupt_active_turn", interrupt_mock)
     monkeypatch.setattr(
         codex_runtime,
         "_codex_thread_has_source_record",
@@ -1068,13 +1246,6 @@ async def test_prepare_send_materializes_app_thread_when_resume_reports_not_foun
     assert thread_info.thread_id == "thread-real"
     assert thread_info.source == "app"
     assert thread_info.is_active is True
-    interrupt_mock.assert_awaited_once_with(
-        state,
-        adapter,
-        "codex:onlineWorker",
-        "thread-real",
-        label="codex",
-    )
 
 
 @pytest.mark.asyncio
@@ -1102,8 +1273,6 @@ async def test_prepare_send_materializes_state_only_app_thread(monkeypatch):
         side_effect=RuntimeError("thread not found: app:codex:draft")
     )
 
-    interrupt_mock = AsyncMock()
-    monkeypatch.setattr(codex_runtime, "_interrupt_active_turn", interrupt_mock)
     monkeypatch.setattr(
         codex_runtime,
         "_codex_thread_has_source_record",
@@ -1131,13 +1300,6 @@ async def test_prepare_send_materializes_state_only_app_thread(monkeypatch):
     assert thread_info.thread_id == "thread-real"
     assert thread_info.source == "app"
     assert thread_info.is_active is True
-    interrupt_mock.assert_awaited_once_with(
-        state,
-        adapter,
-        "codex:onlineWorker",
-        "thread-real",
-        label="codex",
-    )
 
 
 @pytest.mark.asyncio

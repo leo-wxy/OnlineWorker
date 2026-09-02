@@ -74,8 +74,6 @@ function showsManagedRemoteProxyAlias(provider: ProviderMetadata | undefined) {
   return Boolean(managedRemoteProxyAlias(provider));
 }
 
-const CIVILITY_MODE_SEALED = true;
-
 function managedRemoteProxyAlias(provider: ProviderMetadata | undefined) {
   if (provider?.capabilities.messageRewrite?.externalCli !== "remote_proxy") {
     return "";
@@ -151,7 +149,6 @@ export function ProviderSettingsPanel({ mode }: Props) {
   const [loading, setLoading] = useState(true);
   const [savingProviderId, setSavingProviderId] = useState<string | null>(null);
   const [savingCliProviderId, setSavingCliProviderId] = useState<string | null>(null);
-  const [savingHookProviderId, setSavingHookProviderId] = useState<string | null>(null);
   const [validatingProviderId, setValidatingProviderId] = useState<string | null>(null);
   const [validationReports, setValidationReports] = useState<Record<string, ProviderValidationReport>>({});
   const [cliDrafts, setCliDrafts] = useState<Record<string, ProviderCliDraft>>({});
@@ -333,29 +330,6 @@ export function ProviderSettingsPanel({ mode }: Props) {
     }
   };
 
-  const saveProviderCivilityMode = async (
-    providerId: string,
-    enabled: boolean
-  ) => {
-    setSavingHookProviderId(providerId);
-    try {
-      await invoke("set_provider_message_hook_enabled", {
-        providerId,
-        hookName: "abusive_language_normalization",
-        enabled,
-      });
-      clearProviderValidationReport(providerId);
-      startTransition(() => {
-        void load();
-      });
-      setError(null);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setSavingHookProviderId(null);
-    }
-  };
-
   const validateProviderConfig = async (providerId: string) => {
     if (validatingProviderId) {
       return;
@@ -408,7 +382,6 @@ export function ProviderSettingsPanel({ mode }: Props) {
           const provider = byId.get(setting.id);
           const busy = savingProviderId === setting.id;
           const cliBusy = savingCliProviderId === setting.id;
-          const hookBusy = savingHookProviderId === setting.id;
           const validating = validatingProviderId === setting.id;
           const report = validationReports[setting.id];
           const hiddenByDefault = provider?.visible === false;
@@ -420,12 +393,6 @@ export function ProviderSettingsPanel({ mode }: Props) {
           const canEditLaunchMethods = supportsLaunchMethods(provider);
           const supportsExternalCliAuth = supportsExternalCliAuthConfig(provider);
           const supportsExternalCliChildLauncher = supportsExternalCliLauncherWrap(provider);
-          const supportsMessageRewrite = !CIVILITY_MODE_SEALED && Boolean(
-            provider?.capabilities.messageRewrite?.appSend ||
-            provider?.capabilities.messageRewrite?.telegram ||
-            provider?.capabilities.messageRewrite?.externalCli
-          );
-          const civilityModeEnabled = provider?.messageHooks?.abusiveLanguageNormalization.enabled ?? true;
           const draft = cliDrafts[setting.id] ?? {
             bin: provider?.bin ?? provider?.install?.cliNames?.[0] ?? setting.id,
             authToken: provider?.externalCli?.authToken ?? "",
@@ -521,21 +488,6 @@ export function ProviderSettingsPanel({ mode }: Props) {
                   <span className="text-sm font-semibold text-[var(--ow-text)]">{texts.autostart}</span>
                 </label>
 
-                {provider && supportsMessageRewrite && (
-                  <label className={`flex items-center gap-3 ${hookBusy ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
-                    <Toggle
-                      checked={civilityModeEnabled}
-                      disabled={hookBusy}
-                      onChange={(checked) => {
-                        void saveProviderCivilityMode(setting.id, checked);
-                      }}
-                    />
-                    <span className="grid gap-0.5">
-                      <span className="text-sm font-semibold text-[var(--ow-text)]">{texts.civilityModeTitle}</span>
-                      <span className="text-xs font-medium text-[var(--ow-muted)]">{texts.civilityModeDescription}</span>
-                    </span>
-                  </label>
-                )}
               </div>
 
               {report && (

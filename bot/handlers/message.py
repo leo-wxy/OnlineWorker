@@ -303,14 +303,15 @@ async def _dispatch_thread_message(
             has_photo=has_photo,
             attachments=attachments,
         )
-        if handled:
-            publish_user_message_accepted(
-                state,
-                message_event_request,
-                text=send_text,
-                workspace_path=str(getattr(ws_info, "path", "") or ""),
-                event_id=f"tg:{tg_message_id}" if tg_message_id > 0 else "",
-            )
+        if handled is not False:
+            if handled is True:
+                publish_user_message_accepted(
+                    state,
+                    message_event_request,
+                    text=send_text,
+                    workspace_path=str(getattr(ws_info, "path", "") or ""),
+                    event_id=f"tg:{tg_message_id}" if tg_message_id > 0 else "",
+                )
             return
 
     if message_hooks is not None:
@@ -329,6 +330,7 @@ async def _dispatch_thread_message(
 
     should_continue = True
     preview_value = _preview_for_message(send_text, None, has_photo)
+    send_result = None
     try:
         if message_hooks is not None:
             prepare_kwargs = dict(
@@ -368,7 +370,7 @@ async def _dispatch_thread_message(
             )
             if attachments:
                 send_kwargs["attachments"] = attachments
-            await message_hooks.send(
+            send_result = await message_hooks.send(
                 state,
                 adapter,
                 ws_info,
@@ -377,14 +379,18 @@ async def _dispatch_thread_message(
             )
         else:
             if attachments:
-                await adapter.send_user_message(
+                send_result = await adapter.send_user_message(
                     workspace_id,
                     thread_info.thread_id,
                     send_text,
                     attachments=attachments,
                 )
             else:
-                await adapter.send_user_message(workspace_id, thread_info.thread_id, send_text)
+                send_result = await adapter.send_user_message(
+                    workspace_id,
+                    thread_info.thread_id,
+                    send_text,
+                )
     except Exception:
         if thread_info.thread_id != original_thread_id:
             ws_info.threads.pop(thread_info.thread_id, None)
@@ -398,6 +404,11 @@ async def _dispatch_thread_message(
             thread_info.last_tg_user_message_id = original_last_tg_user_message_id
             ws_info.threads[original_thread_id] = thread_info
         raise
+    delivery_status = (
+        str(send_result.get("status") or "sent")
+        if isinstance(send_result, dict)
+        else "sent"
+    )
     publish_user_message_accepted(
         state,
         UserMessageSendRequest(
@@ -410,6 +421,7 @@ async def _dispatch_thread_message(
             metadata={
                 "source_topic_id": src_topic_id,
                 "telegram_message_id": tg_message_id,
+                "delivery_status": delivery_status,
                 **(message_metadata or {}),
             },
         ),
@@ -440,7 +452,10 @@ async def _dispatch_thread_message(
         else:
             save_storage(state.storage)
 
-    logger.info(f"[TG] 消息已发送到 thread {thread_info.thread_id[:8]}…")
+    if delivery_status == "queued":
+        logger.info("[TG] 消息已排队到 thread %s…", thread_info.thread_id[:8])
+    else:
+        logger.info("[TG] 消息已发送到 thread %s…", thread_info.thread_id[:8])
 
 
 def _build_provider_approval_reply(approval, action: str) -> tuple[str, dict]:

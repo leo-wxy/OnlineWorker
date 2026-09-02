@@ -28,7 +28,8 @@ test("provider session event stream Tauri commands use owner-bridge event stream
   );
 
   assert.match(commands, /pub async fn start_provider_session_event_stream\(/);
-  assert.match(commands, /pub async fn stop_provider_session_event_stream\(\)/);
+  assert.match(commands, /pub async fn stop_provider_session_event_stream\(stream_id: u64\)/);
+  assert.match(commands, /compare_exchange\(stream_id, 0/);
   assert.match(commands, /"type": "session_event_stream"/);
   assert.match(commands, /Channel<ProviderSessionStreamEvent>/);
   assert.doesNotMatch(commands, /pub async fn start_provider_session_stream\(/);
@@ -47,6 +48,10 @@ test("session browser chats handle stream-ready and stream errors as non-destruc
   assert.match(genericChat, /messagesRef\.current\.length === 0/);
   assert.match(genericChat, /setReplyWatchState\(\(current\) => \(current \? "expired" : current\)\)/);
   assert.match(genericChat, /applySessionStreamEvent\(previousMessages, event\)/);
+  assert.match(genericChat, /const snapshotGenerationRef = useRef\(0\)/);
+  assert.match(genericChat, /snapshotGenerationRef\.current \+= 1;\s*applyMessages\(nextMessages/);
+  assert.match(genericChat, /applyMessages\(nextMessages, "auto"\);\s*hasLoadedRef\.current = true;\s*setLoading\(false\)/);
+  assert.match(genericChat, /loadSnapshotIfCurrent\(/);
   assert.match(genericChat, /shouldClearReplyWatch\(previousMessages, nextMessages, event\)/);
   assert.match(genericChat, /shouldSkip:\s*\(\) => liveRefreshBlockedRef\.current/);
   assert.doesNotMatch(genericChat, /shouldSkip:\s*\(\) => liveRefreshBlockedRef\.current \|\| liveStreamReadyRef\.current/);

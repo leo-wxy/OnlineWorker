@@ -26,7 +26,7 @@
 
   不要用 `--remote unix://` 验证 OnlineWorker 审批链路；它连接的是 Codex 默认 socket，会绕过 OnlineWorker proxy。
 - `ow-claude`：Claude CLI HTTP proxy 包装脚本。文明模式当前已封存，脚本仍可通过 `ANTHROPIC_BASE_URL` 把 Claude 请求导入本地代理并用 `--probe` 打印请求摘要，但不会改写 Anthropic `messages[].content` 用户文本；`--rewrite` / `--no-rewrite` 参数仅作为后续恢复链路的兼容保留项。若某个外部 launcher 会先运行自身逻辑再启动名为 `claude` 的二级进程，可显式传 `--launcher-wraps-claude --upstream-base-url <url>`，脚本会临时把 `claude` shim 放到 PATH 前面；具体 launcher 名称和 upstream 由用户配置提供，通用代码不内置私有命令或私有地址。
-- `codex_tui_host.py`：Codex TUI host wrapper 的本地运行入口，仍被 TUI 主控链路使用。
+- Codex TUI host 本地入口统一使用 `python3 main.py --codex-tui-host ...`；打包环境使用同一组参数调用 `onlineworker-bot`。
 
 ## Smoke / diagnostics
 

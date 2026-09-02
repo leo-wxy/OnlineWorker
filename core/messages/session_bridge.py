@@ -85,7 +85,12 @@ def message_event_from_session_event(event: SessionEvent) -> MessageEvent:
     semantic_payload = event.semantic_payload or {}
     kind = canonical_kind_for_session_event(event)
     request_id = _text(payload.get("request_id"))
-    item_id = _text(payload.get("item_id") or payload.get("id"))
+    raw_item = payload.get("item", {})
+    item_id = _text(
+        payload.get("item_id")
+        or payload.get("id")
+        or (raw_item.get("id") if isinstance(raw_item, dict) else "")
+    )
     text = _event_text(event)
     title = _text(
         payload.get("title")
@@ -96,18 +101,33 @@ def message_event_from_session_event(event: SessionEvent) -> MessageEvent:
     )
     status = _text(payload.get("status"))
     reason = _text(payload.get("reason") or semantic_payload.get("reason"))
-    dedupe_parts = [
-        event.provider,
-        event.workspace_id,
-        event.thread_id or "",
-        event.turn_id or "",
-        kind,
-        request_id,
-        item_id,
-    ]
-    dedupe_key = ":".join(part for part in dedupe_parts if part)
-    if kind == "message.assistant.delta" and not request_id and not item_id:
-        dedupe_key = ""
+    stable_identity = [request_id, item_id]
+    if kind in {
+        "message.user.submitted",
+        "message.user.accepted",
+        "message.assistant.final",
+        "turn.started",
+        "turn.completed",
+        "turn.failed",
+    }:
+        stable_identity.append(event.turn_id or "")
+    elif kind == "session.created":
+        stable_identity.append("created")
+    elif kind == "session.title_updated":
+        stable_identity.append(title)
+    dedupe_key = ""
+    if any(stable_identity):
+        dedupe_key = ":".join(
+            part
+            for part in (
+                event.provider,
+                event.workspace_id,
+                event.thread_id or "",
+                kind,
+                *stable_identity,
+            )
+            if part
+        )
 
     public_payload: dict[str, Any] = {
         "rawMethod": event.raw_method,

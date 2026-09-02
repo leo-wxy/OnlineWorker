@@ -67,7 +67,6 @@ test("app shell exposes first-class task, usage, ai, and notification tabs in na
   const tabs = readFileSync(join(root, "src", "utils", "appTabs.js"), "utf8");
   const types = readFileSync(join(root, "src", "utils", "appTabs.d.ts"), "utf8");
   const pages = readFileSync(join(root, "src", "pages", "index.ts"), "utf8");
-  const components = readFileSync(join(root, "src", "components", "index.ts"), "utf8");
 
   assert.match(tabs, /PRIMARY_APP_TABS = \["dashboard", "tasks", "sessions", "usage", "ai", "commands", "notifications", "setup"\]/);
   assert.match(types, /"dashboard" \| "tasks" \| "sessions" \| "usage" \| "ai" \| "commands" \| "notifications" \| "config" \| "setup"/);
@@ -85,7 +84,6 @@ test("app shell exposes first-class task, usage, ai, and notification tabs in na
   assert.match(app, /<UsageBrowser \/>/);
   assert.match(app, /<AiSettingsPanel \/>/);
   assert.match(app, /<NotificationSettingsPanel \/>/);
-  assert.match(components, /export \{ AiSettingsPanel \}/);
   assert.match(pages, /export \{ TaskBoard \} from "\.\/TaskBoard";/);
   assert.match(pages, /export \{ UsageBrowser \} from "\.\/UsageBrowser";/);
 });
@@ -99,12 +97,12 @@ test("task board keeps cached provider summaries and uses force refresh only on 
   assert.match(taskBoard, /forceProviderRefresh\?: boolean/);
   assert.match(taskBoard, /await fetchProviderSessions\(provider\.id, \{ forceRefresh: forceProviderRefresh \}\)/);
   assert.match(taskBoard, /const hasHydratedProviderSessionsRef = useRef\(false\);/);
-  assert.match(taskBoard, /await refresh\(\{ includeActivities: true \}\);/);
+  assert.match(taskBoard, /await refresh\(\);/);
   assert.match(taskBoard, /if \(cancelled \|\| hasHydratedProviderSessionsRef\.current\) \{\s*return;\s*\}/s);
-  assert.match(taskBoard, /await refresh\(\{ includeActivities: false, forceProviderRefresh: true \}\);/);
+  assert.match(taskBoard, /await refresh\(\{ forceProviderRefresh: true \}\);/);
   assert.equal(taskBoard.includes("if (loading || hasHydratedProviderSessionsRef.current)"), false);
-  assert.match(taskBoard, /onClick=\{\(\) => void refresh\(\{ includeActivities: true, forceProviderRefresh: true \}\)\}/);
-  assert.match(taskBoard, /await refresh\(\{ includeActivities: true, forceProviderRefresh: true \}\);/);
+  assert.match(taskBoard, /onClick=\{\(\) => void refresh\(\{ forceProviderRefresh: true \}\)\}/);
+  assert.match(taskBoard, /await refresh\(\{ forceProviderRefresh: true \}\);/);
   assert.match(sessionData, /const providerSessionSnapshotCache = new Map/);
   assert.match(sessionData, /export function readCachedProviderSessionSnapshotRows/);
   assert.match(sessionData, /export function writeCachedProviderSessionSnapshot/);
@@ -230,14 +228,12 @@ test("settings exposes attachment cache controls under a maintenance section", (
   const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
   const setup = readFileSync(join(root, "src", "pages", "SetupWizard.tsx"), "utf8");
   const maintenance = readFileSync(join(root, "src", "components", "MaintenanceSettingsPanel.tsx"), "utf8");
-  const components = readFileSync(join(root, "src", "components", "index.ts"), "utf8");
   const types = readFileSync(join(root, "src", "i18n", "types.ts"), "utf8");
   const zh = readFileSync(join(root, "src", "i18n", "locales", "zh.ts"), "utf8");
   const en = readFileSync(join(root, "src", "i18n", "locales", "en.ts"), "utf8");
 
   assert.match(app, /"maintenance"/);
   assert.match(app, /<MaintenanceSettingsPanel \/>/);
-  assert.match(components, /export \{ MaintenanceSettingsPanel \}/);
   assert.equal(setup.includes("get_attachment_cache_stats"), false);
   assert.equal(setup.includes("clear_attachment_cache"), false);
   assert.match(maintenance, /get_attachment_cache_stats/);
@@ -266,11 +262,7 @@ test("maintenance keeps external Codex permission hook install out of the app sh
   assert.equal(en.includes("Codex Permission Entry"), false);
 });
 
-test("provider settings keeps civility mode controls sealed while rewrite is parked", () => {
-  const panel = readFileSync(join(root, "src", "components", "ProviderSettingsPanel.tsx"), "utf8");
-  const types = readFileSync(join(root, "src", "i18n", "types.ts"), "utf8");
-  const zh = readFileSync(join(root, "src", "i18n", "locales", "zh.ts"), "utf8");
-  const en = readFileSync(join(root, "src", "i18n", "locales", "en.ts"), "utf8");
+test("provider manifests keep their external CLI rewrite modes", () => {
   const codexPlugin = readFileSync(
     join(root, "..", "plugins", "providers", "builtin", "codex", "plugin.yaml"),
     "utf8"
@@ -280,21 +272,10 @@ test("provider settings keeps civility mode controls sealed while rewrite is par
     "utf8"
   );
 
-  assert.match(panel, /const CIVILITY_MODE_SEALED = true/);
-  assert.match(panel, /supportsMessageRewrite/);
-  assert.match(panel, /!CIVILITY_MODE_SEALED && Boolean/);
-  assert.match(panel, /set_provider_message_hook_enabled/);
-  assert.match(panel, /abusive_language_normalization/);
-  assert.match(panel, /texts\.civilityModeTitle/);
-  assert.match(panel, /provider\?\.messageHooks\?\.abusiveLanguageNormalization\.enabled/);
-  assert.match(types, /civilityModeTitle:\s*string/);
-  assert.match(types, /civilityModeDescription:\s*string/);
   assert.match(codexPlugin, /external_cli:\s*remote_proxy/);
   assert.match(codexPlugin, /wrapper:\s*ow-codex/);
   assert.match(claudePlugin, /external_cli:\s*http_proxy/);
   assert.match(claudePlugin, /wrapper:\s*ow-claude/);
-  assert.match(zh, /文明模式/);
-  assert.match(en, /Civility mode/);
 });
 
 test("provider settings exposes discovered hidden extensions with icons and a visible hint", () => {
@@ -361,12 +342,10 @@ test("provider settings exposes external CLI rewrite configuration in the app", 
   assert.equal(zh.includes("上游 Base URL"), false);
   assert.equal(zh.includes("外挂 CLI"), false);
   assert.equal(zh.includes("启动器会再调用 claude"), false);
-  assert.match(zh, /发送前将不文明表达改写为普通表达。/);
   assert.match(zh, /启动后进入受管子 CLI/);
   assert.match(en, /CLI configuration/);
   assert.match(en, /Launch command candidates/);
   assert.equal(en.includes("Upstream Base URL"), false);
-  assert.match(en, /Rewrite abusive language into neutral wording before sending./);
   assert.match(en, /Open the managed child CLI after launcher starts/);
   assert.match(rustConfig, /pub async fn set_provider_cli_config/);
   assert.match(rustLib, /set_provider_cli_config/);
@@ -405,7 +384,6 @@ test("provider settings exposes lightweight provider configuration validation", 
 test("notification tab exposes split app list and plugin-defined configuration", () => {
   const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
   const panel = readFileSync(join(root, "src", "components", "NotificationSettingsPanel.tsx"), "utf8");
-  const components = readFileSync(join(root, "src", "components", "index.ts"), "utf8");
   const types = readFileSync(join(root, "src", "types.ts"), "utf8");
   const i18nTypes = readFileSync(join(root, "src", "i18n", "types.ts"), "utf8");
   const zh = readFileSync(join(root, "src", "i18n", "locales", "zh.ts"), "utf8");
@@ -415,7 +393,6 @@ test("notification tab exposes split app list and plugin-defined configuration",
   assert.match(app, /<NotificationSettingsPanel \/>/);
   assert.match(app, /grid-cols-5/);
   assert.equal(app.includes('["notifications", "Notifications"]'), false);
-  assert.match(components, /export \{ NotificationSettingsPanel \}/);
   assert.match(types, /export interface NotificationChannelMetadata/);
   assert.match(types, /icon\?: ProviderIconMetadata \| null;/);
   assert.match(types, /export interface NotificationSetupGuide/);
@@ -478,19 +455,20 @@ test("task board listens to activity stream without fallback polling", () => {
   const lib = readFileSync(join(root, "src-tauri", "src", "lib.rs"), "utf8");
   const taskBoardState = readFileSync(join(root, "src-tauri", "src", "commands", "task_board_state.rs"), "utf8");
 
-  assert.match(taskBoard, /onClick=\{\(\) => void refresh\(\{ includeActivities: true, forceProviderRefresh: true \}\)\}/);
+  assert.match(taskBoard, /onClick=\{\(\) => void refresh\(\{ forceProviderRefresh: true \}\)\}/);
   assert.match(app, /start_task_board_activity_stream/);
   assert.match(taskModelTypes, /export interface TaskBoardActivityStreamEvent/);
   assert.match(taskModel, /export function taskBoardSessionKey/);
   assert.match(taskModel, /export function upsertTaskBoardActivity/);
   assert.match(taskModel, /export function removeTaskBoardActivity/);
   assert.match(taskBoard, /sharedSessionActivities !== undefined/);
-  assert.match(taskBoard, /onSessionActivitiesChange\?/);
+  assert.doesNotMatch(taskBoard, /onSessionActivitiesChange/);
   assert.match(taskBoard, /const activity = event\.activity;/);
   assert.match(taskBoard, /setLocalSessionActivities\(\(current\) => upsertTaskBoardActivity\(current, activity\)\)/);
   assert.match(taskBoard, /event\.kind === "remove"/);
   assert.match(taskBoard, /setLocalSessionActivities\(\(current\) => removeTaskBoardActivity\(current, event\.providerId!, event\.sessionId!\)\)/);
-  assert.match(taskBoard, /refresh\(\{ includeActivities: true \}\)/);
+  assert.doesNotMatch(app, /invoke<TaskBoardSessionActivity\[\]>\("get_task_board_session_activities"\)/);
+  assert.doesNotMatch(taskBoard, /"get_task_board_session_activities"/);
   assert.match(taskBoard, /setLoading\(false\);/);
   assert.equal(taskBoard.includes("window.setInterval(() => {\n      void refresh();"), false);
   assert.match(taskBoard, /setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 30_000\)/);
@@ -500,6 +478,10 @@ test("task board listens to activity stream without fallback polling", () => {
   assert.match(app, /invoke<number>\("start_task_board_activity_stream", \{ channel \}\)/);
   assert.match(app, /invoke\("stop_task_board_activity_stream", \{ streamId: activeStreamId \}\)/);
   assert.match(taskBoardState, /session_activity_stream/);
+  assert.doesNotMatch(
+    taskBoardState,
+    /if !socket_path\.exists\(\) \{\s*return Ok\(Vec::new\(\)\);\s*\}/,
+  );
   assert.match(taskBoardState, /fn begin_task_board_activity_stream\(\) -> u64/);
   assert.match(taskBoardState, /fn stop_task_board_activity_stream_id\(stream_id: u64\)/);
   assert.match(taskBoardState, /while task_board_activity_stream_is_active\(stream_id\)/);

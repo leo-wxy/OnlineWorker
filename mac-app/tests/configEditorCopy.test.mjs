@@ -16,7 +16,6 @@ test("setup settings dialogs and logs consume semantic theme colors", () => {
     "src/components/AiSettingsPanel.tsx",
     "src/components/MaintenanceSettingsPanel.tsx",
     "src/components/ConfigEditor.tsx",
-    "src/components/CliChecker.tsx",
     "src/components/ConnectivityTest.tsx",
     "src/components/ActionGuideDialog.tsx",
     "src/components/LogWindow.tsx",

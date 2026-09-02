@@ -11,6 +11,7 @@ from core.storage import (
     save_storage,
 )
 from plugins.providers.builtin.codex.python.storage_runtime import (
+    is_codex_user_visible_session,
     list_codex_sessions,
     list_codex_threads_by_cwd,
     query_codex_active_thread_ids,
@@ -19,6 +20,15 @@ from plugins.providers.builtin.codex.python.storage_runtime import (
     read_codex_turn_terminal_outcome,
     read_thread_history,
 )
+
+
+def test_codex_memories_workspace_is_not_user_visible(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    memories = tmp_path / ".codex" / "memories"
+
+    assert not is_codex_user_visible_session(cwd=str(memories))
+    assert not is_codex_user_visible_session(cwd=str(memories / "rollout"))
+    assert is_codex_user_visible_session(cwd=str(tmp_path / "project"))
 
 
 def test_load_storage_file_not_exists(tmp_path):
@@ -89,6 +99,21 @@ def test_save_atomic_via_tmp(tmp_path):
     import os
     assert not os.path.exists(path + ".tmp")
     assert os.path.exists(path)
+
+
+def test_load_storage_recovers_from_valid_backup(tmp_path):
+    path = str(tmp_path / "state.json")
+    storage = AppStorage(
+        workspaces={"codex:/repo": WorkspaceInfo(name="repo", path="/repo", tool="codex")},
+        active_workspace="codex:/repo",
+    )
+    save_storage(storage, path)
+    (tmp_path / "state.json").write_text("{broken", encoding="utf-8")
+
+    recovered = load_storage(path)
+
+    assert recovered.active_workspace == "codex:/repo"
+    assert recovered.workspaces["codex:/repo"].path == "/repo"
 
 
 def test_load_storage_multiple_workspaces(tmp_path):

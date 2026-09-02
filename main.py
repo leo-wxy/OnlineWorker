@@ -225,7 +225,6 @@ if __name__ == "__main__" and any(flag in sys.argv[1:] for flag in _ACCOUNT_FEAT
 from telegram import Update
 from telegram.ext import (
     Application,
-    CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
     TypeHandler,
@@ -238,18 +237,10 @@ from core.state import AppState
 from core.storage import load_storage
 from core.lifecycle import LifecycleManager
 from bot.filters import WhitelistFilter
-from bot.handlers.common import (
-    make_start_handler, make_ping_handler, make_echo_handler,
-    make_status_handler, make_help_handler, make_active_handler,
-    make_restart_handler, make_stop_handler,
-)
 from bot.handlers.workspace import (
-    make_workspace_handler, make_ws_open_callback_handler, make_thread_open_callback_handler,
-    make_cli_handler, make_cli_callback_handler,
-)
-from bot.handlers.thread import (
-    make_new_thread_handler, make_list_thread_handler,
-    make_archive_thread_handler, make_skills_handler, make_history_handler,
+    make_ws_open_callback_handler,
+    make_thread_open_callback_handler,
+    make_cli_callback_handler,
 )
 from bot.handlers.slash import make_slash_command_handler
 from bot.handlers.message import make_message_handler, make_callback_handler

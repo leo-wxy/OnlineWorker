@@ -38,11 +38,11 @@ def _attachment_summary(attachments: list[dict] | None) -> list[dict[str, Any]]:
     return public
 
 
-def _publish(state: Any, event) -> bool:
+def _publish_result(state: Any, event) -> bool | None:
     bus = getattr(state, "message_bus", None)
     publish = getattr(bus, "publish", None)
     if not callable(publish):
-        return False
+        return None
     try:
         return bool(publish(event))
     except Exception:
@@ -52,11 +52,15 @@ def _publish(state: Any, event) -> bool:
             getattr(event, "event_id", ""),
             exc_info=True,
         )
-        return False
+        return None
 
 
-def publish_session_message_event(state: Any, session_event: SessionEvent) -> bool:
-    return _publish(state, message_event_from_session_event(session_event))
+def _publish(state: Any, event) -> bool:
+    return _publish_result(state, event) is True
+
+
+def publish_session_message_event(state: Any, session_event: SessionEvent) -> bool | None:
+    return _publish_result(state, message_event_from_session_event(session_event))
 
 
 def publish_user_message_event(

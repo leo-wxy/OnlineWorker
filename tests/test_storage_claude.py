@@ -377,8 +377,6 @@ def test_default_claude_storage_snapshot_is_reused_across_facts(tmp_path, monkey
     monkeypatch.setattr(storage_module, "CLAUDE_SESSIONS_DIR", str(sessions_dir))
     monkeypatch.setattr(storage_module, "CLAUDE_PROJECTS_DIR", str(projects_dir))
     monkeypatch.setattr(storage_module, "CLAUDE_HISTORY_PATH", str(tmp_path / "empty-history.jsonl"))
-    storage_module.clear_claude_storage_cache()
-
     snapshot_calls = {"count": 0}
     real_builder = storage_module._build_claude_thread_snapshot
 
@@ -396,9 +394,6 @@ def test_default_claude_storage_snapshot_is_reused_across_facts(tmp_path, monkey
     assert [item["id"] for item in threads] == ["ses-a"]
     assert active_ids == {"ses-a"}
     assert snapshot_calls["count"] == 1
-
-    storage_module.clear_claude_storage_cache()
-
 
 def test_list_claude_threads_by_cwd_reads_project_jsonl_store(tmp_path):
     projects_dir = tmp_path / "projects"
@@ -1408,8 +1403,6 @@ def test_default_claude_storage_snapshot_reuses_cache_until_files_change(
     monkeypatch.setattr(storage_module, "CLAUDE_SESSIONS_DIR", str(sessions_dir))
     monkeypatch.setattr(storage_module, "CLAUDE_PROJECTS_DIR", str(projects_dir))
     monkeypatch.setattr(storage_module, "CLAUDE_HISTORY_PATH", str(history_path))
-    storage_module.clear_claude_storage_cache()
-
     calls = {"sessions": 0}
 
     def fake_load_claude_sessions(sessions_dir_arg=None):

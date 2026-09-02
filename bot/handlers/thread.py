@@ -265,7 +265,9 @@ async def _interrupt_thread_in_source(
         raise RuntimeError("workspace 未关联 daemon ID")
 
     if not thread_interrupt_supported(state, ws):
-        raise RuntimeError("当前主控模式暂不支持从 TG 远程中断，请回到 TUI 主控界面操作。")
+        raise RuntimeError(
+            "当前会话由其他 Codex owner 控制；普通消息只能排队，无法立即中断。"
+        )
 
     active_adapter = _resolve_thread_adapter(state, ws)
     if not active_adapter:

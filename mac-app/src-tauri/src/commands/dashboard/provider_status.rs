@@ -5,7 +5,7 @@ use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use super::super::config_provider::{
     infer_provider_legacy_transport, provider_default_live_transport, provider_default_metadata,
@@ -102,11 +102,6 @@ fn provider_snapshot_from_metadata(provider: ProviderMetadata) -> ProviderConfig
     }
 }
 
-pub(super) fn is_hidden_provider(id: &str) -> bool {
-    let _ = id;
-    false
-}
-
 fn infer_legacy_transport(
     tool_name: &str,
     explicit_protocol: Option<&str>,
@@ -162,9 +157,6 @@ pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<Provi
 
     if let Some(providers) = parsed.providers {
         for (id, provider) in providers {
-            if is_hidden_provider(&id) {
-                continue;
-            }
             let mut snapshot = default_provider_snapshot(&id);
             snapshot.managed = provider.managed.unwrap_or(snapshot.managed);
             snapshot.autostart =
@@ -207,9 +199,6 @@ pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<Provi
     } else if let Some(tools) = parsed.tools {
         for tool in tools {
             if tool.name.trim().is_empty() {
-                continue;
-            }
-            if is_hidden_provider(&tool.name) {
                 continue;
             }
             let mut snapshot = default_provider_snapshot(&tool.name);
@@ -270,7 +259,7 @@ pub(super) fn resolve_builtin_provider_snapshots(raw: Option<&str>) -> Vec<Provi
         }
     }
     let mut extras: Vec<_> = resolved.into_values().collect();
-    extras.retain(|provider| provider.visible && !is_hidden_provider(&provider.id));
+    extras.retain(|provider| provider.visible);
     extras.sort_by(|a, b| a.id.cmp(&b.id));
     ordered.extend(extras);
     ordered
@@ -381,9 +370,6 @@ pub(super) fn build_provider_statuses(
     configs: Vec<ProviderConfigSnapshot>,
     data_dir: &Path,
     service_running: bool,
-    _managed_service_running: bool,
-    _last_started_at: Option<SystemTime>,
-    _now: SystemTime,
 ) -> Vec<ProviderDashboardStatus> {
     configs
         .into_iter()

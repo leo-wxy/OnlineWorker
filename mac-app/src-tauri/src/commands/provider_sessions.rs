@@ -6,14 +6,11 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc, OnceLock,
-};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::ipc::Channel;
 use tauri::AppHandle;
 
-use super::config::ensure_data_dir;
+use super::config::{atomic_write, ensure_data_dir};
 use super::config_provider::{ProviderMetadata, ProviderSessionAccessCapabilities};
 use super::provider_bridge_common::{
     provider_bridge_env, provider_owner_bridge_socket_path, require_runtime_provider,
@@ -21,7 +18,8 @@ use super::provider_bridge_common::{
 };
 use super::session_state::load_local_thread_overlays;
 
-static PROVIDER_SESSION_STREAM_GENERATION: OnceLock<Arc<AtomicU64>> = OnceLock::new();
+static PROVIDER_SESSION_STREAM_NEXT_ID: AtomicU64 = AtomicU64::new(0);
+static PROVIDER_SESSION_STREAM_ACTIVE_ID: AtomicU64 = AtomicU64::new(0);
 const PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(6);
 const PROVIDER_SESSION_BRIDGE_LIST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
@@ -78,10 +76,20 @@ pub struct ProviderSessionStreamEvent {
     pub error: Option<String>,
 }
 
-fn provider_session_stream_generation() -> Arc<AtomicU64> {
-    PROVIDER_SESSION_STREAM_GENERATION
-        .get_or_init(|| Arc::new(AtomicU64::new(0)))
-        .clone()
+fn begin_provider_session_stream() -> u64 {
+    let stream_id = PROVIDER_SESSION_STREAM_NEXT_ID.fetch_add(1, Ordering::SeqCst) + 1;
+    PROVIDER_SESSION_STREAM_ACTIVE_ID.store(stream_id, Ordering::SeqCst);
+    stream_id
+}
+
+fn provider_session_stream_is_active(stream_id: u64) -> bool {
+    PROVIDER_SESSION_STREAM_ACTIVE_ID.load(Ordering::SeqCst) == stream_id
+}
+
+fn deactivate_provider_session_stream(stream_id: u64) -> bool {
+    PROVIDER_SESSION_STREAM_ACTIVE_ID
+        .compare_exchange(stream_id, 0, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
 }
 
 fn normalized_session_access_value(value: &str) -> String {
@@ -495,8 +503,7 @@ fn stream_provider_session_events_via_owner_bridge(
     provider_id: &str,
     session_id: &str,
     workspace_dir: Option<&str>,
-    generation: Arc<AtomicU64>,
-    my_generation: u64,
+    stream_id: u64,
     channel: Channel<ProviderSessionStreamEvent>,
 ) {
     let socket_path = provider_owner_bridge_socket_path(data_dir);
@@ -508,7 +515,7 @@ fn stream_provider_session_events_via_owner_bridge(
         .map(str::to_string);
 
     tauri::async_runtime::spawn_blocking(move || {
-        while generation.load(Ordering::SeqCst) == my_generation {
+        while provider_session_stream_is_active(stream_id) {
             let socket = match UnixStream::connect(&socket_path) {
                 Ok(socket) => socket,
                 Err(error) => {
@@ -578,7 +585,7 @@ fn stream_provider_session_events_via_owner_bridge(
             }
 
             let mut reader = BufReader::new(socket);
-            while generation.load(Ordering::SeqCst) == my_generation {
+            while provider_session_stream_is_active(stream_id) {
                 let mut line = String::new();
                 match reader.read_line(&mut line) {
                     Ok(0) => break,
@@ -630,7 +637,7 @@ fn stream_provider_session_events_via_owner_bridge(
                 }
             }
 
-            if generation.load(Ordering::SeqCst) == my_generation {
+            if provider_session_stream_is_active(stream_id) {
                 std::thread::sleep(std::time::Duration::from_millis(500));
             }
         }
@@ -672,6 +679,10 @@ fn local_overlay_archive_result(
         "workspace_dir": workspace_dir,
         "archive_mode": "local_overlay",
     }))
+}
+
+fn archive_mode_requires_local_state_persist(archive_mode: &str) -> bool {
+    archive_mode != "provider"
 }
 
 fn owner_bridge_list_error_allows_sidecar(error: &str) -> bool {
@@ -995,7 +1006,7 @@ fn persist_provider_session_archived_state(
     };
 
     if !state.is_object() {
-        state = serde_json::json!({});
+        return Err("onlineworker_state root must be an object".to_string());
     }
     let root = state
         .as_object_mut()
@@ -1003,9 +1014,6 @@ fn persist_provider_session_archived_state(
     let workspaces = root
         .entry("workspaces".to_string())
         .or_insert_with(|| Value::Object(Default::default()));
-    if !workspaces.is_object() {
-        *workspaces = Value::Object(Default::default());
-    }
     let workspaces = workspaces
         .as_object_mut()
         .ok_or("onlineworker_state.workspaces must be an object".to_string())?;
@@ -1061,9 +1069,6 @@ fn persist_provider_session_archived_state(
             "threads": {}
         })
     });
-    if !workspace.is_object() {
-        *workspace = serde_json::json!({});
-    }
     let workspace = workspace
         .as_object_mut()
         .ok_or("workspace state must be an object".to_string())?;
@@ -1082,9 +1087,6 @@ fn persist_provider_session_archived_state(
     let threads = workspace
         .entry("threads".to_string())
         .or_insert_with(|| Value::Object(Default::default()));
-    if !threads.is_object() {
-        *threads = Value::Object(Default::default());
-    }
     let threads = threads
         .as_object_mut()
         .ok_or("workspace threads must be an object".to_string())?;
@@ -1101,9 +1103,6 @@ fn persist_provider_session_archived_state(
             "source": "app"
         })
     });
-    if !thread.is_object() {
-        *thread = Value::Object(Default::default());
-    }
     let thread = thread
         .as_object_mut()
         .ok_or("thread state must be an object".to_string())?;
@@ -1129,10 +1128,9 @@ fn persist_provider_session_archived_state(
     }
     let payload = serde_json::to_string_pretty(&Value::Object(sorted.into_iter().collect()))
         .map_err(|e| format!("serialize onlineworker_state failed: {e}"))?;
-    let tmp_path = state_path.with_extension("json.tmp");
-    std::fs::write(&tmp_path, payload)
-        .map_err(|e| format!("write onlineworker_state tmp failed: {e}"))?;
-    std::fs::rename(&tmp_path, &state_path)
+    atomic_write(&state_path.with_extension("json.bak"), payload.as_bytes())
+        .map_err(|e| format!("write onlineworker_state backup failed: {e}"))?;
+    atomic_write(&state_path, payload.as_bytes())
         .map_err(|e| format!("replace onlineworker_state failed: {e}"))?;
     Ok(())
 }
@@ -1361,13 +1359,15 @@ pub async fn archive_provider_session(
         })
         .ok_or("真实归档成功，但缺少 workspace_dir，无法更新本地归档状态".to_string())?;
 
-    persist_provider_session_archived_state(
-        &data_dir,
-        &provider.id,
-        &normalized_session_id,
-        &workspace_for_state,
-        session_title.as_deref(),
-    )?;
+    if archive_mode_requires_local_state_persist(archive_mode) {
+        persist_provider_session_archived_state(
+            &data_dir,
+            &provider.id,
+            &normalized_session_id,
+            &workspace_for_state,
+            session_title.as_deref(),
+        )?;
+    }
 
     Ok(serde_json::json!({
         "ok": true,
@@ -1448,38 +1448,37 @@ pub async fn start_provider_session_event_stream(
     session_id: String,
     workspace_dir: Option<String>,
     channel: Channel<ProviderSessionStreamEvent>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let _provider = require_runtime_provider(&provider_id)?;
-    let generation = provider_session_stream_generation();
-    let my_generation = generation.fetch_add(1, Ordering::SeqCst) + 1;
+    let stream_id = begin_provider_session_stream();
     let data_dir = ensure_data_dir()?;
     stream_provider_session_events_via_owner_bridge(
         &data_dir,
         &provider_id,
         &session_id,
         workspace_dir.as_deref(),
-        generation,
-        my_generation,
+        stream_id,
         channel,
     );
-    Ok(())
+    Ok(stream_id)
 }
 
 #[tauri::command]
-pub async fn stop_provider_session_event_stream() -> Result<(), String> {
-    provider_session_stream_generation().fetch_add(1, Ordering::SeqCst);
+pub async fn stop_provider_session_event_stream(stream_id: u64) -> Result<(), String> {
+    deactivate_provider_session_stream(stream_id);
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        archive_provider_session_via_owner_bridge, create_provider_session_via_owner_bridge,
-        list_provider_sessions_via_owner_bridge_with_timeout,
+        archive_mode_requires_local_state_persist, archive_provider_session_via_owner_bridge,
+        begin_provider_session_stream, create_provider_session_via_owner_bridge,
+        deactivate_provider_session_stream, list_provider_sessions_via_owner_bridge_with_timeout,
         owner_bridge_archive_error_allows_local_overlay, owner_bridge_archive_error_allows_sidecar,
         owner_bridge_list_error_allows_sidecar, persist_provider_session_archived_state,
         provider_session_list_access, provider_session_read_access, provider_session_send_access,
-        send_provider_session_message_via_owner_bridge,
+        provider_session_stream_is_active, send_provider_session_message_via_owner_bridge,
         send_provider_session_message_via_owner_bridge_with_retry,
         start_provider_session_message_via_owner_bridge, ComposerAttachment,
     };
@@ -1498,6 +1497,26 @@ mod tests {
     use std::time::Duration;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn owner_bridge_archive_keeps_python_state_writer_authoritative() {
+        assert!(!archive_mode_requires_local_state_persist("provider"));
+        assert!(archive_mode_requires_local_state_persist(
+            "provider_sidecar"
+        ));
+        assert!(archive_mode_requires_local_state_persist("local_overlay"));
+    }
+
+    #[test]
+    fn stale_provider_session_stream_stop_does_not_stop_current_stream() {
+        let first = begin_provider_session_stream();
+        let second = begin_provider_session_stream();
+
+        assert!(!deactivate_provider_session_stream(first));
+        assert!(provider_session_stream_is_active(second));
+        assert!(deactivate_provider_session_stream(second));
+        assert!(!provider_session_stream_is_active(second));
+    }
 
     #[test]
     fn provider_session_routes_are_declared_by_manifest_capabilities() {
@@ -2203,6 +2222,67 @@ mod tests {
         assert!(state["workspaces"].get("claude:/Users/example").is_none());
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn persist_archive_rejects_invalid_nested_state_without_overwriting() {
+        let cases = [
+            ("workspaces", serde_json::json!({"workspaces": []})),
+            (
+                "workspace",
+                serde_json::json!({
+                    "workspaces": {"overlay-tool:/tmp/sample-workspace": []}
+                }),
+            ),
+            (
+                "threads",
+                serde_json::json!({
+                    "workspaces": {
+                        "overlay-tool:/tmp/sample-workspace": {
+                            "path": "/tmp/sample-workspace",
+                            "tool": "overlay-tool",
+                            "threads": []
+                        }
+                    }
+                }),
+            ),
+            (
+                "thread",
+                serde_json::json!({
+                    "workspaces": {
+                        "overlay-tool:/tmp/sample-workspace": {
+                            "path": "/tmp/sample-workspace",
+                            "tool": "overlay-tool",
+                            "threads": {"session-a": []}
+                        }
+                    }
+                }),
+            ),
+        ];
+
+        for (name, state) in cases {
+            let temp_dir = std::env::temp_dir()
+                .join(format!("ow-state-invalid-{name}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&temp_dir);
+            fs::create_dir_all(&temp_dir).expect("create temp dir");
+            let state_path = temp_dir.join("onlineworker_state.json");
+            let original = serde_json::to_string_pretty(&state).expect("serialize state");
+            fs::write(&state_path, &original).expect("write invalid state");
+
+            assert!(persist_provider_session_archived_state(
+                &temp_dir,
+                "overlay-tool",
+                "session-a",
+                "/tmp/sample-workspace",
+                Some("Archived title"),
+            )
+            .is_err());
+            assert_eq!(
+                fs::read_to_string(&state_path).expect("read preserved state"),
+                original
+            );
+            let _ = fs::remove_dir_all(&temp_dir);
+        }
     }
 
     #[test]

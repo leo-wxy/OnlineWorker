@@ -5,10 +5,10 @@
 ### aarch64 (Apple Silicon) DMG
 
 ```bash
-export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /path/to/onlineWorker && bash scripts/build.sh
+export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /path/to/OnlineWorker && bash scripts/build.sh
 ```
 
-产物: `mac-app/src-tauri/target/release/bundle/dmg/OnlineWorker_1.2.1_aarch64.dmg`
+产物目录：`mac-app/src-tauri/target/release/bundle/dmg/`。文件名中的版本号来自 `mac-app/package.json`，当前为 `1.10.0`。
 
 > 说明：这条命令对应当前仓库的基础构建路径。额外 provider 扩展包不会自动被打进这个 DMG；如果你需要把扩展包一起打包，请在调用 `scripts/build.sh` 前设置 `ONLINEWORKER_PLUGIN_SOURCE_DIRS`。
 
@@ -17,7 +17,7 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
 仓库内置了 GitHub Actions workflow：`.github/workflows/release-dmg.yml`。
 
 - 触发方式：
-  - 推送版本 tag（例如 `1.2.1`）后自动执行
+  - 推送版本 tag（例如 `1.10.0`）后自动执行
   - 手动 `workflow_dispatch`，并传入一个已存在的 `release_tag`
 - 运行环境：
   - `macos-15`
@@ -32,13 +32,16 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
 
 ### x86_64 (Intel) DMG
 
-前提：`mac-app/src-tauri/binaries/onlineworker-bot-x86_64-apple-darwin` 已存在
+前提：以下两个 x86_64 sidecar 已存在：
+
+- `mac-app/src-tauri/binaries/onlineworker-bot-x86_64-apple-darwin`
+- `mac-app/src-tauri/binaries/ccusage-x86_64-apple-darwin`
 
 ```bash
-export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /path/to/onlineWorker/mac-app && pnpm tauri build --target x86_64-apple-darwin
+export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /path/to/OnlineWorker/mac-app && npm run tauri -- build --target x86_64-apple-darwin
 ```
 
-产物: `mac-app/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/OnlineWorker_1.2.1_x64.dmg`
+产物目录：`mac-app/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/`。
 
 ---
 
@@ -49,7 +52,8 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
    - Node.js 20+ (通过 nvm 管理)
    - Python 3.13+ (通过 pyenv 管理)
    - Rust + Cargo (通过 rustup 管理)
-   - pnpm 包管理器
+   - npm（随 Node.js 安装）
+   - 已初始化 Git submodule：`git submodule update --init --recursive`
 
 2. **Rust 交叉编译 target**
    ```bash
@@ -84,15 +88,16 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
 
 ### build.sh 做了什么
 
-`scripts/build.sh` 会自动检测当前机器架构并构建对应版本：
+`scripts/build.sh` 会同步应用版本，然后自动检测当前机器架构并执行四个构建阶段：
 
 1. 使用 PyInstaller 构建 Python bot binary (`dist/onlineworker-bot`)
 2. 将 binary 复制为带 target-triple 后缀的 sidecar (`mac-app/src-tauri/binaries/onlineworker-bot-{target}`)
-3. 使用 Tauri 构建 Mac App 并打包成 DMG
+3. 构建并复制仓库锁定版本的 `ccusage` sidecar (`mac-app/src-tauri/binaries/ccusage-{target}`)
+4. 使用 Tauri 构建 Mac App 并打包成 DMG
 
 ### 基础构建 / 扩展构建
 
-- **基础构建**：直接在 `onlineWorker` 仓库里执行 `scripts/build.sh`。产物只包含当前仓库自带的 builtin providers。
+- **基础构建**：直接在 `OnlineWorker` 仓库里执行 `scripts/build.sh`。产物只包含当前仓库自带的 builtin providers。
 - **扩展构建**：在你自己的本地包装脚本里先准备额外 provider 扩展包，再通过 `ONLINEWORKER_PLUGIN_SOURCE_DIRS` 调用同一套 `scripts/build.sh`。
 
 两种样式最终都输出同一个 `OnlineWorker.app`。差异只存在于 build input，不存在于 bundle identity。
@@ -122,13 +127,20 @@ arch -x86_64 /usr/local/bin/python3.13 -m pip install --break-system-packages \
 **构建步骤**
 
 ```bash
-cd /path/to/onlineWorker
+cd /path/to/OnlineWorker
 
 # 1. 用 x86_64 Python 运行 PyInstaller（使用专用 spec 文件）
 arch -x86_64 /usr/local/bin/python3.13 -m PyInstaller onlineworker-x86_64.spec --clean --noconfirm --distpath dist-x86_64
 
-# 2. 复制到 sidecar 目录
+# 2. 复制 bot sidecar
 cp dist-x86_64/onlineworker-bot mac-app/src-tauri/binaries/onlineworker-bot-x86_64-apple-darwin
+
+# 3. 构建并复制 ccusage sidecar
+CCUSAGE_PRICING_JSON_PATH="$PWD/third_party/ccusage-pricing.json" \
+  cargo build --manifest-path third_party/ccusage/rust/crates/ccusage/Cargo.toml \
+  --release --locked --target x86_64-apple-darwin
+cp third_party/ccusage/rust/target/x86_64-apple-darwin/release/ccusage \
+  mac-app/src-tauri/binaries/ccusage-x86_64-apple-darwin
 ```
 
 > **注意**：`onlineworker-x86_64.spec` 与 `onlineworker.spec` 的区别仅在于 `target_arch='x86_64'`。不要修改 `onlineworker.spec`，它专用于 arm64。
@@ -142,12 +154,15 @@ ls -lh mac-app/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
 
 # 检查 sidecar binary 架构
 file mac-app/src-tauri/binaries/onlineworker-bot-*
+file mac-app/src-tauri/binaries/ccusage-*
 ```
 
 预期输出：
 ```
 onlineworker-bot-aarch64-apple-darwin: Mach-O 64-bit executable arm64
 onlineworker-bot-x86_64-apple-darwin: Mach-O 64-bit executable x86_64
+ccusage-aarch64-apple-darwin: Mach-O 64-bit executable arm64
+ccusage-x86_64-apple-darwin: Mach-O 64-bit executable x86_64
 ```
 
 ## 常见问题
@@ -168,19 +183,3 @@ pip install -r requirements.txt
 rm -rf build dist __pycache__
 pyinstaller onlineworker.spec --clean --noconfirm
 ```
-
-## 版本历史
-
-- **v1.0.0** (2026-05-10)
-  - 完成首次公开仓库发布整理
-  - 接入 GitHub Release 自动构建 Apple Silicon DMG
-  - 收口 README、截图资源与公开发布文档
-
-- **v0.2.0** (2026-04-23)
-  - 收口 codex 运行时标准化与语义事件流
-  - 完成 App UI 统一 workbench 风格调整
-  - 日志弹层已适配新的应用视觉体系
-
-- **v0.1.0** (2026-04-01)
-  - 支持 aarch64 和 x86_64 两个架构
-  - DMG 大小：aarch64 ~18.2M, x86_64 ~19.0M

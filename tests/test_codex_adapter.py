@@ -246,6 +246,29 @@ async def test_external_hook_suppresses_subagent_session_and_later_notify(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_external_hook_suppresses_codex_memories_workspace(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    callback = AsyncMock()
+    adapter = CodexAdapter()
+    adapter.on_event(callback)
+
+    result = await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "SessionStart",
+            "session_id": "memory-session",
+            "cwd": str(tmp_path / ".codex" / "memories"),
+        }
+    )
+
+    assert result == {
+        "accepted": True,
+        "emitted": 0,
+        "suppressed": "non_user_visible_session",
+    }
+    callback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_external_notify_suppresses_subagent_found_in_codex_state():
     callback = AsyncMock()
     adapter = CodexAdapter()
@@ -338,6 +361,31 @@ async def test_app_server_event_marks_session_as_authoritative_live_source():
         "emitted": 0,
         "suppressed": "authoritative_live_source",
     }
+    callback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_app_server_hides_codex_memories_workspace_before_activity(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    adapter = CodexAdapter()
+    callback = AsyncMock()
+    adapter.on_event(callback)
+
+    await adapter._dispatch(
+        json.dumps(
+            {
+                "method": "turn/started",
+                "params": {
+                    "threadId": "memory-session",
+                    "cwd": str(tmp_path / ".codex" / "memories"),
+                    "turn": {"id": "memory-turn"},
+                },
+            }
+        )
+    )
+
+    assert "memory-session" in adapter._hidden_live_sessions
+    assert adapter.has_authoritative_live_session("memory-session") is False
     callback.assert_not_awaited()
 
 
@@ -528,6 +576,277 @@ async def test_hook_start_and_notify_completion_share_one_turn_sequence():
         ("desktop-session", "desktop-turn", "started"),
         ("desktop-session", "desktop-turn", "completed"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_source_claim_concurrent_external_prefers_hook():
+    events = []
+    rollout = MagicMock()
+    adapter = CodexAdapter()
+    adapter._desktop_rollout_ingress = rollout
+
+    async def collect(_method, envelope):
+        events.append(envelope["message"])
+
+    adapter.on_event(collect)
+    base = {
+        "hook_event_name": "AgentTurnComplete",
+        "session_id": "claim-session",
+        "turn_id": "claim-turn",
+        "cwd": "/Users/example/Projects/demo",
+    }
+
+    rollout_result, notify_result, hook_result = await asyncio.gather(
+        adapter.ingest_external_hook_payload({
+            **base,
+            "source": "codex_rollout",
+            "input_messages": ["rollout prompt"],
+            "last_assistant_message": "rollout final",
+        }),
+        adapter.ingest_external_hook_payload({
+            **base,
+            "source": "codex_notify",
+            "input_messages": ["notify prompt"],
+            "last_assistant_message": "notify final",
+        }),
+        adapter.ingest_external_hook_payload({
+            **base,
+            "source": "codex_hook",
+            "input_messages": ["hook prompt"],
+            "last_assistant_message": "hook final",
+        }),
+    )
+
+    assert rollout_result.get("suppressed") == "source_claimed"
+    assert notify_result.get("suppressed") == "source_claimed"
+    assert hook_result == {"accepted": True, "emitted": 5}
+    assert [event["method"] for event in events] == [
+        "session.created",
+        "message.user.submitted",
+        "turn/started",
+        "item/completed",
+        "turn/completed",
+    ]
+    assert events[-2]["params"]["item"]["text"] == "hook final"
+    assert [item.args for item in rollout.record_primary_event.call_args_list] == [
+        ("claim-session", "claim-turn", "completed"),
+        ("claim-session", "claim-turn", "started"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_source_claim_app_server_preempts_pending_external():
+    callback = AsyncMock()
+    adapter = CodexAdapter()
+    adapter.on_event(callback)
+    external = asyncio.create_task(adapter.ingest_external_hook_payload({
+        "hook_event_name": "AgentTurnComplete",
+        "session_id": "claim-session",
+        "turn_id": "claim-turn",
+        "source": "codex_notify",
+        "last_assistant_message": "notify final",
+    }))
+    await asyncio.sleep(0)
+
+    await adapter._dispatch(json.dumps({
+        "method": "turn/completed",
+        "params": {
+            "threadId": "claim-session",
+            "turn": {"id": "claim-turn"},
+        },
+    }))
+    result = await external
+    await adapter._event_queue.join()
+
+    assert result == {
+        "accepted": True,
+        "emitted": 0,
+        "suppressed": "authoritative_live_source",
+    }
+    callback.assert_awaited_once()
+    assert callback.await_args.args[1]["message"]["method"] == "turn/completed"
+    await adapter.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_source_claim_committed_external_blocks_late_app_server():
+    callback = AsyncMock()
+    adapter = CodexAdapter()
+    adapter.on_event(callback)
+
+    result = await adapter.ingest_external_hook_payload({
+        "hook_event_name": "AgentTurnComplete",
+        "session_id": "claim-session",
+        "turn_id": "claim-turn",
+        "source": "codex_rollout",
+        "last_assistant_message": "rollout final",
+    })
+    calls_before = callback.await_count
+    await adapter._dispatch(json.dumps({
+        "method": "turn/completed",
+        "params": {
+            "threadId": "claim-session",
+            "turn": {"id": "claim-turn"},
+        },
+    }))
+
+    assert result == {"accepted": True, "emitted": 4}
+    assert callback.await_count == calls_before
+    assert adapter._event_queue.empty()
+
+
+def test_source_claim_capacity_rejects_external_and_invalidates_evicted_token():
+    adapter = CodexAdapter()
+    oldest_key = ("session-0", "turn-0", "completed")
+    oldest_candidate = None
+    for index in range(500):
+        accepted, candidate = adapter._reserve_ingress_source_claim(
+            f"session-{index}", f"turn-{index}", "completed", "codex_notify",
+        )
+        assert accepted is True
+        if index == 0:
+            oldest_candidate = candidate
+
+    accepted, candidate = adapter._reserve_ingress_source_claim(
+        "overflow", "overflow", "completed", "codex_hook",
+    )
+    assert accepted is False
+    assert candidate is None
+    assert len(adapter._ingress_source_claims) == 500
+
+    assert adapter._commit_app_server_ingress_source_claim(
+        "app-session", "app-turn", "completed",
+    ) is True
+    assert oldest_key not in adapter._ingress_source_claims
+    assert len(adapter._ingress_source_claims) == 500
+
+    accepted, replacement = adapter._reserve_ingress_source_claim(
+        "session-0", "turn-0", "completed", "codex_hook",
+    )
+    assert accepted is True
+    assert replacement is not oldest_candidate
+    assert adapter._commit_ingress_source_claim(oldest_key, oldest_candidate) is False
+    assert adapter._ingress_source_claims[oldest_key] is replacement
+
+
+@pytest.mark.asyncio
+async def test_source_claim_callback_failure_keeps_owner_and_loser_has_no_side_effects():
+    callback = AsyncMock(side_effect=RuntimeError("callback failed"))
+    rollout = MagicMock()
+    adapter = CodexAdapter()
+    adapter.on_event(callback)
+    adapter._desktop_rollout_ingress = rollout
+    base = {
+        "hook_event_name": "AgentTurnComplete",
+        "session_id": "claim-session",
+        "turn_id": "claim-turn",
+        "last_assistant_message": "final",
+    }
+
+    with pytest.raises(RuntimeError, match="callback failed"):
+        await adapter.ingest_external_hook_payload({**base, "source": "codex_notify"})
+    recorded_before = list(rollout.record_primary_event.call_args_list)
+    calls_before = callback.await_count
+    loser = await adapter.ingest_external_hook_payload({**base, "source": "codex_hook"})
+
+    assert loser.get("suppressed") == "source_claimed"
+    assert callback.await_count == calls_before
+    assert rollout.record_primary_event.call_args_list == recorded_before
+
+
+@pytest.mark.asyncio
+async def test_source_claim_spoof_does_not_change_raw_visibility_or_trust():
+    callback = AsyncMock()
+    adapter = CodexAdapter()
+    adapter.configure_external_event_bridge("/tmp/onlineworker")
+    adapter.on_event(callback)
+
+    assert adapter._external_ingress_source({"source": "codex_app_server"}) == "codex_hook"
+    assert adapter._external_ingress_source({"source": "unknown"}) == "codex_hook"
+    assert adapter._external_ingress_source({"source": ""}) == "codex_hook"
+    assert adapter._external_ingress_source({"source": "CoDeX_NoTiFy"}) == "codex_notify"
+
+    with patch(
+        "plugins.providers.builtin.codex.python.hook_bridge.mark_onlineworker_codex_hooks_verified",
+    ) as mark_verified:
+        await adapter.ingest_external_hook_payload({
+            "hook_event_name": "SessionStart",
+            "session_id": "spoof-session",
+            "source": "codex_app_server",
+        })
+    mark_verified.assert_not_called()
+
+    hidden = await adapter.ingest_external_hook_payload({
+        "hook_event_name": "AgentTurnComplete",
+        "session_id": "subagent-session",
+        "turn_id": "subagent-turn",
+        "source": {"subagent": {"thread_spawn": {}}},
+        "last_assistant_message": "internal",
+    })
+    assert hidden.get("suppressed") == "non_user_visible_session"
+    callback.assert_not_awaited()
+
+
+def test_source_claim_app_server_category_mapping_is_exact():
+    adapter = CodexAdapter()
+
+    assert adapter._app_server_ingress_claim(
+        "turn/started", {"turn": {"id": "turn-1"}},
+    ) == ("turn-1", "started")
+    assert adapter._app_server_ingress_claim(
+        "item/agentMessage/delta", {"turnId": "turn-1"},
+    ) == ("turn-1", "commentary")
+    assert adapter._app_server_ingress_claim(
+        "item/completed",
+        {"turnId": "turn-1", "item": {"type": "agentMessage", "phase": "commentary"}},
+    ) == ("turn-1", "commentary")
+    assert adapter._app_server_ingress_claim(
+        "item/completed",
+        {"turnId": "turn-1", "item": {"type": "agentMessage", "phase": "final_answer"}},
+    ) == ("turn-1", "completed")
+    assert adapter._app_server_ingress_claim(
+        "turn/completed", {"turn": {"id": "turn-1"}},
+    ) == ("turn-1", "completed")
+    assert adapter._app_server_ingress_claim(
+        "item/completed", {"turnId": "turn-1", "item": {"type": "commandExecution"}},
+    ) is None
+    assert adapter._app_server_ingress_claim("turn/completed", {}) is None
+
+
+@pytest.mark.asyncio
+async def test_source_claim_session_authority_preserves_owned_category_only():
+    callback = AsyncMock()
+    adapter = CodexAdapter()
+    adapter.on_event(callback)
+
+    started = await adapter.ingest_external_hook_payload({
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "claim-session",
+        "turn_id": "claim-turn",
+        "prompt": "hello",
+    })
+    await adapter._dispatch(json.dumps({
+        "method": "thread/name/updated",
+        "params": {"threadId": "claim-session", "name": "Claim session"},
+    }))
+    await adapter._event_queue.join()
+    completed = await adapter.ingest_external_hook_payload({
+        "hook_event_name": "Stop",
+        "session_id": "claim-session",
+        "turn_id": "claim-turn",
+        "source": "codex_notify",
+        "last_assistant_message": "notify final",
+    })
+
+    assert started == {"accepted": True, "emitted": 3}
+    assert adapter._ingress_source_claims[
+        ("claim-session", "claim-turn", "started")
+    ]["source"] == "codex_hook"
+    assert completed.get("suppressed") == "authoritative_live_source"
+    assert adapter._ingress_source_claims[
+        ("claim-session", "claim-turn", "completed")
+    ]["source"] == "codex_app_server"
+    await adapter.disconnect()
 
 
 @pytest.mark.asyncio
@@ -902,6 +1221,34 @@ async def test_send_user_message_records_thread_mapping_before_turn_start():
     result = await adapter.send_user_message("codex:onlineWorker", "tid-live", "hello")
 
     assert result == {"ok": True}
+    assert adapter._thread_workspace_map["tid-live"] == "codex:onlineWorker"
+
+
+@pytest.mark.asyncio
+async def test_turn_steer_targets_current_turn_with_text_and_image():
+    adapter = CodexAdapter()
+    adapter._call = AsyncMock(return_value={"turnId": "turn-live"})
+
+    result = await adapter.turn_steer(
+        "codex:onlineWorker",
+        "tid-live",
+        "turn-live",
+        "继续，并调整方向",
+        attachments=[{"kind": "image", "path": "/tmp/example.png"}],
+    )
+
+    adapter._call.assert_awaited_once_with(
+        "turn/steer",
+        {
+            "threadId": "tid-live",
+            "expectedTurnId": "turn-live",
+            "input": [
+                {"type": "text", "text": "继续，并调整方向"},
+                {"type": "localImage", "path": "/tmp/example.png"},
+            ],
+        },
+    )
+    assert result == {"turnId": "turn-live"}
     assert adapter._thread_workspace_map["tid-live"] == "codex:onlineWorker"
 
 

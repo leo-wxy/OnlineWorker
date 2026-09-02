@@ -1,6 +1,8 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::config_provider::{
     ai_config_metadata_from_raw, build_default_user_config_with_env, normalize_config_for_display,
@@ -15,6 +17,7 @@ use super::config_provider::{
 };
 
 pub(crate) const DEFAULT_APP_NAME: &str = "OnlineWorker";
+static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn app_name() -> &'static str {
     DEFAULT_APP_NAME
@@ -58,6 +61,41 @@ pub fn ensure_data_dir() -> Result<PathBuf, String> {
     let dir = data_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create data dir: {}", e))?;
     Ok(dir)
+}
+
+pub(crate) fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let suffix = ATOMIC_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp_path = path.with_file_name(format!(
+        ".{}.{}.{}.tmp",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("file"),
+        std::process::id(),
+        suffix
+    ));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)?;
+        file.write_all(content)?;
+        file.sync_all()?;
+        if let Ok(metadata) = std::fs::metadata(path) {
+            std::fs::set_permissions(&tmp_path, metadata.permissions())?;
+        }
+        std::fs::rename(&tmp_path, path)?;
+        if let Some(parent) = path.parent() {
+            std::fs::File::open(parent)?.sync_all()?;
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+    result
 }
 
 fn config_path() -> PathBuf {
@@ -130,7 +168,8 @@ fn cleanup_legacy_external_cli_config(dir: &PathBuf) -> Result<(), String> {
         let raw = std::fs::read_to_string(&env).map_err(|e| format!("Cannot read .env: {}", e))?;
         let sanitized = sanitize_env_content(&raw);
         if sanitized != raw {
-            std::fs::write(&env, sanitized).map_err(|e| format!("Cannot write .env: {}", e))?;
+            atomic_write(&env, sanitized.as_bytes())
+                .map_err(|e| format!("Cannot write .env: {}", e))?;
         }
     }
 
@@ -141,7 +180,7 @@ fn cleanup_legacy_external_cli_config(dir: &PathBuf) -> Result<(), String> {
         let env_raw = std::fs::read_to_string(&env).unwrap_or_default();
         let normalized = serialize_normalized_config_with_env(&raw, Some(&env_raw))?;
         if normalized != raw {
-            std::fs::write(&config, normalized)
+            atomic_write(&config, normalized.as_bytes())
                 .map_err(|e| format!("Cannot write config.yaml: {}", e))?;
         }
     }
@@ -522,13 +561,13 @@ pub async fn create_default_config() -> Result<(), String> {
     let env = dir.join(".env");
     if !env.exists() {
         let template = default_env_template();
-        std::fs::write(&env, template).map_err(|e| e.to_string())?;
+        atomic_write(&env, template.as_bytes()).map_err(|e| e.to_string())?;
     }
     let config = dir.join("config.yaml");
     if !config.exists() {
         let env_raw = std::fs::read_to_string(&env).unwrap_or_default();
         let default = build_default_user_config_with_env(Some(&env_raw))?;
-        std::fs::write(&config, default).map_err(|e| e.to_string())?;
+        atomic_write(&config, default.as_bytes()).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -548,7 +587,8 @@ pub async fn set_provider_flags(
     let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
     set_provider_flags_in_document(&mut doc, &provider_id, managed, autostart);
     let serialized = serialize_config_document_for_persistence(doc, &raw)?;
-    std::fs::write(&path, serialized).map_err(|e| format!("Cannot write config.yaml: {}", e))
+    atomic_write(&path, serialized.as_bytes())
+        .map_err(|e| format!("Cannot write config.yaml: {}", e))
 }
 
 #[tauri::command]
@@ -566,7 +606,8 @@ pub async fn set_provider_message_hook_enabled(
     let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
     set_provider_message_hook_enabled_in_document(&mut doc, &provider_id, &hook_name, enabled);
     let serialized = serialize_config_document_for_persistence(doc, &raw)?;
-    std::fs::write(&path, serialized).map_err(|e| format!("Cannot write config.yaml: {}", e))
+    atomic_write(&path, serialized.as_bytes())
+        .map_err(|e| format!("Cannot write config.yaml: {}", e))
 }
 
 #[tauri::command]
@@ -585,7 +626,8 @@ pub async fn set_provider_cli_config(
     let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
     set_provider_cli_config_in_document(&mut doc, &provider_id, bin, external_cli, launch_methods);
     let serialized = serialize_config_document_for_persistence(doc, &raw)?;
-    std::fs::write(&path, serialized).map_err(|e| format!("Cannot write config.yaml: {}", e))
+    atomic_write(&path, serialized.as_bytes())
+        .map_err(|e| format!("Cannot write config.yaml: {}", e))
 }
 
 pub(crate) fn read_provider_runtime_policies_from_disk(
@@ -679,7 +721,8 @@ pub async fn set_ai_config(
     let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
     set_ai_config_in_document(&mut doc, services, scenarios);
     let serialized = serialize_config_document_for_persistence(doc, &raw)?;
-    std::fs::write(&path, serialized).map_err(|e| format!("Cannot write config.yaml: {}", e))
+    atomic_write(&path, serialized.as_bytes())
+        .map_err(|e| format!("Cannot write config.yaml: {}", e))
 }
 
 #[tauri::command]
@@ -696,7 +739,8 @@ pub async fn set_notification_channel_enabled(
     let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
     set_notification_channel_enabled_in_document(&mut doc, &channel_id, enabled);
     let serialized = serialize_config_document_for_persistence(doc, &raw)?;
-    std::fs::write(&path, serialized).map_err(|e| format!("Cannot write config.yaml: {}", e))
+    atomic_write(&path, serialized.as_bytes())
+        .map_err(|e| format!("Cannot write config.yaml: {}", e))
 }
 
 #[tauri::command]
@@ -713,7 +757,8 @@ pub async fn set_notification_channel_config(
     let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
     set_notification_channel_config_in_document(&mut doc, &channel_id, config);
     let serialized = serialize_config_document_for_persistence(doc, &raw)?;
-    std::fs::write(&path, serialized).map_err(|e| format!("Cannot write config.yaml: {}", e))
+    atomic_write(&path, serialized.as_bytes())
+        .map_err(|e| format!("Cannot write config.yaml: {}", e))
 }
 
 #[tauri::command]
@@ -733,7 +778,8 @@ pub async fn write_config(content: String) -> Result<(), String> {
     let path = config_path();
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
     let normalized = serialize_normalized_config_with_env(&content, Some(&env_raw))?;
-    std::fs::write(&path, normalized).map_err(|e| format!("Cannot write config.yaml: {}", e))
+    atomic_write(&path, normalized.as_bytes())
+        .map_err(|e| format!("Cannot write config.yaml: {}", e))
 }
 
 #[tauri::command]
@@ -795,7 +841,7 @@ pub async fn read_env_raw() -> Result<ConfigContent, String> {
 #[tauri::command]
 pub async fn write_env(content: String) -> Result<(), String> {
     let path = env_path();
-    std::fs::write(&path, sanitize_env_content(&content))
+    atomic_write(&path, sanitize_env_content(&content).as_bytes())
         .map_err(|e| format!("Cannot write .env: {}", e))
 }
 
@@ -907,7 +953,7 @@ pub async fn write_env_field(key: String, value: String) -> Result<(), String> {
     }
 
     let new_content = lines.join("\n") + "\n";
-    std::fs::write(&path, new_content).map_err(|e| format!("Cannot write .env: {}", e))
+    atomic_write(&path, new_content.as_bytes()).map_err(|e| format!("Cannot write .env: {}", e))
 }
 
 #[cfg(test)]
@@ -919,14 +965,39 @@ mod tests {
     use serde_yaml::Value;
 
     use super::{
-        build_provider_validation_report, config_path, create_default_config, default_env_template,
-        env_path, is_sensitive_key, read_config, sanitize_env_content, set_provider_flags,
-        set_test_home_override, write_config,
+        atomic_write, build_provider_validation_report, config_path, create_default_config,
+        default_env_template, env_path, is_sensitive_key, read_config, sanitize_env_content,
+        set_provider_flags, set_test_home_override, write_config,
     };
     use crate::commands::config_provider::{
-        provider_default_metadata, public_default_provider_ids, ProviderExternalCliConfig,
-        ProviderMetadata,
+        provider_ai_service_defaults, provider_default_metadata, public_default_provider_ids,
+        ProviderExternalCliConfig, ProviderMetadata,
     };
+
+    #[test]
+    fn atomic_write_replaces_file_without_leaving_temp_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "onlineworker-config-atomic-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).expect("create dir");
+        let path = dir.join("config.yaml");
+        fs::write(&path, "old").expect("write old");
+
+        atomic_write(&path, b"new").expect("atomic write");
+
+        assert_eq!(fs::read_to_string(&path).expect("read"), "new");
+        assert!(fs::read_dir(&dir).expect("read dir").all(|entry| !entry
+            .expect("entry")
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".tmp")));
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     struct TestHomeGuard {
         root: PathBuf,
@@ -1045,7 +1116,7 @@ GROUP_CHAT_ID=-1001
                 .and_then(|ai| ai.get("services"))
                 .and_then(|services| services.as_sequence())
                 .map(|services| services.len()),
-            Some(2)
+            Some(provider_ai_service_defaults().len())
         );
         assert!(env_path().exists());
     }
@@ -1078,7 +1149,7 @@ GROUP_CHAT_ID=-1001
                 .and_then(|ai| ai.get("services"))
                 .and_then(|services| services.as_sequence())
                 .map(|services| services.len()),
-            Some(2)
+            Some(provider_ai_service_defaults().len())
         );
     }
 
@@ -1102,7 +1173,7 @@ GROUP_CHAT_ID=-1001
                 .and_then(|ai| ai.get("services"))
                 .and_then(|services| services.as_sequence())
                 .map(|services| services.len()),
-            Some(2)
+            Some(provider_ai_service_defaults().len())
         );
     }
 

@@ -2,7 +2,6 @@ use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::ipc::Channel;
-use tauri::AppHandle;
 
 use super::config::data_dir;
 
@@ -16,7 +15,7 @@ fn get_running_flag() -> Arc<AtomicBool> {
 }
 
 #[tauri::command]
-pub async fn start_log_tail(_app: AppHandle, channel: Channel<String>) -> Result<(), String> {
+pub async fn start_log_tail(channel: Channel<String>) -> Result<(), String> {
     let log_path = data_dir().join("onlineworker.log");
     let running = get_running_flag();
     running.store(true, Ordering::SeqCst);

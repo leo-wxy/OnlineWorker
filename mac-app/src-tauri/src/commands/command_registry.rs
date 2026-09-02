@@ -316,18 +316,14 @@ fn apply_publish_success(
 
 fn discover_commands() -> Vec<DiscoveredCommand> {
     let skill_commands = discover_skill_commands();
-    let skill_names: HashSet<String> = skill_commands
-        .iter()
-        .map(|command| command.name.clone())
-        .collect();
     let mut commands = bot_commands();
-    commands.extend(discover_downstream_commands(&skill_names));
+    commands.extend(discover_downstream_commands());
     commands.extend(skill_commands);
     sort_discovered_commands(&mut commands);
     commands
 }
 
-fn discover_downstream_commands(_skill_names: &HashSet<String>) -> Vec<DiscoveredCommand> {
+fn discover_downstream_commands() -> Vec<DiscoveredCommand> {
     let visible_provider_ids =
         read_visible_provider_ids_from_disk().unwrap_or_else(|_| public_default_provider_ids());
     let mut commands = downstream_commands_for_visible_provider_ids(&visible_provider_ids);
@@ -1428,7 +1424,7 @@ mod tests {
 
     #[test]
     fn discover_downstream_commands_keeps_manifest_fallback_catalog() {
-        let commands = discover_downstream_commands(&HashSet::new());
+        let commands = discover_downstream_commands();
 
         let command = commands
             .iter()

@@ -1,6 +1,6 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { SessionMarkdownContent } from "./sessionMarkdown.js";
+import { SessionMarkdownContent } from "../src/utils/sessionMarkdown.js";
 
 export function renderSessionMarkdownToStaticMarkup(content) {
   return renderToStaticMarkup(

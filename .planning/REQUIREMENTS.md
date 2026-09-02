@@ -22,6 +22,16 @@ The v1.2.1 milestone requirements are archived at [milestones/v1.2.1-REQUIREMENT
 - [x] **SUPPORT-01**: User can export a local support ZIP containing a human-readable summary, structured diagnostic facts, sanitized configuration shape, provider/plugin inventory, and a bounded recent log excerpt, then reveal the generated file in Finder.
 - [x] **PRIV-01**: Diagnostics and support bundles exclude raw credentials, tokens, environment values, complete Session conversations, prompts, provider transcript/history files, and automatic network upload.
 
+## Runtime Stability
+
+- [x] **STAB-01**: MessageEventBus dedupe retention is bounded while recent duplicates remain suppressed.
+- [x] **STAB-02**: Runtime read failures remain errors and do not replace last-known-good state with fabricated empty data.
+- [x] **STAB-03**: Stale turns, generations, stream cleanup, and delayed requests cannot overwrite a newer owner.
+- [x] **STAB-04**: One provider ingress/live chain owns each user-visible session turn event category.
+- [x] **STAB-05**: Critical config/state writes are atomic and recoverable, and route migrations can safely resume.
+- [x] **STAB-06**: Each stability slice has focused automated regression coverage.
+- [ ] **STAB-07**: OnlineWorker can discover the current Codex session owner, steer/queue ordinary TG input through that owner, invoke its real interrupt capability, and return commentary/final to the original TG Topic.
+
 ## Deferred Backlog
 
 These items were explicitly deferred from the archived v1.2.1 milestone and remain candidates for future release work:
@@ -42,3 +52,10 @@ These items were explicitly deferred from the archived v1.2.1 milestone and rema
 | DIAG-01 | Phase 20 | Complete; source and installed diagnostics UAT passed |
 | SUPPORT-01 | Phase 20 | Complete; installed export, cancellation, and Finder reveal passed |
 | PRIV-01 | Phase 20 | Complete; strict ZIP whitelist and installed `.env` zero-match privacy scan passed |
+| STAB-01 | Phase 24 | Source verified in 24-01 |
+| STAB-02 | Phase 24 | Source verified in 24-02 and 24-08 |
+| STAB-03 | Phase 24 | Source verified in 24-03, 24-05, and 24-08 |
+| STAB-04 | Phase 24 | Source verified in 24-04 and 24-06 |
+| STAB-05 | Phase 24 | Source verified in 24-06 and 24-08 |
+| STAB-06 | Phase 24 | Source verified across 24-01 through 24-06 and 24-08; installed-app UAT pending explicit permission |
+| STAB-07 | Phase 24 | Blocked in 24-07: Codex Desktop owner endpoint and interrupt control are not currently discoverable |

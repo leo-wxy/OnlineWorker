@@ -19,16 +19,33 @@ export function startSessionStreamLifecycle({
     onEvent(event);
   };
 
+  let disposed = false;
+  let streamId;
+
+  const stopStream = (id) => {
+    invokeImpl(stopCommand, { streamId: id }).catch((error) => {
+      onError(`${stopCommand} failed`, error);
+    });
+  };
+
   invokeImpl(startCommand, {
     ...startArgs,
     channel,
-  }).catch((error) => {
-    onError(`${startCommand} failed`, error);
-  });
+  })
+    .then((startedStreamId) => {
+      streamId = startedStreamId;
+      if (disposed) {
+        stopStream(startedStreamId);
+      }
+    })
+    .catch((error) => {
+      onError(`${startCommand} failed`, error);
+    });
 
   return () => {
-    invokeImpl(stopCommand).catch((error) => {
-      onError(`${stopCommand} failed`, error);
-    });
+    disposed = true;
+    if (streamId !== undefined) {
+      stopStream(streamId);
+    }
   };
 }

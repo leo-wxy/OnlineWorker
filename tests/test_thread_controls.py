@@ -345,7 +345,18 @@ async def test_new_thread_handler_keeps_initial_text_while_message_rewrite_is_se
 
 
 @pytest.mark.asyncio
-async def test_thread_topic_message_uses_provider_local_owner_hook_for_custom_provider(monkeypatch):
+@pytest.mark.parametrize(
+    ("local_owner_result", "expected_kinds"),
+    [
+        (True, ["message.user.submitted", "message.user.accepted"]),
+        (None, ["message.user.submitted"]),
+    ],
+)
+async def test_thread_topic_message_uses_provider_local_owner_hook_for_custom_provider(
+    monkeypatch,
+    local_owner_result,
+    expected_kinds,
+):
     from bot.handlers.message import make_message_handler
 
     state = _build_state(tool="custom")
@@ -356,7 +367,7 @@ async def test_thread_topic_message_uses_provider_local_owner_hook_for_custom_pr
     adapter.connected = True
     state.set_adapter("custom", adapter)
 
-    handle_local_owner = AsyncMock(return_value=True)
+    handle_local_owner = AsyncMock(return_value=local_owner_result)
     ensure_connected = AsyncMock(return_value=adapter)
     prepare_send = AsyncMock(return_value=True)
     send = AsyncMock()
@@ -392,6 +403,7 @@ async def test_thread_topic_message_uses_provider_local_owner_hook_for_custom_pr
     ensure_connected.assert_not_awaited()
     prepare_send.assert_not_awaited()
     send.assert_not_awaited()
+    assert [event["kind"] for event in state.message_bus.recent_events()] == expected_kinds
 
 
 @pytest.mark.asyncio

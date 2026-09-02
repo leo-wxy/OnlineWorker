@@ -10,10 +10,6 @@ use super::RecentActivitySummary;
 
 pub(super) const RECENT_ACTIVITY_CACHE_TTL: Duration = Duration::from_secs(15);
 
-fn legacy_activity_db_path() -> Option<PathBuf> {
-    None
-}
-
 #[derive(Clone, Debug)]
 pub(super) struct WorkspaceSnapshot {
     pub(super) id: String,
@@ -37,7 +33,6 @@ pub(super) struct WorkspaceActivityCandidate {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct RecentActivityCacheKey {
     data_dir: PathBuf,
-    legacy_activity_db: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -348,23 +343,17 @@ pub(super) async fn read_recent_activity_summary(
     app: &AppHandle,
     data_dir: &Path,
 ) -> Option<RecentActivitySummary> {
-    let legacy_activity_db = legacy_activity_db_path();
     let now = SystemTime::now();
     let cache_key = RecentActivityCacheKey {
         data_dir: data_dir.to_path_buf(),
-        legacy_activity_db: legacy_activity_db.clone(),
     };
     if let Some(summary) = cached_recent_activity(&cache_key, now) {
         return summary;
     }
 
     let provider_sessions_by_tool = load_provider_session_rows_for_state(app, data_dir).await;
-    let summary = read_recent_activity_summary_cached_with_now(
-        data_dir,
-        legacy_activity_db.as_deref(),
-        &provider_sessions_by_tool,
-        now,
-    );
+    let summary =
+        read_recent_activity_summary_cached_with_now(data_dir, &provider_sessions_by_tool, now);
     cache_recent_activity(cache_key, now, summary.clone());
     summary
 }
@@ -412,13 +401,11 @@ fn cache_recent_activity(
 
 pub(super) fn read_recent_activity_summary_cached_with_now(
     data_dir: &Path,
-    legacy_activity_db: Option<&Path>,
     provider_sessions_by_tool: &HashMap<String, Vec<ProviderSessionRow>>,
     now: SystemTime,
 ) -> Option<RecentActivitySummary> {
     let cache_key = RecentActivityCacheKey {
         data_dir: data_dir.to_path_buf(),
-        legacy_activity_db: legacy_activity_db.map(Path::to_path_buf),
     };
     if let Some(summary) = cached_recent_activity(&cache_key, now) {
         return summary;
@@ -426,7 +413,6 @@ pub(super) fn read_recent_activity_summary_cached_with_now(
 
     let summary = read_recent_activity_summary_from_paths_with_provider_sessions(
         data_dir,
-        legacy_activity_db,
         provider_sessions_by_tool,
     );
     cache_recent_activity(cache_key, now, summary.clone());
@@ -435,7 +421,6 @@ pub(super) fn read_recent_activity_summary_cached_with_now(
 
 pub(super) fn read_recent_activity_summary_from_paths_with_provider_sessions(
     data_dir: &Path,
-    _legacy_activity_db: Option<&Path>,
     provider_sessions_by_tool: &HashMap<String, Vec<ProviderSessionRow>>,
 ) -> Option<RecentActivitySummary> {
     let path = data_dir.join("onlineworker_state.json");

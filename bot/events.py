@@ -2262,7 +2262,9 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             f"ws={ws_daemon_id[:8] if ws_daemon_id else '?'} "
             f"thread={thread_id[:8] if thread_id else '?'}"
         )
-        publish_session_message_event(state, event)
+        publish_result = publish_session_message_event(state, event)
+        if publish_result is False:
+            return
         if (
             event.payload.get("_mirroredOnly") is True
             and thread_id

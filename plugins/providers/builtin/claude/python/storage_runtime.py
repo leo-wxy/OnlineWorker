@@ -25,24 +25,6 @@ _CLAUDE_THREAD_SNAPSHOT_CACHE: dict[str, object] = {
 }
 
 
-def clear_claude_storage_cache() -> None:
-    _CLAUDE_STORAGE_CACHE.update(
-        {
-            "key": None,
-            "signature": None,
-            "sessions": [],
-            "history": {},
-        }
-    )
-    _CLAUDE_THREAD_SNAPSHOT_CACHE.update(
-        {
-            "key": None,
-            "signature": None,
-            "snapshot": None,
-        }
-    )
-
-
 def _default_claude_storage_cache_key() -> tuple[str, str, str]:
     return (
         os.path.expanduser(CLAUDE_SESSIONS_DIR),

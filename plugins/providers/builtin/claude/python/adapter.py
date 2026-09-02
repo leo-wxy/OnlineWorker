@@ -555,15 +555,7 @@ async def _read_stream_text(stream) -> str:
 
 
 def resolve_claude_bin(claude_bin: str) -> str:
-    raw = str(claude_bin or "claude").strip() or "claude"
-    expanded = os.path.expanduser(raw)
-
-    # 显式路径 / 自定义包装脚本一律尊重，不做重写。
-    if os.path.sep in raw:
-        return expanded
-
-    # 裸命令交给运行时 PATH 解析，保持 TG provider 与 App Session Tab 行为一致。
-    return expanded
+    return os.path.expanduser(str(claude_bin or "claude").strip() or "claude")
 
 
 def resolve_claude_command_prefix(claude_command: str) -> list[str]:
