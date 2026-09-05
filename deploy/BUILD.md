@@ -8,7 +8,7 @@
 export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /path/to/OnlineWorker && bash scripts/build.sh
 ```
 
-产物目录：`mac-app/src-tauri/target/release/bundle/dmg/`。文件名中的版本号来自 `mac-app/package.json`，当前为 `1.10.0`。
+产物目录：`mac-app/src-tauri/target/release/bundle/dmg/`。文件名中的版本号来自 `VERSION`，构建脚本会同步至应用配置，当前为 `1.10.1`。
 
 > 说明：这条命令对应当前仓库的基础构建路径。额外 provider 扩展包不会自动被打进这个 DMG；如果你需要把扩展包一起打包，请在调用 `scripts/build.sh` 前设置 `ONLINEWORKER_PLUGIN_SOURCE_DIRS`。
 
