@@ -34,6 +34,44 @@ pub fn provider_bridge_path(home: &str) -> String {
     )
 }
 
+pub(crate) fn command_program_token(command: &str) -> String {
+    let mut token = String::new();
+    let mut chars = command.trim_start().chars().peekable();
+    let mut quote: Option<char> = None;
+    while let Some(ch) = chars.next() {
+        if let Some(active_quote) = quote {
+            if ch == active_quote {
+                quote = None;
+            } else if ch == '\\' {
+                token.push(chars.next().unwrap_or(ch));
+            } else {
+                token.push(ch);
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '\\' => token.push(chars.next().unwrap_or(ch)),
+            ch if ch.is_whitespace() => break,
+            _ => token.push(ch),
+        }
+    }
+    token
+}
+
+pub(crate) fn expand_home_path(value: &str) -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    if value.starts_with("~/") {
+        format!("{}{}", home, &value[1..])
+    } else {
+        value.to_string()
+    }
+}
+
+pub(crate) fn provider_rich_path() -> String {
+    provider_bridge_path(&std::env::var("HOME").unwrap_or_default())
+}
+
 fn provider_overlay_env_spec_from_app_env(data_dir: &Path) -> Option<String> {
     let raw = std::fs::read_to_string(data_dir.join(".env")).ok()?;
     raw.lines().find_map(|line| {
@@ -255,13 +293,99 @@ pub(crate) async fn run_provider_bridge_sidecar(
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_provider_bridge_events_with_timeout, process_tree_pids};
+    use super::{
+        collect_provider_bridge_events_with_timeout, process_tree_pids, provider_bridge_env,
+        provider_overlay_env_spec, provider_overlay_env_spec_from_app_env,
+    };
     use std::collections::HashMap;
+    use std::fs;
     use std::sync::{
         atomic::{AtomicU32, Ordering},
         Arc,
     };
     use std::time::Duration;
+
+    #[test]
+    fn command_program_token_preserves_quotes_escapes_and_caller_trimming() {
+        for (command, expected) in [
+            ("  provider run ", "provider"),
+            ("\"/some path/provider\" run", "/some path/provider"),
+            ("'/some path/provider' run", "/some path/provider"),
+            ("/some\\ path/provider run", "/some path/provider"),
+            ("provider\\", "provider\\"),
+            ("'provider ", "provider "),
+            ("", ""),
+        ] {
+            assert_eq!(
+                super::command_program_token(command),
+                expected,
+                "{command:?}"
+            );
+        }
+        // Config validation trims both ends before using the shared parser.
+        assert_eq!(
+            super::command_program_token("'provider ".trim()),
+            "provider"
+        );
+    }
+
+    #[test]
+    fn provider_overlay_env_spec_from_app_env_reads_data_dir_env_file() {
+        let dir = std::env::temp_dir().join(format!("onlineworker-overlay-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        fs::write(
+            dir.join(".env"),
+            "TELEGRAM_TOKEN=token\nONLINEWORKER_PROVIDER_OVERLAY=  /tmp/sample-overlay  \n",
+        )
+        .expect("write .env");
+
+        assert_eq!(
+            provider_overlay_env_spec_from_app_env(&dir).as_deref(),
+            Some("/tmp/sample-overlay")
+        );
+
+        let _ = fs::remove_file(dir.join(".env"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn provider_overlay_env_spec_prefers_process_env_over_app_env_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "onlineworker-overlay-process-{}",
+            std::process::id()
+        ));
+        let _ = fs::create_dir_all(&dir);
+        fs::write(
+            dir.join(".env"),
+            "ONLINEWORKER_PROVIDER_OVERLAY=/tmp/from-app-env\n",
+        )
+        .expect("write .env");
+        std::env::set_var("ONLINEWORKER_PROVIDER_OVERLAY", "/tmp/from-process-env");
+
+        assert_eq!(
+            provider_overlay_env_spec(&dir).as_deref(),
+            Some("/tmp/from-process-env")
+        );
+
+        std::env::remove_var("ONLINEWORKER_PROVIDER_OVERLAY");
+        let _ = fs::remove_file(dir.join(".env"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn provider_bridge_env_resets_pyinstaller_parent_state() {
+        let dir =
+            std::env::temp_dir().join(format!("onlineworker-sidecar-env-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+
+        let envs = provider_bridge_env(&dir);
+
+        assert!(envs
+            .iter()
+            .any(|(key, value)| { key == "PYINSTALLER_RESET_ENVIRONMENT" && value == "1" }));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[tokio::test]
     async fn provider_bridge_timeout_kills_root_pid() {

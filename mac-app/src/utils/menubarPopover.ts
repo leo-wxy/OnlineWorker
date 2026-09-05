@@ -1,20 +1,5 @@
 import type { MenubarPopoverSessionLane } from "../components/menubar-popover/types";
 
-export function formatTokenCount(value: number | null, withUnit = false) {
-  if (value === null || Number.isNaN(value)) {
-    return "--";
-  }
-  if (value >= 1_000_000) {
-    const formatted = `${(value / 1_000_000).toFixed(1)}M`;
-    return withUnit ? `${formatted} tok` : formatted;
-  }
-  if (value >= 1_000) {
-    const formatted = `${(value / 1_000).toFixed(1)}k`;
-    return withUnit ? `${formatted} tok` : formatted;
-  }
-  return withUnit ? `${value} tok` : String(value);
-}
-
 export function formatRelativeAge(updatedAtEpoch: number | null, nowMs: number) {
   if (!updatedAtEpoch) {
     return "--";

@@ -30,11 +30,12 @@ The v1.2.1 milestone requirements are archived at [milestones/v1.2.1-REQUIREMENT
 - [x] **STAB-04**: One provider ingress/live chain owns each user-visible session turn event category.
 - [x] **STAB-05**: Critical config/state writes are atomic and recoverable, and route migrations can safely resume.
 - [x] **STAB-06**: Each stability slice has focused automated regression coverage.
-- [ ] **STAB-07**: OnlineWorker can discover the current Codex session owner, steer/queue ordinary TG input through that owner, invoke its real interrupt capability, and return commentary/final to the original TG Topic.
 
 ## Deferred Backlog
 
-These items were explicitly deferred from the archived v1.2.1 milestone and remain candidates for future release work:
+- [ ] **STAB-07**: OnlineWorker can discover the current Codex session owner, steer/queue ordinary TG input through that owner, invoke its real interrupt capability, and return commentary/final to the original TG Topic. Deferred from Phase 24 by user acceptance; not implemented/verified. Resume only when supported owner control becomes available; preserve the acceptance criteria in [24-07-PLAN.md](phases/24-runtime-authority-and-durability-hardening/24-07-PLAN.md).
+
+These items remain candidates for future work. UX/PLT items came from v1.2.1; STAB-07 was deferred by explicit user acceptance when Phase 24 was archived on 2026-09-05.
 
 - **UX-01**: User can customize more of the app appearance from first-class settings surfaces.
 - **UX-02**: User can discover and configure external provider extensions from a richer in-app management experience.
@@ -57,5 +58,5 @@ These items were explicitly deferred from the archived v1.2.1 milestone and rema
 | STAB-03 | Phase 24 | Source verified in 24-03, 24-05, and 24-08 |
 | STAB-04 | Phase 24 | Source verified in 24-04 and 24-06 |
 | STAB-05 | Phase 24 | Source verified in 24-06 and 24-08 |
-| STAB-06 | Phase 24 | Source verified across 24-01 through 24-06 and 24-08; installed-app UAT pending explicit permission |
-| STAB-07 | Phase 24 | Blocked in 24-07: Codex Desktop owner endpoint and interrupt control are not currently discoverable |
+| STAB-06 | Phase 24 | Source verified through 24-09; fast packaged verification passed; feature UAT not run and accepted as an archival limitation |
+| STAB-07 | Deferred backlog (from Phase 24) | Deferred by user acceptance on 2026-09-05; original owner-control gap and acceptance criteria preserved in 24-07 |

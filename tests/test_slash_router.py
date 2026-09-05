@@ -55,6 +55,7 @@ def _build_state(
 @pytest.mark.asyncio
 async def test_slash_router_wraps_bare_model_via_provider_command_hook_for_custom_provider(monkeypatch):
     from bot.handlers.slash import make_slash_command_handler
+    from core.providers.registry import _PROVIDERS
     from core.state import PendingCommandWrapper, PendingCommandWrapperOption
 
     state = _build_state(tool="custom")
@@ -79,14 +80,16 @@ async def test_slash_router_wraps_bare_model_via_provider_command_hook_for_custo
     )
     build_wrapper = AsyncMock(return_value=pending)
 
-    monkeypatch.setattr(
-        "bot.interaction_specs.get_provider",
-        lambda name, *args, **kwargs: SimpleNamespace(
+    monkeypatch.setitem(
+        _PROVIDERS,
+        "custom",
+        SimpleNamespace(
+            name="custom",
             capabilities=SimpleNamespace(command_wrappers=("model",)),
             command_hooks=SimpleNamespace(
                 build_thread_command_wrapper=build_wrapper,
             ),
-        ) if name == "custom" else None,
+        ),
     )
     monkeypatch.setattr(
         "bot.handlers.slash.classify_provider",

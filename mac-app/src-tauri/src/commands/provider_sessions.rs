@@ -172,89 +172,7 @@ fn connect_owner_bridge_socket(
     Ok(socket)
 }
 
-fn send_provider_session_message_via_owner_bridge(
-    data_dir: &Path,
-    provider_id: &str,
-    session_id: &str,
-    text: &str,
-    attachments: &[ComposerAttachment],
-    workspace_dir: Option<&str>,
-) -> Result<Option<Value>, String> {
-    let mut socket =
-        match connect_owner_bridge_socket(data_dir, PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT) {
-            Ok(socket) => socket,
-            Err(error) if error.starts_with("provider owner bridge not ready: ") => {
-                return Ok(None)
-            }
-            Err(error) => return Err(error),
-        };
-
-    let mut payload = serde_json::json!({
-        "type": "send_message",
-        "provider_id": provider_id,
-        "thread_id": session_id,
-        "text": text,
-        "source": "session_tab",
-    });
-    if !attachments.is_empty() {
-        payload["attachments"] = serde_json::to_value(attachments)
-            .map_err(|e| format!("serialize attachments failed: {e}"))?;
-    }
-    if let Some(workspace_dir) = workspace_dir
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        payload["workspace_dir"] = Value::String(workspace_dir.to_string());
-    }
-
-    let raw_request = format!("{}\n", payload);
-    socket
-        .write_all(raw_request.as_bytes())
-        .map_err(|e| format!("write provider owner bridge request failed: {e}"))?;
-    socket
-        .shutdown(Shutdown::Write)
-        .map_err(|e| format!("shutdown provider owner bridge write failed: {e}"))?;
-
-    let mut response_line = String::new();
-    let mut reader = BufReader::new(socket);
-    reader
-        .read_line(&mut response_line)
-        .map_err(|e| format!("read provider owner bridge response failed: {e}"))?;
-
-    let response = serde_json::from_str::<Value>(response_line.trim())
-        .map_err(|e| format!("parse provider owner bridge response failed: {e}"))?;
-    if response.get("ok").and_then(Value::as_bool) == Some(true) {
-        return Ok(Some(response));
-    }
-
-    Err(response
-        .get("error")
-        .and_then(Value::as_str)
-        .unwrap_or("provider owner bridge request failed")
-        .to_string())
-}
-
-fn start_provider_session_message_via_owner_bridge(
-    data_dir: &Path,
-    provider_id: &str,
-    workspace_dir: &str,
-    text: &str,
-    attachments: &[ComposerAttachment],
-) -> Result<Value, String> {
-    let mut socket = connect_owner_bridge_socket(data_dir, PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT)?;
-
-    let mut payload = serde_json::json!({
-        "type": "start_session_message",
-        "provider_id": provider_id,
-        "workspace_dir": workspace_dir,
-        "text": text,
-        "source": "session_tab",
-    });
-    if !attachments.is_empty() {
-        payload["attachments"] = serde_json::to_value(attachments)
-            .map_err(|e| format!("serialize attachments failed: {e}"))?;
-    }
-
+fn request_owner_bridge(mut socket: UnixStream, payload: &Value) -> Result<Value, String> {
     let raw_request = format!("{}\n", payload);
     socket
         .write_all(raw_request.as_bytes())
@@ -282,6 +200,66 @@ fn start_provider_session_message_via_owner_bridge(
         .to_string())
 }
 
+fn send_provider_session_message_via_owner_bridge(
+    data_dir: &Path,
+    provider_id: &str,
+    session_id: &str,
+    text: &str,
+    attachments: &[ComposerAttachment],
+    workspace_dir: Option<&str>,
+) -> Result<Option<Value>, String> {
+    let socket = match connect_owner_bridge_socket(data_dir, PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT)
+    {
+        Ok(socket) => socket,
+        Err(error) if error.starts_with("provider owner bridge not ready: ") => return Ok(None),
+        Err(error) => return Err(error),
+    };
+
+    let mut payload = serde_json::json!({
+        "type": "send_message",
+        "provider_id": provider_id,
+        "thread_id": session_id,
+        "text": text,
+        "source": "session_tab",
+    });
+    if !attachments.is_empty() {
+        payload["attachments"] = serde_json::to_value(attachments)
+            .map_err(|e| format!("serialize attachments failed: {e}"))?;
+    }
+    if let Some(workspace_dir) = workspace_dir
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        payload["workspace_dir"] = Value::String(workspace_dir.to_string());
+    }
+
+    request_owner_bridge(socket, &payload).map(Some)
+}
+
+fn start_provider_session_message_via_owner_bridge(
+    data_dir: &Path,
+    provider_id: &str,
+    workspace_dir: &str,
+    text: &str,
+    attachments: &[ComposerAttachment],
+) -> Result<Value, String> {
+    let socket = connect_owner_bridge_socket(data_dir, PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT)?;
+
+    let mut payload = serde_json::json!({
+        "type": "start_session_message",
+        "provider_id": provider_id,
+        "workspace_dir": workspace_dir,
+        "text": text,
+        "source": "session_tab",
+    });
+    if !attachments.is_empty() {
+        payload["attachments"] = serde_json::to_value(attachments)
+            .map_err(|e| format!("serialize attachments failed: {e}"))?;
+    }
+
+    request_owner_bridge(socket, &payload)
+}
+
 fn read_provider_session_via_owner_bridge(
     data_dir: &Path,
     provider_id: &str,
@@ -307,7 +285,7 @@ fn read_provider_session_via_owner_bridge_with_timeout(
     limit: usize,
     timeout: std::time::Duration,
 ) -> Result<Value, String> {
-    let mut socket = connect_owner_bridge_socket(data_dir, timeout)?;
+    let socket = connect_owner_bridge_socket(data_dir, timeout)?;
 
     let mut payload = serde_json::json!({
         "type": "read_session",
@@ -322,29 +300,7 @@ fn read_provider_session_via_owner_bridge_with_timeout(
         payload["workspace_dir"] = Value::String(workspace_dir.to_string());
     }
 
-    let raw_request = format!("{}\n", payload);
-    socket
-        .write_all(raw_request.as_bytes())
-        .map_err(|e| format!("write provider owner bridge request failed: {e}"))?;
-    socket
-        .shutdown(Shutdown::Write)
-        .map_err(|e| format!("shutdown provider owner bridge write failed: {e}"))?;
-
-    let mut response_line = String::new();
-    let mut reader = BufReader::new(socket);
-    reader
-        .read_line(&mut response_line)
-        .map_err(|e| format!("read provider owner bridge response failed: {e}"))?;
-
-    let response = serde_json::from_str::<Value>(response_line.trim())
-        .map_err(|e| format!("parse provider owner bridge response failed: {e}"))?;
-    if response.get("ok").and_then(Value::as_bool) != Some(true) {
-        return Err(response
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("provider owner bridge request failed")
-            .to_string());
-    }
+    let response = request_owner_bridge(socket, &payload)?;
 
     Ok(response
         .get("session")
@@ -374,7 +330,7 @@ fn list_provider_sessions_via_owner_bridge_with_timeout(
     force_refresh: bool,
     timeout: std::time::Duration,
 ) -> Result<Value, String> {
-    let mut socket = connect_owner_bridge_socket(data_dir, timeout)?;
+    let socket = connect_owner_bridge_socket(data_dir, timeout)?;
 
     let payload = serde_json::json!({
         "type": "list_sessions",
@@ -383,29 +339,7 @@ fn list_provider_sessions_via_owner_bridge_with_timeout(
         "force_refresh": force_refresh,
     });
 
-    let raw_request = format!("{}\n", payload);
-    socket
-        .write_all(raw_request.as_bytes())
-        .map_err(|e| format!("write provider owner bridge request failed: {e}"))?;
-    socket
-        .shutdown(Shutdown::Write)
-        .map_err(|e| format!("shutdown provider owner bridge write failed: {e}"))?;
-
-    let mut response_line = String::new();
-    let mut reader = BufReader::new(socket);
-    reader
-        .read_line(&mut response_line)
-        .map_err(|e| format!("read provider owner bridge response failed: {e}"))?;
-
-    let response = serde_json::from_str::<Value>(response_line.trim())
-        .map_err(|e| format!("parse provider owner bridge response failed: {e}"))?;
-    if response.get("ok").and_then(Value::as_bool) != Some(true) {
-        return Err(response
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("provider owner bridge request failed")
-            .to_string());
-    }
+    let response = request_owner_bridge(socket, &payload)?;
 
     Ok(response
         .get("sessions")
@@ -419,7 +353,7 @@ fn archive_provider_session_via_owner_bridge(
     session_id: &str,
     workspace_dir: Option<&str>,
 ) -> Result<Value, String> {
-    let mut socket = connect_owner_bridge_socket(data_dir, PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT)?;
+    let socket = connect_owner_bridge_socket(data_dir, PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT)?;
 
     let mut payload = serde_json::json!({
         "type": "archive_session",
@@ -430,31 +364,7 @@ fn archive_provider_session_via_owner_bridge(
         payload["workspace_dir"] = Value::String(workspace_dir.to_string());
     }
 
-    let raw_request = format!("{}\n", payload);
-    socket
-        .write_all(raw_request.as_bytes())
-        .map_err(|e| format!("write provider owner bridge request failed: {e}"))?;
-    socket
-        .shutdown(Shutdown::Write)
-        .map_err(|e| format!("shutdown provider owner bridge write failed: {e}"))?;
-
-    let mut response_line = String::new();
-    let mut reader = BufReader::new(socket);
-    reader
-        .read_line(&mut response_line)
-        .map_err(|e| format!("read provider owner bridge response failed: {e}"))?;
-
-    let response = serde_json::from_str::<Value>(response_line.trim())
-        .map_err(|e| format!("parse provider owner bridge response failed: {e}"))?;
-    if response.get("ok").and_then(Value::as_bool) != Some(true) {
-        return Err(response
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("provider owner bridge request failed")
-            .to_string());
-    }
-
-    Ok(response)
+    request_owner_bridge(socket, &payload)
 }
 
 fn create_provider_session_via_owner_bridge(
@@ -462,7 +372,7 @@ fn create_provider_session_via_owner_bridge(
     provider_id: &str,
     workspace_dir: &str,
 ) -> Result<Value, String> {
-    let mut socket = connect_owner_bridge_socket(data_dir, PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT)?;
+    let socket = connect_owner_bridge_socket(data_dir, PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT)?;
 
     let payload = serde_json::json!({
         "type": "create_session",
@@ -471,31 +381,7 @@ fn create_provider_session_via_owner_bridge(
         "create_mode": "app_state",
     });
 
-    let raw_request = format!("{}\n", payload);
-    socket
-        .write_all(raw_request.as_bytes())
-        .map_err(|e| format!("write provider owner bridge request failed: {e}"))?;
-    socket
-        .shutdown(Shutdown::Write)
-        .map_err(|e| format!("shutdown provider owner bridge write failed: {e}"))?;
-
-    let mut response_line = String::new();
-    let mut reader = BufReader::new(socket);
-    reader
-        .read_line(&mut response_line)
-        .map_err(|e| format!("read provider owner bridge response failed: {e}"))?;
-
-    let response = serde_json::from_str::<Value>(response_line.trim())
-        .map_err(|e| format!("parse provider owner bridge response failed: {e}"))?;
-    if response.get("ok").and_then(Value::as_bool) != Some(true) {
-        return Err(response
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("provider owner bridge request failed")
-            .to_string());
-    }
-
-    Ok(response)
+    request_owner_bridge(socket, &payload)
 }
 
 fn stream_provider_session_events_via_owner_bridge(
@@ -1497,6 +1383,47 @@ mod tests {
     use std::time::Duration;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn owner_bridge_request_frames_once_and_preserves_failure_responses() {
+        for (raw, expected) in [
+            (
+                "{\"ok\":false,\"error\":\"source archive failed\"}\n",
+                "source archive failed",
+            ),
+            ("{\"ok\":false}\n", "provider owner bridge request failed"),
+            ("{}\n", "provider owner bridge request failed"),
+            (
+                "invalid-json\n",
+                "parse provider owner bridge response failed:",
+            ),
+            ("", "parse provider owner bridge response failed:"),
+        ] {
+            let (client, server) = std::os::unix::net::UnixStream::pair().expect("socket pair");
+            client
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            server
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            let worker = thread::spawn(move || {
+                let mut reader = BufReader::new(server);
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("request line");
+                assert_eq!(line, "{\"type\":\"sample_request\"}\n");
+                assert_eq!(reader.read_line(&mut String::new()).unwrap(), 0);
+                reader
+                    .get_mut()
+                    .write_all(raw.as_bytes())
+                    .expect("response");
+            });
+            let error =
+                super::request_owner_bridge(client, &serde_json::json!({"type": "sample_request"}))
+                    .expect_err("unsuccessful responses must stay errors");
+            worker.join().expect("server");
+            assert!(error.starts_with(expected), "{error}");
+        }
+    }
 
     #[test]
     fn owner_bridge_archive_keeps_python_state_writer_authoritative() {

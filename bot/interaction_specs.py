@@ -5,7 +5,8 @@ from typing import Literal
 
 from core.providers.registry import (
     get_provider,
-    list_providers,
+    list_providers_supporting_command_wrapper as get_wrapper_supported_providers,
+    provider_supports_command_wrapper as supports_thread_command_wrapper,
 )
 from core.state import AppState, PendingCommandWrapper
 from core.storage import ThreadInfo, WorkspaceInfo
@@ -53,28 +54,6 @@ INTERACTION_SPECS: dict[str, InteractionSpec] = {
 
 def get_interaction_spec(name: str) -> InteractionSpec | None:
     return INTERACTION_SPECS.get(name.lower())
-
-
-def supports_thread_command_wrapper(tool_name: str, command_name: str) -> bool:
-    provider = get_provider(tool_name)
-    if provider is None:
-        return False
-    wrappers = getattr(provider.capabilities, "command_wrappers", ())
-    normalized = str(command_name or "").strip().lower()
-    return normalized in {str(item).strip().lower() for item in wrappers}
-
-
-def get_wrapper_supported_providers(command_name: str) -> list[str]:
-    normalized = str(command_name or "").strip().lower()
-    if not normalized:
-        return []
-
-    supported: list[str] = []
-    for provider in list_providers():
-        wrappers = getattr(provider.capabilities, "command_wrappers", ())
-        if normalized in {str(item).strip().lower() for item in wrappers}:
-            supported.append(provider.name)
-    return supported
 
 
 def _get_provider_command_hooks(tool_name: str):

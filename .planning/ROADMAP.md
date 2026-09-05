@@ -28,7 +28,7 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 19: Attention Center And Session Interrupt/Resume** - Added the focused Task Board attention center and provider-owned Session interrupt/resume/recovery controls. Source and installed core UAT passed; narrow-width installed visual UAT was explicitly waived without claiming a pass. (completed 2026-07-11)
 - [x] **Phase 21: Provider Child-Session Visibility** - Provider-owned visibility now blocks child/internal sessions before EventBus and Topic creation, provider-native titles are shared across Desktop and Telegram, and the installed `v1.8.4` runtime passed real child-suppression verification. The remaining live Telegram visual comparison was explicitly waived at closeout and is not claimed as passed. (completed 2026-08-15)
 - [ ] **Phase 22: Dark Mode Support** - Add consistent dark-theme support across the macOS app while preserving existing light-mode behavior.
-- [ ] **Phase 24: Runtime Authority and Durability Hardening** - Seven repository-local hardening slices are source verified; real cross-owner interrupt remains blocked in 24-07.
+- [x] **Phase 24: Runtime Authority and Durability Hardening** - Completed and archived on 2026-09-05 with eight delivered plans; 24-07 / STAB-07 explicitly deferred and feature UAT retained as unverified. [Archive](phases/24-runtime-authority-and-durability-hardening/24-ARCHIVE.md).
 
 ## Phase Details
 
@@ -938,10 +938,12 @@ Plans:
 ### Phase 24: Runtime Authority and Durability Hardening
 
 **Goal:** 让同一 provider session/turn、运行状态和持久化记录各自只有一个明确权威入口，在进程重启、事件乱序、IPC 短暂失败和长期运行下保持稳定。
-**Requirements:** STAB-01–STAB-07
+**Requirements:** STAB-01–STAB-06; STAB-07 moved to deferred backlog by user acceptance
 **Depends on:** Phase 14, Phase 15, Phase 16, Phase 23
 **Scope Fence:** 复用现有 EventBus、projection、provider adapter、Tauri lifecycle 和存储实现；不引入新框架、新依赖、公开事件 API、全量 event sourcing 或跨语言重写。
-**Plans:** 7 plans source verified; 1 cross-owner control plan blocked
+**Status:** Completed and archived on 2026-09-05 with accepted scope/verification limitations.
+**Archive:** [24-ARCHIVE.md](phases/24-runtime-authority-and-durability-hardening/24-ARCHIVE.md)
+**Plans:** 8/8 retained plans complete; 24-07 deferred outside the completion scope
 
 Plans（按影响由小到大）：
 
@@ -951,10 +953,12 @@ Plans（按影响由小到大）：
 - [x] 24-04-PLAN.md — 增加 provider ingress 原子 source claim（source verified）
 - [x] 24-05-PLAN.md — 为 service 与 stream 增加 generation/handle 所有权（source verified）
 - [x] 24-06-PLAN.md — 加固持久化恢复、幂等迁移和跨层回归（source verified）
-- [ ] 24-07-PLAN.md — 接通跨 owner steer/interrupt 与 TG 输出闭环（blocked: owner endpoint/interrupt API unavailable）
 - [x] 24-08-PLAN.md — 收口本地 owner 失败语义、overlay 恢复与 lifecycle 回归（source verified）
+- [x] 24-09-PLAN.md — 精简重复基础逻辑与失效入口（source + fast packaged verified）
 
-Success Criteria (what must be TRUE):
+**Deferred:** [24-07-PLAN.md](phases/24-runtime-authority-and-durability-hardening/24-07-PLAN.md) — 跨 owner 控制，保留为未完成后续事项，不计作完成。
+
+Success Criteria (accepted completion scope):
 
 1. EventBus 去重内存有界，且窗口内重复事件仍被拒绝。
 2. IPC、snapshot 或 provider 读取失败不会伪装成成功空数据，也不会覆盖最后一次有效状态。
@@ -962,11 +966,11 @@ Success Criteria (what must be TRUE):
 4. 同一 session/turn/event 只能由一个 provider ingress 来源发布为用户可见事件。
 5. 配置、状态与 route 迁移中断后旧数据仍可恢复，迁移可安全重跑。
 6. 每个切片都有覆盖其主要竞态或恢复风险的最小自动化回归。
-7. active-writer 场景下普通输入、真实 interrupt、commentary/final 回流在同一 owner 通道闭环。
 
 Latest verification:
 
 - Phase 24 plans 24-01 through 24-06 source verification completed on 2026-08-30: focused suites passed `479` tests with `1 skipped`; formatting/static checks passed.
 - Phase 24 plan 24-08 source verification completed on 2026-08-30: Python `81 passed, 1 skipped`, Rust `255 passed`, formatting/static checks passed.
-- Cross-owner honesty regression passed `4` focused tests and `105 passed, 1 skipped` across the related Codex files. Real owner interrupt remains blocked, so Phase 24 is not closed.
-- Build, package, install, restart, and installed-app UAT were not run and are not claimed.
+- Phase 24 plan 24-09 source verification completed on 2026-09-05: production code reduced by `342` lines; Python `43 passed`, Node `40 passed`, Rust `256 passed`; TypeScript and formatting/static checks passed. Subsequent authorized `1.10.0` fast build/install/restart verification passed; feature UAT remains unverified.
+- Cross-owner honesty regression passed `4` focused tests and `105 passed, 1 skipped` across the related Codex files. Real owner interrupt remains unimplemented; STAB-07 was explicitly deferred when Phase 24 was archived on 2026-09-05.
+- Phase 24-09 fast package/install/restart verification passed after explicit authorization. Full installed-app feature UAT and cross-owner interrupt verification are not claimed.

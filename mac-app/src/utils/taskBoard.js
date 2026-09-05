@@ -13,15 +13,6 @@ const NEEDS_ATTENTION_STATUSES = new Set([
   "waiting_for_input",
 ]);
 
-const RUNNING_STATUSES = new Set([
-  "active",
-  "assistant_progress",
-  "in_progress",
-  "running",
-  "streaming",
-  "tool_started",
-]);
-
 function normalizeTimestamp(value) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     return null;
@@ -478,9 +469,7 @@ export function buildTaskBoardModel({
     const activePreviewText = formatSessionPreviewText(recentActivity?.highlightedThreadPreview || "");
     const rawPreview = isActive
       ? meaningfulPreview(activePreviewText, title, sessionPreviewText || "")
-      : providerActive
-        ? sessionPreviewText
-        : sessionPreviewText;
+      : sessionPreviewText;
     const preview = pinned
       ? uniquePreview(rawPreview, title)
       : meaningfulPreview(rawPreview, title, "");

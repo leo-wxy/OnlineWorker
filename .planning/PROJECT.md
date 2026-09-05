@@ -15,7 +15,7 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 - Latest archived milestone: `v1.2.1`
 - Release tag: `1.8.0`
 - Active milestone: General AI Capability and Session Operations
-- Latest completed roadmap phase: Phase 20 — One-Click Diagnostics And Support Bundle
+- Latest completed roadmap phase: Phase 24 — Runtime Authority and Durability Hardening (archived with STAB-07 deferred by user acceptance)
 
 ## Requirements
 
@@ -91,5 +91,7 @@ Developers can reliably control local AI coding CLI workflows from an installed 
 - 2026-07-11: Phase 20 added for one-click diagnostics and privacy-safe local support bundles; automatic repair and upload are explicitly excluded.
 - 2026-07-11: Phase 20 completed after source regression and installed-app diagnostics, localized cancellation, strict ZIP whitelist, real environment-value privacy scan, and Finder reveal passed.
 
+- 2026-09-05: Phase 24 archived after runtime hardening, code simplification, source regression and fast packaged verification. STAB-07 cross-owner control was explicitly deferred; unexecuted functional UAT remains recorded as an accepted closure limitation.
+
 ---
-*Last updated: 2026-07-11 after Phase 20 completion*
+*Last updated: 2026-09-05 after Phase 24 archival*

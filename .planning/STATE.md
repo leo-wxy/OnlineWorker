@@ -2,27 +2,29 @@
 gsd_state_version: 1.0
 milestone: general-ai-capability-and-session-operations
 milestone_name: General AI Capability and Session Operations
-current_phase: 24 — Runtime Authority and Durability Hardening
-current_plan: 24-07
-status: Phase 24 repository-local work source verified through 24-08; 24-07 blocked
-stopped_at: Completed Phase 24 24-08 source verification
-last_updated: "2026-08-30T21:38:31+08:00"
+current_phase: null
+last_completed_phase: 24 — Runtime Authority and Durability Hardening
+current_plan: null
+status: Phase 24 archived with accepted scope; STAB-07 deferred; ready for next scoped task
+stopped_at: Archived Phase 24 with STAB-07 deferred by user acceptance
+last_updated: "2026-09-05T10:43:52+08:00"
 progress:
   total_phases: 19
-  completed_phases: 12
-  total_plans: 57
-  completed_plans: 44
-  percent: 77
-current_phase_name: Runtime Authority and Durability Hardening
+  completed_phases: 13
+  total_plans: 58
+  completed_plans: 45
+  deferred_plans: 1
+  percent: 78
+current_phase_name: null
 ---
 
 # Project State
 
-**Updated:** 2026-08-30
+**Updated:** 2026-09-05
 **Current milestone:** General AI Capability and Session Operations
-**Current phase:** 24 — Runtime Authority and Durability Hardening
-**Status:** Phase 24 repository-local work source verified through 24-08; 24-07 blocked
-**Current plan:** 24-07 — cross-owner steer/interrupt and TG output loop
+**Current phase:** None; Phase 24 completed and archived
+**Status:** Phase 24 archived with accepted scope; STAB-07 deferred; ready for next scoped task
+**Current plan:** None; STAB-07 is retained in deferred backlog
 **Last archived milestone:** v1.2.1
 
 ## Current Status
@@ -51,7 +53,7 @@ current_phase_name: Runtime Authority and Durability Hardening
 - Phase 21 is complete and installed-app verified. Provider-owned visibility now suppresses Codex child/internal sessions before EventBus and unbound Topic materialization, provider-native titles are shared across Desktop and Telegram, stale child/internal state and routes reconcile to zero without deleting provider history, and the installed `v1.8.4` runtime passed a real child-suppression smoke. The remaining standalone Telegram visual comparison was explicitly waived at closeout and is not claimed as passed.
 - Phase 22 is source verified through 22-06. System/Light/Dark persistence, first-frame bootstrap, shared main/menubar synchronization, semantic tokens, all existing UI surfaces, and the stable theme development guide are implemented. Frontend regression passed 183 tests, TypeScript and Vite production build passed, and installed-app visual/native-window verification remains pending explicit permission.
 - Phase 23 is complete. The independent Codex plugin exposes OAuth and Token / JSON account entry, Cockpit-compatible export, explicit apply/reapply, official manual quota refresh, encrypted storage, and offline session assets. Dedicated API Key and local-file add actions were removed in a later scope reduction while historical credential shapes remain readable/exportable. A 2026-08-18 performance follow-up replaced per-action Python cold starts with one independent resident account-feature worker and added a versioned redacted account-summary cache with background calibration. Combined build/install verification passed for that performance follow-up; session refresh still took 6.0 s and remains separate.
-- Phase 24 repository-local work is source verified through 24-08. Cross-owner queue remains honest while 24-07 stays blocked on unavailable Codex owner control.
+- Phase 24 is completed and archived by user acceptance on 2026-09-05. Eight retained plans are source verified; 24-09 fast packaged verification passed. STAB-07 is deferred and feature UAT remains unverified; neither is claimed as completed.
 - Phase 17's intermediate preview/cache/hydration fixes and their earlier installed evidence are consolidated in `17-01-SUMMARY.md`; `17-VERIFICATION.md` is the canonical closure result.
 
 ## Archived Milestone
@@ -59,6 +61,12 @@ current_phase_name: Runtime Authority and Durability Hardening
 | Milestone | Status | Archive |
 |-----------|--------|---------|
 | v1.2.1 | Completed and archived | [ROADMAP](milestones/v1.2.1-ROADMAP.md), [REQUIREMENTS](milestones/v1.2.1-REQUIREMENTS.md), [phases](milestones/v1.2.1-phases/) |
+
+## Archived Phases
+
+| Phase | Archived | Scope and Record |
+|-------|----------|------------------|
+| 24 | 2026-09-05 | STAB-01–STAB-06 complete; STAB-07 deferred; [archive](phases/24-runtime-authority-and-durability-hardening/24-ARCHIVE.md) |
 
 ## Active Phase
 
@@ -82,14 +90,14 @@ current_phase_name: Runtime Authority and Durability Hardening
 | 21. Provider Child-Session Visibility | Completed; canonical verification and installed child-suppression smoke passed | None; standalone live Telegram visual comparison was waived and remains unclaimed |
 | 22. Dark Mode Support | Source verified through `22-06` | Await explicit permission for installed-app visual and native-window verification |
 | 23. Plugin-Owned Codex Account and Session Asset Management | Completed; OAuth/Token-only entry and fixed row tracks source/visual verified; earlier resident cache path installed verified | Current follow-up is not packaged; session refresh remains 6.0 s and real mutations remain unverified |
-| 24. Runtime Authority and Durability Hardening | Repository-local work source verified through `24-08`; `24-07` blocked | Obtain a supported Codex owner endpoint/interrupt API or split 24-07 into a later capability phase |
+| 24. Runtime Authority and Durability Hardening | Completed and archived with accepted scope; 8 retained plans delivered | None; STAB-07 deferred separately, feature UAT retained as unverified |
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 **Core value:** Developers can reliably control local AI coding CLI workflows from an installed Mac app while receiving timely remote notifications and final results through supported notification channels.
-**Current focus:** Phase 24 repository-local stability work is source verified; 24-07 remains externally blocked
+**Current focus:** Phase 24 archived; ready for the next scoped task. Revisit deferred STAB-07 only when its supported owner-control prerequisites are available.
 
 ## Key Preserved Decisions
 
@@ -231,8 +239,12 @@ See: `.planning/PROJECT.md` (updated 2026-07-11)
 - Phase 24 `24-07` opened on 2026-08-30 after a real active-writer gap was confirmed. Queue disposition/TG wording/fail-closed interrupt/commentary regressions pass (`4` focused; related files `105 passed, 1 skipped`), but Codex Desktop owner endpoint and real interrupt are not discoverable, so the phase remains open.
 - Phase 24 `24-08` completed on 2026-08-30: local-owner failures no longer publish accepted, provider overlay backup/schema safety is enforced, stale service restarts are regression-covered, Python passed `81` with `1 skipped`, and Rust passed `255`.
 
+- Phase 24 `24-09` completed on 2026-09-05: removed unused frontend entries and shared wrapper queries, CLI/sidecar utilities, six config writers, and six session IPC request shells. Production code decreased by 342 lines; Python `43`, Node `40`, Rust `256` tests and TypeScript/format checks passed. Subsequent authorized fast package/install/restart verification passed for `1.10.0`; app and main bot run from the installed bundle. Plan `24-07` remains blocked and feature UAT remains unverified.
+
+- Phase 24 archived on 2026-09-05 by explicit user acceptance: eight retained plans complete, STAB-07 / 24-07 deferred with its original prerequisites and acceptance criteria, feature UAT not run and accepted as a closure limitation. No active phase or plan is selected.
+
 ## Session Continuity
 
-Last session: 2026-08-30T21:38:31+08:00
-Stopped at: Completed Phase 24 24-08 source verification
+Last session: 2026-09-05T10:43:52+08:00
+Stopped at: Archived Phase 24 with STAB-07 deferred by user acceptance
 Resume file: none

@@ -728,6 +728,7 @@ async def test_model_wrapper_callback_select_model_advances_without_applying():
 @pytest.mark.asyncio
 async def test_model_wrapper_callback_uses_provider_command_hook_for_custom_provider(monkeypatch):
     from bot.handlers.message import make_callback_handler
+    from core.providers.registry import _PROVIDERS
 
     state = _build_state(tool="custom")
     ws = state.storage.workspaces["custom:onlineWorker"]
@@ -754,14 +755,16 @@ async def test_model_wrapper_callback_uses_provider_command_hook_for_custom_prov
     )
     state.pending_command_wrappers[700] = pending
 
-    monkeypatch.setattr(
-        "bot.interaction_specs.get_provider",
-        lambda name, *args, **kwargs: SimpleNamespace(
+    monkeypatch.setitem(
+        _PROVIDERS,
+        "custom",
+        SimpleNamespace(
+            name="custom",
             capabilities=SimpleNamespace(command_wrappers=("model",)),
             command_hooks=SimpleNamespace(
                 apply_thread_command_wrapper_selection=apply_wrapper,
             ),
-        ) if name == "custom" else None,
+        ),
     )
 
     query = MagicMock()

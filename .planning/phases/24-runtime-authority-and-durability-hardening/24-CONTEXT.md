@@ -29,3 +29,7 @@
 - 不重写 Python/Rust/React 技术栈与 provider/notification 插件 seam。
 - 不在本 Phase 处理 Settings 并发保存合同或 combined release ownership；它们保留为后续独立工作。
 - 未经当前对话明确授权，不 build、package、install、restart 或 push。
+
+## 归档范围决定（2026-09-05）
+
+用户同意归档已交付的稳定性加固与代码精简。24-07 / STAB-07 从本阶段完成条件中移出并延期，保留解阻条件与真实闭环验收；未执行的安装版功能 UAT 保留为已接受限制，不声明通过。完整记录见 [24-ARCHIVE.md](24-ARCHIVE.md)。

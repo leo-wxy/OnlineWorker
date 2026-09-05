@@ -12,9 +12,12 @@ use super::config_provider::{
     set_notification_channel_enabled_in_document, set_provider_cli_config_in_document,
     set_provider_flags_in_document, set_provider_message_hook_enabled_in_document,
     visible_provider_ids_from_raw, AiConfigMetadata, AiScenarioConfigEntry, AiServiceConfigEntry,
-    NotificationChannelMetadata, ProviderExternalCliConfig, ProviderLaunchMethodConfig,
-    ProviderMetadata, ProviderRuntimePolicy,
+    NotificationChannelMetadata, ProviderConfigDocument, ProviderExternalCliConfig,
+    ProviderLaunchMethodConfig, ProviderMetadata, ProviderRuntimePolicy,
 };
+
+pub(crate) use super::provider_bridge_common::provider_rich_path as provider_validation_rich_path;
+use super::provider_bridge_common::{command_program_token, expand_home_path};
 
 pub(crate) const DEFAULT_APP_NAME: &str = "OnlineWorker";
 static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -247,54 +250,12 @@ pub struct ProviderValidationReport {
     pub sources: ProviderValidationSources,
 }
 
-fn provider_validation_command_program_token(command_line: &str) -> String {
-    let mut token = String::new();
-    let mut chars = command_line.trim().chars().peekable();
-    let mut quote: Option<char> = None;
-    while let Some(ch) = chars.next() {
-        if let Some(q) = quote {
-            if ch == q {
-                quote = None;
-            } else if ch == '\\' {
-                token.push(chars.next().unwrap_or(ch));
-            } else {
-                token.push(ch);
-            }
-            continue;
-        }
-        match ch {
-            '\'' | '"' => quote = Some(ch),
-            '\\' => token.push(chars.next().unwrap_or(ch)),
-            ch if ch.is_whitespace() => break,
-            _ => token.push(ch),
-        }
-    }
-    token
-}
-
-pub(crate) fn provider_validation_rich_path() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    format!(
-        "{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-        home
-    )
-}
-
-fn provider_validation_expand_home_path(value: &str) -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    if value.starts_with("~/") {
-        format!("{}{}", home, &value[1..])
-    } else {
-        value.to_string()
-    }
-}
-
 pub(crate) fn resolve_provider_cli_path(command_line: &str) -> Option<String> {
-    let program = provider_validation_command_program_token(command_line);
+    let program = command_program_token(command_line.trim());
     if program.trim().is_empty() {
         return None;
     }
-    let expanded = provider_validation_expand_home_path(&program);
+    let expanded = expand_home_path(&program);
     if expanded.starts_with('/') {
         let path = Path::new(&expanded);
         if path.exists() && path.is_file() {
@@ -572,12 +533,7 @@ pub async fn create_default_config() -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-pub async fn set_provider_flags(
-    provider_id: String,
-    managed: bool,
-    autostart: bool,
-) -> Result<(), String> {
+fn update_config_document(mutate: impl FnOnce(&mut ProviderConfigDocument)) -> Result<(), String> {
     let dir = ensure_data_dir()?;
     cleanup_legacy_external_cli_config(&dir)?;
     let path = dir.join("config.yaml");
@@ -585,10 +541,21 @@ pub async fn set_provider_flags(
     let raw = read_config_or_materialize_default(&path, &env_raw)?;
 
     let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
-    set_provider_flags_in_document(&mut doc, &provider_id, managed, autostart);
+    mutate(&mut doc);
     let serialized = serialize_config_document_for_persistence(doc, &raw)?;
     atomic_write(&path, serialized.as_bytes())
         .map_err(|e| format!("Cannot write config.yaml: {}", e))
+}
+
+#[tauri::command]
+pub async fn set_provider_flags(
+    provider_id: String,
+    managed: bool,
+    autostart: bool,
+) -> Result<(), String> {
+    update_config_document(|doc| {
+        set_provider_flags_in_document(doc, &provider_id, managed, autostart);
+    })
 }
 
 #[tauri::command]
@@ -597,17 +564,9 @@ pub async fn set_provider_message_hook_enabled(
     hook_name: String,
     enabled: bool,
 ) -> Result<(), String> {
-    let dir = ensure_data_dir()?;
-    cleanup_legacy_external_cli_config(&dir)?;
-    let path = dir.join("config.yaml");
-    let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
-    let raw = read_config_or_materialize_default(&path, &env_raw)?;
-
-    let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
-    set_provider_message_hook_enabled_in_document(&mut doc, &provider_id, &hook_name, enabled);
-    let serialized = serialize_config_document_for_persistence(doc, &raw)?;
-    atomic_write(&path, serialized.as_bytes())
-        .map_err(|e| format!("Cannot write config.yaml: {}", e))
+    update_config_document(|doc| {
+        set_provider_message_hook_enabled_in_document(doc, &provider_id, &hook_name, enabled);
+    })
 }
 
 #[tauri::command]
@@ -617,17 +576,9 @@ pub async fn set_provider_cli_config(
     external_cli: ProviderExternalCliConfig,
     launch_methods: Option<Vec<ProviderLaunchMethodConfig>>,
 ) -> Result<(), String> {
-    let dir = ensure_data_dir()?;
-    cleanup_legacy_external_cli_config(&dir)?;
-    let path = dir.join("config.yaml");
-    let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
-    let raw = read_config_or_materialize_default(&path, &env_raw)?;
-
-    let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
-    set_provider_cli_config_in_document(&mut doc, &provider_id, bin, external_cli, launch_methods);
-    let serialized = serialize_config_document_for_persistence(doc, &raw)?;
-    atomic_write(&path, serialized.as_bytes())
-        .map_err(|e| format!("Cannot write config.yaml: {}", e))
+    update_config_document(|doc| {
+        set_provider_cli_config_in_document(doc, &provider_id, bin, external_cli, launch_methods);
+    })
 }
 
 pub(crate) fn read_provider_runtime_policies_from_disk(
@@ -712,17 +663,9 @@ pub async fn set_ai_config(
     services: Vec<AiServiceConfigEntry>,
     scenarios: BTreeMap<String, AiScenarioConfigEntry>,
 ) -> Result<(), String> {
-    let dir = ensure_data_dir()?;
-    cleanup_legacy_external_cli_config(&dir)?;
-    let path = dir.join("config.yaml");
-    let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
-    let raw = read_config_or_materialize_default(&path, &env_raw)?;
-
-    let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
-    set_ai_config_in_document(&mut doc, services, scenarios);
-    let serialized = serialize_config_document_for_persistence(doc, &raw)?;
-    atomic_write(&path, serialized.as_bytes())
-        .map_err(|e| format!("Cannot write config.yaml: {}", e))
+    update_config_document(|doc| {
+        set_ai_config_in_document(doc, services, scenarios);
+    })
 }
 
 #[tauri::command]
@@ -730,17 +673,9 @@ pub async fn set_notification_channel_enabled(
     channel_id: String,
     enabled: bool,
 ) -> Result<(), String> {
-    let dir = ensure_data_dir()?;
-    cleanup_legacy_external_cli_config(&dir)?;
-    let path = dir.join("config.yaml");
-    let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
-    let raw = read_config_or_materialize_default(&path, &env_raw)?;
-
-    let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
-    set_notification_channel_enabled_in_document(&mut doc, &channel_id, enabled);
-    let serialized = serialize_config_document_for_persistence(doc, &raw)?;
-    atomic_write(&path, serialized.as_bytes())
-        .map_err(|e| format!("Cannot write config.yaml: {}", e))
+    update_config_document(|doc| {
+        set_notification_channel_enabled_in_document(doc, &channel_id, enabled);
+    })
 }
 
 #[tauri::command]
@@ -748,17 +683,9 @@ pub async fn set_notification_channel_config(
     channel_id: String,
     config: BTreeMap<String, serde_yaml::Value>,
 ) -> Result<(), String> {
-    let dir = ensure_data_dir()?;
-    cleanup_legacy_external_cli_config(&dir)?;
-    let path = dir.join("config.yaml");
-    let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
-    let raw = read_config_or_materialize_default(&path, &env_raw)?;
-
-    let mut doc = normalize_provider_document_with_env(&raw, Some(&env_raw))?;
-    set_notification_channel_config_in_document(&mut doc, &channel_id, config);
-    let serialized = serialize_config_document_for_persistence(doc, &raw)?;
-    atomic_write(&path, serialized.as_bytes())
-        .map_err(|e| format!("Cannot write config.yaml: {}", e))
+    update_config_document(|doc| {
+        set_notification_channel_config_in_document(doc, &channel_id, config);
+    })
 }
 
 #[tauri::command]

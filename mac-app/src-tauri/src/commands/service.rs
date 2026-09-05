@@ -1,6 +1,5 @@
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -13,8 +12,10 @@ use super::config::{
     ensure_data_dir, read_provider_metadata_from_disk, read_provider_runtime_policies_from_disk,
 };
 
-const PROVIDER_OVERLAY_ENV: &str = "ONLINEWORKER_PROVIDER_OVERLAY";
-const PYINSTALLER_RESET_ENVIRONMENT_ENV: &str = "PYINSTALLER_RESET_ENVIRONMENT";
+use super::provider_bridge_common::{
+    command_program_token, expand_home_path, provider_bridge_env as bot_sidecar_env,
+    provider_rich_path,
+};
 
 /// Managed state for the sidecar bot process.
 pub struct BotState {
@@ -65,62 +66,6 @@ fn cleanup_owner_bridge_socket_files() {
     if let Ok(data_dir) = ensure_data_dir() {
         cleanup_owner_bridge_socket_files_in_dir(&data_dir);
     }
-}
-
-fn read_env_key(raw: &str, key: &str) -> Option<String> {
-    raw.lines().find_map(|line| {
-        let (line_key, value) = line.split_once('=')?;
-        if line_key.trim() == key {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        } else {
-            None
-        }
-    })
-}
-
-fn overlay_env_spec_from_app_env(data_dir: &Path) -> Option<String> {
-    let raw = fs::read_to_string(data_dir.join(".env")).ok()?;
-    read_env_key(&raw, PROVIDER_OVERLAY_ENV)
-}
-
-fn overlay_env_spec(data_dir: &Path) -> Option<String> {
-    std::env::var(PROVIDER_OVERLAY_ENV)
-        .ok()
-        .and_then(|value| {
-            let trimmed = value.trim().to_string();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed)
-            }
-        })
-        .or_else(|| overlay_env_spec_from_app_env(data_dir))
-}
-
-fn bot_sidecar_env(data_dir: &Path) -> Vec<(String, String)> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let path = format!(
-        "{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-        home
-    );
-    let mut envs = vec![
-        ("PATH".to_string(), path),
-        ("HOME".to_string(), home),
-        ("LANG".to_string(), "en_US.UTF-8".to_string()),
-        (
-            PYINSTALLER_RESET_ENVIRONMENT_ENV.to_string(),
-            "1".to_string(),
-        ),
-    ];
-    if let Some(overlay_env) = overlay_env_spec(data_dir) {
-        envs.push((PROVIDER_OVERLAY_ENV.to_string(), overlay_env));
-    }
-    envs
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -862,40 +807,6 @@ fn is_pid_alive(pid: u32) -> bool {
     }
 }
 
-fn command_program_token(command: &str) -> String {
-    let mut token = String::new();
-    let mut chars = command.trim_start().chars().peekable();
-    let mut quote: Option<char> = None;
-    while let Some(ch) = chars.next() {
-        if let Some(active_quote) = quote {
-            if ch == active_quote {
-                quote = None;
-            } else if ch == '\\' {
-                token.push(chars.next().unwrap_or(ch));
-            } else {
-                token.push(ch);
-            }
-            continue;
-        }
-        match ch {
-            '\'' | '"' => quote = Some(ch),
-            '\\' => token.push(chars.next().unwrap_or(ch)),
-            ch if ch.is_whitespace() => break,
-            _ => token.push(ch),
-        }
-    }
-    token
-}
-
-fn expand_home_path(value: &str) -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    if value.starts_with("~/") {
-        format!("{}{}", home, &value[1..])
-    } else {
-        value.to_string()
-    }
-}
-
 /// Check if a CLI command is installed.
 /// Accepts command lines such as `/path/to/provider-launcher run`; only the executable token
 /// is checked. .app bundles have minimal PATH, so we set a rich PATH for `which`.
@@ -912,16 +823,9 @@ pub async fn check_cli(bin: String) -> Result<bool, String> {
         return Ok(path.exists() && path.is_file());
     }
 
-    // .app bundles inherit minimal PATH; provide a rich one for `which`
-    let home = std::env::var("HOME").unwrap_or_default();
-    let rich_path = format!(
-        "{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-        home
-    );
-
     let output = std::process::Command::new("which")
         .arg(&expanded)
-        .env("PATH", &rich_path)
+        .env("PATH", provider_rich_path())
         .output()
         .map_err(|e| e.to_string())?;
 
@@ -932,11 +836,10 @@ pub async fn check_cli(bin: String) -> Result<bool, String> {
 mod tests {
     use super::should_ignore_sidecar_output_event;
     use super::{
-        apply_manual_stop_policy, apply_service_start_policy, bot_sidecar_env,
+        apply_manual_stop_policy, apply_service_start_policy,
         cleanup_owner_bridge_socket_files_in_dir, cleanup_process_matchers, command_program_token,
-        compute_service_status, managed_bot_cleanup_pids_from_rows, overlay_env_spec,
-        overlay_env_spec_from_app_env, pid_parent_pairs_from_output, pids_from_bot_process_rows,
-        process_tree_pids, read_env_key, select_primary_pid, service_owner_matches,
+        compute_service_status, managed_bot_cleanup_pids_from_rows, pid_parent_pairs_from_output,
+        pids_from_bot_process_rows, process_tree_pids, select_primary_pid, service_owner_matches,
         service_restart_is_still_owned, should_attempt_background_service_recovery, BotState,
         ManagedProcessCleanupPolicy, LEGACY_OWNER_BRIDGE_SOCKET_FILENAME,
     };
@@ -1130,73 +1033,6 @@ mod tests {
         assert!(!provider_socket.exists());
         assert!(!legacy_socket.exists());
         assert!(unrelated.exists());
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn read_env_key_trims_overlay_path_values() {
-        let raw = "ONLINEWORKER_PROVIDER_OVERLAY=  /tmp/private-overlay  \n";
-        assert_eq!(
-            read_env_key(raw, "ONLINEWORKER_PROVIDER_OVERLAY").as_deref(),
-            Some("/tmp/private-overlay")
-        );
-    }
-
-    #[test]
-    fn overlay_env_spec_from_app_env_reads_data_dir_env_file() {
-        let dir = std::env::temp_dir().join(format!("onlineworker-overlay-{}", std::process::id()));
-        let _ = fs::create_dir_all(&dir);
-        fs::write(
-            dir.join(".env"),
-            "TELEGRAM_TOKEN=token\nONLINEWORKER_PROVIDER_OVERLAY=/tmp/private-overlay\n",
-        )
-        .expect("write .env");
-
-        assert_eq!(
-            overlay_env_spec_from_app_env(&dir).as_deref(),
-            Some("/tmp/private-overlay")
-        );
-
-        let _ = fs::remove_file(dir.join(".env"));
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn overlay_env_spec_prefers_process_env_over_app_env_file() {
-        let dir = std::env::temp_dir().join(format!(
-            "onlineworker-overlay-process-{}",
-            std::process::id()
-        ));
-        let _ = fs::create_dir_all(&dir);
-        fs::write(
-            dir.join(".env"),
-            "ONLINEWORKER_PROVIDER_OVERLAY=/tmp/from-app-env\n",
-        )
-        .expect("write .env");
-        std::env::set_var("ONLINEWORKER_PROVIDER_OVERLAY", "/tmp/from-process-env");
-
-        assert_eq!(
-            overlay_env_spec(&dir).as_deref(),
-            Some("/tmp/from-process-env")
-        );
-
-        std::env::remove_var("ONLINEWORKER_PROVIDER_OVERLAY");
-        let _ = fs::remove_file(dir.join(".env"));
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn bot_sidecar_env_resets_pyinstaller_parent_state() {
-        let dir =
-            std::env::temp_dir().join(format!("onlineworker-sidecar-env-{}", std::process::id()));
-        let _ = fs::create_dir_all(&dir);
-
-        let envs = bot_sidecar_env(&dir);
-
-        assert!(envs
-            .iter()
-            .any(|(key, value)| { key == "PYINSTALLER_RESET_ENVIRONMENT" && value == "1" }));
 
         let _ = fs::remove_dir_all(&dir);
     }

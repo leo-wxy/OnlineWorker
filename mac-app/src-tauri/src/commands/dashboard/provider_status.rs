@@ -12,6 +12,9 @@ use super::super::config_provider::{
     provider_metadata_from_raw, provider_uses_shared_app_server_transport,
     public_default_provider_ids, ProviderIconEntry, ProviderMetadata, ProviderTuiHostEntry,
 };
+use super::super::provider_bridge_common::{
+    command_program_token, expand_home_path, provider_rich_path,
+};
 use super::{ProviderDashboardStatus, ServiceHealth};
 
 #[derive(Deserialize, Default)]
@@ -432,54 +435,12 @@ fn derive_provider_health(
     }
 }
 
-fn dashboard_rich_path() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    format!(
-        "{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-        home
-    )
-}
-
-fn resolve_cli_bin(bin: &str) -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    if bin.starts_with("~/") {
-        format!("{}{}", home, &bin[1..])
-    } else {
-        bin.to_string()
-    }
-}
-
-fn command_program_token(command: &str) -> String {
-    let mut token = String::new();
-    let mut chars = command.trim_start().chars().peekable();
-    let mut quote: Option<char> = None;
-    while let Some(ch) = chars.next() {
-        if let Some(active_quote) = quote {
-            if ch == active_quote {
-                quote = None;
-            } else if ch == '\\' {
-                token.push(chars.next().unwrap_or(ch));
-            } else {
-                token.push(ch);
-            }
-            continue;
-        }
-        match ch {
-            '\'' | '"' => quote = Some(ch),
-            '\\' => token.push(chars.next().unwrap_or(ch)),
-            ch if ch.is_whitespace() => break,
-            _ => token.push(ch),
-        }
-    }
-    token
-}
-
 fn check_cli_available_sync(bin: &str) -> bool {
     let program = command_program_token(bin);
     if program.is_empty() {
         return false;
     }
-    let resolved = resolve_cli_bin(&program);
+    let resolved = expand_home_path(&program);
     if resolved.starts_with('/') {
         let path = Path::new(&resolved);
         return path.exists() && path.is_file();
@@ -487,7 +448,7 @@ fn check_cli_available_sync(bin: &str) -> bool {
 
     Command::new("which")
         .arg(&resolved)
-        .env("PATH", dashboard_rich_path())
+        .env("PATH", provider_rich_path())
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
