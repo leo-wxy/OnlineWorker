@@ -48,7 +48,7 @@ OnlineWorker sidebar
 - 某个插件失败时仅该 selector 显示“加载失败 / 重试 / 查看诊断”，其他 selector 仍可用。
 - OnlineWorker bot、provider runtime、owner bridge、Task Board、Usage、notification 或 Codex app-server 停止时，页面仍可用。
 - 该页不复用或扩展实时 Sessions/Usage 页。Codex 内部可用“账号 / 会话资产”分段控件。
-- Phase 23 不提供 copy-to-instance、跨实例同步、多个命名 Codex Home，也不实现 Claude/Codemaker 账号界面；这些不显示占位控件。
+- Phase 23 不提供 copy-to-instance、跨实例同步、多个命名 Codex Home，也不实现 Claude/external provider extension 账号界面；这些不显示占位控件。
 
 ## Spacing Scale
 

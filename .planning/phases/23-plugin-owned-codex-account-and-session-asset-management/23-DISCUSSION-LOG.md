@@ -62,7 +62,7 @@
 | Separate window | OnlineWorker only launches an external plugin window | |
 
 **User's choice:** Add an `账号` sidebar entry dynamically.
-**Notes:** Keep one entry for Codex/Claude/Codemaker plugin selectors. Hide it when no account plugin is enabled. Isolate load failures per plugin with error/retry/diagnostics.
+**Notes:** Keep one entry for Codex/Claude/external provider extension plugin selectors. Hide it when no account plugin is enabled. Isolate load failures per plugin with error/retry/diagnostics.
 
 ## Account package compatibility
 
@@ -105,6 +105,6 @@
 
 ## Deferred Ideas
 
-- Claude and Codemaker account implementations.
+- Claude and external provider extension account implementations.
 - Quotas, tags, notes, groups, gateway/relay, account pool, automation, and model-provider management.
 - Multi-instance session copy and synchronization.

@@ -49,7 +49,7 @@ final result: passed
 
 **Comparison target**
 
-- Source visual truth: `/var/folders/qc/6j7krw4x2v3_0xdn609bzlzm0000gn/T/codex-clipboard-ac872715-a62a-4e7a-b87a-bfca719a356a.png`.
+- Source visual truth: the user-provided account-card reference image (local path omitted).
 - Implementation screenshot: `/tmp/onlineworker-account-card-final-wide.jpg`.
 - Responsive screenshot: `/tmp/onlineworker-account-card-final-narrow.jpg`.
 - Focused comparison: `/tmp/onlineworker-account-card-comparison-final.jpg`.
@@ -72,7 +72,7 @@ final result: passed
 **Findings**
 
 - No actionable P0, P1 or P2 findings remain.
-- [P3] Cockpit-only Team Name, user ID, validity, note, reset and gateway actions remain absent because OnlineWorker does not expose those account fields or features.
+- [P3] Reference-only Team Name, user ID, validity, note, reset and gateway actions remain absent because OnlineWorker does not expose those account fields or features.
 - [P3] Action controls retain readable text labels instead of copying the reference's icon-only footer, preserving the app's current accessibility and control vocabulary.
 
 **Comparison history**
@@ -97,19 +97,19 @@ final result: passed
 
 **Comparison target**
 
-- Account reference: `/var/folders/qc/6j7krw4x2v3_0xdn609bzlzm0000gn/T/com.openai.sky.CUAService/Cockpit Tools Screenshot 2026-08-18 at 3.57.50 PM.jpeg`
-- Account implementation: `/var/folders/qc/6j7krw4x2v3_0xdn609bzlzm0000gn/T/com.openai.sky.CUAService/OnlineWorker Screenshot 2026-08-18 at 3.57.59 PM.jpeg`
-- Session reference: `/var/folders/qc/6j7krw4x2v3_0xdn609bzlzm0000gn/T/com.openai.sky.CUAService/Cockpit Tools Screenshot 2026-08-18 at 3.59.22 PM.jpeg`
-- Session implementation: `/var/folders/qc/6j7krw4x2v3_0xdn609bzlzm0000gn/T/com.openai.sky.CUAService/OnlineWorker Screenshot 2026-08-18 at 3.59.53 PM.jpeg`
-- Collapsed sidebar: `/var/folders/qc/6j7krw4x2v3_0xdn609bzlzm0000gn/T/com.openai.sky.CUAService/OnlineWorker Screenshot 2026-08-18 at 3.53.40 PM.jpeg`
-- Short-window collapsed sidebar: `/var/folders/qc/6j7krw4x2v3_0xdn609bzlzm0000gn/T/com.openai.sky.CUAService/OnlineWorker Screenshot 2026-08-18 at 3.54.18 PM.jpeg`
+- Account reference: the user-provided account reference image (local path omitted)
+- Account implementation: the captured OnlineWorker account view (local path omitted)
+- Session reference: the user-provided session reference image (local path omitted)
+- Session implementation: the captured OnlineWorker session view (local path omitted)
+- Collapsed sidebar: the captured collapsed-sidebar view (local path omitted)
+- Short-window collapsed sidebar: the captured short-window sidebar view (local path omitted)
 - Viewport: `1493 x 768` for both reference and implementation states.
 - Combined comparisons: `/tmp/phase23-account-final-comparison.jpg`, `/tmp/phase23-session-final-comparison.jpg`.
 
 **Findings and fixes**
 
 - The first packaged UI was rejected: one oversized account card left most of the page empty, action hierarchy was weak, export only appeared disabled, and the collapsed sidebar showed oversized white blocks plus a heavy scrollbar.
-- The account view now uses one compact selectable row with identity/current/plan, quota, explicit reapply, refresh and export actions. Cockpit gateway, API service, account pool, tag, note, rotation and multi-open surfaces remain intentionally absent.
+- The account view now uses one compact selectable row with identity/current/plan, quota, explicit reapply, refresh and export actions. Reference gateway, API service, account pool, tag, note, rotation and multi-open surfaces remain intentionally absent.
 - Export now opens the native save panel with `codex-accounts.json`; cancelling returns to the unchanged one-account list instead of clearing it.
 - Reapply, visibility repair and trash use a plugin-owned accessible confirmation dialog instead of an unreliable browser confirm.
 - The session view follows the reference hierarchy: 30-day local summary, search/filter, scoped actions, default-collapsed `cwd`/project rows, then conversation rows on expansion.
@@ -119,8 +119,8 @@ final result: passed
 **Interaction evidence**
 
 - Mounted-DMG checks exercised the sidebar collapse/expand flow, independent short-window nav scrolling, account/session tabs, native export save panel and cancel, reapply confirmation and project-group disclosure.
-- The packaged account page rendered the current PRO account with a 35% weekly quota and enabled `重新应用`/`刷新额度`/`导出` actions.
-- The packaged session page rendered 31 project groups covering 72 conversations; expanding `onlineworker-combined` rendered its conversation rows.
+- The packaged account page rendered account status and quota, with `重新应用`/`刷新额度`/`导出` actions enabled; personal account values are omitted.
+- The packaged session page rendered project groups and conversations; expanding a project rendered its conversation rows. Private workspace names and account-specific counts are omitted.
 - Real OAuth, quota network refresh, apply/reapply confirmation, file write, trash, restore and visibility repair were not executed against the user's data.
 
 final result: passed
@@ -133,7 +133,7 @@ final result: passed
 - Implementation captures: `/tmp/onlineworker-session-assets-loaded.png` and `/tmp/onlineworker-session-picker.png` from the installed `/Applications/OnlineWorker.app`.
 - Comparison captures: `/tmp/onlineworker-session-assets-comparison.jpg` and `/tmp/onlineworker-session-picker-comparison.jpg`.
 - Viewport: desktop `1493 x 768` CSS px, device pixel ratio `1`.
-- State: 35 populated project cards / 79 conversations, plus the `onlineworker-combined` picker with eight conversations.
+- State: populated project cards and a project-specific conversation picker; private workspace names and account-specific counts are omitted.
 
 **Packaged verification completed**
 
@@ -154,7 +154,7 @@ final result: passed
 
 - `bash build.sh` passed.
 - `bash verify-packaged-fast.sh` rebuilt and validated the DMG but its first install attempt was blocked by two stale bot processes that ignored SIGTERM.
-- After stopping only those verified PIDs, `OnlineWorker/scripts/install-current-dmg.sh` passed; installed app/bot/ccusage hashes matched the DMG and bundled Codemaker/POPO manifests were present.
+- After stopping only those verified PIDs, `OnlineWorker/scripts/install-current-dmg.sh` passed; installed app/bot/ccusage hashes matched the DMG and the configured extension manifests were present (repository-external names omitted).
 - DMG SHA-256: `ae1802ddd9bd0a900a42d3761f12b7bc493f5d738db288c6094ccc4521e92101`.
 
 final result: passed

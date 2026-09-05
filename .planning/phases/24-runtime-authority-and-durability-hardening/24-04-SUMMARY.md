@@ -15,11 +15,11 @@ completed_at: "2026-08-30T19:36:52+08:00"
 
 ## Verification
 
-- 红灯：`/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest tests/test_codex_adapter.py -k source_claim -q` → `8 failed, 51 deselected`
+- 红灯：`python3.13 -m pytest tests/test_codex_adapter.py -k source_claim -q` → `8 failed, 51 deselected`
 - 绿灯：同一命令 → `8 passed, 51 deselected`
-- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest tests/test_codex_adapter.py -q` → `59 passed`
-- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest tests/test_codex_external_ingress.py tests/test_provider_owner_bridge.py tests/test_events_streaming.py -q` → `126 passed`
-- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m py_compile plugins/providers/builtin/codex/python/adapter.py tests/test_codex_adapter.py` → passed
+- `python3.13 -m pytest tests/test_codex_adapter.py -q` → `59 passed`
+- `python3.13 -m pytest tests/test_codex_external_ingress.py tests/test_provider_owner_bridge.py tests/test_events_streaming.py -q` → `126 passed`
+- `python3.13 -m py_compile plugins/providers/builtin/codex/python/adapter.py tests/test_codex_adapter.py` → passed
 - `git diff --check` → passed
 
 ## Scope

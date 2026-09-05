@@ -19,9 +19,9 @@ The feature must remain usable when the OnlineWorker bot, Provider runtime, owne
 - **D-01:** OnlineWorker is only the generic feature carrier. The Codex plugin owns its UI, data model, storage, validation, import/export/application behavior, and session-asset operations.
 - **D-02:** The feature must not depend on OnlineWorker Provider runtime state, owner bridge, Task Board, existing Sessions/Usage pages, notification flow, or Codex app-server lifecycle.
 - **D-03:** Add a generic account-management plugin capability. At least one enabled plugin with this capability dynamically contributes a single `账号` sidebar entry; when no such plugin is enabled, the entry is hidden.
-- **D-04:** The `账号` page presents one selector per account-capable plugin (`Codex`, later `Claude`/`Codemaker`). Each plugin supplies its own content and configuration; the host must not branch on provider IDs.
+- **D-04:** The `账号` page presents one selector per account-capable plugin (`Codex`, later `Claude`/`external provider extension`). Each plugin supplies its own content and configuration; the host must not branch on provider IDs.
 - **D-05:** A plugin load failure is isolated to that plugin selector and shows its own error, retry, and diagnostic state. Other account plugins remain usable.
-- **D-06:** Phase 23 implements Codex only. Claude and Codemaker business implementations are deferred, but the host seam must permit them without adding provider-specific code later.
+- **D-06:** Phase 23 implements Codex only. Claude and external provider extension business implementations are deferred, but the host seam must permit them without adding provider-specific code later.
 - **D-07:** The host may expose only generic system capabilities needed by plugins, such as mounting local assets, opening a browser, choosing files, saving files, and invoking a plugin-owned action. Action invocation uses one independent long-lived account-feature worker, not Provider runtime/app-server authority; timeout or crash clears that worker and the next request starts a new one without replaying the failed action. Those capabilities must not contain Codex account/session vocabulary.
 
 ### Codex account credential scope
@@ -66,7 +66,7 @@ The feature must remain usable when the OnlineWorker bot, Provider runtime, owne
 
 ### Explicitly excluded from Phase 23
 - **D-38:** Only an explicit user-triggered read of the official Codex usage endpoint is in scope. Do not implement background quota polling, subscription management beyond those returned usage windows, account tags, notes, groups, auto-rotation, API gateway/relay, API service keys, account pools, load balancing, model-provider management, wake-up tasks, application multi-open, or automatic account switching.
-- **D-39:** Do not implement Claude or Codemaker account behavior in this phase.
+- **D-39:** Do not implement Claude or external provider extension account behavior in this phase.
 - **D-40:** Do not modify or coordinate OnlineWorker live provider/session behavior as a side effect of account or asset operations.
 
 ### the agent's Discretion
@@ -141,7 +141,7 @@ The feature must remain usable when the OnlineWorker bot, Provider runtime, owne
 ## Deferred Ideas
 
 - Claude account plugin implementation.
-- Codemaker account plugin implementation.
+- external provider extension account plugin implementation.
 - Subscription management beyond the official usage windows, background/automatic quota refresh, tags, notes, groups, and automatic rotation.
 - API gateways, relay services, account pools, load balancing, API-service management, model providers, wake-up tasks, and application multi-open.
 - Session copy-to-instance, cross-instance synchronization, and multiple named Codex homes.

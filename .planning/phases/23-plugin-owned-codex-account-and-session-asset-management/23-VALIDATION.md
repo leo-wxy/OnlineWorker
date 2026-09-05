@@ -95,8 +95,8 @@ created: 2026-08-17
 - `git diff --check` — passed。
 - `bash build.sh`（combined shell）— passed；生成 39 MB `OnlineWorker_1.9.0_aarch64.dmg`，SHA-256 `9c623489c0e31c677d39fa505f52835dd738bd82bb7f9a62fa1c959934e8713a`。
 - Mounted-DMG sidebar QA — passed：`2041 x 560` 短窗口中导航区域可独立滚动、滚动条 chrome 隐藏、底部语言入口固定；恢复到 `1493 x 768` 后折叠态无裁切和大号装饰卡片。
-- Mounted-DMG account QA — passed：当前 PRO 账号、35% 周额度、enabled reapply/quota/export actions 可见；reapply 打开可访问确认框；export 打开默认名 `codex-accounts.json` 的 native save panel，取消后账号列表仍保留 1 条。
-- Mounted-DMG session QA — passed：30 天统计加载完成，**31 个 cwd/project 组 → 72 条 conversation** 可见；展开 `onlineworker-combined` 后会话明细正常呈现。
+- Mounted-DMG account QA — passed：账号状态、周额度、enabled reapply/quota/export actions 可见（个人数值省略）；reapply 打开可访问确认框；export 打开默认名 `codex-accounts.json` 的 native save panel，取消后账号列表保持不变。
+- Mounted-DMG session QA — passed：30 天统计加载完成，工作目录分组及会话（个人统计省略） 可见；展开 某个项目（名称省略） 后会话明细正常呈现。
 - 未执行：真实 OAuth、真实额度网络请求、真实 apply/reapply 确认、凭据文件写出、账号/会话导入、trash/restore/repair、安装到 `/Applications`。
 
 ### Account loading performance follow-up — 2026-08-18
@@ -105,7 +105,7 @@ created: 2026-08-17
 - `cargo test --manifest-path mac-app/src-tauri/Cargo.toml account_feature --lib` — **10 passed**；覆盖 worker response 边界、timeout/error 映射、native capability 与 loopback。
 - `node --test mac-app/tests/accountFeature*.test.mjs` — **10 passed**；覆盖 cache-first、后台校准、字段白名单、secret/path 禁止项及通用 host 边界。
 - `cd mac-app && npm run build` — passed；TypeScript 与 Vite production build 均通过。
-- `bash verify-packaged-fast.sh` — passed in **113 s**；重新构建 39 MB `OnlineWorker_1.9.0_aarch64.dmg`，SHA-256 `6c1a6b0ae4b40e41196fe1897a4074f930e12f5d2e2a1e96120e75e0e8a38472`，安装到 `/Applications` 后 app、bot、Codemaker 与 POPO bundled plugins 验证通过。
+- `bash verify-packaged-fast.sh` — passed in **113 s**；重新构建 39 MB `OnlineWorker_1.9.0_aarch64.dmg`，SHA-256 `6c1a6b0ae4b40e41196fe1897a4074f930e12f5d2e2a1e96120e75e0e8a38472`，安装到 `/Applications` 后 app、bot、external provider extension 与 external notification extension bundled plugins 验证通过。
 - Installed account cache-hit path — **449 ms** 内账号行可见，未出现 loading placeholder；后台校准继续运行。
 - Installed resident worker — 同一 PyInstaller worker process tree 在账号/会话导航后持续存活，没有按 action 新建额外 worker tree。
 - Installed session baseline — 刷新 **32 个工作目录 / 74 个会话** 用时 **6001 ms**；会话扫描未包含在本次 1、2 优化中，仍是独立性能缺口。
@@ -123,7 +123,7 @@ created: 2026-08-17
 - `git diff --check` — passed。
 - `bash build.sh` — passed；生成 `OnlineWorker_1.9.0_aarch64.dmg`，SHA-256 `aea1e9baeb4fa598201d332cd9dcb5aa626866abc6afb03b8c5e9f10c1f2ead7`。
 - `bash verify-packaged-fast.sh` 的重建和 DMG 校验通过；安装步骤发现两个已运行 3 天且不响应 SIGTERM 的旧 bot，因此脚本在覆盖安装前按预期失败。按明确 PID 强制停止旧实例后，`OnlineWorker/scripts/install-current-dmg.sh` 成功完成安装和重启；DMG 与 `/Applications` 内 app、bot、ccusage 哈希完全一致。
-- Installed-app read-only QA — 账号卡片显示 1 个当前 PRO 账号与 68% 周额度；添加账号弹窗双 tab、`关闭`、`取消`均可用；会话页扫描完成后显示 **35 个工作目录 / 79 个会话**。Codemaker 与 POPO bundled plugin manifest 存在，localhost callback 模板已嵌入应用二进制。
+- Installed-app read-only QA — 账号卡片显示账号状态与周额度（个人数值省略）；添加账号弹窗双 tab、`关闭`、`取消`均可用；会话页扫描完成后显示 工作目录分组及会话（个人统计省略）。external provider extension 与 external notification extension bundled plugin manifest 存在，localhost callback 模板已嵌入应用二进制。
 - 未运行真实 OAuth，也未执行 apply/reapply、额度网络刷新、账号导入导出或会话 mutation。
 
 ### Account tab visual-system follow-up — 2026-08-23
@@ -144,8 +144,8 @@ created: 2026-08-17
 - `cd mac-app && ./node_modules/.bin/tsc --noEmit` — passed。
 - `git diff --check` — passed。
 - `bash build.sh` — passed；生成 40,896,350-byte `OnlineWorker_1.9.0_aarch64.dmg`，SHA-256 `ae1802ddd9bd0a900a42d3761f12b7bc493f5d738db288c6094ccc4521e92101`。
-- `bash verify-packaged-fast.sh` — build、DMG 校验通过；首次安装被两个不响应 SIGTERM 的旧 bot 阻塞。按明确 PID 停止旧实例后，`OnlineWorker/scripts/install-current-dmg.sh` 安装、重启通过，DMG 与安装版 app/bot/ccusage 哈希一致，Codemaker/POPO bundled manifests 存在。
-- Installed-app UI — 35 个工作目录 / 79 个会话正常加载；工程卡片底部 `选择会话` 对齐；弹窗搜索、全选、逐项选择、取消不提交、确认后 scoped selection 均通过。桌面 `1493 x 768` 与 Variant C 并排检查无 P0/P1/P2 问题。
+- `bash verify-packaged-fast.sh` — build、DMG 校验通过；首次安装被两个不响应 SIGTERM 的旧 bot 阻塞。按明确 PID 停止旧实例后，`OnlineWorker/scripts/install-current-dmg.sh` 安装、重启通过，DMG 与安装版 app/bot/ccusage 哈希一致，external provider extension/external notification extension bundled manifests 存在。
+- Installed-app UI — 工作目录分组及会话正常加载（个人统计省略）；工程卡片底部 `选择会话` 对齐；弹窗搜索、全选、逐项选择、取消不提交、确认后 scoped selection 均通过。桌面 `1493 x 768` 与 Variant C 并排检查无 P0/P1/P2 问题。
 - 未执行真实会话导入、导出、移入废纸篓、恢复或 visibility repair mutation。
 
 ### Codex state and session feedback follow-up — 2026-08-24
@@ -157,7 +157,7 @@ created: 2026-08-17
 - `python3 -m pytest -q plugins/providers/builtin/codex/tests` — **47 passed**。
 - `node --test mac-app/tests/accountFeature*.test.mjs` — **13 passed**；`cd mac-app && ./node_modules/.bin/tsc --noEmit` — passed。
 - `bash build.sh` — passed；生成 40,940,751-byte `OnlineWorker_1.10.0_aarch64.dmg`，SHA-256 `fd120b2a45a2a97fca95a06876c688cecf2c69603f4f18cde02a8810cd49d55e`。
-- `bash verify-packaged-fast.sh` 的构建和 DMG 校验通过；安装首次被两个不响应正常停止的旧 bot 阻塞。按明确 PID 停止旧实例后，`OnlineWorker/scripts/install-current-dmg.sh` 安装和重启通过，DMG 与 `/Applications` 的 app/bot/ccusage hashes 一致，Codemaker/POPO bundled manifests 存在。
+- `bash verify-packaged-fast.sh` 的构建和 DMG 校验通过；安装首次被两个不响应正常停止的旧 bot 阻塞。按明确 PID 停止旧实例后，`OnlineWorker/scripts/install-current-dmg.sh` 安装和重启通过，DMG 与 `/Applications` 的 app/bot/ccusage hashes 一致，external provider extension/external notification extension bundled manifests 存在。
 - 未执行真实额度请求、apply/reapply、账号导入导出或会话 mutation。
 
 ## Validation Sign-Off

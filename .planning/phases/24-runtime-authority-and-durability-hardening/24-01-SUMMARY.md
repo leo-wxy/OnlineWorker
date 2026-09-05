@@ -15,7 +15,7 @@ completed_at: "2026-08-30T17:54:07+08:00"
 
 ## Verification
 
-- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest tests/test_message_event_bus.py -q` → `26 passed in 0.35s`
+- `python3.13 -m pytest tests/test_message_event_bus.py -q` → `26 passed in 0.35s`
 - `git diff --check` → passed
 
 默认 `python3` 指向 Python 3.14 且没有安装 pytest，因此首次命令未进入测试；未安装依赖，改用项目已有 Python 3.13.1 完成验证。

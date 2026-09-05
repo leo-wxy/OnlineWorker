@@ -15,8 +15,8 @@ completed_at: "2026-08-30T18:34:39+08:00"
 
 ## Verification
 
-- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest tests/test_message_event_bus.py tests/test_events_streaming.py tests/test_codex_adapter.py -q` → `133 passed`
-- `/Users/wxy/.pyenv/versions/3.13.1/bin/python3 -m pytest tests/test_provider_owner_bridge.py -q` → `63 passed`
+- `python3.13 -m pytest tests/test_message_event_bus.py tests/test_events_streaming.py tests/test_codex_adapter.py -q` → `133 passed`
+- `python3.13 -m pytest tests/test_provider_owner_bridge.py -q` → `63 passed`
 - `node --test tests/appShell.test.mjs tests/menubarPopover.test.mjs tests/sessionPolling.test.mjs tests/providerSessionEventStream.test.mjs` → `42 passed`
 - `git diff --check` → passed
 

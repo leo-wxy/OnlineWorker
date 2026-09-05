@@ -92,8 +92,8 @@ completed: 2026-08-18
 - Performance follow-up packaged verification：`verify-packaged-fast.sh` 113 s passed；39 MB DMG SHA-256 `6c1a6b0ae4b40e41196fe1897a4074f930e12f5d2e2a1e96120e75e0e8a38472`；安装版账号 cache-hit 449 ms，resident worker tree 稳定；会话刷新 6001 ms。
 - OAuth/Token-only 与账号卡片 follow-up：Python account/Codex regression `44 passed`；Node account contracts `10 passed`；TypeScript 与 `pnpm build` passed；1440px Light/Dark 及 900px Light 截图确认卡片层级和窄屏无横向溢出。
 - 2026-08-23 source follow-up：Python **71 passed**、Rust account feature **10 passed**、Node account contracts **10 passed**、TypeScript、Rust format 与 `git diff --check` 通过；桌面与窄屏浏览器预览确认回调成功状态、返回应用指引和关闭页面入口。
-- 2026-08-23 packaged follow-up：`bash build.sh` passed；39 MB `OnlineWorker_1.9.0_aarch64.dmg` SHA-256 `aea1e9baeb4fa598201d332cd9dcb5aa626866abc6afb03b8c5e9f10c1f2ead7`。首次 packaged install 被两个不响应 SIGTERM 的 3 天旧 bot 阻塞；按 PID 清理后 `install-current-dmg.sh` passed，DMG/installed 三个二进制哈希一致，Codemaker/POPO bundled manifests 存在，app 与 account worker 正常启动。
-- Installed-app read-only UI：账号卡片显示 1 个当前 PRO 账号、68% 周额度和可用 reapply/refresh/export；添加弹窗双 tab 与关闭/取消可用；会话页显示 **35 个 cwd/project 组 / 79 个 conversations**。
+- 2026-08-23 packaged follow-up：`bash build.sh` passed；39 MB `OnlineWorker_1.9.0_aarch64.dmg` SHA-256 `aea1e9baeb4fa598201d332cd9dcb5aa626866abc6afb03b8c5e9f10c1f2ead7`。首次 packaged install 被两个不响应 SIGTERM 的 3 天旧 bot 阻塞；按 PID 清理后 `install-current-dmg.sh` passed，DMG/installed 三个二进制哈希一致，external provider extension/external notification extension bundled manifests 存在，app 与 account worker 正常启动。
+- Installed-app read-only UI：账号卡片显示账号状态、周额度和可用 reapply/refresh/export（个人数值省略）；添加弹窗双 tab 与关闭/取消可用；会话页显示 工作目录分组及会话（个人统计省略）。
 - Session card-picker source verification：`node --test tests/accountFeature*.test.mjs` **10 passed**；TypeScript 与 `git diff --check` passed。
 - Review remediation source verification：Python **75 passed**、Rust account feature **13 passed**、Node account contracts **11 passed**，TypeScript 与 Rust format checks passed。
 - Account-tab design source verification：`node --test tests/accountFeature*.test.mjs` **11 passed**；`./node_modules/.bin/tsc --noEmit`、`pnpm build` 与 `git diff --check` passed。

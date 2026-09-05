@@ -296,7 +296,7 @@ Verification:
 - `git diff --check` passed with no unresolved conflicts.
 - The combined wrapper built and installed `OnlineWorker_1.10.0_aarch64.dmg`; DMG SHA-256: `37fc10af4d762bf61cfd7af94e77a4b4b196cd5c8dea91caf422664ec7ec4a33`.
 - The first install attempt found two pre-existing bot processes that did not stop within the helper timeout. After terminating those exact stale processes, installation and restart completed successfully.
-- Installed app, bot, and usage-sidecar hashes matched the mounted DMG. The bundled `codemaker` provider and `popo` notification manifests were present, and the installed App, main bot, and account worker remained running after startup.
+- Installed app, bot, and usage-sidecar hashes matched the mounted DMG. The bundled `external provider extension` provider and `external notification extension` notification manifests were present, and the installed App, main bot, and account worker remained running after startup.
 - Real Telegram acceptance remains pending; this record does not replace the canonical Phase 21 closeout.
 
 ## Implementation Record — 2026-08-24 (Turn-Scoped Telegram Deduplication Follow-Up)
@@ -323,5 +323,5 @@ Verification:
 - Provider state, Telegram streaming, adapter, external-ingress, and owner-bridge regression passed: `176` sandbox-compatible tests plus `2` macOS FSEvents tests rerun outside the sandbox, `178 passed` total.
 - The combined wrapper rebuilt `OnlineWorker_1.10.0_aarch64.dmg`; the installed artifact SHA-256 was `a2ce0d3c1294bdfefd6830984a0d1ace3c29e69ade171871abc9e136fbcbee48`.
 - The first fast-install attempt stopped before replacement because two stale bot processes exceeded the helper timeout. After those exact old processes exited, the repository install helper completed replacement and restart.
-- Installed app, bot, and usage-sidecar hashes matched the mounted DMG. The packaged `codemaker` provider and `popo` notification manifests were present, and the installed App, main bot, and account worker remained running after startup.
+- Installed app, bot, and usage-sidecar hashes matched the mounted DMG. The packaged `external provider extension` provider and `external notification extension` notification manifests were present, and the installed App, main bot, and account worker remained running after startup.
 - Real Telegram acceptance for the duplicate-message scenario remains pending.
