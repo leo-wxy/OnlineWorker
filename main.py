@@ -231,6 +231,7 @@ from telegram.ext import (
     filters,
 )
 from telegram.request import HTTPXRequest
+from telegram.error import NetworkError
 from config import load_config, default_data_dir, set_data_dir
 from core.im_routes import ImRouteStore
 from core.state import AppState
@@ -246,6 +247,8 @@ from bot.handlers.slash import make_slash_command_handler
 from bot.handlers.message import make_message_handler, make_callback_handler
 
 logger = logging.getLogger(__name__)
+telegram_polling_logger = logging.getLogger("onlineworker.telegram_polling")
+telegram_polling_logger.setLevel(logging.INFO)
 
 _DEFAULT_LOCK_FILE = "/tmp/onlineworker_bot.lock"
 _TELEGRAM_BOT_URL_RE = re.compile(r"(https://api\.telegram\.org/bot)[^/\s]+")
@@ -295,6 +298,15 @@ def _telegram_httpx_kwargs(cfg) -> dict:
     if proxy_url:
         kwargs["proxy"] = proxy_url
     return kwargs
+
+
+async def _log_telegram_polling_response(response) -> None:
+    if not response.request.url.path.endswith("/getUpdates"):
+        return
+    if response.status_code == 200:
+        telegram_polling_logger.info("[telegram-polling] success")
+    else:
+        telegram_polling_logger.warning("[telegram-polling] failure status=%s", response.status_code)
 
 
 MAX_RAPID_CRASHES = 5       # 连续快速崩溃上限
@@ -449,6 +461,9 @@ async def _log_raw_update(update: Update, context) -> None:
 
 async def _log_application_error(update: object, context) -> None:
     """记录 PTB update 处理链中的未捕获异常。"""
+    error = getattr(context, "error", None)
+    if update is None and isinstance(error, NetworkError):
+        telegram_polling_logger.warning("[telegram-polling] failure reason=%s", type(error).__name__)
     logger.error(
         "[ptb-error] update_type=%s error=%s",
         type(update).__name__ if update is not None else "None",
@@ -665,7 +680,10 @@ def main() -> None:
                         read_timeout=20,
                         write_timeout=20,
                         connect_timeout=10,
-                        httpx_kwargs=telegram_httpx_kwargs,
+                        httpx_kwargs={
+                            **telegram_httpx_kwargs,
+                            "event_hooks": {"response": [_log_telegram_polling_response]},
+                        },
                     )
                 )
                 .build()

@@ -243,13 +243,15 @@ fn read_tail(path: &Path, max_bytes: u64) -> Result<String, String> {
 }
 
 fn is_telegram_polling_success_line(line: &str) -> bool {
-    line.contains("api.telegram.org")
-        && line.contains("/getUpdates")
-        && line.contains("\"HTTP/1.1 200 OK\"")
+    line.contains("onlineworker.telegram_polling: [telegram-polling] success")
+        || (line.contains("api.telegram.org")
+            && line.contains("/getUpdates")
+            && line.contains("\"HTTP/1.1 200 OK\""))
 }
 
 fn is_telegram_polling_error_line(line: &str) -> bool {
-    line.contains("[ptb-error]")
+    line.contains("onlineworker.telegram_polling: [telegram-polling] failure")
+        || line.contains("[ptb-error]")
         || line.contains("telegram.error.NetworkError")
         || line.contains("telegram.error.TimedOut")
         || line.contains("httpx.ConnectError")
@@ -299,10 +301,21 @@ fn redact_telegram_token(line: &str) -> String {
 fn diagnose_telegram_polling_from_log(raw: &str, now: SystemTime) -> TelegramPollingDiagnostic {
     let mut current_timestamp: Option<SystemTime> = None;
     let mut last_polling_event: Option<(bool, SystemTime, String)> = None;
+    let mut has_polling_marker = false;
 
     for line in raw.lines() {
         if let Some(timestamp) = parse_log_timestamp(line) {
             current_timestamp = Some(timestamp);
+        }
+        if line.contains("telegram.ext.Application:") && line.contains("Application started") {
+            last_polling_event = None;
+            has_polling_marker = false;
+            continue;
+        }
+        if line.contains("onlineworker.telegram_polling: [telegram-polling]") {
+            has_polling_marker = true;
+        } else if has_polling_marker {
+            continue;
         }
         if is_telegram_polling_success_line(line) {
             let ts = current_timestamp.unwrap_or(now);
@@ -328,6 +341,12 @@ fn diagnose_telegram_polling_from_log(raw: &str, now: SystemTime) -> TelegramPol
                     "Telegram getUpdates has no recent successful response for {}s",
                     age
                 )),
+            };
+        }
+        if age > TELEGRAM_POLLING_STALE_AFTER_SECS {
+            return TelegramPollingDiagnostic {
+                connected: None,
+                detail: Some(format!("Last Telegram polling error is stale ({}s); waiting for a new result", age)),
             };
         }
         return TelegramPollingDiagnostic {
@@ -543,6 +562,22 @@ mod tests {
         assert!(detail.contains("Recent Telegram polling error"));
         assert!(!detail.contains("1234567890:SECRET"));
         assert!(detail.contains("/bot[redacted]/getUpdates"));
+    }
+
+    #[test]
+    fn telegram_polling_diagnostic_uses_safe_markers_and_expires_old_errors() {
+        let now = SystemTime::now();
+        let stamp = |age| local_log_time(now, Duration::from_secs(age));
+        let cases = [
+            (format!("{} [ERROR] __main__: [ptb-error] old failure\n{} [INFO] onlineworker.telegram_polling: [telegram-polling] success", stamp(10), stamp(2)), Some(true)),
+            (format!("{} [INFO] onlineworker.telegram_polling: [telegram-polling] success\n{} [ERROR] __main__: telegram.error.NetworkError: message delivery failed", stamp(10), stamp(2)), Some(true)),
+            (format!("{} [ERROR] __main__: [ptb-error] old failure", stamp(120)), None),
+            (format!("{} [ERROR] __main__: [ptb-error] old failure\n{} [INFO] telegram.ext.Application: Application started", stamp(10), stamp(2)), None),
+            (format!("{} [INFO] onlineworker.telegram_polling: [telegram-polling] success\n{} [WARNING] onlineworker.telegram_polling: [telegram-polling] failure reason=NetworkError", stamp(10), stamp(2)), Some(false)),
+        ];
+        for (raw, expected) in cases {
+            assert_eq!(diagnose_telegram_polling_from_log(&raw, now).connected, expected, "{raw}");
+        }
     }
 
     #[test]

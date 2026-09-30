@@ -154,12 +154,28 @@ def test_main_uses_telegram_proxy_settings_for_request(monkeypatch):
 
     assert len(request_calls) == 4
     assert all(
-        call["httpx_kwargs"] == {
+        {k: v for k, v in call["httpx_kwargs"].items() if k != "event_hooks"} == {
             "trust_env": True,
             "proxy": "socks5://127.0.0.1:7890",
         }
         for call in request_calls
     )
+    assert request_calls[1]["httpx_kwargs"]["event_hooks"]["response"] == [main._log_telegram_polling_response]
+
+
+@pytest.mark.asyncio
+async def test_polling_health_logs_safe_success_failure_and_ignores_message_errors(caplog):
+    from telegram.error import NetworkError
+    response = SimpleNamespace(status_code=200, request=SimpleNamespace(url=SimpleNamespace(path="/botsynthetic-token/getUpdates")))
+    with caplog.at_level(logging.INFO, logger="onlineworker.telegram_polling"):
+        await main._log_telegram_polling_response(response)
+        response.status_code = 503
+        await main._log_telegram_polling_response(response)
+        await main._log_application_error(None, SimpleNamespace(error=NetworkError("sample polling failure")))
+        await main._log_application_error(object(), SimpleNamespace(error=NetworkError("sample message failure")))
+    records = [record.getMessage() for record in caplog.records if record.name == "onlineworker.telegram_polling"]
+    assert records == ["[telegram-polling] success", "[telegram-polling] failure status=503", "[telegram-polling] failure reason=NetworkError"]
+    assert "synthetic-token" not in " ".join(records)
 
 
 def test_main_prestarts_provider_runtime_before_telegram_polling(monkeypatch):
