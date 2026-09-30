@@ -56,7 +56,12 @@ wait_for_started() {
 	while [ "$SECONDS" -lt "$deadline" ]; do
 		if runtime_lines | awk '
 			$4 ~ /\/onlineworker-app$/ { app += 1 }
-			$4 ~ /\/onlineworker-bot$/ { bot += 1 }
+			$4 ~ /\/onlineworker-bot$/ {
+				# The main bot has only --data-dir; helpers add operation flags.
+				main_bot = ($5 == "--data-dir")
+				for (i = 6; i <= NF; i++) if ($i ~ /^--/) main_bot = 0
+				bot += main_bot
+			}
 			END { exit !(app >= 1 && bot >= 1) }
 		'; then
 			return 0

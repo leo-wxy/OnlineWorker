@@ -110,3 +110,35 @@ def test_restart_force_stops_runtime_that_ignores_term(tmp_path: Path):
         "15310 15408",
         "-KILL 15310 15408",
     ]
+
+
+@pytest.mark.parametrize("script_name", ("install-current-dmg.sh", "restart-installed-app.sh"))
+@pytest.mark.parametrize(
+    "bot_args, expected",
+    (
+        (None, 1),
+        ("--account-feature-worker", 1),
+        ("--provider-session-bridge --data-dir /tmp/sample-workspace", 1),
+        ("--data-dir /tmp/sample-workspace --provider-session-bridge", 1),
+        ("--data-dir /tmp/sample-workspace --codex-tui-host", 1),
+        ("--data-dir /tmp/sample-workspace", 0),
+        ("--data-dir /tmp/sample workspace", 0),
+    ),
+)
+def test_started_check_requires_main_bot(script_name: str, bot_args: str | None, expected: int):
+    script = (PROJECT_ROOT / "scripts" / script_name).read_text(encoding="utf-8")
+    function = "wait_for_started() {" + script.split("wait_for_started() {", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+    rows = "20001 1 00:00 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-app"
+    if bot_args is not None:
+        rows += f"\n20002 20001 00:00 /Applications/OnlineWorker.app/Contents/MacOS/onlineworker-bot {bot_args}"
+    result = subprocess.run(
+        ["/bin/bash", "-c", function +
+         'runtime_lines() { printf "%s\\n" "$OW_TEST_ROWS"; }; '
+         'sleep() { SECONDS=$((SECONDS + 1)); }; wait_for_started 1'],
+        env={**os.environ, "OW_TEST_ROWS": rows},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == expected, result.stdout + result.stderr
