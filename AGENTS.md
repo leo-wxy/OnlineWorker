@@ -67,6 +67,19 @@ rules needed to work safely in this codebase.
     commits. History rewriting and force-pushing require explicit approval and
     a backup plan.
 
+## Message Bus Authority
+
+- 所有与消息相关的接收、归一化、去重、状态投影、展示和通知分发，都必须经过
+  现有消息总线 `MessageEventBus`。输入可以来自不同 provider 或入口，但不能
+  在页面、通知渠道或路由层另建消息处理链路。
+- Task Board、会话详情、Telegram 和其他消费者只能消费总线事件或总线派生的
+  投影。历史数据也应由消息中心统一加载和回放，不能由各页面独立读取会话
+  文件或日志来维持消息显示。
+- 禁止通过新增定时轮询、后台重读会话文件或重复订阅来掩盖消息更新缺陷。
+  出现消息滞后时，先定位并修复事件发布、订阅、去重或投影更新的根因。
+- Provider 兼容入口和 fallback 也必须发布到同一总线，并遵守单一权威消息源
+  约束；不得与权威 live 链并行输出同一条用户可见消息。
+
 ## Provider Approval Control
 
 - 权限审批只允许走 provider app-server request/response。OnlineWorker 接到

@@ -31,6 +31,15 @@ The v1.2.1 milestone requirements are archived at [milestones/v1.2.1-REQUIREMENT
 - [x] **STAB-05**: Critical config/state writes are atomic and recoverable, and route migrations can safely resume.
 - [x] **STAB-06**: Each stability slice has focused automated regression coverage.
 
+## Session Delivery and Recovery
+
+- [x] **DELIVERY-01**: 发送与归档只在请求写入前自动重试，结果不确定时不重复执行。
+- [x] **DELIVERY-02**: 会话状态由 Python AppStorage 统一写入；配置并发与陈旧全文保存不会丢更新。
+- [x] **DELIVERY-03**: 旧 stream、归档、发送和附件结果不能更新新的 provider/session/workspace 选择。
+- [x] **DELIVERY-04**: 慢 IM 消费不阻塞 MessageEventBus 发布、本地状态与会话投影。
+- [x] **DELIVERY-05**: 流发送积压有界，断线后通过消息中心快照恢复，无静默丢失或重复。
+- [x] **DELIVERY-06**: 新建与首消息失败保留真实会话和恢复状态，重试不创建或发送第二份。
+
 ## Deferred Backlog
 
 - [ ] **STAB-07**: OnlineWorker can discover the current Codex session owner, steer/queue ordinary TG input through that owner, invoke its real interrupt capability, and return commentary/final to the original TG Topic. Deferred from Phase 24 by user acceptance; not implemented/verified. Resume only when supported owner control becomes available; preserve the acceptance criteria in [24-07-PLAN.md](phases/24-runtime-authority-and-durability-hardening/24-07-PLAN.md).
@@ -60,3 +69,9 @@ These items remain candidates for future work. UX/PLT items came from v1.2.1; ST
 | STAB-05 | Phase 24 | Source verified in 24-06 and 24-08 |
 | STAB-06 | Phase 24 | Source verified through 24-09; fast packaged verification passed; feature UAT not run and accepted as an archival limitation |
 | STAB-07 | Deferred backlog (from Phase 24) | Deferred by user acceptance on 2026-09-05; original owner-control gap and acceptance criteria preserved in 24-07 |
+| DELIVERY-01 | Phase 25 / 25-01 | Complete |
+| DELIVERY-02 | Phase 25 / 25-01 | Complete |
+| DELIVERY-03 | Phase 25 / 25-01 | Complete |
+| DELIVERY-04 | Phase 25 / 25-02 | Source and fast package verified; feature UAT pending |
+| DELIVERY-05 | Phase 25 / 25-02 | Source and fast package verified; feature UAT pending |
+| DELIVERY-06 | Phase 25 / 25-03 | Source and fast package verified; feature UAT pending |

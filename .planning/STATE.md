@@ -2,29 +2,29 @@
 gsd_state_version: 1.0
 milestone: general-ai-capability-and-session-operations
 milestone_name: General AI Capability and Session Operations
-current_phase: null
+current_phase: 25
 last_completed_phase: 24 — Runtime Authority and Durability Hardening
-current_plan: null
-status: Phase 24 archived with accepted scope; STAB-07 deferred; ready for next scoped task
-stopped_at: Archived Phase 24 with STAB-07 deferred by user acceptance
-last_updated: "2026-09-05T10:43:52+08:00"
+current_plan: 25-03
+status: Phase 25 in progress; Phase 24 remains archived; STAB-07 deferred
+stopped_at: 25-03 source and fast package verified; Phase 25 feature UAT pending
+last_updated: "2026-09-30"
 progress:
-  total_phases: 19
+  total_phases: 20
   completed_phases: 13
-  total_plans: 58
-  completed_plans: 45
+  total_plans: 61
+  completed_plans: 46
   deferred_plans: 1
-  percent: 78
-current_phase_name: null
+  percent: 75
+current_phase_name: Session Delivery and Recovery
 ---
 
 # Project State
 
-**Updated:** 2026-09-05
+**Updated:** 2026-09-30
 **Current milestone:** General AI Capability and Session Operations
-**Current phase:** None; Phase 24 completed and archived
-**Status:** Phase 24 archived with accepted scope; STAB-07 deferred; ready for next scoped task
-**Current plan:** None; STAB-07 is retained in deferred backlog
+**Current phase:** 25 — Session Delivery and Recovery
+**Status:** In progress; Phase 24 remains archived and STAB-07 deferred
+**Current plan:** 25-03 — 源码与快速打包安装验证通过；功能 UAT 待确认
 **Last archived milestone:** v1.2.1
 
 ## Current Status
@@ -91,13 +91,14 @@ current_phase_name: null
 | 22. Dark Mode Support | Source verified through `22-06` | Await explicit permission for installed-app visual and native-window verification |
 | 23. Plugin-Owned Codex Account and Session Asset Management | Completed; OAuth/Token-only entry and fixed row tracks source/visual verified; earlier resident cache path installed verified | Current follow-up is not packaged; session refresh remains 6.0 s and real mutations remain unverified |
 | 24. Runtime Authority and Durability Hardening | Completed and archived with accepted scope; 8 retained plans delivered | None; STAB-07 deferred separately, feature UAT retained as unverified |
+| 25. Session Delivery and Recovery | In progress | 25-01 complete and installed verified; 25-02 source and fast package verified, feature UAT pending; 25-03 source and fast package verified, feature UAT pending |
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 **Core value:** Developers can reliably control local AI coding CLI workflows from an installed Mac app while receiving timely remote notifications and final results through supported notification channels.
-**Current focus:** Phase 24 archived; ready for the next scoped task. Revisit deferred STAB-07 only when its supported owner-control prerequisites are available.
+**Current focus:** Phase 25 follows the user-approved order: send/session/state boundaries, consumer/stream recovery, then new-session recovery. STAB-07 remains deferred.
 
 ## Key Preserved Decisions
 
@@ -245,6 +246,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 ## Session Continuity
 
-Last session: 2026-09-05T10:43:52+08:00
-Stopped at: Archived Phase 24 with STAB-07 deferred by user acceptance
+Last session: 2026-09-30
+Stopped at: Phase 25-03 source and fast package verified; feature UAT pending; Phase 24 remains archived
 Resume file: none

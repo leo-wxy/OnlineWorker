@@ -48,3 +48,23 @@ fast_packaged_verified_at: "2026-09-05T10:39:34+08:00"
 - IPC 精简只覆盖会话模块的六个等价入口；usage、Task Board、Dashboard 的独立错误处理没有被强行统一。
 - 未新增依赖、修改公开合同或手动修改运行时用户配置；未 commit/push。打包、覆盖安装与重启仅在后续明确授权后执行。
 - 快速安装与启动已验证；安装版功能 UAT 未验证。
+
+## 后续精简（2026-09-26）
+
+- TaskBoard 的 `sessionActivities` 改为必填，删除独立活动流订阅与本地备用状态；复用 App 已有的 snapshot/activity/remove 处理和 stream ID 清理。净减 61 行。
+- IM route 迁移改用固定命名参数 SQL，以 `IS` 比较可空 workspace/session 字段；保留既有目标绑定与入口占用保护。净减 25 行。回归覆盖三种 scope 的目标冲突、入口冲突，以及 unknown 入口升级。
+- Claude runtime 删除六个未使用的默认 hook 导入，保留 provider 仍使用的重连 hook。净减 8 行。
+- 本轮生产代码净减 94 行，未新增依赖；Phase 24 归档与 STAB-07 延期状态保持。
+
+| 命令 | 结果 |
+|---|---|
+| `rtk proxy python -m pytest -q tests/test_im_route_store.py tests/test_claude_runtime.py tests/test_provider_capabilities.py` | 27 passed |
+| `rtk proxy node --test mac-app/tests/appShell.test.mjs mac-app/tests/taskBoard.test.mjs` | 56 passed |
+| `rtk proxy ./mac-app/node_modules/.bin/tsc -p mac-app/tsconfig.json --noEmit` | 通过 |
+| `rtk proxy git diff --check` | 通过 |
+
+后续按用户明确授权运行 `rtk proxy bash scripts/verify-packaged-fast.sh`，退出 `0`，耗时 `104s`。`1.10.1` 四处版本一致，Python bot、ccusage、前端与 Rust release 构建完成，产物为 `mac-app/src-tauri/target/release/bundle/dmg/OnlineWorker_1.10.1_aarch64.dmg`。
+
+已覆盖并重启 `/Applications/OnlineWorker.app`。按源码实际的 `--data-dir` 参数核对，主 App 与主 bot 均从安装目录运行；账号 worker 和会话查询辅助进程未计作主 bot。快速安装与启动验证通过，完整功能 UAT 未执行。
+
+2026-09-30 再次运行 `rtk proxy bash scripts/verify-packaged-fast.sh`，退出 `0`，耗时 `91s`。`1.10.1` sidecar 与应用重建、DMG 生成、覆盖安装及重启完成；补充核对确认新启动的主 App 与主 bot 均运行于安装目录。完整功能 UAT 未执行。

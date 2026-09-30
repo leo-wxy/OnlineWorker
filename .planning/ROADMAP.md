@@ -29,6 +29,7 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 21: Provider Child-Session Visibility** - Provider-owned visibility now blocks child/internal sessions before EventBus and Topic creation, provider-native titles are shared across Desktop and Telegram, and the installed `v1.8.4` runtime passed real child-suppression verification. The remaining live Telegram visual comparison was explicitly waived at closeout and is not claimed as passed. (completed 2026-08-15)
 - [ ] **Phase 22: Dark Mode Support** - Add consistent dark-theme support across the macOS app while preserving existing light-mode behavior.
 - [x] **Phase 24: Runtime Authority and Durability Hardening** - Completed and archived on 2026-09-05 with eight delivered plans; 24-07 / STAB-07 explicitly deferred and feature UAT retained as unverified. [Archive](phases/24-runtime-authority-and-durability-hardening/24-ARCHIVE.md).
+- [ ] **Phase 25: Session Delivery and Recovery** - 按顺序修复发送重试、写入权威、会话失效、消费积压与新建恢复。
 
 ## Phase Details
 
@@ -974,3 +975,15 @@ Latest verification:
 - Phase 24 plan 24-09 source verification completed on 2026-09-05: production code reduced by `342` lines; Python `43 passed`, Node `40 passed`, Rust `256 passed`; TypeScript and formatting/static checks passed. Subsequent authorized `1.10.0` fast build/install/restart verification passed; feature UAT remains unverified.
 - Cross-owner honesty regression passed `4` focused tests and `105 passed, 1 skipped` across the related Codex files. Real owner interrupt remains unimplemented; STAB-07 was explicitly deferred when Phase 24 was archived on 2026-09-05.
 - Phase 24-09 fast package/install/restart verification passed after explicit authorization. Full installed-app feature UAT and cross-owner interrupt verification are not claimed.
+
+### Phase 25: Session Delivery and Recovery
+
+**Goal:** 发送与归档不会因响应不确定而重复执行，旧会话结果不能污染新会话，状态只有一个写入权威，慢 IM 和流积压不阻塞或破坏总线投影，新建失败可恢复已有真实会话。
+**Requirements:** DELIVERY-01–DELIVERY-06
+**Depends on:** Phase 14, Phase 18, Phase 24
+**Status:** In progress; opened on 2026-09-30 by user instruction.
+**Scope Fence:** 复用现有 registry、owner bridge、MessageEventBus、AppStorage 和原子写入；不新增依赖、不引入离线归档 journal、不重新开启 STAB-07。
+
+- [x] [25-01-PLAN.md](phases/25-session-delivery-and-recovery/25-01-PLAN.md) — 发送边界、会话失效、状态写入权威与发送失败事件
+- [x] [25-02-PLAN.md](phases/25-session-delivery-and-recovery/25-02-PLAN.md) — IM 消费隔离、有界流队列与重连快照（源码与快速打包安装验证通过；功能验收待确认）
+- [x] [25-03-PLAN.md](phases/25-session-delivery-and-recovery/25-03-PLAN.md) — 新建会话分阶段恢复（源码与快速打包安装验证通过；功能 UAT 待确认）
