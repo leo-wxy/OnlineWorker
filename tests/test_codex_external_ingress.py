@@ -86,7 +86,8 @@ async def test_large_rollout_history_does_not_consume_one_fd_per_file(
 
 
 @pytest.mark.asyncio
-async def test_start_restores_only_bound_unfinished_rollout_watch(tmp_path: Path):
+@pytest.mark.parametrize("topic_id", [None, 14623])
+async def test_start_restores_only_bound_unfinished_rollout_watch(tmp_path: Path, topic_id):
     active_session_id = "11111111-2222-4333-8444-555555555557"
     completed_session_id = "11111111-2222-4333-8444-555555555558"
     turn_id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeee10"
@@ -155,7 +156,7 @@ async def test_start_restores_only_bound_unfinished_rollout_watch(tmp_path: Path
     )
     workspace.threads[active_session_id] = ThreadInfo(
         thread_id=active_session_id,
-        topic_id=14623,
+        topic_id=topic_id,
         source="unknown",
     )
     workspace.threads[completed_session_id] = ThreadInfo(

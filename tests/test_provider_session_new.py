@@ -8,6 +8,70 @@ from core.storage import AppStorage
 from core.storage import ThreadInfo, WorkspaceInfo
 
 
+def test_recovery_projection_clears_only_recovery_failure_and_preserves_completion():
+    from core.messages.events import create_message_event
+    state = AppState()
+
+    def publish(kind, **payload):
+        state.message_bus.publish(create_message_event(kind, provider_id="overlay-tool", session_id="sample-session", turn_id="sample-turn", payload=payload))
+
+    publish("turn.started")
+    publish("session.recovery.updated", error="sample binding failure", text="sample first message")
+    publish("session.recovery.updated", recoveryStatus="sent")
+    assert state.message_bus.session_activity("overlay-tool", "sample-session")["status"] == "running"
+    publish("session.recovery.updated", error="sample binding failure")
+    publish("turn.completed")
+    publish("session.recovery.updated", recoveryStatus="sent")
+    activity = state.message_bus.session_activity("overlay-tool", "sample-session")
+    assert activity["status"] == "completed"
+    assert activity["attentionReason"] == activity["deliveryError"] == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["topic_pending", "unknown_send", "save_after_send"])
+async def test_new_session_recovery_reuses_thread_and_never_repeats_uncertain_or_sent_message(monkeypatch, tmp_path, failure):
+    from core import provider_session_new as new
+    from core.storage import load_storage, save_storage
+
+    ws = WorkspaceInfo(name="sample", path="/tmp/sample-workspace", tool="overlay-tool", daemon_workspace_id="overlay-tool:/tmp/sample-workspace")
+    state = AppState(storage=AppStorage(workspaces={ws.daemon_workspace_id: ws}))
+    path = tmp_path / "sample-state.json"
+    fail_save = failure == "save_after_send"
+
+    def persist(storage):
+        nonlocal fail_save
+        if fail_save and any(t.new_session_recovery.get("send_status") == "sent" for t in ws.threads.values()):
+            fail_save = False
+            raise OSError("sample save failure")
+        save_storage(storage, str(path))
+
+    monkeypatch.setattr(new, "save_storage", persist)
+    adapter = SimpleNamespace(start_thread=AsyncMock(return_value={"id": "sample-session"}))
+    args = dict(provider_id="overlay-tool", preview="sample first message", source="telegram_new_thread", state=state, recovery_key="sample-request")
+    started = await new.start_real_provider_thread(adapter, ws, ws.daemon_workspace_id, **args)
+    restarted = await new.start_real_provider_thread(adapter, ws, ws.daemon_workspace_id, **args)
+    assert restarted.thread_id == started.thread_id
+    assert load_storage(str(path)).workspaces[ws.daemon_workspace_id].threads[started.thread_id].source == "telegram_new_thread"
+    adapter.start_thread.assert_awaited_once()
+    send = AsyncMock(return_value=new.SentProviderThreadMessage(started.thread_id, "sample first message"))
+    if failure == "unknown_send":
+        send.side_effect = TimeoutError("sample uncertain response")
+    monkeypatch.setattr(new, "_send_started_provider_thread_message", send)
+    if failure != "topic_pending":
+        with pytest.raises((OSError, TimeoutError)):
+            await new.send_started_provider_thread_message(state, ws, started.thread_info, ws.daemon_workspace_id)
+        loaded = load_storage(str(path)).workspaces[ws.daemon_workspace_id].threads[started.thread_id]
+        assert loaded.new_session_recovery["send_status"] in {"sending", "unknown"}
+    if failure == "unknown_send":
+        with pytest.raises(RuntimeError, match="禁止自动重复发送"):
+            await new.send_started_provider_thread_message(state, ws, started.thread_info, ws.daemon_workspace_id)
+    else:
+        await new.send_started_provider_thread_message(state, ws, started.thread_info, ws.daemon_workspace_id)
+        await new.send_started_provider_thread_message(state, ws, started.thread_info, ws.daemon_workspace_id)
+        assert started.thread_info.new_session_recovery["send_status"] == "sent"
+    send.assert_awaited_once()
+
+
 @pytest.mark.asyncio
 async def test_start_real_provider_thread_materializes_new_thread():
     from core.provider_session_new import start_real_provider_thread

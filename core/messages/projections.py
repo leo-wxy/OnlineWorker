@@ -123,19 +123,107 @@ def _is_user_interruption(event: MessageEvent) -> bool:
     } or "interrupted by user" in reason
 
 
+def _update_conversation(activity: SessionActivity, event: MessageEvent, *, full: bool = False) -> None:
+    turns = activity.conversation_turns
+    payload = {**(event.payload or {}), **event.conversation_payload} if full else event.payload or {}
+    window = 50 if full else 6
+    if event.kind == "session.history.loaded":
+        if not turns or full:
+            history = [
+                dict(turn) for turn in payload.get("turns", [])
+                if isinstance(turn, dict) and turn.get("role") in {"user", "assistant"}
+                and str(turn.get("content") or "").strip()
+            ][-window:]
+            if full and turns:
+                history = _merge_conversation_history(history, turns)
+            activity.conversation_turns = history[-window:]
+        return
+    if event.kind in {"turn.completed", "turn.failed"}:
+        for turn in turns:
+            if turn.get("pending") and (not event.turn_id or turn.get("turnId") == event.turn_id):
+                turn["pending"] = False
+                turn["displayMode"] = "markdown" if event.kind == "turn.completed" else "plain"
+        return
+    if event.kind not in {
+        "message.user.submitted", "message.user.accepted",
+        "message.assistant.delta", "message.assistant.final",
+    }:
+        return
+    if event.source == "startup_bootstrap" and turns:
+        return
+    text = str(payload.get("text") or payload.get("delta") or payload.get("message") or "")
+    role = "user" if event.kind.startswith("message.user.") else "assistant"
+    if role == "user":
+        attached = [f"[Attached {item.get('kind') or 'file'}] {item.get('name') or 'attachment'}"
+                    for item in payload.get("attachments", []) if isinstance(item, dict)]
+        if attached:
+            text = "\n".join(([text] if text else []) + attached)
+    if not text:
+        return
+    item_id = str(payload.get("itemId") or "")
+    message_request_id = str(payload.get("messageRequestId") or "")
+    turn_id = event.turn_id
+    existing = None
+    if role == "user" and event.kind == "message.user.accepted":
+        existing = next((turn for turn in reversed(turns)
+                         if turn["role"] == "user" and (
+                             turn.get("messageRequestId") == message_request_id if message_request_id
+                             else turn["content"] == text
+                         )), None)
+    elif role == "assistant":
+        existing = next((turn for turn in reversed(turns)
+                         if turn["role"] == role and turn.get("turnId", "") == turn_id
+                         and turn.get("itemId", "") == item_id
+                         and (item_id or turn.get("pending"))), None)
+    if existing is None:
+        existing = {"role": role, "content": "", "itemId": item_id, "turnId": turn_id}
+        if message_request_id:
+            existing["messageRequestId"] = message_request_id
+        turns.append(existing)
+    incremental = event.kind == "message.assistant.delta" and not payload.get("isSnapshot")
+    if incremental and existing.get("pending") is False:
+        return
+    content = existing["content"] + text if incremental else text
+    existing["content"] = content if full else content[:4000]
+    existing["pending"] = role == "assistant" and event.kind == "message.assistant.delta" and not payload.get("isSnapshot")
+    existing["displayMode"] = "markdown" if event.kind == "message.assistant.final" else "plain"
+    del turns[:-window]
+
+
+def _merge_conversation_history(history: list[dict], live: list[dict]) -> list[dict]:
+    def same(left, right):
+        if left["role"] != right["role"]:
+            return False
+        left_id, right_id = left.get("itemId"), right.get("itemId")
+        if left_id and right_id:
+            return left_id == right_id and left.get("turnId", "") == right.get("turnId", "")
+        # ponytail: legacy history has no item IDs; align its suffix until providers expose them.
+        return left["content"] == right["content"]
+
+    for overlap in range(min(len(history), len(live)), 0, -1):
+        if all(same(left, right) for left, right in zip(history[-overlap:], live[:overlap])):
+            return history[:-overlap] + live
+    return history + live
+
+
 class SessionActivityProjection:
-    def __init__(self) -> None:
+    def __init__(self, *, full_conversation: bool = False) -> None:
+        self._full_conversation = full_conversation
         self._activities: dict[str, SessionActivity] = {}
         self._turn_ids: dict[str, str] = {}
+        self._message_request_ids: dict[str, str] = {}
+        self._request_turn_ids: dict[str, str] = {}
 
     def update(self, event: MessageEvent) -> None:
         if not event.provider_id or not event.session_id:
             return
 
         key = f"{event.provider_id}:{event.session_id}"
-        if event.kind == "session.archived":
+        if event.kind in {"session.archived", "session.hidden"}:
             self._activities.pop(key, None)
             self._turn_ids.pop(key, None)
+            self._message_request_ids.pop(key, None)
+            self._request_turn_ids.pop(key, None)
             return
 
         activity = self._activities.get(key)
@@ -157,6 +245,24 @@ class SessionActivityProjection:
         if event.turn_id and (event.kind == "turn.started" or not current_turn_id):
             self._turn_ids[key] = event.turn_id
 
+        payload = event.payload or {}
+        message_request_id = _compact(payload.get("messageRequestId"))
+        if event.kind == "message.user.submitted":
+            self._message_request_ids[key] = message_request_id
+            activity.last_message_request_id = message_request_id
+            self._request_turn_ids[key] = current_turn_id
+            activity.delivery_status = "submitted"
+            activity.delivery_error = ""
+        elif event.kind in {"message.user.queued", "message.user.accepted", "message.user.send_failed"}:
+            latest_request_id = self._message_request_ids.get(key, "")
+            if latest_request_id and message_request_id != latest_request_id:
+                return
+            if message_request_id and not latest_request_id:
+                self._message_request_ids[key] = message_request_id
+                activity.last_message_request_id = message_request_id
+
+        _update_conversation(activity, event, full=self._full_conversation)
+
         if event.workspace_id:
             activity.workspace_id = event.workspace_id
         if event.workspace_path:
@@ -174,6 +280,8 @@ class SessionActivityProjection:
             activity.title = event.session_id
 
         summary = _summary_from_payload(event)
+        if event.kind in {"message.assistant.delta", "message.assistant.final"} and activity.conversation_turns:
+            summary = _compact(activity.conversation_turns[-1]["content"])[:500]
         if event.kind == "message.user.submitted":
             if summary:
                 activity.last_user_message = summary
@@ -182,14 +290,30 @@ class SessionActivityProjection:
                 if not _is_terminal(activity):
                     _reset_live_summary_for_new_input(activity)
         elif event.kind == "message.user.accepted":
+            activity.delivery_status = "accepted"
+            activity.delivery_error = ""
             if summary:
                 activity.last_user_message = summary
                 if _is_placeholder_title(activity.title, event.session_id):
                     activity.title = summary[:160]
             if not _is_terminal(activity):
-                _reset_live_summary_for_new_input(activity)
+                if not message_request_id:
+                    _reset_live_summary_for_new_input(activity)
                 activity.status = RUNNING_STATUS
                 _clear_attention(activity)
+        elif event.kind == "message.user.queued":
+            activity.delivery_status = "queued"
+        elif event.kind == "message.user.send_failed":
+            activity.delivery_status = _compact(payload.get("deliveryStatus")) or "failed"
+            activity.delivery_error = _compact(payload.get("error")) or "消息发送失败"
+            if (
+                not activity.active_turn_id
+                and current_turn_id == self._request_turn_ids.get(key, current_turn_id)
+                and (message_request_id or activity.status != RUNNING_STATUS)
+            ):
+                activity.status = FAILED_STATUS
+                activity.attention_reason = _compact(payload.get("error")) or "消息发送失败"
+                activity.attention_kind = "failure"
         elif event.kind in {
             "turn.started",
             "message.assistant.delta",
@@ -211,6 +335,9 @@ class SessionActivityProjection:
             activity.active_turn_id = ""
             _clear_attention(activity)
         elif event.kind == "turn.completed":
+            if activity._recovery_status:
+                activity._recovery_status = COMPLETED_STATUS
+                activity.active_turn_id = ""
             if activity.status != NEEDS_ATTENTION_STATUS:
                 activity.status = COMPLETED_STATUS
                 activity.active_turn_id = ""
@@ -235,6 +362,22 @@ class SessionActivityProjection:
             activity.request_id = ""
             activity.approval_source = ""
             activity.mirrored_only = False
+        elif event.kind == "session.recovery.updated":
+            if payload.get("text"):
+                activity.last_user_message = str(payload["text"])[:500]
+            if payload.get("error"):
+                if not activity._recovery_status or activity.status != NEEDS_ATTENTION_STATUS:
+                    activity._recovery_status = activity.status
+                activity.status = NEEDS_ATTENTION_STATUS
+                activity.attention_reason = str(payload["error"])
+                activity.attention_kind = "failure"
+                activity.delivery_error = str(payload["error"])
+            elif activity._recovery_status:
+                if activity.status == NEEDS_ATTENTION_STATUS and activity.attention_kind == "failure":
+                    activity.status = activity._recovery_status
+                    _clear_attention(activity)
+                activity._recovery_status = ""
+                activity.delivery_error = ""
         elif event.kind == "approval.requested":
             prompt = _compact(payload.get("prompt") or payload.get("user_prompt") or payload.get("userPrompt"))
             if prompt:

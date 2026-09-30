@@ -1542,6 +1542,7 @@ async def test_new_thread_handler_rejects_tui_mode_thread_creation():
 
     save_storage_mock.assert_not_called()
     ctx.bot.create_forum_topic.assert_not_called()
+    assert "App 或 Hybrid" in ctx.bot.send_message.await_args.kwargs["text"]
 
 
 @pytest.mark.asyncio

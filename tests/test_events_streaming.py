@@ -67,14 +67,14 @@ async def test_duplicate_canonical_event_runs_provider_handler_once():
         "session.title_updated",
     ]
 
-    def fail_publish(_event):
+    def fail_publish(_event, **_kwargs):
         raise RuntimeError("bus unavailable")
 
     state.message_bus = SimpleNamespace(publish=fail_publish)
     with patch("bot.events.save_storage"):
         await handler("app-server-event", title_event("Third title"))
-    assert bot.edit_forum_topic.await_count == 3
-    assert ws.threads["tid-123"].preview == "Third title"
+    assert bot.edit_forum_topic.await_count == 2
+    assert ws.threads["tid-123"].preview == "Second title"
 
 
 @pytest.mark.asyncio
@@ -1946,6 +1946,7 @@ async def test_codex_delayed_old_hook_during_new_turn_start_does_not_duplicate_t
 
     release_new_send.set()
     await new_turn_task
+    await handler.drain_delivery()
 
     current_run = state.get_provider_current_run("codex", "tid-123")
     assert send_count == 1
@@ -2055,6 +2056,7 @@ async def test_codex_item_and_turn_completed_race_emits_one_notification(monkeyp
 
     release_summary.set()
     await item_task
+    await handler.drain_delivery()
 
     assert summary_calls == 1
     assert len(notifications.events) == 1

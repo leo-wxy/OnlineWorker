@@ -137,7 +137,7 @@ impl ProviderBridgeOutput {
     }
 }
 
-fn pid_parent_pairs_from_output(output: &[u8]) -> HashMap<u32, u32> {
+pub(crate) fn pid_parent_pairs_from_output(output: &[u8]) -> HashMap<u32, u32> {
     std::str::from_utf8(output)
         .ok()
         .map(|text| {
@@ -187,7 +187,7 @@ fn running_process_tree_pids(root_pid: u32) -> Vec<u32> {
     process_tree_pids(root_pid, &parents)
 }
 
-fn kill_pid(pid: u32) {
+pub(crate) fn kill_pid(pid: u32) {
     let _ = std::process::Command::new("kill")
         .args(["-9", &pid.to_string()])
         .output();

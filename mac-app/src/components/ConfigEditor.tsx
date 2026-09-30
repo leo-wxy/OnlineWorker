@@ -178,6 +178,7 @@ function YamlPanel({
   const { t } = useI18n();
   const [configRaw, setConfigRaw] = useState("");
   const [configPath, setConfigPath] = useState("");
+  const [configRevision, setConfigRevision] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -190,6 +191,7 @@ function YamlPanel({
       const content = await invoke<ConfigContent>("read_config");
       setConfigRaw(content.raw);
       setConfigPath(content.path);
+      setConfigRevision(content.revision);
       setEditContent(content.raw);
       setError(null);
     } catch (event) {
@@ -213,10 +215,11 @@ function YamlPanel({
     setSaving(true);
     setSaved(false);
     try {
-      await invoke("write_config", { content: editContent });
+      await invoke("write_config", { content: editContent, revision: configRevision });
       const latest = await invoke<ConfigContent>("read_config");
       setConfigRaw(latest.raw);
       setConfigPath(latest.path);
+      setConfigRevision(latest.revision);
       setEditContent(latest.raw);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -267,6 +270,7 @@ function EnvPanel({
   const { t } = useI18n();
   const [envContent, setEnvContent] = useState<EnvContent | null>(null);
   const [rawContent, setRawContent] = useState("");
+  const [envRevision, setEnvRevision] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -282,6 +286,7 @@ function EnvPanel({
       ]);
       setEnvContent(masked);
       setRawContent(raw.raw);
+      setEnvRevision(raw.revision);
       setEditContent(raw.raw);
       setError(null);
     } catch (event) {
@@ -305,13 +310,14 @@ function EnvPanel({
     setSaving(true);
     setSaved(false);
     try {
-      await invoke("write_env", { content: editContent });
+      await invoke("write_env", { content: editContent, revision: envRevision });
       const [masked, raw] = await Promise.all([
         invoke<EnvContent>("read_env"),
         invoke<ConfigContent>("read_env_raw"),
       ]);
       setEnvContent(masked);
       setRawContent(raw.raw);
+      setEnvRevision(raw.revision);
       setEditContent(raw.raw);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);

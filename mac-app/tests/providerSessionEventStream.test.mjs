@@ -42,17 +42,13 @@ test("session browser chats handle stream-ready and stream errors as non-destruc
     "utf8",
   );
 
-  assert.match(genericChat, /if \(event\?\.kind === "stream_ready"\) \{\s*liveStreamReadyRef\.current = true;\s*return;\s*\}/s);
+  assert.match(genericChat, /if \(event\?\.kind === "stream_ready"\) \{\s*return;\s*\}/s);
   assert.match(genericChat, /if \(event\?\.kind === "error"\)/);
-  assert.match(genericChat, /liveStreamReadyRef\.current = false/);
   assert.match(genericChat, /messagesRef\.current\.length === 0/);
   assert.match(genericChat, /setReplyWatchState\(\(current\) => \(current \? "expired" : current\)\)/);
   assert.match(genericChat, /applySessionStreamEvent\(previousMessages, event\)/);
-  assert.match(genericChat, /const snapshotGenerationRef = useRef\(0\)/);
-  assert.match(genericChat, /snapshotGenerationRef\.current \+= 1;\s*applyMessages\(nextMessages/);
-  assert.match(genericChat, /applyMessages\(nextMessages, "auto"\);\s*hasLoadedRef\.current = true;\s*setLoading\(false\)/);
-  assert.match(genericChat, /loadSnapshotIfCurrent\(/);
+  assert.match(genericChat, /applyMessages\(nextMessages, "auto"\);\s*setLoading\(false\)/);
+  assert.doesNotMatch(genericChat, /loadSnapshotIfCurrent|pollAssistantReply|startActiveSessionRefresh|setInterval/);
   assert.match(genericChat, /shouldClearReplyWatch\(previousMessages, nextMessages, event\)/);
-  assert.match(genericChat, /shouldSkip:\s*\(\) => liveRefreshBlockedRef\.current/);
-  assert.doesNotMatch(genericChat, /shouldSkip:\s*\(\) => liveRefreshBlockedRef\.current \|\| liveStreamReadyRef\.current/);
+  assert.match(genericChat, /reloadKey: streamReloadKey/);
 });

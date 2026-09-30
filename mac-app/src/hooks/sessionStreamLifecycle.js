@@ -14,12 +14,12 @@ export function startSessionStreamLifecycle({
     return undefined;
   }
 
+  let disposed = false;
   const channel = createChannel();
   channel.onmessage = (event) => {
-    onEvent(event);
+    if (!disposed) onEvent(event);
   };
 
-  let disposed = false;
   let streamId;
 
   const stopStream = (id) => {
@@ -39,7 +39,7 @@ export function startSessionStreamLifecycle({
       }
     })
     .catch((error) => {
-      onError(`${startCommand} failed`, error);
+      if (!disposed) onError(`${startCommand} failed`, error);
     });
 
   return () => {

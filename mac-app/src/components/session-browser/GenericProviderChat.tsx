@@ -11,29 +11,15 @@ import { shouldClearReplyWatch } from "../../utils/replyWatch.js";
 import { applySessionStreamEvent } from "../../utils/sessionEventModel.js";
 import { ProviderSessionBadges } from "./badges";
 import {
-  buildSnapshotSignature,
-  countAssistantEntries,
-  hasSessionSnapshotChanged,
-  loadSnapshotIfCurrent,
-  pollAssistantReply,
-  startActiveSessionRefresh,
-} from "../../utils/sessionPolling.js";
-import {
-  fetchProviderSession,
   sendProviderSessionMessage,
   startProviderSessionMessage,
 } from "./api";
 import { useStagedAttachments } from "./composerAttachments";
+import { sessionIdentityKey } from "../../utils/sessionBrowserState.js";
 import { getProviderUi, type UnifiedSession } from "./presentation";
 import { providerSessionMetadataFromUnifiedSession } from "./sessionData";
 import {
-  BACKGROUND_REPLY_POLL,
-  CODEX_BACKGROUND_REPLY_POLL,
-  CODEX_FOREGROUND_REPLY_POLL,
-  FOREGROUND_REPLY_POLL,
   limitSessionTurns,
-  mergeSessionTurns,
-  overlayPendingUserTurn,
   SessionChatHeader,
   SessionComposer,
   SessionMessages,
@@ -49,10 +35,6 @@ function isSessionMetadataRich(session: UnifiedSession) {
     providerSession.sandboxPolicy != null ||
     providerSession.isSmoke
   );
-}
-
-function usesExtendedReplyPolling(session: UnifiedSession) {
-  return isSessionMetadataRich(session);
 }
 
 export function GenericProviderChat({
@@ -83,6 +65,7 @@ export function GenericProviderChat({
   const [sending, setSending] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const { stagingAttachments, handlePickFiles } = useStagedAttachments({
+    scopeKey: sessionIdentityKey(session),
     supportsAttachments: providerSupportsAttachments,
     unsupportedMessage: t.sessions.attachmentUnsupported,
     setError,
@@ -91,26 +74,15 @@ export function GenericProviderChat({
   const [replyWatchState, setReplyWatchState] = useState<ReplyWatchState | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const replyWatchTokenRef = useRef(0);
+  const newSessionRequestRef = useRef<{ payload: string; id: string } | null>(null);
   const messagesRef = useRef<SessionTurn[]>([]);
-  const snapshotGenerationRef = useRef(0);
-  const liveRefreshBlockedRef = useRef(true);
-  const liveStreamReadyRef = useRef(false);
-  const hasLoadedRef = useRef(false);
+  const scopeGenerationRef = useRef(0);
+  useEffect(() => {
+    scopeGenerationRef.current += 1;
+    return () => { scopeGenerationRef.current += 1; };
+  }, [session.id, session.type, session.workspace]);
+  const [streamReloadKey, setStreamReloadKey] = useState(0);
   const pendingScrollBehaviorRef = useRef<ScrollBehavior>("auto");
-  const pendingUserMessage = typeof activeSession.raw?.lastUserMessage === "string"
-    ? activeSession.raw.lastUserMessage.trim()
-    : typeof activeSession.raw?.last_user_message === "string"
-      ? activeSession.raw.last_user_message.trim()
-      : "";
-  const pendingEventKind = typeof activeSession.raw?.lastEventKind === "string"
-    ? activeSession.raw.lastEventKind.trim()
-    : typeof activeSession.raw?.last_event_kind === "string"
-      ? activeSession.raw.last_event_kind.trim()
-      : "";
-  const sessionOverlayRaw = {
-    lastUserMessage: pendingUserMessage,
-    lastEventKind: pendingEventKind,
-  };
 
   const cancelReplyWatch = useCallback(() => {
     replyWatchTokenRef.current += 1;
@@ -127,8 +99,6 @@ export function GenericProviderChat({
   }, []);
 
   useEffect(() => {
-    snapshotGenerationRef.current += 1;
-    liveStreamReadyRef.current = false;
     setActiveSession(session);
   }, [session.id, session.type, session.workspace]);
 
@@ -150,84 +120,17 @@ export function GenericProviderChat({
     });
   }, [session.archived, session.raw, session.title, session.id, session.type, session.workspace]);
 
-  const loadMessages = useCallback(async () => {
+  const loadMessages = useCallback(() => {
     if (mode === "new-session") {
       applyMessages([], "auto");
-      hasLoadedRef.current = true;
       setLoading(false);
       setError(null);
       return;
     }
     setLoading(true);
     setError(null);
-    const snapshotGeneration = snapshotGenerationRef.current;
-    try {
-      const turns = await fetchProviderSession(activeSession.type, activeSession.id, activeSession.workspace);
-      if (snapshotGeneration !== snapshotGenerationRef.current) {
-        return;
-      }
-      const nextTurns = overlayPendingUserTurn(turns, sessionOverlayRaw);
-      const overlayed = nextTurns !== turns;
-      applyMessages(nextTurns, "auto");
-      hasLoadedRef.current = true;
-      setReplyWatchState((current) => overlayed ? (current ?? "background") : (current === "expired" ? null : current));
-    } catch (loadError) {
-      if (snapshotGeneration === snapshotGenerationRef.current) {
-        setError((loadError as Error).message);
-      }
-    } finally {
-      if (snapshotGeneration === snapshotGenerationRef.current) {
-        setLoading(false);
-      }
-    }
-  }, [
-    activeSession.id,
-    activeSession.type,
-    activeSession.workspace,
-    applyMessages,
-    mode,
-    pendingEventKind,
-    pendingUserMessage,
-  ]);
-
-  const refreshMessagesSilently = useCallback(async () => {
-    if (mode === "new-session") {
-      return;
-    }
-    const snapshotGeneration = snapshotGenerationRef.current;
-    try {
-      const turns = await fetchProviderSession(activeSession.type, activeSession.id, activeSession.workspace);
-      if (snapshotGeneration !== snapshotGenerationRef.current) {
-        return;
-      }
-      const nextTurns = overlayPendingUserTurn(turns, sessionOverlayRaw);
-      const overlayed = nextTurns !== turns;
-      hasLoadedRef.current = true;
-      if (!hasSessionSnapshotChanged(messagesRef.current, nextTurns)) {
-        setReplyWatchState((current) => overlayed ? (current ?? "background") : (current === "expired" ? null : current));
-        return;
-      }
-      applyMessages(nextTurns, "auto");
-      setReplyWatchState((current) => overlayed ? (current ?? "background") : (current === "expired" ? null : current));
-    } catch (loadError) {
-      if (snapshotGeneration !== snapshotGenerationRef.current) {
-        return;
-      }
-      if (messagesRef.current.length === 0) {
-        setError((loadError as Error).message);
-      } else {
-        console.warn("Provider session silent refresh failed", loadError);
-      }
-    }
-  }, [
-    activeSession.id,
-    activeSession.type,
-    activeSession.workspace,
-    applyMessages,
-    mode,
-    pendingEventKind,
-    pendingUserMessage,
-  ]);
+    setStreamReloadKey((current) => current + 1);
+  }, [applyMessages, mode]);
 
   useEffect(() => {
     if (!active) {
@@ -235,20 +138,11 @@ export function GenericProviderChat({
     }
     cancelReplyWatch();
     setAttachments([]);
-    if (hasLoadedRef.current && messagesRef.current.length > 0) {
-      void refreshMessagesSilently();
-    } else {
-      void loadMessages();
-    }
+    if (mode === "new-session") loadMessages();
     return () => {
       replyWatchTokenRef.current += 1;
     };
-  }, [active, loadMessages, refreshMessagesSilently, cancelReplyWatch]);
-
-  useEffect(() => {
-    liveRefreshBlockedRef.current =
-      loading || sending || (replyWatchState !== null && replyWatchState !== "expired");
-  }, [loading, sending, replyWatchState]);
+  }, [active, loadMessages, mode, cancelReplyWatch]);
 
   useEffect(() => {
     const behavior = pendingScrollBehaviorRef.current;
@@ -258,12 +152,16 @@ export function GenericProviderChat({
 
   const handleSessionEvent = useCallback((event: SessionStreamEvent) => {
     if (event?.kind === "stream_ready") {
-      liveStreamReadyRef.current = true;
+      return;
+    }
+    if (event?.kind === "send_failed") {
+      setError(event.error ?? "消息发送失败");
+      setReplyWatchState("expired");
       return;
     }
     if (event?.kind === "error") {
-      liveStreamReadyRef.current = false;
-      if (messagesRef.current.length === 0) {
+      if (messagesRef.current.length === 0) setLoading(false);
+      if (event.semanticKind === "message.user.send_failed" || messagesRef.current.length === 0) {
         setError(event.error ?? "provider session stream error");
       } else {
         console.warn("Provider session event stream error", event.error);
@@ -278,11 +176,9 @@ export function GenericProviderChat({
     if (nextMessages === previousMessages) {
       return;
     }
-    snapshotGenerationRef.current += 1;
     applyMessages(nextMessages, "auto");
-    hasLoadedRef.current = true;
     setLoading(false);
-    setError(null);
+    setError(event.error ?? null);
     if (shouldClearReplyWatch(previousMessages, nextMessages, event)) {
       cancelReplyWatch();
     }
@@ -293,62 +189,9 @@ export function GenericProviderChat({
     providerId: activeSession.type,
     sessionId: activeSession.id,
     workspaceDir: activeSession.workspace ?? null,
+    reloadKey: streamReloadKey,
     onEvent: handleSessionEvent,
   });
-
-  useEffect(() => {
-    if (!active) {
-      return;
-    }
-    if (mode === "new-session") {
-      return;
-    }
-    if (!activeSession.id) {
-      return;
-    }
-
-    const cleanup = startActiveSessionRefresh({
-      intervalMs: 3000,
-      getCurrentSnapshot: () => messagesRef.current,
-      loadSnapshot: async () => {
-        const snapshot = await loadSnapshotIfCurrent(
-          () => fetchProviderSession(
-            activeSession.type,
-            activeSession.id,
-            activeSession.workspace,
-          ),
-          () => snapshotGenerationRef.current,
-        );
-        return snapshot === null
-          ? messagesRef.current
-          : overlayPendingUserTurn(snapshot, sessionOverlayRaw);
-      },
-      onSnapshot: (snapshot) => {
-        const overlayed = Boolean(
-          pendingUserMessage
-          && (pendingEventKind === "message.user.submitted" || pendingEventKind === "message.user.accepted")
-          && snapshot[snapshot.length - 1]?.role === "user"
-          && snapshot[snapshot.length - 1]?.content === pendingUserMessage,
-        );
-        applyMessages(snapshot, "auto");
-        setReplyWatchState((current) => overlayed ? (current ?? "background") : (current === "expired" ? null : current));
-      },
-      shouldSkip: () => liveRefreshBlockedRef.current,
-      onError: (error) => {
-        console.warn("Provider session snapshot refresh failed", error);
-      },
-    });
-
-    return cleanup;
-  }, [
-    active,
-    activeSession.id,
-    activeSession.type,
-    activeSession.workspace,
-    mode,
-    pendingEventKind,
-    pendingUserMessage,
-  ]);
 
   const handleSend = async (trimmedText: string, nextAttachments: ComposerAttachment[]) => {
     if (!trimmedText.trim() && nextAttachments.length === 0) {
@@ -367,15 +210,19 @@ export function GenericProviderChat({
 
     const replyWatchToken = replyWatchTokenRef.current + 1;
     replyWatchTokenRef.current = replyWatchToken;
-    const shouldContinue = () => replyWatchTokenRef.current === replyWatchToken;
+    const scopeGeneration = scopeGenerationRef.current;
+    const isCurrentScope = () => scopeGenerationRef.current === scopeGeneration;
 
     setSending(true);
     setError(null);
-    snapshotGenerationRef.current += 1;
     applyMessages(optimisticMessages, "smooth");
     setReplyWatchState("foreground");
-
-    const baselineAssistantCount = countAssistantEntries(previousMessages);
+    if (mode === "new-session") {
+      const payload = JSON.stringify([sessionIdentityKey(activeSession), trimmedText, nextAttachments]);
+      if (newSessionRequestRef.current?.payload !== payload) {
+        newSessionRequestRef.current = { payload, id: crypto.randomUUID() };
+      }
+    }
 
     try {
       const sendResult = mode === "new-session"
@@ -384,6 +231,7 @@ export function GenericProviderChat({
             activeSession.workspace,
             trimmedText,
             nextAttachments,
+            newSessionRequestRef.current?.id,
           )
         : await sendProviderSessionMessage(
             activeSession.type,
@@ -392,10 +240,18 @@ export function GenericProviderChat({
             nextAttachments,
             activeSession.workspace,
       );
+      if (!isCurrentScope()) return;
+      if (sendResult.error) setError(sendResult.error);
+      if (sendResult.accepted === false) {
+        cancelReplyWatch();
+        applyMessages(previousMessages, "auto");
+        return false;
+      }
       const remappedSessionId = sendResult.threadId?.trim();
       if (mode === "new-session" && !remappedSessionId) {
-        if (sendResult.pending && sendResult.accepted !== false) {
+        if (sendResult.pending) {
           await onNewSessionPending?.(sendResult, trimmedText);
+          if (!isCurrentScope()) return;
           setAttachments([]);
           setReplyWatchState("background");
           return true;
@@ -403,7 +259,6 @@ export function GenericProviderChat({
         throw new Error("provider did not return a real session id");
       }
       if (remappedSessionId && remappedSessionId !== activeSession.id) {
-        snapshotGenerationRef.current += 1;
         const nextSession = {
           ...activeSession,
           id: remappedSessionId,
@@ -414,6 +269,7 @@ export function GenericProviderChat({
         } else {
           await onSessionRemapped?.(activeSession, sendResult);
         }
+        if (!isCurrentScope()) return;
       }
       setAttachments([]);
       if (mode === "new-session") {
@@ -421,93 +277,16 @@ export function GenericProviderChat({
         return true;
       }
 
-      const loadSnapshot = async () => {
-        const currentSession = remappedSessionId && remappedSessionId !== activeSession.id
-          ? {
-              ...activeSession,
-              id: remappedSessionId,
-            }
-          : activeSession;
-        const snapshot = await loadSnapshotIfCurrent(
-          () => fetchProviderSession(
-            currentSession.type,
-            currentSession.id,
-            currentSession.workspace,
-          ),
-          () => snapshotGenerationRef.current,
-        );
-        if (snapshot === null) {
-          return messagesRef.current;
-        }
-        const overlaySnapshot = overlayPendingUserTurn(snapshot, {
-          lastUserMessage: trimmedText,
-          lastEventKind: "message.user.accepted",
-        });
-        const shouldMergeSnapshot = remappedSessionId && remappedSessionId !== activeSession.id;
-        const nextSnapshot = shouldMergeSnapshot
-          ? mergeSessionTurns(previousMessages, overlaySnapshot)
-          : overlaySnapshot;
-        if (shouldContinue()) {
-          messagesRef.current = nextSnapshot;
-        }
-        return nextSnapshot;
-      };
-      const applySnapshot = (snapshot: SessionTurn[]) => {
-        const shouldMergeSnapshot = remappedSessionId && remappedSessionId !== activeSession.id;
-        const nextSnapshot = shouldMergeSnapshot
-          ? mergeSessionTurns(previousMessages, snapshot)
-          : snapshot;
-        if (shouldContinue()) {
-          applyMessages(nextSnapshot, "auto");
-        }
-      };
-
-      const foregroundResult = await pollAssistantReply({
-        loadSnapshot,
-        getAssistantCount: countAssistantEntries,
-        getSignature: buildSnapshotSignature,
-        baselineAssistantCount,
-        baselineSnapshot: previousMessages,
-        onUpdate: applySnapshot,
-        shouldContinue,
-        ...(usesExtendedReplyPolling(activeSession) ? CODEX_FOREGROUND_REPLY_POLL : FOREGROUND_REPLY_POLL),
-      });
-      if (!shouldContinue()) {
-        return;
-      }
-
-      applyMessages(foregroundResult.snapshot, "auto");
-      if (foregroundResult.settled) {
-        setReplyWatchState(null);
-        return;
-      }
-
-      setReplyWatchState("background");
-      void (async () => {
-        const backgroundResult = await pollAssistantReply({
-          loadSnapshot,
-          getAssistantCount: countAssistantEntries,
-          getSignature: buildSnapshotSignature,
-          baselineAssistantCount,
-          baselineSnapshot: previousMessages,
-          onUpdate: applySnapshot,
-          shouldContinue,
-          ...(usesExtendedReplyPolling(activeSession) ? CODEX_BACKGROUND_REPLY_POLL : BACKGROUND_REPLY_POLL),
-        });
-        if (!shouldContinue()) {
-          return;
-        }
-
-        applyMessages(backgroundResult.snapshot, "auto");
-        setReplyWatchState(backgroundResult.settled ? null : "expired");
-      })();
+      setReplyWatchState((current) => current === "foreground" ? "background" : current);
+      return true;
     } catch (sendError) {
+      if (!isCurrentScope()) return;
       cancelReplyWatch();
       setError((sendError as Error).message);
       applyMessages(previousMessages, "auto");
       return false;
     } finally {
-      setSending(false);
+      if (isCurrentScope()) setSending(false);
     }
   };
 

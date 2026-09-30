@@ -2,6 +2,10 @@ function normalizedString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+export function sessionIdentityKey(session) {
+  return JSON.stringify([session.type, session.id, session.workspace ?? ""]);
+}
+
 function firstNonEmptyString(...values) {
   for (const value of values) {
     const text = normalizedString(value);

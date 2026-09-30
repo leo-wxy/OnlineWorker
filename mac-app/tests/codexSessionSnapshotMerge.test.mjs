@@ -7,56 +7,34 @@ import { dirname, join } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
 
-test("provider session send flow only merges snapshots after a remap", () => {
+test("provider session remap switches the stream identity without a second snapshot read", () => {
   const genericChat = readFileSync(join(root, "src", "components", "session-browser", "GenericProviderChat.tsx"), "utf8");
 
-  assert.match(
-    genericChat,
-    /const shouldMergeSnapshot = remappedSessionId && remappedSessionId !== activeSession\.id;/,
-  );
-  assert.match(
-    genericChat,
-    /const nextSnapshot = shouldMergeSnapshot\s*\? mergeSessionTurns\(previousMessages, snapshot\)\s*:\s*snapshot;/s,
-  );
-  assert.doesNotMatch(genericChat, /const mergedSnapshot = mergeSessionTurns\(previousMessages, snapshot\)/);
+  assert.match(genericChat, /if \(remappedSessionId && remappedSessionId !== activeSession\.id\)/);
+  assert.match(genericChat, /setActiveSession\(nextSession\)/);
+  assert.doesNotMatch(genericChat, /fetchProviderSession|mergeSessionTurns/);
 });
 
-test("provider session view loads codex through generic provider session reads", () => {
+test("provider session view loads through the generic message center stream", () => {
   const genericChat = readFileSync(join(root, "src", "components", "session-browser", "GenericProviderChat.tsx"), "utf8");
 
-  assert.match(genericChat, /const turns = await fetchProviderSession\(activeSession\.type, activeSession\.id, activeSession\.workspace\)/);
-  assert.match(genericChat, /const sessionOverlayRaw = \{\s*lastUserMessage: pendingUserMessage,\s*lastEventKind: pendingEventKind,\s*\};/s);
-  assert.match(genericChat, /overlayPendingUserTurn\(turns,\s*sessionOverlayRaw\)/);
   assert.match(genericChat, /enabled: active && mode !== "new-session" && Boolean\(activeSession\.id\)/);
-  assert.match(genericChat, /usesExtendedReplyPolling/);
+  assert.match(genericChat, /providerId: activeSession\.type/);
+  assert.match(genericChat, /sessionId: activeSession\.id/);
+  assert.match(genericChat, /workspaceDir: activeSession\.workspace/);
   assert.doesNotMatch(genericChat, /fetchCodexThreadState/);
 });
 
-test("provider session view keeps snapshot refresh active after the live stream is ready", () => {
+test("provider session view applies recovery snapshots without background polling", () => {
   const genericChat = readFileSync(join(root, "src", "components", "session-browser", "GenericProviderChat.tsx"), "utf8");
 
-  assert.match(genericChat, /startActiveSessionRefresh\(\{/);
-  assert.match(genericChat, /intervalMs:\s*3000/);
-  assert.match(genericChat, /const liveStreamReadyRef = useRef\(false\)/);
-  assert.match(genericChat, /if \(event\?\.kind === "stream_ready"\) \{\s*liveStreamReadyRef\.current = true;\s*return;\s*\}/s);
-  assert.match(genericChat, /shouldSkip:\s*\(\) => liveRefreshBlockedRef\.current/);
-  assert.doesNotMatch(genericChat, /shouldSkip:\s*\(\) => liveRefreshBlockedRef\.current \|\| liveStreamReadyRef\.current/);
+  assert.doesNotMatch(genericChat, /startActiveSessionRefresh|setInterval|fetchProviderSession|usesExtendedReplyPolling/);
+  assert.match(genericChat, /if \(event\?\.kind === "stream_ready"\) \{\s*return;\s*\}/s);
   assert.match(genericChat, /const \[loading, setLoading\] = useState\(true\)/);
-  assert.match(
-    genericChat,
-    /liveRefreshBlockedRef\.current\s*=\s*loading \|\| sending \|\| \(replyWatchState !== null && replyWatchState !== "expired"\)/,
-  );
-  assert.match(
-    genericChat,
-    /return overlayPendingUserTurn\(\s*await fetchProviderSession\(\s*activeSession\.type,\s*activeSession\.id,\s*activeSession\.workspace,\s*\),\s*sessionOverlayRaw\s*\);/s,
-  );
-  assert.doesNotMatch(genericChat, /return mergeSessionTurns\(messagesRef\.current, turns\)/);
+  assert.match(genericChat, /applySessionStreamEvent\(previousMessages, event\)/);
+  assert.match(genericChat, /applyMessages\(nextMessages, "auto"\)/);
+  assert.match(genericChat, /setStreamReloadKey\(\(current\) => current \+ 1\)/);
   assert.doesNotMatch(genericChat, /setMessages\(\[\]\)/);
-  assert.match(genericChat, /const overlayed = nextTurns !== turns;/);
-  assert.match(
-    genericChat,
-    /setReplyWatchState\(\(current\) => overlayed \? \(current \?\? "background"\) : \(current === "expired" \? null : current\)\);/,
-  );
 });
 
 test("session browser keeps existing messages visible during reloads", () => {
@@ -73,10 +51,6 @@ test("session browser only uses smooth scroll for user-authored appends", () => 
   assert.match(genericChat, /const pendingScrollBehaviorRef = useRef<ScrollBehavior>\("auto"\);/);
   assert.match(genericChat, /const applyMessages = useCallback\(\s*\(\s*nextMessages: SessionTurn\[\],\s*scrollBehavior: ScrollBehavior = "auto"/s);
   assert.match(genericChat, /endRef\.current\?\.scrollIntoView\(\{ behavior \}\);/);
-  assert.match(
-    genericChat,
-    /const overlaySnapshot = overlayPendingUserTurn\(\s*snapshot,\s*\{\s*lastUserMessage: trimmedText,\s*lastEventKind: "message.user.accepted",\s*\}\s*\);/s,
-  );
   assert.match(genericChat, /applyMessages\(optimisticMessages,\s*"smooth"\);/);
   assert.doesNotMatch(genericChat, /scrollIntoView\(\{ behavior: "smooth" \}\)/);
 });

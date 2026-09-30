@@ -321,6 +321,7 @@ export interface UsageSourceCatalogEntry {
 export interface ConfigContent {
   raw: string;
   path: string;
+  revision: string;
 }
 
 // Env file content (sensitive fields masked by default)
@@ -355,10 +356,14 @@ export interface SessionTurn {
   timestamp?: string;
   pending?: boolean;
   displayMode?: "plain" | "markdown";
+  turnId?: string | null;
+  itemId?: string | null;
 }
 
 export interface ProviderSessionSendResult {
   accepted?: boolean;
+  error?: string | null;
+  requestId?: string | null;
   providerId?: string | null;
   threadId?: string | null;
   requestedThreadId?: string | null;

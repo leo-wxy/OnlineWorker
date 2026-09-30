@@ -20,10 +20,12 @@ from core.providers.facts import (
     read_provider_thread_history,
 )
 from core.provider_session_new import (
+    _checkpoint_new_session,
     send_started_provider_thread_message,
     start_real_provider_thread,
     validate_new_provider_thread_request,
 )
+from core.provider_session_archive import commit_session_archive
 from core.providers.registry import classify_provider, get_provider, provider_not_enabled_message
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -81,44 +83,6 @@ def _resolve_workspace(state: AppState, src_topic_id: Optional[int]) -> Optional
             state.observe_unknown_telegram_topic(src_topic_id)
             return None
     return state.get_active_workspace()
-
-
-async def _rollback_failed_new_thread(
-    state: AppState,
-    bot,
-    group_chat_id: int,
-    ws: WorkspaceInfo,
-    thread_id: Optional[str],
-    topic_id: Optional[int],
-) -> None:
-    """清理 /new 失败留下的本地 thread 占位和 TG topic。"""
-    if thread_id:
-        ws.threads.pop(thread_id, None)
-
-    if topic_id is None:
-        return
-
-    state.invalidate_telegram_topic(topic_id)
-    try:
-        await bot.delete_forum_topic(
-            chat_id=group_chat_id,
-            message_thread_id=topic_id,
-        )
-        state.invalidate_telegram_topic(topic_id)
-        logger.info(f"已回滚删除新建失败的 Topic {topic_id}")
-        return
-    except Exception as e:
-        logger.warning(f"回滚删除 Topic {topic_id} 失败，尝试关闭：{e}")
-
-    try:
-        await bot.close_forum_topic(
-            chat_id=group_chat_id,
-            message_thread_id=topic_id,
-        )
-        state.invalidate_telegram_topic(topic_id)
-        logger.info(f"已回滚关闭新建失败的 Topic {topic_id}")
-    except Exception as e:
-        logger.warning(f"回滚关闭 Topic {topic_id} 失败：{e}")
 
 
 def _get_thread_provider(tool_name: str):
@@ -321,6 +285,7 @@ async def _handle_archive_request(
 
     try:
         await _archive_thread_in_source(state, ws_info, thread_info.thread_id)
+        commit_session_archive(state, ws_info, thread_info, source="telegram")
     except Exception as e:
         logger.error(f"真实归档 thread 失败：{e}")
         await _send_to_group(
@@ -334,8 +299,6 @@ async def _handle_archive_request(
     cfg = state.config
     delete_topic = cfg.delete_archived_topics if cfg else True
     action_text = "处理完成"
-
-    thread_info.archived = True
 
     topic_id = get_route_aware_thread_topic_id(state, ws_info, thread_info)
     if topic_id:
@@ -603,6 +566,15 @@ def make_new_thread_handler(state: AppState, group_chat_id: int) -> Callable:
             return
 
         initial_text = " ".join(context.args).strip() if context.args else None
+        recovery_key = f"telegram_new_thread:{group_chat_id}:{msg.message_id}" if msg else ""
+        if context.args and context.args[0] == "--resume":
+            resume_id = context.args[1] if len(context.args) == 2 else ""
+            resume_thread = ws.threads.get(resume_id)
+            if resume_thread is None or not resume_thread.new_session_recovery:
+                await _send_to_group(context.bot, group_chat_id, "❌ 未找到可恢复的新建会话。", topic_id=reply_topic_id)
+                return
+            recovery_key = str(resume_thread.new_session_recovery.get("request_id") or "")
+            initial_text = str(resume_thread.new_session_recovery.get("text") or "")
 
         validation_error = _validate_new_thread_request(state, ws, initial_text)
         if validation_error:
@@ -638,11 +610,13 @@ def make_new_thread_handler(state: AppState, group_chat_id: int) -> Callable:
                 workspace_id,
                 provider_id=str(ws.tool),
                 preview=initial_text or None,
-                source="app",
+                source="telegram_new_thread",
+                state=state,
+                recovery_key=recovery_key,
             )
             thread_id = started.thread_id
             thread_info = started.thread_info
-            # 注意：此处不 save_storage，topic_id 尚未确定
+            recovery = thread_info.new_session_recovery
 
             # 2. 创建 Telegram Forum Topic
             topic_name = _make_thread_topic_name(
@@ -652,21 +626,31 @@ def make_new_thread_handler(state: AppState, group_chat_id: int) -> Callable:
                 thread_id,
                 workspace_path=workspace_path_for_topic_hint(ws),
             )
-            topic = await context.bot.create_forum_topic(chat_id=group_chat_id, name=topic_name)
-            topic_id = topic.message_thread_id
-
-            # 3. 更新 topic_id，先不持久化；只有源端 thread 就绪后才写入 storage
             workspace_key = state.get_workspace_storage_key(ws)
-            if workspace_key is not None:
-                state.bind_telegram_session_topic(
-                    workspace_key,
-                    ws,
-                    thread_info,
-                    topic_id,
-                    display_name=thread_info.preview,
-                )
+            topic_id = state.get_thread_topic_id(workspace_key, ws, thread_info) if workspace_key is not None else thread_info.topic_id
+            if topic_id is None:
+                try:
+                    topic_id = recovery.get("unbound_topic_id")
+                    if topic_id is None:
+                        topic = await context.bot.create_forum_topic(chat_id=group_chat_id, name=topic_name)
+                        topic_id = topic.message_thread_id
+                        recovery["unbound_topic_id"] = topic_id
+                    if workspace_key is not None:
+                        state.bind_telegram_session_topic(workspace_key, ws, thread_info, topic_id, display_name=thread_info.preview)
+                    else:
+                        thread_info.topic_id = topic_id
+                    recovery["bind_status"] = "bound"
+                    recovery.pop("bind_error", None)
+                    recovery.pop("unbound_topic_id", None)
+                except Exception as bind_exc:
+                    topic_id = None
+                    recovery["bind_status"] = "failed"
+                    recovery["bind_error"] = f"Telegram 绑定失败，原会话已保留: {bind_exc}"
+                _checkpoint_new_session(state, ws, thread_info)
             else:
-                thread_info.topic_id = topic_id
+                recovery["bind_status"] = "bound"
+                recovery.pop("bind_error", None)
+                recovery.pop("unbound_topic_id", None)
 
             await _activate_new_thread_in_source(
                 state,
@@ -677,26 +661,30 @@ def make_new_thread_handler(state: AppState, group_chat_id: int) -> Callable:
                 initial_text,
             )
 
-            if state.storage is None:
-                logger.warning("storage 为 None，跳过保存（新 thread 创建）")
-            else:
-                save_storage(state.storage)
+            if recovery.get("bind_status") != "bound":
+                await _send_to_group(context.bot, group_chat_id,
+                    f"⚠️ 原会话 {thread_id} 已保留，首消息已发送。\n{recovery.get('bind_error', '')}\n用 /new --resume {thread_id} 补做绑定，不会重复发送首消息。",
+                    topic_id=reply_topic_id)
+                return
 
             logger.info(f"新建 thread {thread_id[:8]}… → Topic {topic_id}")
 
         except Exception as e:
-            await _rollback_failed_new_thread(
-                state=state,
-                bot=context.bot,
-                group_chat_id=group_chat_id,
-                ws=ws,
-                thread_id=thread_id,
-                topic_id=topic_id,
-            )
+            retained = ws.threads.get(thread_id) if thread_id else next((t for t in ws.threads.values() if t.new_session_recovery.get("request_id") == recovery_key), None)
+            detail = str(e)
+            if retained is not None:
+                thread_id = retained.thread_id
+                if not retained.new_session_recovery.get("error"):
+                    retained.new_session_recovery["error"] = detail
+                try:
+                    _checkpoint_new_session(state, ws, retained)
+                except Exception:
+                    logger.warning("保存新会话恢复状态失败", exc_info=True)
+                detail = f"{retained.new_session_recovery.get('error', detail)}\n原会话 {thread_id} 已保留。用 /new --resume {thread_id} 恢复；结果不确定时不会重复发送。"
             logger.error(f"新建 thread 失败：{e}")
             await _send_to_group(
                 context.bot, group_chat_id,
-                f"❌ 新建 thread 失败：{e}",
+                f"❌ 新建 thread 未完成：{detail}",
                 topic_id=reply_topic_id,
             )
             return

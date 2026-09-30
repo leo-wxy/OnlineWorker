@@ -1,8 +1,11 @@
 use serde::Serialize;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use super::config_provider::{
     ai_config_metadata_from_raw, build_default_user_config_with_env, normalize_config_for_display,
@@ -21,6 +24,21 @@ use super::provider_bridge_common::{command_program_token, expand_home_path};
 
 pub(crate) const DEFAULT_APP_NAME: &str = "OnlineWorker";
 static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
+static CONFIG_WRITE_LOCK: Mutex<()> = Mutex::new(());
+
+fn content_revision(content: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    content.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn check_content_revision(path: &Path, revision: &str) -> Result<(), String> {
+    let current = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    if content_revision(&current) != revision {
+        return Err("文件已被其他设置操作修改，请重新加载后再保存".to_string());
+    }
+    Ok(())
+}
 
 pub(crate) fn app_name() -> &'static str {
     DEFAULT_APP_NAME
@@ -202,6 +220,7 @@ fn read_config_or_materialize_default(path: &Path, env_raw: &str) -> Result<Stri
 pub struct ConfigContent {
     pub raw: String,
     pub path: String,
+    pub revision: String,
 }
 
 #[derive(Serialize)]
@@ -517,6 +536,7 @@ pub async fn check_first_run() -> Result<bool, String> {
 /// Create default config.yaml and .env template if they don't exist.
 #[tauri::command]
 pub async fn create_default_config() -> Result<(), String> {
+    let _guard = CONFIG_WRITE_LOCK.lock().map_err(|e| e.to_string())?;
     let dir = ensure_data_dir()?;
     cleanup_legacy_external_cli_config(&dir)?;
     let env = dir.join(".env");
@@ -534,6 +554,7 @@ pub async fn create_default_config() -> Result<(), String> {
 }
 
 fn update_config_document(mutate: impl FnOnce(&mut ProviderConfigDocument)) -> Result<(), String> {
+    let _guard = CONFIG_WRITE_LOCK.lock().map_err(|e| e.to_string())?;
     let dir = ensure_data_dir()?;
     cleanup_legacy_external_cli_config(&dir)?;
     let path = dir.join("config.yaml");
@@ -697,12 +718,15 @@ pub async fn read_config() -> Result<ConfigContent, String> {
     Ok(ConfigContent {
         raw: normalize_config_for_display(&raw, Some(&env_raw)),
         path: path.to_string_lossy().to_string(),
+        revision: content_revision(&raw),
     })
 }
 
 #[tauri::command]
-pub async fn write_config(content: String) -> Result<(), String> {
+pub async fn write_config(content: String, revision: String) -> Result<(), String> {
+    let _guard = CONFIG_WRITE_LOCK.lock().map_err(|e| e.to_string())?;
     let path = config_path();
+    check_content_revision(&path, &revision)?;
     let env_raw = std::fs::read_to_string(env_path()).unwrap_or_default();
     let normalized = serialize_normalized_config_with_env(&content, Some(&env_raw))?;
     atomic_write(&path, normalized.as_bytes())
@@ -756,18 +780,19 @@ pub async fn read_env() -> Result<EnvContent, String> {
 #[tauri::command]
 pub async fn read_env_raw() -> Result<ConfigContent, String> {
     let path = env_path();
-    let raw = sanitize_env_content(
-        &std::fs::read_to_string(&path).map_err(|e| format!("Cannot read .env: {}", e))?,
-    );
+    let raw = std::fs::read_to_string(&path).map_err(|e| format!("Cannot read .env: {}", e))?;
     Ok(ConfigContent {
-        raw,
+        raw: sanitize_env_content(&raw),
         path: path.to_string_lossy().to_string(),
+        revision: content_revision(&raw),
     })
 }
 
 #[tauri::command]
-pub async fn write_env(content: String) -> Result<(), String> {
+pub async fn write_env(content: String, revision: String) -> Result<(), String> {
+    let _guard = CONFIG_WRITE_LOCK.lock().map_err(|e| e.to_string())?;
     let path = env_path();
+    check_content_revision(&path, &revision)?;
     atomic_write(&path, sanitize_env_content(&content).as_bytes())
         .map_err(|e| format!("Cannot write .env: {}", e))
 }
@@ -840,6 +865,7 @@ pub async fn reveal_env_field(key: String) -> Result<String, String> {
 /// Write/update a single field in .env (patch style - preserves other fields and comments)
 #[tauri::command]
 pub async fn write_env_field(key: String, value: String) -> Result<(), String> {
+    let _guard = CONFIG_WRITE_LOCK.lock().map_err(|e| e.to_string())?;
     if is_legacy_external_cli_env_key(&key) {
         return Err(format!(
             "Key '{}' is no longer managed by OnlineWorker",
@@ -1110,7 +1136,8 @@ GROUP_CHAT_ID=-1001
         tauri::async_runtime::block_on(create_default_config()).expect("create default config");
 
         let content = tauri::async_runtime::block_on(read_config()).expect("read config");
-        tauri::async_runtime::block_on(write_config(content.raw)).expect("write config");
+        tauri::async_runtime::block_on(write_config(content.raw, content.revision))
+            .expect("write config");
 
         let raw = fs::read_to_string(config_path()).expect("read persisted config");
         let doc: Value = serde_yaml::from_str(&raw).expect("parse persisted config");
@@ -1147,7 +1174,8 @@ GROUP_CHAT_ID=-1001
         doc["providers"][&provider_id]["autostart"] = Value::Bool(false);
 
         let edited = serde_yaml::to_string(&doc).expect("serialize edited config");
-        tauri::async_runtime::block_on(write_config(edited)).expect("write config");
+        tauri::async_runtime::block_on(write_config(edited, content.revision))
+            .expect("write config");
 
         let raw = fs::read_to_string(config_path()).expect("read persisted config");
         let persisted: Value = serde_yaml::from_str(&raw).expect("parse persisted config");
@@ -1176,6 +1204,71 @@ GROUP_CHAT_ID=-1001
         }
         assert!(persisted.get("ai").is_some());
         assert!(persisted.get("notifications").is_some());
+    }
+
+    #[test]
+    fn full_document_save_rejects_stale_revision() {
+        let _guard = TestHomeGuard::new();
+        tauri::async_runtime::block_on(create_default_config()).unwrap();
+        let snapshot = tauri::async_runtime::block_on(read_config()).unwrap();
+        let provider = default_provider_ids_for_test().remove(0);
+        tauri::async_runtime::block_on(set_provider_flags(provider, false, false)).unwrap();
+        let current = fs::read_to_string(config_path()).unwrap();
+        assert!(
+            tauri::async_runtime::block_on(write_config(snapshot.raw, snapshot.revision)).is_err()
+        );
+        assert_eq!(fs::read_to_string(config_path()).unwrap(), current);
+
+        let env = tauri::async_runtime::block_on(super::read_env_raw()).unwrap();
+        tauri::async_runtime::block_on(super::write_env_field("SAMPLE_FIELD".into(), "new".into()))
+            .unwrap();
+        assert!(tauri::async_runtime::block_on(super::write_env(env.raw, env.revision)).is_err());
+        assert!(fs::read_to_string(env_path())
+            .unwrap()
+            .contains("SAMPLE_FIELD=new"));
+    }
+
+    #[test]
+    fn concurrent_field_updates_preserve_both_changes() {
+        let guard = TestHomeGuard::new();
+        tauri::async_runtime::block_on(create_default_config()).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let provider_ids = default_provider_ids_for_test();
+        assert!(provider_ids.len() >= 2);
+        let workers: Vec<_> = provider_ids
+            .iter()
+            .take(2)
+            .enumerate()
+            .map(|(index, provider)| {
+                let root = guard.root.clone();
+                let barrier = barrier.clone();
+                let provider = provider.clone();
+                std::thread::spawn(move || {
+                    set_test_home_override(Some(root));
+                    barrier.wait();
+                    tauri::async_runtime::block_on(set_provider_flags(provider, false, false))
+                        .unwrap();
+                    tauri::async_runtime::block_on(super::write_env_field(
+                        format!("SAMPLE_FIELD_{index}"),
+                        "new".into(),
+                    ))
+                    .unwrap();
+                    set_test_home_override(None);
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        let doc: Value = serde_yaml::from_str(&fs::read_to_string(config_path()).unwrap()).unwrap();
+        for provider in provider_ids.iter().take(2) {
+            assert_eq!(
+                provider_value(&doc, provider, "managed").and_then(Value::as_bool),
+                Some(false)
+            );
+        }
+        let env = fs::read_to_string(env_path()).unwrap();
+        assert!(env.contains("SAMPLE_FIELD_0=new") && env.contains("SAMPLE_FIELD_1=new"));
     }
 
     #[test]

@@ -167,6 +167,7 @@ export default function App() {
     const channel = new Channel<TaskBoardActivityStreamEvent>();
 
     channel.onmessage = (event) => {
+      if (disposed) return;
       if (event.kind === "snapshot") {
         setTaskBoardActivities(event.activities ?? []);
         return;

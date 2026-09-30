@@ -2,17 +2,6 @@ import { formatSessionPreviewText, sessionPreviewFromRaw } from "./sessionBrowse
 
 const BOARD_LANE_LIMIT = 12;
 
-const NEEDS_ATTENTION_STATUSES = new Set([
-  "approval_requested",
-  "blocked",
-  "failed",
-  "needs_attention",
-  "question_waiting",
-  "waiting",
-  "waiting_for_approval",
-  "waiting_for_input",
-]);
-
 function normalizeTimestamp(value) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     return null;
@@ -50,21 +39,6 @@ export function removeTaskBoardActivity(activities, providerId, sessionId) {
   return activities.filter((item) => item.providerId !== providerId || item.sessionId !== sessionId);
 }
 
-export function selectRecentConversationTurns(turns, limit = 6) {
-  const normalizedLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 6;
-  if (normalizedLimit === 0 || !Array.isArray(turns)) {
-    return [];
-  }
-  return turns.flatMap((turn) => {
-    const role = typeof turn?.role === "string" ? turn.role.trim().toLowerCase() : "";
-    const content = typeof turn?.content === "string" ? turn.content.trim() : "";
-    if (!content || (role !== "user" && role !== "assistant")) {
-      return [];
-    }
-    return [{ role, content }];
-  }).slice(-normalizedLimit);
-}
-
 function normalizedBoardText(value) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
 }
@@ -79,27 +53,6 @@ function readSessionTimestamp(session) {
       raw.createdAt ??
       raw.created_at,
   );
-}
-
-function preferSessionPreviewOverActivity({ activityPreviewText, session, activity, title }) {
-  const sessionText = uniquePreview(
-    sessionPreview(session) ||
-      activityPreviewFallback({ ...activity, sessionId: normalizedString(activity.sessionId) }, title),
-    title,
-  );
-  const activityText = activityPreviewText || null;
-  if (!sessionText) {
-    return activityText;
-  }
-  if (!activityText) {
-    return sessionText;
-  }
-  const sessionUpdatedAt = readSessionTimestamp(session) ?? 0;
-  const activityUpdatedAt = normalizeTimestamp(activity?.updatedAt) ?? 0;
-  if (sessionUpdatedAt > activityUpdatedAt) {
-    return sessionText;
-  }
-  return activityText;
 }
 
 function providerLabelFor(providerLabels, providerId) {
@@ -182,34 +135,8 @@ function activityPreview(activity) {
   return lastFinalMessage || lastAssistantMessage || attentionReason || lastUserMessage || null;
 }
 
-function activityPreviewFallback(activity, title) {
-  const sessionId = normalizedString(activity.sessionId);
-  const text = formatSessionPreviewText(activity.lastUserMessage)
-    || formatSessionPreviewText(activity.title)
-    || formatSessionPreviewText(title);
-  if (!text || isPlaceholderTitle(text, sessionId)) {
-    return null;
-  }
-  return text;
-}
-
 function normalizedString(value) {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function meaningfulPreview(preview, title, fallback) {
-  const text = normalizedString(preview);
-  const normalizedTitle = formatSessionPreviewText(title);
-  if (text && text !== normalizedTitle) {
-    return text;
-  }
-  const fallbackText = normalizedString(fallback);
-  return fallbackText && fallbackText !== normalizedTitle ? fallbackText : null;
-}
-
-function uniquePreview(preview, title) {
-  const text = normalizedString(preview);
-  return text && text !== formatSessionPreviewText(title) ? text : null;
 }
 
 function activityStatusReason(activity, fallback) {
@@ -220,47 +147,6 @@ function activityStatusReason(activity, fallback) {
   return fallback === "需要处理" ? fallback : "";
 }
 
-function readStatusValue(raw) {
-  return normalizedString(
-    raw.status ??
-      raw.state ??
-      raw.runtimeStatus ??
-      raw.runtime_status ??
-      raw.lastEvent ??
-      raw.last_event ??
-      raw.event ??
-      raw.eventName ??
-      raw.event_name,
-  ).toLowerCase();
-}
-
-function readRecentEvent(raw) {
-  const event = normalizedString(
-    raw.lastEvent ??
-      raw.last_event ??
-      raw.event ??
-      raw.eventName ??
-      raw.event_name ??
-      raw.status ??
-      raw.state,
-  );
-  return event || null;
-}
-
-function hasNeedsAttentionSignal(raw) {
-  if (
-    raw.needsAttention === true ||
-    raw.needs_attention === true ||
-    raw.waitingForInput === true ||
-    raw.waiting_for_input === true ||
-    raw.approvalRequested === true ||
-    raw.approval_requested === true
-  ) {
-    return true;
-  }
-  return NEEDS_ATTENTION_STATUSES.has(readStatusValue(raw));
-}
-
 function activityNeedsAttention(activity) {
   const status = normalizedString(activity.status).toLowerCase();
   return status === "needs_attention" || status === "failed";
@@ -268,38 +154,6 @@ function activityNeedsAttention(activity) {
 
 function activityRunning(activity) {
   return normalizedString(activity.status).toLowerCase() === "running";
-}
-
-function readProviderActiveSignal(raw) {
-  if (
-    raw.providerActive === true ||
-    raw.provider_active === true ||
-    raw.ownerBridgeActive === true ||
-    raw.owner_bridge_active === true
-  ) {
-    return true;
-  }
-  if (
-    raw.providerActive === false ||
-    raw.provider_active === false ||
-    raw.ownerBridgeActive === false ||
-    raw.owner_bridge_active === false
-  ) {
-    return false;
-  }
-  return null;
-}
-
-function hasStrongActiveRecentActivity(recentActivity) {
-  if (!recentActivity) {
-    return false;
-  }
-  const activeSessionId = normalizedString(recentActivity.activeSessionId);
-  if (!activeSessionId) {
-    return false;
-  }
-  const preview = formatSessionPreviewText(recentActivity.highlightedThreadPreview || "");
-  return !isPlaceholderTitle(preview, activeSessionId) && !isLowSignalTaskBoardText(preview);
 }
 
 function sessionRefSet(refs) {
@@ -347,29 +201,11 @@ export function buildTaskBoardModel({
   providerLabels,
   nowEpochMs = Date.now(),
 }) {
-  const recentActivity = dashboardState?.recentActivity ?? null;
-  const activeSessionId = recentActivity?.activeSessionId?.trim() || null;
-  const activeProviderId =
-    recentActivity?.activeSessionTool?.trim() ||
-    recentActivity?.activeTool?.trim() ||
-    null;
-  const activeWorkspacePath = recentActivity?.activeWorkspacePath?.trim() || null;
-  const hasStrongActiveSession = hasStrongActiveRecentActivity(recentActivity);
   const generatedAtEpochMs = normalizeTimestamp(dashboardState?.generatedAtEpoch) ?? nowEpochMs;
   const pinnedKeys = sessionRefSet(taskBoardState?.pinned);
   const sessionsByKey = new Map(
     sessions.map((session) => [taskBoardSessionKey(session.type, session.id), session]),
   );
-  const activeSessionKey =
-    activeSessionId && activeProviderId
-      ? taskBoardSessionKey(activeProviderId, activeSessionId)
-      : null;
-  const activeRecentSession = activeSessionKey ? sessionsByKey.get(activeSessionKey) : null;
-  const activeRecentSessionProviderActive = activeRecentSession
-    ? readProviderActiveSignal(activeRecentSession.raw ?? {})
-    : null;
-  const allowDashboardActiveSession =
-    hasStrongActiveSession && activeRecentSessionProviderActive !== false;
 
   const tasks = sessionActivities.flatMap((activity) => {
     const providerId = normalizedString(activity.providerId);
@@ -384,8 +220,7 @@ export function buildTaskBoardModel({
     const attentionKind = normalizedString(activity.attentionKind).toLowerCase();
     const interrupted = status === "completed" && attentionKind === "interrupted";
     const recentEnded = status === "completed";
-    const providerActive = readProviderActiveSignal(session?.raw ?? {});
-    const running = !needsAttention && activityRunning(activity) && providerActive !== false;
+    const running = !needsAttention && activityRunning(activity);
     const pinned = pinnedKeys.has(key);
     const title = activityTitle({ ...activity, sessionId }, session);
     const fallbackReason = needsAttention
@@ -395,13 +230,7 @@ export function buildTaskBoardModel({
         : pinned
           ? "关注中"
           : "";
-    const activityPreviewText = normalizedString(activityPreview(activity));
-  const preview = preferSessionPreviewOverActivity({
-      activityPreviewText,
-      session,
-      activity: { ...activity, sessionId },
-      title,
-    });
+    const preview = activityPreview(activity);
 
     return [{
       id: key,
@@ -427,6 +256,7 @@ export function buildTaskBoardModel({
       controlReason: normalizedString(activity.controlReason),
       controlMode: normalizedString(activity.controlMode) || "external",
       recentEvents: Array.isArray(activity.recentEvents) ? activity.recentEvents.slice(0, 5) : [],
+      conversationTurns: Array.isArray(activity.conversationTurns) ? activity.conversationTurns : [],
       lastUserMessage: normalizedString(activity.lastUserMessage),
       lastAssistantMessage: normalizedString(activity.lastAssistantMessage),
       interrupted,
@@ -435,44 +265,23 @@ export function buildTaskBoardModel({
       running,
       pinned,
       statusReason: activityStatusReason(activity, fallbackReason),
-      recentEvent: providerActive === true ? "provider_active" : normalizedString(activity.lastEventKind) || null,
+      recentEvent: normalizedString(activity.lastEventKind) || null,
       updatedAtEpochMs: normalizeTimestamp(activity.updatedAt),
     }];
   });
   const projectedKeys = new Set(tasks.map((task) => task.id));
 
   sessions.forEach((session) => {
-    const raw = session.raw ?? {};
     const updatedAtEpochMs = readSessionTimestamp(session);
-    const isActive =
-      allowDashboardActiveSession &&
-      Boolean(activeSessionId) &&
-      session.id === activeSessionId &&
-      (!activeProviderId || session.type === activeProviderId);
-    const providerActive = readProviderActiveSignal(raw) === true;
     const key = taskBoardSessionKey(session.type, session.id);
     if (projectedKeys.has(key)) {
       return;
     }
-    const needsAttention = hasNeedsAttentionSignal(raw);
-    const running = !needsAttention && (isActive || providerActive);
+    const needsAttention = false;
+    const running = false;
     const pinned = pinnedKeys.has(key);
     const title = sessionTitle(session);
-    const fallbackReason = needsAttention
-      ? "需要处理"
-      : running
-        ? "正在执行"
-        : pinned
-          ? "关注中"
-          : "";
-    const sessionPreviewText = sessionPreview(session);
-    const activePreviewText = formatSessionPreviewText(recentActivity?.highlightedThreadPreview || "");
-    const rawPreview = isActive
-      ? meaningfulPreview(activePreviewText, title, sessionPreviewText || "")
-      : sessionPreviewText;
-    const preview = pinned
-      ? uniquePreview(rawPreview, title)
-      : meaningfulPreview(rawPreview, title, "");
+    const preview = null;
 
     tasks.push({
       id: key,
@@ -496,6 +305,7 @@ export function buildTaskBoardModel({
       controlReason: "",
       controlMode: "external",
       recentEvents: [],
+      conversationTurns: [],
       lastUserMessage: "",
       lastAssistantMessage: normalizedString(preview),
       interrupted: false,
@@ -503,54 +313,11 @@ export function buildTaskBoardModel({
       recentEnded: false,
       running,
       pinned,
-      statusReason: needsAttention || running ? fallbackReason : "",
-      recentEvent: isActive ? "active_session" : providerActive ? "provider_active" : readRecentEvent(raw),
-      updatedAtEpochMs: isActive ? Math.max(updatedAtEpochMs ?? 0, generatedAtEpochMs) : updatedAtEpochMs,
+      statusReason: "",
+      recentEvent: null,
+      updatedAtEpochMs,
     });
   });
-
-  if (
-    allowDashboardActiveSession &&
-    activeSessionId &&
-    !tasks.some((task) => task.sessionId === activeSessionId && (!activeProviderId || task.providerId === activeProviderId)) &&
-    (activeWorkspacePath || recentActivity?.highlightedThreadPreview)
-  ) {
-    const providerId = activeProviderId || "unknown";
-    const key = taskBoardSessionKey(providerId, activeSessionId);
-    tasks.push({
-      id: key,
-      sessionId: activeSessionId,
-      providerId,
-      providerLabel: providerLabelFor(providerLabels, providerId),
-      title: recentActivity?.highlightedThreadPreview || activeSessionId,
-      workspace: activeWorkspacePath || recentActivity?.activeWorkspaceName || "",
-      workspaceId: "",
-      workspacePath: activeWorkspacePath || "",
-      preview: uniquePreview(recentActivity?.highlightedThreadPreview, recentActivity?.highlightedThreadPreview || activeSessionId),
-      archived: false,
-      needsAttention: false,
-      status: "running",
-      attentionKind: "",
-      requestId: "",
-      approvalSource: "",
-      mirroredOnly: false,
-      canInterrupt: false,
-      canRecover: false,
-      controlReason: "",
-      controlMode: "external",
-      recentEvents: [],
-      lastUserMessage: "",
-      lastAssistantMessage: "",
-      interrupted: false,
-      canContinue: false,
-      recentEnded: false,
-      running: true,
-      pinned: pinnedKeys.has(key),
-      statusReason: "正在执行",
-      recentEvent: "active_session",
-      updatedAtEpochMs: generatedAtEpochMs,
-    });
-  }
 
   const boardTasks = tasks.filter((task) => {
     if (task.archived) {
@@ -594,60 +361,5 @@ export function buildTaskBoardModel({
       total: tasks.length,
     },
     generatedAtEpochMs,
-  };
-}
-
-export function collectTaskBoardPreviewHydrationPlan({
-  sessions = [],
-  taskBoardState = null,
-  pinnedLimit = 12,
-  lowSignalLimit = 16,
-} = {}) {
-  const pinned = Array.isArray(taskBoardState?.pinned) ? taskBoardState.pinned : [];
-  const pinnedKeys = new Set(
-    pinned.map((item) => taskBoardSessionKey(item.providerId, item.sessionId)),
-  );
-  const pinnedUpdatedAtByKey = new Map(
-    pinned.map((item) => [
-      taskBoardSessionKey(item.providerId, item.sessionId),
-      item.updatedAtEpoch ?? 0,
-    ]),
-  );
-  const orderedPinnedKeys = sessions
-    .filter((session) => pinnedKeys.has(taskBoardSessionKey(session.type, session.id)))
-    .sort((left, right) => {
-      const leftUpdatedAt = pinnedUpdatedAtByKey.get(taskBoardSessionKey(left.type, left.id)) ?? 0;
-      const rightUpdatedAt = pinnedUpdatedAtByKey.get(taskBoardSessionKey(right.type, right.id)) ?? 0;
-      return rightUpdatedAt - leftUpdatedAt;
-    })
-    .slice(0, pinnedLimit)
-    .map((session) => taskBoardSessionKey(session.type, session.id));
-  const orderedLowSignalKeys = sessions
-    .filter((session) => {
-      const raw = session.raw ?? {};
-      const preview = raw.lastMessage ?? raw.last_message ?? raw.preview ?? raw.summary ?? "";
-      return isLowSignalTaskBoardText(session.title) || isLowSignalTaskBoardText(preview);
-    })
-    .sort((left, right) => {
-      const leftUpdatedAt = Number((left.raw ?? {}).updatedAt ?? (left.raw ?? {}).updated_at ?? 0);
-      const rightUpdatedAt = Number((right.raw ?? {}).updatedAt ?? (right.raw ?? {}).updated_at ?? 0);
-      return rightUpdatedAt - leftUpdatedAt;
-    })
-    .slice(0, lowSignalLimit)
-    .map((session) => taskBoardSessionKey(session.type, session.id));
-
-  const keys = [];
-  const seen = new Set();
-  for (const key of [...orderedPinnedKeys, ...orderedLowSignalKeys]) {
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    keys.push(key);
-  }
-
-  return {
-    keys,
-    pinnedKeys: orderedPinnedKeys,
   };
 }

@@ -68,6 +68,45 @@ export async function fetchProviderSession(
   return limitSessionTurns(normalizeSessionTurns(turns));
 }
 
+function normalizeProviderSessionSendResult(
+  result: Record<string, unknown> | null,
+): ProviderSessionSendResult {
+  const payload = result ?? {};
+  return {
+    accepted: typeof payload.accepted === "boolean" ? payload.accepted : undefined,
+    error: typeof payload.error === "string" ? payload.error : null,
+    requestId: typeof payload.request_id === "string" ? payload.request_id : null,
+    providerId: typeof payload.provider_id === "string"
+      ? payload.provider_id
+      : typeof payload.providerId === "string"
+        ? payload.providerId
+        : null,
+    threadId: typeof payload.thread_id === "string"
+      ? payload.thread_id
+      : typeof payload.threadId === "string"
+        ? payload.threadId
+        : null,
+    requestedThreadId: typeof payload.requested_thread_id === "string"
+      ? payload.requested_thread_id
+      : typeof payload.requestedThreadId === "string"
+        ? payload.requestedThreadId
+        : null,
+    workspaceId: typeof payload.workspace_id === "string"
+      ? payload.workspace_id
+      : typeof payload.workspaceId === "string"
+        ? payload.workspaceId
+        : null,
+    remapped: typeof payload.remapped === "boolean" ? payload.remapped : undefined,
+    createdNewThread: typeof payload.created_new_thread === "boolean"
+      ? payload.created_new_thread
+      : typeof payload.createdNewThread === "boolean"
+        ? payload.createdNewThread
+        : undefined,
+    pending: typeof payload.pending === "boolean" ? payload.pending : undefined,
+    session: payload.session ?? null,
+  };
+}
+
 export async function sendProviderSessionMessage(
   providerId: string,
   sessionId: string,
@@ -82,38 +121,7 @@ export async function sendProviderSessionMessage(
     attachments,
     workspaceDir: workspaceDir ?? null,
   });
-  const payload = result ?? {};
-  return {
-    accepted: typeof payload.accepted === "boolean" ? payload.accepted : undefined,
-    providerId: typeof payload.provider_id === "string"
-      ? payload.provider_id
-      : typeof payload.providerId === "string"
-        ? payload.providerId
-        : null,
-    threadId: typeof payload.thread_id === "string"
-      ? payload.thread_id
-      : typeof payload.threadId === "string"
-        ? payload.threadId
-        : null,
-    requestedThreadId: typeof payload.requested_thread_id === "string"
-      ? payload.requested_thread_id
-      : typeof payload.requestedThreadId === "string"
-        ? payload.requestedThreadId
-        : null,
-    workspaceId: typeof payload.workspace_id === "string"
-      ? payload.workspace_id
-      : typeof payload.workspaceId === "string"
-        ? payload.workspaceId
-        : null,
-    remapped: typeof payload.remapped === "boolean" ? payload.remapped : undefined,
-    createdNewThread: typeof payload.created_new_thread === "boolean"
-      ? payload.created_new_thread
-      : typeof payload.createdNewThread === "boolean"
-        ? payload.createdNewThread
-        : undefined,
-    pending: typeof payload.pending === "boolean" ? payload.pending : undefined,
-    session: payload.session ?? null,
-  };
+  return normalizeProviderSessionSendResult(result);
 }
 
 export async function startProviderSessionMessage(
@@ -121,58 +129,27 @@ export async function startProviderSessionMessage(
   workspaceDir: string,
   text: string,
   attachments: ComposerAttachment[] = [],
+  requestId?: string,
 ): Promise<ProviderSessionSendResult> {
   const result = await invoke<Record<string, unknown> | null>("start_provider_session_message", {
     providerId,
     workspaceDir,
     text,
     attachments,
+    requestId: requestId ?? null,
   });
-  const payload = result ?? {};
-  return {
-    accepted: typeof payload.accepted === "boolean" ? payload.accepted : undefined,
-    providerId: typeof payload.provider_id === "string"
-      ? payload.provider_id
-      : typeof payload.providerId === "string"
-        ? payload.providerId
-        : null,
-    threadId: typeof payload.thread_id === "string"
-      ? payload.thread_id
-      : typeof payload.threadId === "string"
-        ? payload.threadId
-        : null,
-    requestedThreadId: typeof payload.requested_thread_id === "string"
-      ? payload.requested_thread_id
-      : typeof payload.requestedThreadId === "string"
-        ? payload.requestedThreadId
-        : null,
-    workspaceId: typeof payload.workspace_id === "string"
-      ? payload.workspace_id
-      : typeof payload.workspaceId === "string"
-        ? payload.workspaceId
-        : null,
-    remapped: typeof payload.remapped === "boolean" ? payload.remapped : undefined,
-    createdNewThread: typeof payload.created_new_thread === "boolean"
-      ? payload.created_new_thread
-      : typeof payload.createdNewThread === "boolean"
-        ? payload.createdNewThread
-        : undefined,
-    pending: typeof payload.pending === "boolean" ? payload.pending : undefined,
-    session: payload.session ?? null,
-  };
+  return normalizeProviderSessionSendResult(result);
 }
 
 export async function archiveProviderSession(
   providerId: string,
   sessionId: string,
   workspaceDir?: string | null,
-  sessionTitle?: string | null,
 ): Promise<unknown> {
   return invoke("archive_provider_session", {
     providerId,
     sessionId,
     workspaceDir: workspaceDir ?? null,
-    sessionTitle: sessionTitle ?? null,
   });
 }
 

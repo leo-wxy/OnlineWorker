@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -10,6 +11,7 @@ from config import get_data_dir, load_config, load_provider_runtime_config
 from core.providers.overlay import iter_overlay_manifest_paths, load_manifest
 from core.providers.registry import get_provider
 from core.storage import AppStorage, ThreadInfo, WorkspaceInfo
+from core.state import AppState
 from core.user_messages.contracts import UserMessageSendRequest
 from core.user_messages.gateway import prepare_user_message_text
 
@@ -252,15 +254,10 @@ def _attach_adapter_registry(state, *, adapters: dict[str, Any] | None = None):
 
 
 def _build_runtime_manager_stub(config):
-    state = _attach_adapter_registry(
-        SimpleNamespace(
-            config=config,
-            app_server_proc=None,
-        )
-    )
+    state = AppState(config=config, storage=AppStorage())
     manager = SimpleNamespace(
         state=state,
-        storage=AppStorage(workspaces={}),
+        storage=state.storage,
         gid=0,
         _tui_sync_tasks={},
         _tui_mirror_tasks={},
@@ -295,6 +292,7 @@ def _build_runtime_manager_stub(config):
     return manager
 
 
+@asynccontextmanager
 async def _provider_session_adapter(descriptor, provider_id: str):
     runtime_hooks = getattr(descriptor, "runtime_hooks", None)
     if not callable(getattr(runtime_hooks, "start", None)):
@@ -302,11 +300,16 @@ async def _provider_session_adapter(descriptor, provider_id: str):
     config, tool_cfg = _runtime_config_and_tool_cfg(descriptor, provider_id)
 
     manager = _build_runtime_manager_stub(config)
-    await runtime_hooks.start(manager, bot=None, tool_cfg=tool_cfg)
-    active_adapter = manager.state.get_adapter(provider_id)
-    if active_adapter is None:
-        raise RuntimeError(f"Provider '{provider_id}' runtime did not register adapter")
-    return active_adapter
+    try:
+        await runtime_hooks.start(manager, bot=None, tool_cfg=tool_cfg)
+        active_adapter = manager.state.get_adapter(provider_id)
+        if active_adapter is None:
+            raise RuntimeError(f"Provider '{provider_id}' runtime did not register adapter")
+        yield active_adapter
+    finally:
+        shutdown = getattr(runtime_hooks, "shutdown", None)
+        if callable(shutdown):
+            await shutdown(manager)
 
 
 def _workspace_path_for_session(provider_id: str, session_id: str, workspace_dir: str | None) -> str:
@@ -522,36 +525,36 @@ async def send_provider_session_message(
     if not workspace_path:
         raise ValueError(f"workspace_dir is required for provider '{provider_id}' send")
 
-    adapter = await _provider_session_adapter(descriptor, provider_id)
-    ws_info = {
-        "tool": provider_id,
-        "path": workspace_path,
-        "daemon_workspace_id": _workspace_id(provider_id, workspace_path),
-    }
-    thread_info = {
-        "thread_id": normalized_session_id,
-    }
-    gateway_result = await prepare_user_message_text(
-        _message_gateway_state(),
-        UserMessageSendRequest(
-            source="provider_session_bridge",
-            provider_id=provider_id,
-            workspace_id=ws_info["daemon_workspace_id"],
-            thread_id=normalized_session_id,
+    async with _provider_session_adapter(descriptor, provider_id) as adapter:
+        ws_info = {
+            "tool": provider_id,
+            "path": workspace_path,
+            "daemon_workspace_id": _workspace_id(provider_id, workspace_path),
+        }
+        thread_info = {
+            "thread_id": normalized_session_id,
+        }
+        gateway_result = await prepare_user_message_text(
+            _message_gateway_state(),
+            UserMessageSendRequest(
+                source="provider_session_bridge",
+                provider_id=provider_id,
+                workspace_id=ws_info["daemon_workspace_id"],
+                thread_id=normalized_session_id,
+                text=trimmed_text,
+                attachments=normalized_attachments,
+            ),
+        )
+        trimmed_text = gateway_result.text
+
+        await _invoke_message_hook_send(
+            message_hooks.send,
+            adapter=adapter,
+            ws_info=ws_info,
+            thread_info=thread_info,
             text=trimmed_text,
             attachments=normalized_attachments,
-        ),
-    )
-    trimmed_text = gateway_result.text
-
-    await _invoke_message_hook_send(
-        message_hooks.send,
-        adapter=adapter,
-        ws_info=ws_info,
-        thread_info=thread_info,
-        text=trimmed_text,
-        attachments=normalized_attachments,
-    )
+        )
 
 
 async def archive_provider_session(
@@ -568,24 +571,24 @@ async def archive_provider_session(
         raise ValueError("session_id is required")
 
     workspace_path = _workspace_path_for_session(provider_id, normalized_session_id, workspace_dir)
-    adapter = await _provider_session_adapter(descriptor, provider_id)
-    state, ws_info = _bridge_state_for_archive(
-        provider_id,
-        normalized_session_id,
-        workspace_path,
-        adapter,
-    )
-    if callable(archive_thread):
-        await _invoke_thread_archive(
-            archive_thread,
-            state=state,
-            adapter=adapter,
-            ws_info=ws_info,
-            thread_id=normalized_session_id,
+    async with _provider_session_adapter(descriptor, provider_id) as adapter:
+        state, ws_info = _bridge_state_for_archive(
+            provider_id,
+            normalized_session_id,
+            workspace_path,
+            adapter,
         )
-        return
+        if callable(archive_thread):
+            await _invoke_thread_archive(
+                archive_thread,
+                state=state,
+                adapter=adapter,
+                ws_info=ws_info,
+                thread_id=normalized_session_id,
+            )
+            return
 
-    adapter_archive = getattr(adapter, "archive_thread", None)
-    if not callable(adapter_archive):
-        raise ValueError(f"Provider '{provider_id}' does not expose real archive support")
-    await adapter_archive(ws_info.daemon_workspace_id, normalized_session_id)
+        adapter_archive = getattr(adapter, "archive_thread", None)
+        if not callable(adapter_archive):
+            raise ValueError(f"Provider '{provider_id}' does not expose real archive support")
+        await adapter_archive(ws_info.daemon_workspace_id, normalized_session_id)

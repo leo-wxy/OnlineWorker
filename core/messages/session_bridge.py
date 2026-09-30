@@ -12,6 +12,9 @@ def _text(value: Any) -> str:
 
 
 def _event_text(event: SessionEvent) -> str:
+    if event.kind == "assistant_delta":
+        # Incremental chunks must retain boundary spaces and newlines.
+        return str(event.payload.get("delta") or event.semantic_payload.get("text") or "")
     semantic_text = _text(event.semantic_payload.get("text"))
     if semantic_text:
         return semantic_text
@@ -88,6 +91,7 @@ def message_event_from_session_event(event: SessionEvent) -> MessageEvent:
     raw_item = payload.get("item", {})
     item_id = _text(
         payload.get("item_id")
+        or payload.get("itemId")
         or payload.get("id")
         or (raw_item.get("id") if isinstance(raw_item, dict) else "")
     )
@@ -106,6 +110,7 @@ def message_event_from_session_event(event: SessionEvent) -> MessageEvent:
         "message.user.submitted",
         "message.user.accepted",
         "message.assistant.final",
+        "message.assistant.delta",
         "turn.started",
         "turn.completed",
         "turn.failed",
@@ -116,7 +121,11 @@ def message_event_from_session_event(event: SessionEvent) -> MessageEvent:
     elif kind == "session.title_updated":
         stable_identity.append(title)
     dedupe_key = ""
-    if any(stable_identity):
+    # A turn contains multiple commentary messages; only a concrete item/request
+    # can identify a repeated snapshot within that turn.
+    if any(stable_identity) and (kind != "message.assistant.delta" or (
+        event.raw_method == "item/completed" and (item_id or request_id)
+    )):
         dedupe_key = ":".join(
             part
             for part in (
@@ -133,6 +142,13 @@ def message_event_from_session_event(event: SessionEvent) -> MessageEvent:
         "rawMethod": event.raw_method,
         "semanticKind": event.semantic_kind,
     }
+    if item_id:
+        public_payload["itemId"] = item_id
+    phase = _text(semantic_payload.get("phase") or payload.get("phase"))
+    if phase:
+        public_payload["phase"] = phase
+    if kind == "message.assistant.delta" and event.raw_method == "item/completed":
+        public_payload["isSnapshot"] = True
     if text:
         if kind == "message.assistant.delta":
             public_payload["delta"] = text

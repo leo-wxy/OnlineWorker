@@ -12,21 +12,25 @@ from types import SimpleNamespace
 from typing import Optional
 
 from config import get_data_dir
+from core.messages.events import create_message_event
 from core.provider_session_new import (
     build_provider_session_summary,
     send_started_provider_thread_message,
     start_real_provider_thread,
     validate_new_provider_thread_request,
 )
+from core.provider_session_archive import commit_session_archive
 from core.providers.registry import get_provider
 from core.storage import ThreadInfo, WorkspaceInfo, save_storage
 from core.user_messages.contracts import UserMessageSendRequest
 from core.user_messages.gateway import prepare_user_message_text
 from core.messages.publishing import (
-    publish_session_archived,
     publish_approval_answered,
     publish_user_message_accepted,
+    publish_user_message_event,
+    publish_user_message_failed,
     publish_user_message_submitted,
+    report_user_message_failure,
 )
 
 
@@ -36,9 +40,51 @@ OWNER_BRIDGE_USAGE_TIMEOUT_SECONDS = 5.0
 OWNER_BRIDGE_SLOW_REQUEST_WARNING_SECONDS = 0.25
 OWNER_BRIDGE_PREVIEW_HYDRATION_LIMIT = 6
 OWNER_BRIDGE_PREVIEW_MAX_LENGTH = 220
+OWNER_BRIDGE_STREAM_QUEUE_SIZE = 256
 CONTROLLED_THREAD_SOURCES = {"app", "provider", "telegram_new_thread"}
 logger = logging.getLogger(__name__)
 ABSOLUTE_PATH_RE = re.compile(r"(?:^|[\s(])(/(?:Users|Applications|Volumes|private|tmp|var)/[^\s)]+)")
+
+
+def _stream_queue(writer):
+    queue = asyncio.Queue(maxsize=OWNER_BRIDGE_STREAM_QUEUE_SIZE)
+    closed = asyncio.Event()
+
+    def enqueue(payload):
+        if closed.is_set():
+            return
+        try:
+            queue.put_nowait(payload)
+        except asyncio.QueueFull:
+            logger.warning("[provider-owner-bridge] stream queue full; disconnecting for snapshot recovery")
+            closed.set()
+            writer.close()
+
+    return queue, closed, enqueue
+
+
+async def _run_stream_writer(reader, writer, queue, closed, snapshot):
+    if closed.is_set():
+        return
+
+    async def send(payload):
+        writer.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
+        await writer.drain()
+
+    async def write_loop():
+        await send(snapshot)
+        while True:
+            await send(await queue.get())
+
+    tasks = [asyncio.create_task(write_loop()), asyncio.create_task(reader.read()), asyncio.create_task(closed.wait())]
+    try:
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            task.result()
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def provider_owner_bridge_socket_path(data_dir: Optional[str] = None) -> Optional[str]:
@@ -239,17 +285,7 @@ def _new_thread_source(provider_id: str) -> str:
 
 
 def _new_thread_info(thread_id: str, *, source: str = "app"):
-    return ThreadInfo(
-        thread_id=thread_id,
-        topic_id=None,
-        preview=None,
-        archived=False,
-        streaming_msg_id=None,
-        last_tg_user_message_id=None,
-        history_sync_cursor=None,
-        is_active=True,
-        source=source,
-    )
+    return ThreadInfo(thread_id=thread_id, is_active=True, source=source)
 
 
 def _is_app_state_thread_id(provider_id: str, thread_id: str) -> bool:
@@ -501,8 +537,13 @@ def _normalize_provider_turn(turn: dict) -> dict:
         normalized["displayMode"] = display_mode
     elif kind == "error":
         normalized["displayMode"] = "plain"
+    elif role == "assistant":
+        normalized["displayMode"] = "plain" if turn.get("phase") == "commentary" else "markdown"
     if kind:
         normalized["kind"] = kind
+    for field in ("timestamp", "turnId", "itemId", "phase"):
+        if turn.get(field):
+            normalized[field] = turn[field]
 
     return normalized
 
@@ -620,89 +661,6 @@ async def _hydrate_low_signal_session_previews(
             )
 
 
-def _event_payload_text(payload: dict, *keys: str) -> str:
-    for key in keys:
-        value = str(payload.get(key) or "").strip()
-        if value:
-            return value
-    return ""
-
-
-def _user_message_stream_text(payload: dict) -> str:
-    base_text = _event_payload_text(payload, "text", "message", "delta")
-    attachment_lines: list[str] = []
-    for attachment in payload.get("attachments") or []:
-        if not isinstance(attachment, dict):
-            continue
-        kind = str(attachment.get("kind") or "").strip().lower()
-        name = str(attachment.get("name") or "").strip() or "attachment"
-        label = "image" if kind == "image" else "file"
-        attachment_lines.append(f"[Attached {label}] {name}")
-    if not attachment_lines:
-        return base_text
-    if not base_text:
-        return "\n".join(attachment_lines)
-    return f"{base_text}\n" + "\n".join(attachment_lines)
-
-
-def _message_event_to_session_stream_payload(event) -> Optional[dict]:
-    payload = event.payload if isinstance(getattr(event, "payload", None), dict) else {}
-    semantic_kind = str(getattr(event, "kind", "") or "").strip()
-
-    if semantic_kind in {"message.user.submitted", "message.user.accepted"}:
-        text = _user_message_stream_text(payload)
-        if not text:
-            return None
-        return {
-            "kind": "user_message",
-            "semanticKind": semantic_kind,
-            "turn": {
-                "role": "user",
-                "content": text,
-                "displayMode": "plain",
-            },
-        }
-
-    if semantic_kind == "message.assistant.delta":
-        text = _event_payload_text(payload, "delta", "text", "message")
-        if not text:
-            return None
-        return {
-            "kind": "assistant_progress",
-            "semanticKind": semantic_kind,
-            "turn": {
-                "role": "assistant",
-                "content": text,
-                "displayMode": "plain",
-                "pending": True,
-            },
-        }
-
-    if semantic_kind == "message.assistant.final":
-        text = _event_payload_text(payload, "text", "message", "delta")
-        if not text:
-            return None
-        return {
-            "kind": "assistant_completed",
-            "semanticKind": semantic_kind,
-            "turn": {
-                "role": "assistant",
-                "content": text,
-                "displayMode": "markdown",
-            },
-        }
-
-    if semantic_kind == "turn.failed":
-        reason = _event_payload_text(payload, "reason", "text", "message", "delta")
-        return {
-            "kind": "turn_aborted",
-            "semanticKind": semantic_kind,
-            "reason": reason or "interrupted",
-        }
-
-    return None
-
-
 async def _status_lines_for_provider(state, provider_id: str, provider) -> list[str]:
     status_builder = getattr(provider, "status_builder", None)
     if callable(status_builder):
@@ -726,6 +684,7 @@ class ProviderOwnerBridge:
         self.socket_path = provider_owner_bridge_socket_path(self.data_dir)
         self._server: Optional[asyncio.base_events.Server] = None
         self._pending_send_tasks: set[asyncio.Task] = set()
+        self._new_session_tasks: dict[tuple[str, str, str], tuple[str, list, asyncio.Task]] = {}
         self._list_sessions_tasks: dict[tuple[str, int], asyncio.Task] = {}
         self._list_sessions_cache: dict[tuple[str, int], dict] = {}
 
@@ -767,6 +726,7 @@ class ProviderOwnerBridge:
         if self._pending_send_tasks:
             await asyncio.gather(*self._pending_send_tasks, return_exceptions=True)
             self._pending_send_tasks.clear()
+        self._new_session_tasks.clear()
 
         if self.socket_path and os.path.exists(self.socket_path):
             try:
@@ -1188,38 +1148,19 @@ class ProviderOwnerBridge:
             await writer.drain()
             return
 
-        write_lock = asyncio.Lock()
-        pending: set[asyncio.Task] = set()
-        queued_payloads: list[dict] = []
-        snapshot_sent = False
-
-        async def send_payload(payload: dict) -> None:
-            async with write_lock:
-                writer.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
-                await writer.drain()
-
-        loop = asyncio.get_running_loop()
-
-        def schedule_payload(payload: dict) -> None:
-            task = loop.create_task(send_payload(payload))
-            pending.add(task)
-            task.add_done_callback(pending.discard)
+        queue, closed, enqueue = _stream_queue(writer)
 
         def on_event(event) -> None:
-            nonlocal snapshot_sent
             if not getattr(event, "provider_id", "") or not getattr(event, "session_id", ""):
                 return
-            if event.kind == "session.archived":
+            if event.kind in {"session.archived", "session.hidden"}:
                 payload = {
                     "ok": True,
                     "kind": "remove",
                     "providerId": event.provider_id,
                     "sessionId": event.session_id,
                 }
-                if not snapshot_sent:
-                    queued_payloads.append(payload)
-                    return
-                schedule_payload(payload)
+                enqueue(payload)
                 return
             activity = bus.session_activity(event.provider_id, event.session_id)
             if activity is None:
@@ -1231,10 +1172,7 @@ class ProviderOwnerBridge:
                     "providerId": event.provider_id,
                     "sessionId": event.session_id,
                 }
-                if not snapshot_sent:
-                    queued_payloads.append(payload)
-                    return
-                schedule_payload(payload)
+                enqueue(payload)
                 return
             payload = {
                 "ok": True,
@@ -1245,14 +1183,11 @@ class ProviderOwnerBridge:
                     "eventId": event.event_id,
                 },
             }
-            if not snapshot_sent:
-                queued_payloads.append(payload)
-                return
-            schedule_payload(payload)
+            enqueue(payload)
 
         unsubscribe = bus.subscribe(on_event)
         try:
-            await send_payload(
+            await _run_stream_writer(reader, writer, queue, closed,
                 {
                     "ok": True,
                     "kind": "snapshot",
@@ -1264,17 +1199,8 @@ class ProviderOwnerBridge:
                     ),
                 }
             )
-            snapshot_sent = True
-            for payload in queued_payloads:
-                schedule_payload(payload)
-            queued_payloads.clear()
-            await reader.read()
         finally:
             unsubscribe()
-            for task in tuple(pending):
-                task.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
 
     async def _handle_session_event_stream(
         self,
@@ -1319,19 +1245,14 @@ class ProviderOwnerBridge:
             await writer.drain()
             return
 
-        write_lock = asyncio.Lock()
-        pending: set[asyncio.Task] = set()
-        loop = asyncio.get_running_loop()
+        queue, closed, enqueue = _stream_queue(writer)
 
-        async def send_payload(payload: dict) -> None:
-            async with write_lock:
-                writer.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
-                await writer.drain()
-
-        def schedule_payload(payload: dict) -> None:
-            task = loop.create_task(send_payload(payload))
-            pending.add(task)
-            task.add_done_callback(pending.discard)
+        def snapshot():
+            activity = bus.session_activity(provider_id, session_id) or {}
+            return {
+                "kind": "replace_snapshot", "snapshot": bus.session_conversation(provider_id, session_id),
+                "error": activity.get("deliveryError") or None,
+            }
 
         def on_event(event) -> None:
             if str(getattr(event, "provider_id", "") or "").strip() != provider_id:
@@ -1340,24 +1261,35 @@ class ProviderOwnerBridge:
                 return
             if workspace_dir and str(getattr(event, "workspace_path", "") or "").strip() != workspace_dir:
                 return
-            payload = _message_event_to_session_stream_payload(event)
-            if payload is not None:
-                schedule_payload(payload)
+            if event.kind == "message.user.send_failed":
+                activity = bus.session_activity(provider_id, session_id) or {}
+                if activity.get("lastMessageRequestId") == event.payload.get("messageRequestId"):
+                    enqueue({"kind": "send_failed", "semanticKind": event.kind, "error": event.payload.get("error")})
+            elif event.kind in {
+                "message.user.submitted", "message.user.accepted", "message.assistant.delta",
+                "message.assistant.final", "session.history.loaded", "turn.completed", "turn.failed",
+                "session.recovery.updated",
+                "session.archived", "session.hidden",
+            }:
+                enqueue(snapshot())
 
         unsubscribe = bus.subscribe(on_event)
         try:
-            await send_payload(
-                {
-                    "kind": "stream_ready",
-                }
-            )
-            await reader.read()
+            if not bus.session_history_loaded(provider_id, session_id):
+                response = await self._handle_read_session({
+                    "provider_id": provider_id, "session_id": session_id, "limit": 50,
+                    "workspace_dir": workspace_dir,
+                })
+                if not response.get("ok"):
+                    writer.write((json.dumps({"kind": "error", "error": response.get("error")}) + "\n").encode())
+                    await writer.drain()
+                    return
+            initial_snapshot = snapshot()
+            while not queue.empty():
+                queue.get_nowait()
+            await _run_stream_writer(reader, writer, queue, closed, initial_snapshot)
         finally:
             unsubscribe()
-            for task in tuple(pending):
-                task.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
 
     async def _handle_archive_session(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
@@ -1373,10 +1305,6 @@ class ProviderOwnerBridge:
         if provider is None:
             return {"ok": False, "error": f"Provider '{provider_id}' 未启用"}
 
-        adapter = self.state.get_adapter(provider_id)
-        if adapter is None or not getattr(adapter, "connected", False):
-            return {"ok": False, "error": f"{provider_id} adapter 未连接"}
-
         ws_info, thread_info = _resolve_workspace_and_thread(
             self.state,
             provider_id,
@@ -1388,31 +1316,18 @@ class ProviderOwnerBridge:
 
         workspace_id = getattr(ws_info, "daemon_workspace_id", None) or _workspace_key(provider_id, ws_info.path)
         ws_info.daemon_workspace_id = workspace_id
+        adapter = self.state.get_adapter(provider_id)
         if hasattr(adapter, "register_workspace_cwd"):
             try:
                 adapter.register_workspace_cwd(workspace_id, ws_info.path)
             except Exception:
                 logger.debug("[provider-owner-bridge] register_workspace_cwd 失败", exc_info=True)
 
-        archive_source = "本地归档" if _is_app_state_thread_id(provider_id, thread_id) else "真实归档"
         if _is_app_state_thread_id(provider_id, thread_id):
-            thread_info.archived = True
-            thread_info.is_active = False
-            if getattr(self.state, "storage", None) is not None:
-                try:
-                    save_storage(self.state.storage)
-                except Exception as exc:
-                    thread_info.archived = False
-                    thread_info.is_active = True
-                    return {"ok": False, "error": f"本地归档失败: {exc}"}
-            publish_session_archived(
-                self.state,
-                provider_id=provider_id,
-                workspace_id=workspace_id,
-                workspace_path=ws_info.path,
-                session_id=thread_id,
-                source="desktop_app",
-            )
+            try:
+                commit_session_archive(self.state, ws_info, thread_info, source="desktop_app", archive_mode="local_overlay")
+            except Exception as exc:
+                return {"ok": False, "error": f"本地归档失败: {exc}"}
             return {
                 "ok": True,
                 "provider_id": provider_id,
@@ -1424,39 +1339,32 @@ class ProviderOwnerBridge:
 
         thread_hooks = getattr(provider, "thread_hooks", None)
         archive_thread = getattr(thread_hooks, "archive_thread", None) if thread_hooks is not None else None
+        archive_mode = "provider"
         try:
             if callable(archive_thread):
+                if getattr(archive_thread, "requires_adapter", True) and (adapter is None or not getattr(adapter, "connected", False)):
+                    return {"ok": False, "error": f"{provider_id} adapter 未连接"}
                 await archive_thread(self.state, ws_info, thread_id, adapter)
             elif callable(getattr(adapter, "archive_thread", None)):
                 await adapter.archive_thread(workspace_id, thread_id)
             else:
-                return {"ok": False, "error": f"Provider '{provider_id}' 不支持真实归档"}
+                raise RuntimeError(f"Provider '{provider_id}' 不支持真实归档")
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-
-        thread_info.archived = True
-        thread_info.is_active = False
-        if getattr(self.state, "storage", None) is not None:
-            try:
-                save_storage(self.state.storage)
-            except Exception as exc:
-                thread_info.archived = False
-                thread_info.is_active = True
-                return {"ok": False, "error": f"{archive_source}成功，但保存本地归档状态失败: {exc}"}
-        publish_session_archived(
-            self.state,
-            provider_id=provider_id,
-            workspace_id=workspace_id,
-            workspace_path=ws_info.path,
-            session_id=thread_id,
-            source="desktop_app",
-        )
+            unsupported = "does not expose a real source archive operation" in str(exc).lower() or "不支持真实归档" in str(exc)
+            if request.get("allow_local_overlay") is not True or not unsupported:
+                return {"ok": False, "error": str(exc)}
+            archive_mode = "local_overlay"
+        try:
+            commit_session_archive(self.state, ws_info, thread_info, source="desktop_app", archive_mode=archive_mode)
+        except Exception as exc:
+            return {"ok": False, "error": f"归档后保存本地状态失败: {exc}"}
         return {
             "ok": True,
             "provider_id": provider_id,
             "thread_id": thread_id,
             "workspace_id": workspace_id,
             "workspace_dir": ws_info.path,
+            **({"archive_mode": archive_mode} if archive_mode == "local_overlay" else {}),
         }
 
     async def _handle_usage_source_summary(self, request: dict) -> dict:
@@ -1612,6 +1520,14 @@ class ProviderOwnerBridge:
                 continue
             normalized.append(normalized_turn)
 
+        bus = getattr(self.state, "message_bus", None)
+        if bus is not None:
+            bus.publish(create_message_event(
+                "session.history.loaded", provider_id=provider_id, session_id=session_id,
+                workspace_path=str(request.get("workspace_dir") or ""), source="owner_history",
+                payload={"turns": normalized, "historyWindow": limit},
+            ))
+            normalized = bus.session_conversation(provider_id, session_id)[-limit:]
         return {"ok": True, "session": normalized}
 
     async def _handle_runtime_status(self, request: dict) -> dict:
@@ -1968,12 +1884,10 @@ class ProviderOwnerBridge:
         source = str(request.get("source") or "session_tab")
         owner_bridge_router = getattr(message_hooks, "try_route_owner_bridge_send", None)
         if callable(owner_bridge_router) and not attachments and source != "session_tab":
-            route_result = await owner_bridge_router(
-                self.state,
-                ws_info,
-                thread_info,
-                text=text,
-            )
+            with report_user_message_failure(self.state, message_event_request, text=text, workspace_path=ws_info.path):
+                route_result = await owner_bridge_router(
+                    self.state, ws_info, thread_info, text=text,
+                )
             if route_result:
                 self.state.mark_provider_send_started(provider_id, thread_id)
                 publish_user_message_accepted(
@@ -2063,6 +1977,7 @@ class ProviderOwnerBridge:
                 )
         except Exception as exc:
             rollback_thread_remap()
+            publish_user_message_failed(self.state, message_event_request, text=text, workspace_path=ws_info.path, error=exc)
             return {"ok": False, "error": str(exc)}
 
         if thread_info.thread_id != original_thread_id and getattr(self.state, "storage", None) is not None:
@@ -2070,21 +1985,21 @@ class ProviderOwnerBridge:
                 save_storage(self.state.storage)
             except Exception as exc:
                 rollback_thread_remap()
-                return {"ok": False, "error": f"发送成功，但保存 remapped thread 失败: {exc}"}
+                publish_user_message_failed(self.state, message_event_request, text=text, workspace_path=ws_info.path, error=exc)
+                return {"ok": False, "error": f"保存 remapped thread 失败，消息未发送: {exc}"}
 
-        publish_user_message_accepted(
+        delivery_request = UserMessageSendRequest(
+            source=str(request.get("source") or "session_tab"),
+            provider_id=provider_id, workspace_id=str(workspace_id),
+            thread_id=str(thread_info.thread_id), text=text, attachments=attachments,
+            metadata=message_event_request.metadata,
+        )
+        publish_user_message_event(
             self.state,
-            UserMessageSendRequest(
-                source=str(request.get("source") or "session_tab"),
-                provider_id=provider_id,
-                workspace_id=str(workspace_id),
-                thread_id=str(thread_info.thread_id),
-                text=text,
-                attachments=attachments,
-                metadata={"bridge": "provider_owner"},
-            ),
+            delivery_request,
             text=text,
             workspace_path=str(getattr(ws_info, "path", "") or ""),
+            kind="message.user.queued", delivery_status="queued",
         )
 
         async def execute_send() -> None:
@@ -2104,7 +2019,9 @@ class ProviderOwnerBridge:
                 )
                 if isinstance(send_result, dict) and str(send_result.get("status") or "") == "error":
                     raise RuntimeError(str(send_result.get("error") or f"{provider_id} send failed"))
-            except Exception:
+                publish_user_message_accepted(self.state, delivery_request, text=text, workspace_path=ws_info.path)
+            except Exception as exc:
+                publish_user_message_failed(self.state, delivery_request, text=text, workspace_path=ws_info.path, error=exc)
                 rolled_back = rollback_thread_remap()
                 if rolled_back and getattr(self.state, "storage", None) is not None:
                     try:
@@ -2147,6 +2064,7 @@ class ProviderOwnerBridge:
         text: str,
         attachments,
     ) -> dict:
+        recovery_key = str(request.get("request_id") or uuid.uuid4())
         try:
             started = await start_real_provider_thread(
                 adapter,
@@ -2155,9 +2073,19 @@ class ProviderOwnerBridge:
                 provider_id=provider_id,
                 preview=text,
                 source="provider",
+                state=self.state,
+                recovery_key=recovery_key,
+                attachments=attachments,
             )
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            saved_thread = next((thread for thread in ws_info.threads.values()
+                                 if thread.new_session_recovery.get("request_id") == recovery_key), None)
+            self._list_sessions_cache.clear()
+            return {
+                "ok": saved_thread is not None, "accepted": False, "error": str(exc), "request_id": recovery_key,
+                "thread_id": saved_thread.thread_id if saved_thread else "",
+                "recovery": dict(saved_thread.new_session_recovery) if saved_thread else {},
+            }
         thread_id = started.thread_id
         created_thread = started.created_thread
         thread_info = started.thread_info
@@ -2177,31 +2105,19 @@ class ProviderOwnerBridge:
                 metadata={"bridge": "provider_owner"},
             )
         except Exception as exc:
-            thread_info.is_active = False
-            if getattr(self.state, "storage", None) is not None:
-                try:
-                    save_storage(self.state.storage)
-                except Exception as save_exc:
-                    return {
-                        "ok": False,
-                        "error": f"{exc}; 保存失败 Session 绑定失败: {save_exc}",
-                    }
             self._list_sessions_cache.clear()
             return {
-                "ok": False,
-                "error": str(exc),
+                "ok": True,
+                "error": thread_info.new_session_recovery.get("error") or str(exc),
                 "provider_id": provider_id,
                 "thread_id": thread_id,
                 "requested_thread_id": thread_id,
                 "workspace_id": workspace_id,
                 "created_new_thread": created_thread,
+                "request_id": recovery_key,
+                "recovery": dict(thread_info.new_session_recovery),
+                "accepted": thread_info.new_session_recovery.get("send_status") == "sent",
             }
-
-        if getattr(self.state, "storage", None) is not None:
-            try:
-                save_storage(self.state.storage)
-            except Exception as exc:
-                return {"ok": False, "error": f"发送成功，但保存新 thread 失败: {exc}"}
         self._list_sessions_cache.clear()
 
         now = int(time.time())
@@ -2213,7 +2129,9 @@ class ProviderOwnerBridge:
             "thread_id": effective_thread_id,
             "requested_thread_id": thread_id,
             "workspace_id": workspace_id,
-            "created_new_thread": True,
+            "created_new_thread": created_thread,
+            "request_id": recovery_key,
+            "recovery": dict(thread_info.new_session_recovery),
             "remapped": effective_thread_id != thread_id,
             "session": build_provider_session_summary(
                 ws_info,
@@ -2270,7 +2188,13 @@ class ProviderOwnerBridge:
             except Exception:
                 logger.debug("[provider-owner-bridge] register_workspace_cwd 失败", exc_info=True)
 
-        task = asyncio.create_task(
+        recovery_key = str(request.get("request_id") or uuid.uuid4())
+        request = {**request, "request_id": recovery_key}
+        task_key = (provider_id, workspace_id, recovery_key)
+        pending = self._new_session_tasks.get(task_key)
+        if pending and (pending[0] != text or pending[1] != attachments):
+            return {"ok": False, "error": "恢复请求与原始首消息不一致"}
+        task = pending[2] if pending else asyncio.create_task(
             self._execute_start_session_message(
                 request=request,
                 provider_id=provider_id,
@@ -2282,6 +2206,15 @@ class ProviderOwnerBridge:
                 attachments=attachments,
             )
         )
+        self._new_session_tasks[task_key] = (text, attachments, task)
+
+        def clear_start_task(completed):
+            current = self._new_session_tasks.get(task_key)
+            if current is not None and current[2] is completed:
+                self._new_session_tasks.pop(task_key, None)
+
+        if pending is None:
+            task.add_done_callback(clear_start_task)
         self._pending_send_tasks.add(task)
         task.add_done_callback(self._pending_send_tasks.discard)
 
@@ -2293,6 +2226,7 @@ class ProviderOwnerBridge:
             "ok": True,
             "accepted": True,
             "pending": True,
+            "request_id": recovery_key,
             "provider_id": provider_id,
             "thread_id": "",
             "requested_thread_id": "",

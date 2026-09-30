@@ -912,3 +912,41 @@ async def test_notification_summary_consumer_uses_final_message_from_bus():
     assert result.task_name_override == "通知摘要迁移"
     assert result.task_summary_override == ""
     assert result.message == "完成摘要：notification summary 已从 bus final 事件生成。"
+
+
+def test_bus_conversation_keeps_each_item_and_folds_incremental_chunks():
+    bus = MessageEventBus()
+    def publish(raw_method, item_id, text, phase=""):
+        payload = {"itemId": item_id, "delta": text}
+        kind = "assistant_delta"
+        if raw_method == "item/completed":
+            payload = {"item": {"id": item_id, "type": "agentMessage", "text": text}, "phase": phase}
+            kind = "assistant_completed"
+        event = SessionEvent(provider="codex", workspace_id="codex:/tmp/sample-workspace",
+                             thread_id="sample-session", turn_id="sample-turn", kind=kind,
+                             payload=payload, raw_method=raw_method,
+                             semantic_payload={"text": text, "phase": phase})
+        return bus.publish(message_event_from_session_event(event))
+    assert publish("item/agentMessage/delta", "commentary-item", "Hello ")
+    assert publish("item/agentMessage/delta", "commentary-item", "world")
+    assert publish("item/completed", "commentary-item", "Hello world", "commentary")
+    assert publish("item/agentMessage/delta", "final-item", "Done")
+    assert publish("item/completed", "final-item", "Done", "final_answer")
+    activity = bus.session_activity("codex", "sample-session")
+    assert [turn["content"] for turn in activity["conversationTurns"]] == ["Hello world", "Done"]
+    assert all(not turn["pending"] for turn in activity["conversationTurns"])
+    assert activity["lastAssistantMessage"] == "Done"
+
+
+def test_bus_conversation_keeps_six_messages_and_does_not_reapply_stale_history():
+    bus = MessageEventBus()
+    def publish(kind, payload):
+        return bus.publish(create_message_event(kind, provider_id="codex", session_id="sample-session", payload=payload))
+    publish("session.history.loaded", {"turns": [{"role": "user", "content": "old question"}]})
+    for index in range(7):
+        publish("message.user.submitted", {"text": f"question {index}"})
+        publish("message.user.accepted", {"text": f"question {index}"})
+    before = bus.session_activity("codex", "sample-session")["conversationTurns"]
+    assert [turn["content"] for turn in before] == [f"question {index}" for index in range(1, 7)]
+    publish("session.history.loaded", {"turns": [{"role": "user", "content": "stale"}]})
+    assert bus.session_activity("codex", "sample-session")["conversationTurns"] == before

@@ -15,15 +15,7 @@ from core.providers.lifecycle_runtime import (
     _sync_provider_threads_from_facts,
     resolve_default_reconnect_topic_id,
 )
-from core.providers.message_runtime import send_default_message
-from core.providers.thread_runtime import (
-    activate_default_new_thread,
-    archive_default_thread,
-    interrupt_default_thread,
-    resolve_default_thread_adapter,
-)
 from core.storage import save_storage
-from core.providers.workspace_runtime import default_normalize_server_threads
 from plugins.providers.builtin.claude.python.adapter import (
     ClaudeAdapter,
     format_claude_unavailable_message,
@@ -419,10 +411,11 @@ async def shutdown_runtime(manager) -> None:
 
 async def setup_connection(manager, bot, adapter, **kwargs) -> None:
     from bot.handlers.common import reconcile_workspace_threads_with_source
-    from bot.events import make_event_handler, make_server_request_handler
+    from bot.events import make_event_handler, make_server_request_handler, stop_event_delivery
 
-    adapter.on_event(make_event_handler(manager.state, bot, manager.gid))
-    adapter.on_server_request(make_server_request_handler(manager.state, bot, manager.gid))
+    await stop_event_delivery(manager.state, "claude")
+    adapter.on_event(make_event_handler(manager.state, bot, manager.gid, provider_id="claude"))
+    adapter.on_server_request(make_server_request_handler(manager.state, bot, manager.gid, provider_id="claude"))
 
     for ws_name, ws_info in manager.storage.workspaces.items():
         if ws_info.tool != "claude" or not ws_info.daemon_workspace_id:

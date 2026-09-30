@@ -6,8 +6,6 @@ import { fileURLToPath } from "node:url";
 
 import {
   buildTaskBoardModel,
-  collectTaskBoardPreviewHydrationPlan,
-  selectRecentConversationTurns,
 } from "../src/utils/taskBoard.js";
 
 const nowEpochMs = 1_800_000_000_000;
@@ -48,33 +46,7 @@ function session(overrides) {
   };
 }
 
-test("selectRecentConversationTurns keeps the latest six user and assistant messages", () => {
-  const turns = [
-    { role: "user", content: "one" },
-    { role: "assistant", content: "two" },
-    { role: "tool", content: "hidden tool output" },
-    { role: "user", content: "three" },
-    { role: "assistant", content: "four" },
-    { role: "user", content: "   " },
-    { role: "user", content: "five" },
-    { role: "assistant", content: "six" },
-    { role: "assistant", content: "seven" },
-  ];
-
-  assert.deepEqual(
-    selectRecentConversationTurns(turns),
-    [
-      { role: "assistant", content: "two" },
-      { role: "user", content: "three" },
-      { role: "assistant", content: "four" },
-      { role: "user", content: "five" },
-      { role: "assistant", content: "six" },
-      { role: "assistant", content: "seven" },
-    ],
-  );
-});
-
-test("buildTaskBoardModel puts dashboard active session in running column", () => {
+test("buildTaskBoardModel does not infer running from dashboard without bus events", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -99,12 +71,8 @@ test("buildTaskBoardModel puts dashboard active session in running column", () =
     nowEpochMs,
   });
 
-  assert.equal(board.counts.running, 1);
+  assert.equal(board.counts.running, 0);
   assert.equal(board.counts.needsAttention, 0);
-  assert.equal(board.counts.pinnedIdle, 0);
-  assert.equal(board.counts.total, 2);
-  assert.equal(board.running[0].sessionId, "thread-a");
-  assert.equal(board.running[0].preview, "active work");
 });
 
 test("buildTaskBoardModel ignores stale session-list running flags without live activity", () => {
@@ -132,7 +100,7 @@ test("buildTaskBoardModel ignores stale session-list running flags without live 
   assert.equal(board.counts.pinnedIdle, 0);
 });
 
-test("buildTaskBoardModel puts provider-active session in running column", () => {
+test("buildTaskBoardModel does not infer running from provider metadata without bus events", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -150,13 +118,11 @@ test("buildTaskBoardModel puts provider-active session in running column", () =>
     nowEpochMs,
   });
 
-  assert.equal(board.counts.running, 1);
-  assert.equal(board.running[0].sessionId, "thread-active");
-  assert.equal(board.running[0].statusReason, "正在执行");
-  assert.equal(board.running[0].recentEvent, "provider_active");
+  assert.equal(board.counts.running, 0);
+  assert.equal(board.counts.needsAttention, 0);
 });
 
-test("buildTaskBoardModel shows live preview from session raw when provider-active row has no dashboard preview", () => {
+test("buildTaskBoardModel does not display raw metadata messages without a bus projection", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -175,12 +141,11 @@ test("buildTaskBoardModel shows live preview from session raw when provider-acti
     nowEpochMs,
   });
 
-  assert.equal(board.counts.running, 1);
-  assert.equal(board.running[0].sessionId, "thread-active");
-  assert.equal(board.running[0].preview, "继续修 Session 列表 preview");
+  assert.equal(board.counts.running, 0);
+  assert.equal(board.counts.needsAttention, 0);
 });
 
-test("buildTaskBoardModel uses assistant preview when provider-active row lacks generic preview fields", () => {
+test("buildTaskBoardModel does not use metadata assistant messages as activity", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -199,11 +164,11 @@ test("buildTaskBoardModel uses assistant preview when provider-active row lacks 
     nowEpochMs,
   });
 
-  assert.equal(board.counts.running, 1);
-  assert.equal(board.running[0].preview, "同步 preview 到 task board。");
+  assert.equal(board.counts.running, 0);
+  assert.equal(board.counts.needsAttention, 0);
 });
 
-test("buildTaskBoardModel prefers live session preview over stale cached preview", () => {
+test("buildTaskBoardModel does not choose between metadata message caches", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -223,11 +188,11 @@ test("buildTaskBoardModel prefers live session preview over stale cached preview
     nowEpochMs,
   });
 
-  assert.equal(board.counts.running, 1);
-  assert.equal(board.running[0].preview, "通过事件流刷新 TaskBoard。");
+  assert.equal(board.counts.running, 0);
+  assert.equal(board.counts.needsAttention, 0);
 });
 
-test("buildTaskBoardModel shows sanitized owner-bridge preview for provider-active row", () => {
+test("buildTaskBoardModel requires a bus projection for owner-bridge message previews", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -246,14 +211,11 @@ test("buildTaskBoardModel shows sanitized owner-bridge preview for provider-acti
     nowEpochMs,
   });
 
-  assert.equal(board.counts.running, 1);
-  assert.equal(
-    board.running[0].preview,
-    "修 Session 列表预览，并检查 [path] 里的 owner bridge 数据链。",
-  );
+  assert.equal(board.counts.running, 0);
+  assert.equal(board.counts.needsAttention, 0);
 });
 
-test("buildTaskBoardModel suppresses stale running activity when provider marks session inactive", () => {
+test("buildTaskBoardModel preserves bus running state when metadata is stale", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -287,7 +249,7 @@ test("buildTaskBoardModel suppresses stale running activity when provider marks 
     nowEpochMs,
   });
 
-  assert.equal(board.counts.running, 0);
+  assert.equal(board.counts.running, 1);
   assert.equal(board.counts.total, 1);
 });
 
@@ -320,7 +282,7 @@ test("buildTaskBoardModel keeps activity running when session metadata is absent
   assert.equal(board.running[0].recentEvent, "message.assistant.delta");
 });
 
-test("buildTaskBoardModel prefers fresher provider session preview over stale activity preview", () => {
+test("buildTaskBoardModel keeps bus preview authoritative over newer metadata", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -359,7 +321,7 @@ test("buildTaskBoardModel prefers fresher provider session preview over stale ac
   assert.equal(board.running[0].sessionId, "thread-live");
   assert.equal(
     board.running[0].preview,
-    "直接取安装态 owner bridge 的实时返回，不再靠猜。",
+    "旧的 activity preview",
   );
 });
 
@@ -396,7 +358,7 @@ test("buildTaskBoardModel separates archived sessions", () => {
   assert.equal(board.pinnedIdle[0].sessionId, "thread-a");
 });
 
-test("buildTaskBoardModel shows latest message for pinned idle sessions", () => {
+test("buildTaskBoardModel keeps metadata-only pinned sessions without inventing message previews", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -421,7 +383,7 @@ test("buildTaskBoardModel shows latest message for pinned idle sessions", () => 
 
   assert.equal(board.counts.pinnedIdle, 1);
   assert.equal(board.pinnedIdle[0].title, "梳理一下当前未完成的 phase");
-  assert.equal(board.pinnedIdle[0].preview, "最后一条会话内容应该显示在关注中卡片里。");
+  assert.equal(board.pinnedIdle[0].preview, null);
 });
 
 test("buildTaskBoardModel suppresses pinned preview when it only repeats the title", () => {
@@ -452,7 +414,7 @@ test("buildTaskBoardModel suppresses pinned preview when it only repeats the tit
   assert.equal(board.pinnedIdle[0].preview, null);
 });
 
-test("buildTaskBoardModel creates a running fallback from dashboard activity", () => {
+test("buildTaskBoardModel does not create a dashboard-only running task", () => {
   const board = buildTaskBoardModel({
     sessions: [],
     providerLabels: { codex: "Codex" },
@@ -468,10 +430,8 @@ test("buildTaskBoardModel creates a running fallback from dashboard activity", (
     nowEpochMs,
   });
 
-  assert.equal(board.counts.total, 1);
-  assert.equal(board.counts.running, 1);
-  assert.equal(board.running[0].sessionId, "thread-live");
-  assert.equal(board.running[0].workspace, "/tmp/live");
+  assert.equal(board.counts.running, 0);
+  assert.equal(board.counts.needsAttention, 0);
 });
 
 test("buildTaskBoardModel renders approval request above previous user prompt", () => {
@@ -735,7 +695,7 @@ test("buildTaskBoardModel keeps latest user message preview even when it repeats
   assert.equal(board.running[0].statusReason, "");
 });
 
-test("buildTaskBoardModel suppresses active session preview when it repeats the title", () => {
+test("buildTaskBoardModel ignores metadata preview even when it repeats the title", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -756,11 +716,11 @@ test("buildTaskBoardModel suppresses active session preview when it repeats the 
     nowEpochMs,
   });
 
-  assert.equal(board.running[0].title, "继续 /Users/example/Projects/sample-repo 的任务");
-  assert.equal(board.running[0].preview, null);
+  assert.equal(board.counts.running, 0);
+  assert.equal(board.counts.needsAttention, 0);
 });
 
-test("buildTaskBoardModel falls back to provider session preview when active dashboard preview only repeats the title", () => {
+test("buildTaskBoardModel does not use provider messages as a dashboard fallback", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -785,11 +745,8 @@ test("buildTaskBoardModel falls back to provider session preview when active das
     nowEpochMs,
   });
 
-  assert.equal(board.running[0].title, "继续phase17 的实现");
-  assert.equal(
-    board.running[0].preview,
-    "抓一份安装态 owner bridge 的真实 list_sessions 返回。",
-  );
+  assert.equal(board.counts.running, 0);
+  assert.equal(board.counts.needsAttention, 0);
 });
 
 test("buildTaskBoardModel ignores stale low-signal dashboard active session without live provider signal", () => {
@@ -822,7 +779,7 @@ test("buildTaskBoardModel ignores stale low-signal dashboard active session with
   assert.equal(board.running.length, 0);
 });
 
-test("buildTaskBoardModel ignores stale dashboard active workspace when matching session is explicitly inactive", () => {
+test("buildTaskBoardModel ignores dashboard and provider activity without bus events", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -865,13 +822,11 @@ test("buildTaskBoardModel ignores stale dashboard active workspace when matching
     nowEpochMs,
   });
 
-  assert.equal(board.counts.running, 1);
-  assert.equal(board.running.length, 1);
-  assert.equal(board.running[0].providerId, "codex");
-  assert.equal(board.running[0].sessionId, "thread-live");
+  assert.equal(board.counts.running, 0);
+  assert.equal(board.counts.needsAttention, 0);
 });
 
-test("buildTaskBoardModel sanitizes absolute local paths in provider session preview", () => {
+test("buildTaskBoardModel does not render file-path metadata previews as bus messages", () => {
   const board = buildTaskBoardModel({
     sessions: [
       session({
@@ -890,8 +845,8 @@ test("buildTaskBoardModel sanitizes absolute local paths in provider session pre
     nowEpochMs,
   });
 
-  assert.equal(board.counts.running, 1);
-  assert.equal(board.running[0].preview, "读 [path] 这条链路。");
+  assert.equal(board.counts.running, 0);
+  assert.equal(board.counts.needsAttention, 0);
 });
 
 test("buildTaskBoardModel replaces uuid activity title with session title", () => {
@@ -1062,28 +1017,4 @@ test("buildTaskBoardModel does not use assistant text as title without session m
 
   assert.equal(board.running[0].title, "00000000-000");
   assert.equal(board.running[0].preview, "通过事件流更新 TaskBoard。");
-});
-
-test("collectTaskBoardPreviewHydrationPlan dedupes sessions that are both pinned and low-signal", () => {
-  const target = session({
-    id: "thread-a",
-    title: "OK",
-    raw: {
-      preview: "OK",
-      updatedAt: nowEpochMs - 5_000,
-    },
-  });
-
-  const plan = collectTaskBoardPreviewHydrationPlan({
-    sessions: [target],
-    taskBoardState: {
-      version: 1,
-      pinned: [
-        { providerId: "codex", sessionId: "thread-a", updatedAtEpoch: nowEpochMs },
-      ],
-    },
-  });
-
-  assert.deepEqual(plan.keys, ["codex:thread-a"]);
-  assert.deepEqual(plan.pinnedKeys, ["codex:thread-a"]);
 });

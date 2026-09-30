@@ -397,8 +397,8 @@ async def test_setup_connection_auto_continues_capacity_abort_once(tmp_path, mon
     adapter._thread_workspace_map = {}
 
     event_handler = AsyncMock()
-    monkeypatch.setattr("bot.events.make_event_handler", lambda *_args: event_handler)
-    monkeypatch.setattr("bot.events.make_server_request_handler", lambda *_args: AsyncMock())
+    monkeypatch.setattr("bot.events.make_event_handler", lambda *_args, **_kwargs: event_handler)
+    monkeypatch.setattr("bot.events.make_server_request_handler", lambda *_args, **_kwargs: AsyncMock())
     monkeypatch.setattr(codex_runtime, "prime_thread_mappings", AsyncMock())
     monkeypatch.setattr(
         "plugins.providers.builtin.codex.python.owner_bridge.ensure_codex_owner_bridge_started",
@@ -470,8 +470,8 @@ async def test_setup_connection_ignores_non_capacity_abort(tmp_path, monkeypatch
     adapter._thread_workspace_map = {}
 
     event_handler = AsyncMock()
-    monkeypatch.setattr("bot.events.make_event_handler", lambda *_args: event_handler)
-    monkeypatch.setattr("bot.events.make_server_request_handler", lambda *_args: AsyncMock())
+    monkeypatch.setattr("bot.events.make_event_handler", lambda *_args, **_kwargs: event_handler)
+    monkeypatch.setattr("bot.events.make_server_request_handler", lambda *_args, **_kwargs: AsyncMock())
     monkeypatch.setattr(codex_runtime, "prime_thread_mappings", AsyncMock())
     monkeypatch.setattr(
         "plugins.providers.builtin.codex.python.owner_bridge.ensure_codex_owner_bridge_started",
@@ -519,23 +519,10 @@ async def test_codex_app_server_resolved_clears_tg_pending_approval():
     bot = MagicMock()
     bot.edit_message_text = AsyncMock()
 
-    cleared = await codex_runtime.handle_codex_app_server_resolution_event(
-        state,
-        bot,
-        123,
-        "app-server-event",
-        {
-            "message": {
-                "method": "serverRequest/resolved",
-                "params": {
-                    "threadId": "tid-123",
-                    "requestId": "approval-1",
-                },
-            },
-        },
-    )
+    resolved = codex_runtime._take_resolved_approvals(state, "approval-1", "tid-123")
+    await codex_runtime._edit_resolved_approvals(bot, 123, resolved)
 
-    assert cleared == 1
+    assert len(resolved) == 1
     assert state.pending_approvals == {}
     bot.edit_message_text.assert_awaited_once()
     assert bot.edit_message_text.await_args.kwargs["chat_id"] == 123
@@ -558,15 +545,10 @@ async def test_codex_app_server_resolved_ignores_non_codex_pending_approval():
     bot = MagicMock()
     bot.edit_message_text = AsyncMock()
 
-    cleared = await codex_runtime.mark_codex_app_server_approval_resolved(
-        state,
-        bot,
-        123,
-        request_id="approval-1",
-        thread_id="tid-123",
-    )
+    resolved = codex_runtime._take_resolved_approvals(state, "approval-1", "tid-123")
+    await codex_runtime._edit_resolved_approvals(bot, 123, resolved)
 
-    assert cleared == 0
+    assert resolved == []
     assert 88 in state.pending_approvals
     bot.edit_message_text.assert_not_awaited()
 
@@ -968,11 +950,11 @@ async def test_send_message_resumes_and_retries_when_turn_start_lost_thread(monk
 
     monkeypatch.setattr(
         "plugins.providers.builtin.codex.python.tui_realtime_mirror.seed_codex_watch_baseline",
-        lambda *_args: None,
+        lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
         "plugins.providers.builtin.codex.python.tui_realtime_mirror.watch_codex_thread",
-        lambda *_args: watched.append(thread_info.thread_id),
+        lambda *_args, **_kwargs: watched.append(thread_info.thread_id),
     )
 
     await codex_runtime.send_message(
@@ -1028,11 +1010,11 @@ async def test_send_message_queues_when_resume_finds_active_writer(monkeypatch):
     monkeypatch.setattr(codex_runtime, "_queue_codex_message", queue_mock)
     monkeypatch.setattr(
         "plugins.providers.builtin.codex.python.tui_realtime_mirror.seed_codex_watch_baseline",
-        lambda *_args: None,
+        lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
         "plugins.providers.builtin.codex.python.tui_realtime_mirror.watch_codex_thread",
-        lambda *_args: None,
+        lambda *_args, **_kwargs: None,
     )
 
     result = await codex_runtime.send_message(

@@ -23,6 +23,8 @@ function normalizeSessionTurn(turn) {
     displayMode,
     ...(turn.timestamp ? { timestamp: turn.timestamp } : {}),
     ...(turn.pending ? { pending: true } : {}),
+    ...(turn.turnId ? { turnId: turn.turnId } : {}),
+    ...(turn.itemId ? { itemId: turn.itemId } : {}),
   };
 }
 
@@ -111,7 +113,7 @@ export function applySessionStreamEvent(turns, event) {
   switch (eventKind) {
     case "replace_snapshot":
       return Array.isArray(event.snapshot)
-        ? event.snapshot.reduce((acc, turn) => appendSessionTurn(acc, turn), [])
+        ? event.snapshot.map(normalizeSessionTurn).filter(Boolean)
         : turns;
     case "assistant_progress":
       if (isPendingAssistantTurn(turns[turns.length - 1])) {

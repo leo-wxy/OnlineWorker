@@ -55,6 +55,8 @@ test("startSessionStreamLifecycle starts stream, forwards events, and stops on c
   await Promise.resolve();
 
   cleanup?.();
+  channel.onmessage?.({ kind: "assistant_completed", turn: { role: "assistant", content: "late" } });
+  assert.equal(receivedEvents.length, 1);
   await Promise.resolve();
 
   assert.equal(invocations.length, 2);

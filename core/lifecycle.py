@@ -19,6 +19,7 @@ from core.providers.registry import get_provider
 from core.providers.facts import list_provider_threads, query_provider_active_thread_ids
 from core.providers.topic_policy import provider_allows_unbound_thread_topic_materialization
 from core.state import AppState
+from core.provider_session_archive import commit_session_archive
 from core.storage import (
     AppStorage, ThreadInfo, save_storage,
 )
@@ -122,6 +123,8 @@ class LifecycleManager:
 
     async def post_shutdown(self, application: Application) -> None:
         await self._cancel_reconnect_tasks()
+        from bot.events import stop_event_delivery
+        await stop_event_delivery(self.state)
         await self._shutdown_enabled_providers()
         await stop_provider_owner_bridge(self.state)
         self._provider_owner_bridge_started = False
@@ -468,9 +471,7 @@ class LifecycleManager:
                         f"topic={topic_id}"
                     )
 
-                    # 更新本地状态
-                    thread_info.archived = True
-                    thread_info.is_active = False
+                    commit_session_archive(self.state, ws_info, thread_info, source="startup_sync")
 
                     if await self._cleanup_thread_topic(
                         bot,
@@ -563,8 +564,7 @@ class LifecycleManager:
                     f"{ws_name}/{thread_id[:12]}… topic="
                     f"{self.state.get_thread_topic_id(ws_name, ws_info, thread_info)}"
                 )
-                thread_info.archived = True
-                thread_info.is_active = False
+                commit_session_archive(self.state, ws_info, thread_info, source="startup_sync", archive_mode="local_overlay")
 
                 if self.state.get_thread_topic_id(ws_name, ws_info, thread_info) is None:
                     cleaned_count += 1

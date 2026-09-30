@@ -13,14 +13,16 @@ CODEX_SESSIONS_DIR = "~/.codex/sessions"
 _CODEX_SESSION_FILE_CACHE: dict[str, dict[str, object]] = {}
 
 
-def is_codex_user_visible_session(source=None, *, thread_source=None, cwd=None) -> bool:
+def is_codex_user_visible_session(source=None, *, thread_source=None, cwd=None, ephemeral=False) -> bool:
     """统一判断 Codex session 是否应作为顶层用户会话展示。"""
     if cwd:
         session_cwd = os.path.realpath(os.path.expanduser(str(cwd)))
         memories_root = os.path.realpath(os.path.expanduser("~/.codex/memories"))
         if session_cwd == memories_root or session_cwd.startswith(memories_root + os.sep):
             return False
-    if str(thread_source or "").strip().lower() == "subagent":
+    if ephemeral is True or str(thread_source or "").strip().lower() in {"subagent", "side_conversation", "sideconversation", "ephemeral"}:
+        return False
+    if isinstance(source, str) and source.strip().lower() in {"side_conversation", "sideconversation", "ephemeral"}:
         return False
     if not source or source == "vscode":
         return True
@@ -180,6 +182,7 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
                         payload.get("source"),
                         thread_source=payload.get("thread_source"),
                         cwd=cwd,
+                        ephemeral=payload.get("ephemeral", False),
                     ):
                         if isinstance(cwd, str) and cwd and os.path.isabs(cwd):
                             tid = (
@@ -268,7 +271,7 @@ def _query_codex_active_thread_rows_by_workspace() -> tuple[dict[str, set[str]],
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
-            SELECT id, title, created_at, updated_at, source, cwd
+            SELECT *
             FROM threads
             WHERE archived = 0
             ORDER BY created_at DESC
@@ -279,7 +282,10 @@ def _query_codex_active_thread_rows_by_workspace() -> tuple[dict[str, set[str]],
         return active_ids_by_workspace, rows_by_workspace
 
     for row in rows:
-        if not is_codex_user_visible_session(row["source"] or "", cwd=row["cwd"]):
+        if not is_codex_user_visible_session(
+            row["source"] or "", cwd=row["cwd"],
+            thread_source=row["thread_source"] if "thread_source" in row.keys() else None,
+        ):
             continue
         workspace_path = str(row["cwd"] or "").strip()
         thread_id = str(row["id"] or "").strip()
@@ -529,17 +535,20 @@ def query_codex_active_thread_ids(
     try:
         if os.path.exists(db_path):
             conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT id, source, cwd FROM threads WHERE archived = 0 "
+                "SELECT * FROM threads WHERE archived = 0 "
                 "AND (cwd = ? OR (? AND instr(cwd, ? || '/') = 1))",
                 (workspace_path, grouped, workspace_path),
             ).fetchall()
             conn.close()
             active_ids.update(
-                row[0]
+                row["id"]
                 for row in rows
-                if is_codex_user_visible_session(row[1] or "", cwd=row[2])
-                and _codex_workspace_matches(row[2] or "", workspace_path)
+                if is_codex_user_visible_session(
+                    row["source"] or "", cwd=row["cwd"],
+                    thread_source=row["thread_source"] if "thread_source" in row.keys() else None,
+                ) and _codex_workspace_matches(row["cwd"] or "", workspace_path)
             )
     except Exception:
         pass
@@ -770,7 +779,7 @@ def list_codex_threads_by_cwd(
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             rows = conn.execute("""
-                SELECT id, title, created_at, updated_at, source, cwd
+                SELECT *
                 FROM threads
                 WHERE archived = 0
                   AND (cwd = ? OR (? AND instr(cwd, ? || '/') = 1))
@@ -794,7 +803,8 @@ def list_codex_threads_by_cwd(
 
     for r in rows:
         if not is_codex_user_visible_session(
-            r["source"] or "", cwd=r["cwd"]
+            r["source"] or "", cwd=r["cwd"],
+            thread_source=r["thread_source"] if "thread_source" in r.keys() else None,
         ) or not _codex_workspace_matches(r["cwd"], cwd):
             continue
         tid = r["id"]
@@ -940,7 +950,7 @@ def list_codex_subagent_thread_ids(thread_ids: list[str]) -> set[str]:
         return set()
 
     try:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         placeholders = ",".join("?" for _ in thread_ids)
         rows = conn.execute(
@@ -953,7 +963,7 @@ def list_codex_subagent_thread_ids(thread_ids: list[str]) -> set[str]:
         ).fetchall()
         conn.close()
 
-        return {
+        hidden = {
             row["id"]
             for row in rows
             if not is_codex_user_visible_session(
@@ -964,5 +974,17 @@ def list_codex_subagent_thread_ids(thread_ids: list[str]) -> set[str]:
                 cwd=row["cwd"] if "cwd" in row.keys() else None,
             )
         }
+        missing = set(thread_ids) - {row["id"] for row in rows}
+        if missing:
+            # Desktop side conversations retain prompt history without a durable
+            # thread or rollout. Normal newly created sessions keep their rollout.
+            try:
+                with open(os.path.expanduser("~/.codex/.codex-global-state.json"), encoding="utf-8") as handle:
+                    desktop = json.load(handle)
+                prompts = desktop.get("electron-persisted-atom-state", {}).get("prompt-history", {})
+                hidden.update(thread_id for thread_id in missing if thread_id in prompts and not find_session_file(thread_id))
+            except (OSError, ValueError, AttributeError):
+                pass
+        return hidden
     except Exception:
         return set()

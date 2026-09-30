@@ -42,6 +42,7 @@ _INGRESS_SOURCE_PRIORITY = {
     "codex_app_server": 4,
 }
 _INTERNAL_HOOK_PROMPT_PREFIXES = (
+    "Side conversation boundary.",
     "You write the one-line activity update displayed beneath an existing Codex task title.",
     "You are a helpful assistant. You will be presented with a user prompt, and your job is to provide a short title for a task",
 )
@@ -100,6 +101,7 @@ class CodexAdapter:
             tuple[str, str, str], dict[str, Any]
         ] = {}
         self._hidden_live_sessions: set[str] = set()
+        self._visibility_checked_sessions: set[str] = set()
         self._supports_idle_restart = False
         self._idle_restart_handler = None
         self._idle_check_task: Optional[asyncio.Task] = None
@@ -229,6 +231,7 @@ class CodexAdapter:
         # id=1 已被 initialize 消耗
         self._next_id = 2
         self._connected = True
+        self._visibility_checked_sessions.clear()
         self._disconnect_notified = False
         self._heartbeat_fail_count = 0  # 重置心跳失败计数
 
@@ -728,6 +731,51 @@ class CodexAdapter:
         for callback in tuple(self._event_callbacks):
             await callback("app-server-event", envelope)
 
+    async def _check_session_visibility(self, session_id: str) -> bool:
+        if session_id in self._hidden_live_sessions or session_id in storage_runtime.list_codex_subagent_thread_ids([session_id]):
+            return False
+        if not self._connected or session_id in self._visibility_checked_sessions:
+            return True
+        try:
+            result = await asyncio.wait_for(
+                self._call("thread/read", {"threadId": session_id, "includeTurns": False}),
+                timeout=2.0,
+            )
+        except Exception:
+            # Metadata unavailable is not evidence that a normal session is hidden.
+            self._visibility_checked_sessions.add(session_id)
+            return True
+        thread = result.get("thread", result) if isinstance(result, dict) else None
+        if not isinstance(thread, dict) or not thread:
+            self._visibility_checked_sessions.add(session_id)
+            return True
+        visible = storage_runtime.is_codex_user_visible_session(
+            thread.get("source"),
+            thread_source=thread.get("thread_source") or thread.get("threadSource"),
+            cwd=thread.get("cwd"),
+            ephemeral=thread.get("ephemeral", False),
+        )
+        if visible:
+            self._visibility_checked_sessions.add(session_id)
+        return visible
+
+    async def _hide_session(self, session_id: str, workspace_id: str = "") -> None:
+        session = self._external_hook_sessions.get(session_id)
+        registered = (
+            session_id in self._authoritative_live_sessions
+            or bool(session and session.get("session_created_emitted"))
+            or (session is None and session_id in self._thread_workspace_map)
+        )
+        workspace_id = self._thread_workspace_map.pop(session_id, None) or workspace_id
+        self._hidden_live_sessions.add(session_id)
+        self._visibility_checked_sessions.discard(session_id)
+        self._authoritative_live_sessions.discard(session_id)
+        self._external_hook_sessions.pop(session_id, None)
+        if registered:
+            await self._emit_external_hook_event(
+                workspace_id or "codex:desktop", "session.hidden", {"threadId": session_id},
+            )
+
     async def ingest_external_hook_payload(
         self,
         payload: dict[str, Any],
@@ -763,6 +811,7 @@ class CodexAdapter:
         source = payload.get("source")
         thread_source = payload.get("thread_source") or payload.get("threadSource")
         cwd = payload.get("cwd")
+        ephemeral = payload.get("ephemeral", False)
         transcript_path = str(
             payload.get("transcript_path") or payload.get("transcriptPath") or ""
         ).strip()
@@ -778,14 +827,16 @@ class CodexAdapter:
                             "threadSource"
                         )
                         cwd = cwd or meta_payload.get("cwd")
+                        ephemeral = ephemeral or meta_payload.get("ephemeral", False)
             except (OSError, json.JSONDecodeError):
                 pass
         if not is_codex_user_visible_session(
             source,
             thread_source=thread_source,
             cwd=cwd,
-        ) or session_id in list_codex_subagent_thread_ids([session_id]):
-            self._hidden_live_sessions.add(session_id)
+            ephemeral=ephemeral,
+        ) or session_id in list_codex_subagent_thread_ids([session_id]) or not await self._check_session_visibility(session_id):
+            await self._hide_session(session_id)
             return {
                 "accepted": True,
                 "emitted": 0,
@@ -808,9 +859,7 @@ class CodexAdapter:
             str(prompt or "").strip().startswith(_INTERNAL_HOOK_PROMPT_PREFIXES)
             for prompt in prompt_candidates
         ):
-            self._hidden_live_sessions.add(session_id)
-            self._external_hook_sessions.pop(session_id, None)
-            self._thread_workspace_map.pop(session_id, None)
+            await self._hide_session(session_id)
             return {
                 "accepted": True,
                 "emitted": 0,
@@ -957,6 +1006,7 @@ class CodexAdapter:
                     "turnId": turn_id,
                     "item": {
                         "type": "agentMessage",
+                        "id": payload.get("item_id") or payload.get("itemId") or payload.get("message_id") or payload.get("messageId") or payload.get("id"),
                         "text": text,
                         "phase": "commentary",
                         "threadId": session_id,
@@ -1210,11 +1260,14 @@ class CodexAdapter:
                     thread.get("source"),
                     thread_source=thread_source,
                     cwd=thread.get("cwd") or cwd,
+                    ephemeral=thread.get("ephemeral", False),
                 ):
                     if thread_id:
-                        self._hidden_live_sessions.add(thread_id)
+                        await self._hide_session(thread_id, workspace_id)
                     continue
                 visible_threads.append(thread)
+                if thread_id and "ephemeral" in thread:
+                    self._visibility_checked_sessions.add(thread_id)
                 if thread_id and workspace_id:
                     self._thread_workspace_map[thread_id] = workspace_id
         return visible_threads
@@ -1836,6 +1889,11 @@ class CodexAdapter:
                 method, envelope = await self._event_queue.get()
                 self._event_worker_busy = True
                 try:
+                    params = envelope.get("message", {}).get("params", {})
+                    thread_id = self._extract_thread_id_from_event_params(params)
+                    if thread_id and not await self._check_session_visibility(thread_id):
+                        await self._hide_session(thread_id, envelope.get("workspace_id", ""))
+                        continue
                     delivered = True
                     for cb in self._event_callbacks:
                         try:
@@ -1946,6 +2004,7 @@ class CodexAdapter:
             source = params.get("source")
             thread_source = params.get("thread_source") or params.get("threadSource")
             cwd = params.get("cwd")
+            ephemeral = params.get("ephemeral", False)
             for nested_key in ("thread", "item", "turn"):
                 nested = params.get(nested_key)
                 if not isinstance(nested, dict):
@@ -1956,13 +2015,15 @@ class CodexAdapter:
                     thread_source = nested.get("thread_source") or nested.get("threadSource")
                 if not cwd:
                     cwd = nested.get("cwd")
+                ephemeral = ephemeral or nested.get("ephemeral", False)
             if not is_codex_user_visible_session(
                 source,
                 thread_source=thread_source,
                 cwd=cwd,
+                ephemeral=ephemeral,
             ):
                 if thread_id:
-                    self._hidden_live_sessions.add(thread_id)
+                    await self._hide_session(thread_id)
                 return
             if (
                 thread_id
@@ -1971,7 +2032,7 @@ class CodexAdapter:
                 and thread_id not in self._authoritative_live_sessions
                 and thread_id in list_codex_subagent_thread_ids([thread_id])
             ):
-                self._hidden_live_sessions.add(thread_id)
+                await self._hide_session(thread_id)
                 return
             if thread_id and method == "thread/closed":
                 self._authoritative_live_sessions.discard(thread_id)

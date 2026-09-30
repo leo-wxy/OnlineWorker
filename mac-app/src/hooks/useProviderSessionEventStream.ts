@@ -6,6 +6,7 @@ interface UseProviderSessionEventStreamOptions {
   providerId: string;
   sessionId: string;
   workspaceDir?: string | null;
+  reloadKey?: number;
   onEvent: (event: SessionStreamEvent) => void;
 }
 
@@ -14,6 +15,7 @@ export function useProviderSessionEventStream({
   providerId,
   sessionId,
   workspaceDir,
+  reloadKey = 0,
   onEvent,
 }: UseProviderSessionEventStreamOptions): void {
   useSessionStream<SessionStreamEvent>({
@@ -27,7 +29,7 @@ export function useProviderSessionEventStream({
           workspaceDir: workspaceDir ?? null,
         }
       : null,
-    deps: [providerId, sessionId, workspaceDir ?? ""],
+    deps: [providerId, sessionId, workspaceDir ?? "", reloadKey],
     onEvent,
   });
 }

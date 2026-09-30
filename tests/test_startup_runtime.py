@@ -478,7 +478,7 @@ async def test_start_claude_defers_cli_touching_work_until_send():
     tool_cfg = cfg.get_tool("claude")
     assert tool_cfg is not None
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.connect = AsyncMock()
     adapter.configure_hook_bridge = MagicMock()
     adapter.install_external_hook_ingress = AsyncMock(return_value={"state": "installed"})
@@ -529,7 +529,7 @@ async def test_start_claude_runtime_passes_configured_auth_token_to_adapter():
     tool_cfg = cfg.get_tool("claude")
     assert tool_cfg is not None
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.connect = AsyncMock()
     adapter.configure_hook_bridge = MagicMock()
     adapter.install_external_hook_ingress = AsyncMock(return_value={"state": "installed"})
@@ -593,7 +593,7 @@ async def test_setup_claude_connection_hides_stale_threads_from_authoritative_fa
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.on_event = MagicMock()
     adapter.on_server_request = MagicMock()
     adapter.register_workspace_cwd = MagicMock()
@@ -1018,7 +1018,7 @@ async def test_setup_provider_connection_uses_registry_lifecycle_hook_for_custom
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
     bot = MagicMock()
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     custom_connected = AsyncMock()
 
     monkeypatch.setattr(
@@ -1757,7 +1757,8 @@ def test_owned_unix_listener_command_requires_exact_hooks_and_socket():
 
 
 @pytest.mark.asyncio
-async def test_stop_existing_owned_unix_listener_rechecks_pid_identity_before_terminate():
+@pytest.mark.parametrize("socket_symlink", [False, True])
+async def test_stop_existing_owned_unix_listener_rechecks_pid_identity_before_terminate(socket_symlink):
     owned_url = "unix:///Users/example/.codex/app-server-control/onlineworker-app-server.sock"
     identity = (
         "123 1 Fri Jul 11 09:00:00 2026 "
@@ -1786,6 +1787,10 @@ async def test_stop_existing_owned_unix_listener_rechecks_pid_identity_before_te
     ) as kill_mock, patch(
         "plugins.providers.builtin.codex.python.process.unix_socket_accepting",
         return_value=False,
+    ), patch(
+        "plugins.providers.builtin.codex.python.process.os.path.realpath",
+        return_value=("/tmp/sample-daemon.sock" if socket_symlink else
+                      "/Users/example/.codex/app-server-control/onlineworker-app-server.sock"),
     ):
         await server._stop_existing_owned_unix_listener(owned_url)
 
@@ -1793,7 +1798,8 @@ async def test_stop_existing_owned_unix_listener_rechecks_pid_identity_before_te
     assert capture.await_args_list[0].args == (
         "/usr/sbin/lsof",
         "-t",
-        "/Users/example/.codex/app-server-control/onlineworker-app-server.sock",
+        ("/tmp/sample-daemon.sock" if socket_symlink else
+         "/Users/example/.codex/app-server-control/onlineworker-app-server.sock"),
     )
     assert capture.await_args_list[1].args[:2] == ("/bin/ps", "-ww")
     assert capture.await_args_list[2].args[:2] == ("/bin/ps", "-ww")
@@ -2029,7 +2035,7 @@ async def test_connect_adapter_with_retry_logs_process_snapshot_on_disconnect(ca
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.connect = AsyncMock()
     disconnect_callback = None
 
@@ -2078,7 +2084,7 @@ async def test_connect_adapter_with_retry_schedules_reconnect_after_initial_fail
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.connect = AsyncMock(side_effect=TimeoutError("timed out during opening handshake"))
     adapter.on_disconnect = MagicMock()
 
@@ -2130,7 +2136,7 @@ async def test_connect_adapter_with_retry_installs_desktop_event_ingress_without
         delete_archived_topics=True,
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.connect = AsyncMock()
     adapter.configure_external_event_bridge = MagicMock()
     adapter.configure_hook_bridge = MagicMock()
@@ -2250,7 +2256,7 @@ async def test_codex_reconnect_loop_routes_notifications_to_codex_global_topic_w
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.connect = AsyncMock()
     adapter.on_disconnect = MagicMock()
 
@@ -2305,7 +2311,7 @@ async def test_codex_reconnect_loop_prefers_active_codex_workspace_topic():
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.connect = AsyncMock()
     adapter.on_disconnect = MagicMock()
 
@@ -2344,7 +2350,7 @@ async def test_codex_reconnect_loop_uses_provider_notify_topic_hook(monkeypatch)
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.connect = AsyncMock()
     adapter.on_disconnect = MagicMock()
     resolve_notify_topic_id = MagicMock(return_value=9191)
@@ -2414,7 +2420,7 @@ async def test_setup_codex_connection_clears_stale_streaming_state():
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.on_event = MagicMock()
     adapter.on_server_request = MagicMock()
     adapter.register_workspace_cwd = MagicMock()
@@ -2468,7 +2474,7 @@ async def test_prime_codex_thread_mappings_revives_stale_archived_active_thread(
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter._thread_workspace_map = {}
 
     monkeypatch.setattr(
@@ -2737,7 +2743,7 @@ async def test_ensure_thread_topics_replays_history_via_provider_defaults_for_co
     bot.create_forum_topic = AsyncMock(return_value=SimpleNamespace(message_thread_id=6201))
     replay_mock = AsyncMock(return_value="cursor-1")
 
-    with patch(
+    with patch("core.lifecycle.provider_allows_unbound_thread_topic_materialization", return_value=True), patch(
         "core.lifecycle.query_provider_active_thread_ids",
         return_value={"tid-new"},
     ), patch(
@@ -2978,7 +2984,7 @@ async def test_ensure_thread_topics_revives_stale_archived_active_thread(monkeyp
         lambda storage_obj: None,
     )
 
-    with patch(
+    with patch("core.lifecycle.provider_allows_unbound_thread_topic_materialization", return_value=True), patch(
         "core.lifecycle.list_provider_threads",
         return_value=[{"id": "tid-stale", "preview": "继续处理phase15"}],
     ), patch(
@@ -3107,7 +3113,7 @@ async def test_setup_codex_connection_ignores_non_codex_workspaces():
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.on_event = MagicMock()
     adapter.on_server_request = MagicMock()
     adapter.register_workspace_cwd = MagicMock()
@@ -3163,7 +3169,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_from_hist
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.on_event = MagicMock()
     adapter.on_server_request = MagicMock()
     adapter.register_workspace_cwd = MagicMock()
@@ -3231,7 +3237,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_after_del
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.on_event = MagicMock()
     adapter.on_server_request = MagicMock()
     adapter.register_workspace_cwd = MagicMock()
@@ -3308,7 +3314,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_via_backg
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.on_event = MagicMock()
     adapter.on_server_request = MagicMock()
     adapter.register_workspace_cwd = MagicMock()
@@ -3404,7 +3410,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_from_task
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.on_event = MagicMock()
     adapter.on_server_request = MagicMock()
     adapter.register_workspace_cwd = MagicMock()
@@ -3480,7 +3486,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_with_mark
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.on_event = MagicMock()
     adapter.on_server_request = MagicMock()
     adapter.register_workspace_cwd = MagicMock()
@@ -3556,7 +3562,7 @@ async def test_setup_codex_connection_recovers_stale_streaming_message_from_same
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.on_event = MagicMock()
     adapter.on_server_request = MagicMock()
     adapter.register_workspace_cwd = MagicMock()
@@ -3632,7 +3638,7 @@ async def test_setup_codex_connection_marks_stale_streaming_message_as_incomplet
     )
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.on_event = MagicMock()
     adapter.on_server_request = MagicMock()
     adapter.register_workspace_cwd = MagicMock()
@@ -3685,7 +3691,7 @@ async def test_codex_disconnect_callback_only_starts_one_reconnect_loop():
     manager = LifecycleManager(state, storage, cfg.group_chat_id, cfg)
 
     bot = MagicMock()
-    adapter = MagicMock()
+    adapter = MagicMock(_check_session_visibility=AsyncMock(return_value=True))
     adapter.connect = AsyncMock()
     disconnect_callbacks: list = []
 

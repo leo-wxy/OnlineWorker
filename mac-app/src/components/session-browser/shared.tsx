@@ -3,13 +3,12 @@ import type { ComposerAttachment, SessionTurn } from "../../types";
 import {
   limitSessionTurns,
   mergeSessionTurns,
-  overlayPendingUserTurn,
   SESSION_BROWSER_VISIBLE_TURNS,
 } from "../../utils/sessionTurnMerge.js";
 import { StatePanel } from "./presentation";
 import { SessionMarkdown } from "./SessionMarkdown";
 
-export { limitSessionTurns, mergeSessionTurns, overlayPendingUserTurn, SESSION_BROWSER_VISIBLE_TURNS };
+export { limitSessionTurns, mergeSessionTurns, SESSION_BROWSER_VISIBLE_TURNS };
 
 function AssistantAvatar({ label }: { label: string }) {
   return (
@@ -291,30 +290,6 @@ export function SessionComposer({
     </div>
   );
 }
-
-export const CODEX_FOREGROUND_REPLY_POLL = {
-  intervalMs: 500,
-  maxAttempts: 120,
-  stablePollsRequired: 2,
-};
-
-export const CODEX_BACKGROUND_REPLY_POLL = {
-  intervalMs: 1500,
-  maxAttempts: 1200,
-  stablePollsRequired: 2,
-};
-
-export const FOREGROUND_REPLY_POLL = {
-  intervalMs: 1000,
-  maxAttempts: 60,
-  stablePollsRequired: 2,
-};
-
-export const BACKGROUND_REPLY_POLL = {
-  intervalMs: 3000,
-  maxAttempts: 600,
-  stablePollsRequired: 2,
-};
 
 export type ReplyWatchState = "foreground" | "background" | "expired";
 

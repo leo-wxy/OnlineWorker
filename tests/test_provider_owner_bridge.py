@@ -25,6 +25,59 @@ def test_runtime_health_prioritizes_actionable_warning_over_connected_line():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("uncertain", [False, True])
+async def test_start_session_retry_keeps_real_thread_and_does_not_repeat_first_message(monkeypatch, tmp_path, uncertain):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+
+    adapter = SimpleNamespace(connected=True, start_thread=AsyncMock(return_value={"id": "sample-session"}))
+    send = AsyncMock(return_value={})
+    if uncertain:
+        send.side_effect = TimeoutError("sample uncertain response")
+    provider = SimpleNamespace(message_hooks=SimpleNamespace(send=send))
+    monkeypatch.setattr("core.provider_owner_bridge.get_provider", lambda *_args, **_kwargs: provider)
+    state = AppState(storage=AppStorage())
+    state.set_adapter("overlay-tool", adapter)
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    request = {"provider_id": "overlay-tool", "workspace_dir": "/tmp/sample-workspace", "text": "sample first message", "request_id": "sample-request"}
+    first = await bridge._handle_start_session_message(request)
+    second = await bridge._handle_start_session_message(request)
+    assert first["thread_id"] == second["thread_id"] == "sample-session"
+    assert second["recovery"]["send_status"] == ("unknown" if uncertain else "sent")
+    assert second["ok"] is True
+    assert second["accepted"] is not uncertain
+    assert state.storage.workspaces["overlay-tool:/tmp/sample-workspace"].threads["sample-session"].source == "provider"
+    adapter.start_thread.assert_awaited_once()
+    send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_new_session_retries_share_the_pending_creation(monkeypatch, tmp_path):
+    from core.provider_owner_bridge import ProviderOwnerBridge
+    release = asyncio.Event()
+
+    async def create(workspace_id):
+        await release.wait()
+        return {"id": "sample-created"}
+
+    adapter = SimpleNamespace(connected=True, start_thread=AsyncMock(side_effect=create))
+    send = AsyncMock(return_value={})
+    provider = SimpleNamespace(message_hooks=SimpleNamespace(send=send))
+    monkeypatch.setattr("core.provider_owner_bridge.get_provider", lambda *_args, **_kwargs: provider)
+    state = AppState(storage=AppStorage())
+    state.set_adapter("overlay-tool", adapter)
+    bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    request = {"provider_id": "overlay-tool", "workspace_dir": "/tmp/sample-workspace", "text": "sample first message", "request_id": "sample-request"}
+    responses = await asyncio.gather(bridge._handle_start_session_message(request), bridge._handle_start_session_message(request))
+    assert all(row["pending"] for row in responses)
+    assert len(bridge._new_session_tasks) == 1
+    release.set()
+    await asyncio.gather(*tuple(bridge._pending_send_tasks))
+    adapter.start_thread.assert_awaited_once()
+    send.assert_awaited_once()
+    assert bridge._new_session_tasks == {}
+
+
+@pytest.mark.asyncio
 async def test_provider_owner_bridge_creates_provider_session(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
@@ -463,6 +516,10 @@ async def test_provider_owner_bridge_streams_filtered_session_events_from_messag
 
     state = AppState(storage=AppStorage())
     state.message_bus = MessageEventBus()
+    state.message_bus.publish(create_message_event(
+        "session.history.loaded", provider_id="claude", session_id="thread-a",
+        workspace_path="/tmp/project", payload={"turns": [], "historyWindow": 50},
+    ))
     bridge = ProviderOwnerBridge(state, data_dir=str(tmp_path))
 
     socket_path = f"/tmp/ow-bridge-events-{os.getpid()}.sock"
@@ -471,14 +528,16 @@ async def test_provider_owner_bridge_streams_filtered_session_events_from_messag
     except FileNotFoundError:
         pass
     server = await asyncio.start_unix_server(bridge._handle_client, path=socket_path)
+    writer = None
     try:
         reader, writer = await asyncio.open_unix_connection(socket_path)
         writer.write(
             b'{"type":"session_event_stream","provider_id":"claude","session_id":"thread-a","workspace_dir":"/tmp/project"}\n'
         )
         await writer.drain()
-        ready = json.loads((await reader.readline()).decode("utf-8"))
-        assert ready["kind"] == "stream_ready"
+        ready = json.loads((await asyncio.wait_for(reader.readline(), 1)).decode("utf-8"))
+        assert ready["kind"] == "replace_snapshot"
+        assert ready["snapshot"] == []
 
         state.message_bus.publish(
             create_message_event(
@@ -494,11 +553,10 @@ async def test_provider_owner_bridge_streams_filtered_session_events_from_messag
                 created_at=10,
             )
         )
-        user_update = json.loads((await reader.readline()).decode("utf-8"))
-        assert user_update["kind"] == "user_message"
-        assert user_update["semanticKind"] == "message.user.accepted"
-        assert user_update["turn"]["role"] == "user"
-        assert user_update["turn"]["content"] == "图片里面主要是什么内容\n[Attached image] Image #1"
+        user_update = json.loads((await asyncio.wait_for(reader.readline(), 1)).decode("utf-8"))
+        assert user_update["kind"] == "replace_snapshot"
+        assert user_update["snapshot"][-1]["role"] == "user"
+        assert user_update["snapshot"][-1]["content"] == "图片里面主要是什么内容\n[Attached image] Image #1"
 
         state.message_bus.publish(
             create_message_event(
@@ -511,10 +569,10 @@ async def test_provider_owner_bridge_streams_filtered_session_events_from_messag
                 created_at=20,
             )
         )
-        delta_update = json.loads((await reader.readline()).decode("utf-8"))
-        assert delta_update["kind"] == "assistant_progress"
-        assert delta_update["turn"]["pending"] is True
-        assert delta_update["turn"]["content"] == "我先看一下当前链路。"
+        delta_update = json.loads((await asyncio.wait_for(reader.readline(), 1)).decode("utf-8"))
+        assert delta_update["kind"] == "replace_snapshot"
+        assert delta_update["snapshot"][-1]["pending"] is True
+        assert delta_update["snapshot"][-1]["content"] == "我先看一下当前链路。"
 
         state.message_bus.publish(
             create_message_event(
@@ -527,10 +585,10 @@ async def test_provider_owner_bridge_streams_filtered_session_events_from_messag
                 created_at=30,
             )
         )
-        final_update = json.loads((await reader.readline()).decode("utf-8"))
-        assert final_update["kind"] == "assistant_completed"
-        assert final_update["turn"]["displayMode"] == "markdown"
-        assert final_update["turn"]["content"] == "## 最终结果"
+        final_update = json.loads((await asyncio.wait_for(reader.readline(), 1)).decode("utf-8"))
+        assert final_update["kind"] == "replace_snapshot"
+        assert final_update["snapshot"][-1]["displayMode"] == "markdown"
+        assert final_update["snapshot"][-1]["content"] == "## 最终结果"
 
         state.message_bus.publish(
             create_message_event(
@@ -555,18 +613,18 @@ async def test_provider_owner_bridge_streams_filtered_session_events_from_messag
                 created_at=50,
             )
         )
-        first_following_update = json.loads((await reader.readline()).decode("utf-8"))
+        first_following_update = json.loads((await asyncio.wait_for(reader.readline(), 1)).decode("utf-8"))
         assert "should not pass" not in json.dumps(first_following_update, ensure_ascii=False)
-        abort_update = first_following_update
-        if abort_update["kind"] != "turn_aborted":
-            abort_update = json.loads((await reader.readline()).decode("utf-8"))
-        assert abort_update["kind"] == "turn_aborted"
-        assert abort_update["reason"] == "interrupted"
+        assert first_following_update["kind"] == "replace_snapshot"
+        assert first_following_update["snapshot"][-1]["content"] == "## 最终结果"
         writer.close()
         await writer.wait_closed()
     finally:
+        if writer is not None:
+            writer.close()
+            await asyncio.wait_for(writer.wait_closed(), 1)
         server.close()
-        await server.wait_closed()
+        await asyncio.wait_for(server.wait_closed(), 1)
         try:
             os.remove(socket_path)
         except FileNotFoundError:
@@ -1231,6 +1289,7 @@ async def test_provider_owner_bridge_uses_registry_message_hooks(monkeypatch, tm
     assert state.get_provider_runtime("overlay-tool").thread_pending_send_started_at["tid-1"] > 0
     assert [event["kind"] for event in state.message_bus.recent_events()] == [
         "message.user.submitted",
+        "message.user.queued",
         "message.user.accepted",
     ]
     activity = state.message_bus.session_activity("overlay-tool", "tid-1")
@@ -2317,7 +2376,7 @@ async def test_provider_owner_bridge_reads_latest_session_turns_via_provider_fac
         "ok": True,
         "session": [
             {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "world"},
+            {"role": "assistant", "content": "world", "displayMode": "markdown"},
         ],
     }
     assert observed == {
@@ -2428,7 +2487,7 @@ async def test_provider_owner_bridge_does_not_treat_workspace_dir_as_sessions_di
         "ok": True,
         "session": [
             {"role": "user", "content": "图片主色调是什么？"},
-            {"role": "assistant", "content": "偏青绿色"},
+            {"role": "assistant", "content": "偏青绿色", "displayMode": "markdown"},
         ],
     }
     assert observed == {
@@ -3077,7 +3136,7 @@ async def test_provider_owner_bridge_archives_session_via_real_thread_hook(monke
         else None,
     )
     monkeypatch.setattr(
-        "core.provider_owner_bridge.save_storage",
+        "core.provider_session_archive.save_storage",
         lambda storage_arg: saved.update({"storage": storage_arg}),
     )
 
@@ -3143,7 +3202,7 @@ async def test_provider_owner_bridge_archives_app_state_session_locally(monkeypa
         else None,
     )
     monkeypatch.setattr(
-        "core.provider_owner_bridge.save_storage",
+        "core.provider_session_archive.save_storage",
         lambda storage_arg: saved.update({"storage": storage_arg}),
     )
 

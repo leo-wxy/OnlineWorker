@@ -297,9 +297,6 @@ export function CommandRegistryView({
           <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border uppercase tracking-wider ${scopeClass}`}>
             {scopeLabels[command.scope]}
           </span>
-          <button className="w-7 h-7 rounded-lg flex items-center justify-center text-[var(--ow-subtle)] hover:bg-[var(--ow-disabled-surface)] hover:text-[var(--ow-text)] transition-colors opacity-0 row-action" title="Edit Command">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
-          </button>
         </div>
       </div>
     );
@@ -340,9 +337,6 @@ export function CommandRegistryView({
         }
         .mac-checkbox:checked::before {
           transform: scale(1);
-        }
-        .row-hover:hover .row-action {
-          opacity: 1;
         }
       `}</style>
       
@@ -386,9 +380,6 @@ export function CommandRegistryView({
               className="w-full rounded-2xl border border-[var(--ow-line)] bg-[var(--ow-panel)] py-2.5 pl-11 pr-4 text-base text-[var(--ow-text)] placeholder:text-[var(--ow-subtle)] focus:outline-none focus:border-[var(--ow-blue)] focus:ring-4 focus:ring-[var(--ow-focus)] transition-colors shadow-sm"
               placeholder={t.commands.searchPlaceholder}
             />
-            <div className="absolute inset-y-0 right-0 pr-4 flex items-center">
-              <kbd className="hidden sm:inline-flex items-center rounded border border-[var(--ow-line)] bg-[var(--ow-panel)] px-2 py-0.5 text-xs font-mono text-[var(--ow-subtle)]">⌘K</kbd>
-            </div>
           </div>
 
           {/* Segmented Filter */}

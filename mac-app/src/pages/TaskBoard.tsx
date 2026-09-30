@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "../i18n";
 import {
   fetchProviderMetadata,
-  fetchProviderSession,
   fetchProviderSessions,
 } from "../components/session-browser/api";
 import {
@@ -16,21 +15,13 @@ import { mergeSessionListSnapshot } from "../utils/sessionBrowserState.js";
 import { visibleSessionProviders } from "../utils/sessionProviders.js";
 import {
   buildTaskBoardModel,
-  collectTaskBoardPreviewHydrationPlan,
-  isLowSignalTaskBoardText,
-  removeTaskBoardActivity,
-  selectRecentConversationTurns,
-  taskBoardSessionKey,
-  type TaskBoardActivityStreamEvent,
   type TaskBoardSessionActivity,
   type TaskBoardState,
   type TaskBoardTask,
-  upsertTaskBoardActivity,
 } from "../utils/taskBoard.js";
 import type {
   DashboardState,
   ProviderMetadata,
-  SessionTurn,
 } from "../types";
 
 export interface TaskBoardOpenSessionTarget {
@@ -42,7 +33,7 @@ export interface TaskBoardOpenSessionTarget {
 
 interface Props {
   onOpenSession: (target: TaskBoardOpenSessionTarget) => void;
-  sessionActivities?: TaskBoardSessionActivity[];
+  sessionActivities: TaskBoardSessionActivity[];
 }
 
 const DEFAULT_TASK_BOARD_STATE: TaskBoardState = {
@@ -50,9 +41,6 @@ const DEFAULT_TASK_BOARD_STATE: TaskBoardState = {
   pinned: [],
 };
 
-const PINNED_PREVIEW_HYDRATION_LIMIT = 12;
-const LOW_SIGNAL_PREVIEW_HYDRATION_LIMIT = 16;
-const SESSION_PREVIEW_HYDRATION_TIMEOUT_MS = 1200;
 const TASK_BOARD_DETAIL_TURN_LIMIT = 6;
 
 interface RefreshOptions {
@@ -92,82 +80,6 @@ function formatLoadError(error: string, texts: ReturnType<typeof useI18n>["t"]) 
     return texts.taskBoard.nativeDataUnavailable;
   }
   return error;
-}
-
-function lastTurnMessage(turns: SessionTurn[]) {
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const content = turns[index]?.content?.trim();
-    if (content) {
-      return content;
-    }
-  }
-  return null;
-}
-
-async function readSessionLastMessage(session: UnifiedSession) {
-  return lastTurnMessage(await fetchProviderSession(session.type, session.id, session.workspace));
-}
-
-async function readSessionLastMessageWithTimeout(
-  session: UnifiedSession,
-  timeoutMs = SESSION_PREVIEW_HYDRATION_TIMEOUT_MS,
-) {
-  let timer: number | null = null;
-  try {
-    return await Promise.race([
-      readSessionLastMessage(session),
-      new Promise<null>((resolve) => {
-        timer = window.setTimeout(() => resolve(null), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer !== null) {
-      window.clearTimeout(timer);
-    }
-  }
-}
-
-async function hydrateTaskBoardSessionPreviews(
-  sessions: UnifiedSession[],
-  taskBoardState: TaskBoardState,
-) {
-  const plan = collectTaskBoardPreviewHydrationPlan({
-    sessions,
-    taskBoardState,
-    pinnedLimit: PINNED_PREVIEW_HYDRATION_LIMIT,
-    lowSignalLimit: LOW_SIGNAL_PREVIEW_HYDRATION_LIMIT,
-  });
-  const hydrationKeys = new Set(plan.keys);
-  if (hydrationKeys.size === 0) {
-    return sessions;
-  }
-  const pinnedKeys = new Set(plan.pinnedKeys);
-
-  return Promise.all(sessions.map(async (session) => {
-    const key = taskBoardSessionKey(session.type, session.id);
-    if (!hydrationKeys.has(key)) {
-      return session;
-    }
-    try {
-      const lastMessage = await readSessionLastMessageWithTimeout(session);
-      if (!lastMessage) {
-        return session;
-      }
-      if (!pinnedKeys.has(key) && isLowSignalTaskBoardText(lastMessage)) {
-        return session;
-      }
-      return {
-        ...session,
-        raw: {
-          ...(session.raw ?? {}),
-          lastMessage,
-        },
-      };
-    } catch (lastMessageError) {
-      console.warn(`Failed to hydrate task board session preview for ${session.type}:${session.id}`, lastMessageError);
-      return session;
-    }
-  }));
 }
 
 function taskAccent(providerId: string) {
@@ -486,7 +398,6 @@ export function TaskBoard({
   const [providers, setProviders] = useState<ProviderMetadata[]>([]);
   const [dashboardState, setDashboardState] = useState<DashboardState | null>(null);
   const [taskBoardState, setTaskBoardState] = useState<TaskBoardState>(DEFAULT_TASK_BOARD_STATE);
-  const [localSessionActivities, setLocalSessionActivities] = useState<TaskBoardSessionActivity[]>([]);
   const [sessions, setSessions] = useState<UnifiedSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -496,13 +407,9 @@ export function TaskBoard({
   const [selectedApprovalTaskIds, setSelectedApprovalTaskIds] = useState<string[]>([]);
   const [busyApprovalTaskIds, setBusyApprovalTaskIds] = useState<string[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [selectedConversationTurns, setSelectedConversationTurns] = useState<SessionTurn[]>([]);
-  const [selectedConversationLoading, setSelectedConversationLoading] = useState(false);
-  const [selectedConversationError, setSelectedConversationError] = useState(false);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [pendingControl, setPendingControl] = useState<PendingTaskBoardControl | null>(null);
   const hasHydratedProviderSessionsRef = useRef(false);
-  const refreshSequenceRef = useRef(0);
   const refreshInFlightRef = useRef(false);
 
   const providerLabels = useMemo(
@@ -518,8 +425,6 @@ export function TaskBoard({
     }
     refreshInFlightRef.current = true;
     setRefreshing(true);
-    const refreshSequence = refreshSequenceRef.current + 1;
-    refreshSequenceRef.current = refreshSequence;
     try {
       const [nextProviders, nextDashboard, nextTaskBoardState] = await Promise.all([
         fetchProviderMetadata(),
@@ -559,17 +464,7 @@ export function TaskBoard({
       const flatSessions = sessionResults.flat();
       setSessions((current) => mergeSessionListSnapshot(current, flatSessions));
       setNowMs(Date.now());
-      void hydrateTaskBoardSessionPreviews(flatSessions, nextTaskBoardState)
-        .then((hydratedSessions) => {
-          if (refreshSequenceRef.current !== refreshSequence) {
-            return;
-          }
-          setSessions((current) => mergeSessionListSnapshot(current, hydratedSessions));
-          setNowMs(Date.now());
-        })
-        .catch((hydrationError) => {
-          console.warn("Failed to hydrate task board session previews", hydrationError);
-        });
+
     } catch (err) {
       setError(String(err));
     } finally {
@@ -595,63 +490,6 @@ export function TaskBoard({
       cancelled = true;
     };
   }, [refresh]);
-
-  useEffect(() => {
-    if (sharedSessionActivities !== undefined) {
-      return;
-    }
-    const channel = new Channel<TaskBoardActivityStreamEvent>();
-    let activeStreamId: number | null = null;
-    let disposed = false;
-    channel.onmessage = (event) => {
-      if (event.kind === "snapshot") {
-        setLocalSessionActivities(event.activities ?? []);
-        setNowMs(Date.now());
-        setLoading(false);
-        return;
-      }
-      if (event.kind === "activity" && event.activity) {
-        const activity = event.activity;
-        setLocalSessionActivities((current) => upsertTaskBoardActivity(current, activity));
-        setNowMs(Date.now());
-        setLoading(false);
-        return;
-      }
-      if (event.kind === "remove" && event.providerId && event.sessionId) {
-        setLocalSessionActivities((current) => removeTaskBoardActivity(current, event.providerId!, event.sessionId!));
-        setNowMs(Date.now());
-        setLoading(false);
-        return;
-      }
-      if (event.kind === "error" && event.error) {
-        console.warn("Task board activity stream failed", event.error);
-      }
-    };
-
-    void invoke<number>("start_task_board_activity_stream", { channel })
-      .then((streamId) => {
-        if (disposed) {
-          void invoke("stop_task_board_activity_stream", { streamId }).catch((streamError) => {
-            console.warn("Failed to stop task board activity stream", streamError);
-          });
-          return;
-        }
-        activeStreamId = streamId;
-      })
-      .catch((streamError) => {
-        console.warn("Failed to start task board activity stream", streamError);
-      });
-
-    return () => {
-      disposed = true;
-      if (activeStreamId === null) {
-        return;
-      }
-      void invoke("stop_task_board_activity_stream", { streamId: activeStreamId }).catch((streamError) => {
-        console.warn("Failed to stop task board activity stream", streamError);
-      });
-    };
-  }, [sharedSessionActivities]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
@@ -706,13 +544,13 @@ export function TaskBoard({
   const board = useMemo(
     () => buildTaskBoardModel({
       sessions,
-      sessionActivities: sharedSessionActivities ?? localSessionActivities,
+      sessionActivities: sharedSessionActivities,
       dashboardState,
       taskBoardState,
       providerLabels,
       nowEpochMs: nowMs,
     }),
-    [dashboardState, nowMs, providerLabels, sharedSessionActivities, localSessionActivities, sessions, taskBoardState],
+    [dashboardState, nowMs, providerLabels, sharedSessionActivities, sessions, taskBoardState],
   );
   const allTasks = useMemo(
     () => [...board.needsAttention, ...board.running, ...board.recentEnded],
@@ -735,50 +573,7 @@ export function TaskBoard({
     setSelectedTaskId(initial?.id ?? null);
   }, [board.needsAttention, board.recentEnded, board.running, selectedTask]);
 
-  useEffect(() => {
-    if (!selectedTask) {
-      setSelectedConversationTurns([]);
-      setSelectedConversationLoading(false);
-      setSelectedConversationError(false);
-      return;
-    }
-
-    let cancelled = false;
-    const fallbackTurns = selectRecentConversationTurns([
-      { role: "user", content: selectedTask.lastUserMessage },
-      { role: "assistant", content: selectedTask.lastAssistantMessage || selectedTask.preview || "" },
-    ], TASK_BOARD_DETAIL_TURN_LIMIT) as SessionTurn[];
-    setSelectedConversationTurns(fallbackTurns);
-    setSelectedConversationLoading(true);
-    setSelectedConversationError(false);
-
-    void fetchProviderSession(
-      selectedTask.providerId,
-      selectedTask.sessionId,
-      selectedTask.workspace || null,
-    ).then((turns) => {
-      if (cancelled) {
-        return;
-      }
-      const recentTurns = selectRecentConversationTurns(
-        turns,
-        TASK_BOARD_DETAIL_TURN_LIMIT,
-      ) as SessionTurn[];
-      setSelectedConversationTurns(recentTurns.length > 0 ? recentTurns : fallbackTurns);
-      setSelectedConversationLoading(false);
-    }).catch((conversationError) => {
-      if (cancelled) {
-        return;
-      }
-      console.warn(`Failed to load task board conversation for ${selectedTask.providerId}:${selectedTask.sessionId}`, conversationError);
-      setSelectedConversationError(fallbackTurns.length === 0);
-      setSelectedConversationLoading(false);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedTask?.id, selectedTask?.providerId, selectedTask?.sessionId, selectedTask?.workspace]);
+  const selectedConversationTurns = selectedTask?.conversationTurns ?? [];
 
   useEffect(() => {
     if (!pendingControl) {
@@ -1107,10 +902,6 @@ export function TaskBoard({
                           </li>
                         ))}
                       </ol>
-                    ) : selectedConversationLoading ? (
-                      <p className="mt-3 text-xs text-[var(--ow-subtle)]">正在读取会话内容…</p>
-                    ) : selectedConversationError ? (
-                      <p className="mt-3 text-xs text-[var(--ow-subtle)]">暂时无法读取会话内容。</p>
                     ) : (
                       <p className="mt-3 text-xs text-[var(--ow-subtle)]">暂无可显示的会话内容。</p>
                     )}

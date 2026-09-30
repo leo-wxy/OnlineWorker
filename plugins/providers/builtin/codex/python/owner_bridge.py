@@ -9,6 +9,7 @@ from typing import Optional
 from config import get_data_dir
 from core.messages.publishing import (
     publish_user_message_accepted,
+    publish_user_message_failed,
     publish_user_message_submitted,
 )
 from core.user_messages.contracts import UserMessageSendRequest
@@ -424,6 +425,7 @@ class CodexOwnerBridge:
                     turn_params["sandboxPolicy"] = sandbox_policy
                 await adapter._call("turn/start", turn_params)
         except Exception as exc:
+            publish_user_message_failed(self.state, message_event_request, text=text, workspace_path=cwd, error=exc)
             return {"ok": False, "error": str(exc)}
 
         if workspace_id and cwd:
@@ -438,7 +440,7 @@ class CodexOwnerBridge:
                 thread_id=effective_thread_id,
                 text=text,
                 attachments=attachments,
-                metadata={"bridge": "codex_owner"},
+                metadata=message_event_request.metadata,
             ),
             text=text,
             workspace_path=cwd,

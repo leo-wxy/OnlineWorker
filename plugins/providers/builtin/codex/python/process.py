@@ -181,7 +181,8 @@ class AppServerProcess:
 
     async def _stop_existing_owned_unix_listener(self, listen_url: str) -> None:
         """仅终止精确占用 OnlineWorker 专属 socket 的旧 app-server。"""
-        socket_path = resolve_unix_socket_path(listen_url)
+        # Codex may expose the endpoint as a symlink to its daemon socket.
+        socket_path = os.path.realpath(resolve_unix_socket_path(listen_url))
         code, output = await _capture_command_output("/usr/sbin/lsof", "-t", socket_path)
         pids = sorted(
             {

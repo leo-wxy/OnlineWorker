@@ -177,6 +177,8 @@ class AppState:
     telegram_group_chat_id: int | None = None
     telegram_im_account_id: str = "default"
     message_bus: MessageEventBus = field(default_factory=MessageEventBus)
+    im_event_consumers: dict[str, Any] = field(default_factory=dict)
+    new_session_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def set_im_route_store(
         self,

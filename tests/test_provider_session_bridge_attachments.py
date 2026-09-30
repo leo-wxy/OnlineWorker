@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 import pytest
 
 
@@ -10,9 +12,10 @@ async def test_provider_session_bridge_forwards_attachments_to_message_hooks(mon
     class _FakeAdapter:
         connected = True
 
+    @asynccontextmanager
     async def _start_adapter(descriptor, provider_id):
         assert provider_id == "overlay-tool"
-        return _FakeAdapter()
+        yield _FakeAdapter()
 
     async def _send(state, adapter, ws_info, thread_info, **kwargs):
         captured["workspace"] = ws_info["path"]

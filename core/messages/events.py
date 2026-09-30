@@ -74,9 +74,12 @@ class MessageEvent:
     created_at: float = 0.0
     dedupe_key: str = ""
     payload: dict[str, Any] = field(default_factory=dict)
+    conversation_payload: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data.pop("conversation_payload", None)
+        return data
 
 
 @dataclass
@@ -93,9 +96,14 @@ class SessionActivity:
     approval_source: str = ""
     mirrored_only: bool = False
     active_turn_id: str = ""
+    delivery_status: str = ""
+    delivery_error: str = ""
+    _recovery_status: str = ""
+    last_message_request_id: str = ""
     last_user_message: str = ""
     last_assistant_message: str = ""
     last_final_message: str = ""
+    conversation_turns: list[dict[str, Any]] = field(default_factory=list)
     last_event_kind: str = ""
     updated_at: float = 0.0
 
@@ -113,9 +121,13 @@ class SessionActivity:
             "approvalSource": self.approval_source,
             "mirroredOnly": self.mirrored_only,
             "activeTurnId": self.active_turn_id,
+            "deliveryStatus": self.delivery_status,
+            "deliveryError": self.delivery_error,
+            "lastMessageRequestId": self.last_message_request_id,
             "lastUserMessage": self.last_user_message,
             "lastAssistantMessage": self.last_assistant_message,
             "lastFinalMessage": self.last_final_message,
+            "conversationTurns": [dict(turn) for turn in self.conversation_turns],
             "lastEventKind": self.last_event_kind,
             "updatedAt": self.updated_at,
         }
@@ -163,4 +175,6 @@ def create_message_event(
         created_at=timestamp,
         dedupe_key=normalized["dedupe_key"],
         payload=public_payload,
+        conversation_payload={key: value for key, value in (payload or {}).items()
+                              if key in {"text", "delta", "turns"}},
     )

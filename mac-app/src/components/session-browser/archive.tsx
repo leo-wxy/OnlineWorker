@@ -88,24 +88,20 @@ export function ArchiveNoticeBanner({ notice }: { notice: ArchiveNotice | null }
 
 export async function archiveSessionWithFeedback({
   session,
-  selectedSessionId,
   refreshCurrentProvider,
   onArchivedSelection,
   successText,
   failureText,
 }: {
   session: UnifiedSession;
-  selectedSessionId: string | null;
   refreshCurrentProvider: () => Promise<void>;
   onArchivedSelection: () => void;
   successText: string;
   failureText: (error: string) => string;
 }): Promise<ArchiveNotice> {
   try {
-    await archiveProviderSession(session.type, session.id, session.workspace, session.title);
-    if (selectedSessionId === session.id) {
-      onArchivedSelection();
-    }
+    await archiveProviderSession(session.type, session.id, session.workspace);
+    onArchivedSelection();
     await refreshCurrentProvider();
     return {
       tone: "success",

@@ -447,7 +447,7 @@ test("dashboard renders provider icons from provider metadata", () => {
   assert.equal(dashboard.includes("function ProviderIcon()"), false);
 });
 
-test("task board listens to activity stream without fallback polling", () => {
+test("task board consumes the app-owned activity stream without a second subscription", () => {
   const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
   const taskBoard = readFileSync(join(root, "src", "pages", "TaskBoard.tsx"), "utf8");
   const taskModel = readFileSync(join(root, "src", "utils", "taskBoard.js"), "utf8");
@@ -461,12 +461,12 @@ test("task board listens to activity stream without fallback polling", () => {
   assert.match(taskModel, /export function taskBoardSessionKey/);
   assert.match(taskModel, /export function upsertTaskBoardActivity/);
   assert.match(taskModel, /export function removeTaskBoardActivity/);
-  assert.match(taskBoard, /sharedSessionActivities !== undefined/);
+  assert.match(taskBoard, /sessionActivities: TaskBoardSessionActivity\[\];/);
   assert.doesNotMatch(taskBoard, /onSessionActivitiesChange/);
-  assert.match(taskBoard, /const activity = event\.activity;/);
-  assert.match(taskBoard, /setLocalSessionActivities\(\(current\) => upsertTaskBoardActivity\(current, activity\)\)/);
-  assert.match(taskBoard, /event\.kind === "remove"/);
-  assert.match(taskBoard, /setLocalSessionActivities\(\(current\) => removeTaskBoardActivity\(current, event\.providerId!, event\.sessionId!\)\)/);
+  assert.doesNotMatch(taskBoard, /start_task_board_activity_stream|stop_task_board_activity_stream/);
+  assert.match(app, /setTaskBoardActivities\(event\.activities \?\? \[\]\)/);
+  assert.match(app, /setTaskBoardActivities\(\(current\) => upsertTaskBoardActivity\(current, event\.activity!\)\)/);
+  assert.match(app, /setTaskBoardActivities\(\(current\) => removeTaskBoardActivity\(current, event\.providerId!, event\.sessionId!\)\)/);
   assert.doesNotMatch(app, /invoke<TaskBoardSessionActivity\[\]>\("get_task_board_session_activities"\)/);
   assert.doesNotMatch(taskBoard, /"get_task_board_session_activities"/);
   assert.match(taskBoard, /setLoading\(false\);/);
@@ -514,8 +514,8 @@ test("phase 19 task board uses grouped detail layout and continue only focuses t
   assert.match(taskBoard, /最近结束/);
   assert.match(taskBoard, /control_task_board_session/);
   assert.match(taskBoard, /会话片段/);
-  assert.match(taskBoard, /fetchProviderSession/);
-  assert.match(taskBoard, /selectRecentConversationTurns/);
+  assert.doesNotMatch(taskBoard, /fetchProviderSession\b|startActiveSessionRefresh/);
+  assert.match(taskBoard, /selectedTask\?\.conversationTurns \?\? \[\]/);
   assert.match(taskBoard, /selectedConversationTurns/);
   assert.match(taskBoard, /const \[mobileDetailOpen,\s*setMobileDetailOpen\] = useState\(false\)/);
   assert.match(taskBoard, /setMobileDetailOpen\(true\)/);
@@ -555,19 +555,8 @@ test("task board pinned cards expose an explicit unfollow action", () => {
   assert.equal(taskBoard.includes("removeFromBoard"), false);
 });
 
-test("task board hydrates previews for pinned idle sessions", () => {
+test("task board has no independent history or preview message readers", () => {
   const taskBoard = readFileSync(join(root, "src", "pages", "TaskBoard.tsx"), "utf8");
-  const taskModel = readFileSync(join(root, "src", "utils", "taskBoard.js"), "utf8");
-
-  assert.match(taskBoard, /async function hydrateTaskBoardSessionPreviews/);
-  assert.match(taskBoard, /const PINNED_PREVIEW_HYDRATION_LIMIT = 12/);
-  assert.match(taskModel, /export function collectTaskBoardPreviewHydrationPlan/);
-  assert.match(taskModel, /\.slice\(0, pinnedLimit\)/);
-  assert.match(taskModel, /\.slice\(0, lowSignalLimit\)/);
-  assert.match(taskBoard, /readSessionLastMessageWithTimeout\(session\)/);
-  assert.match(taskBoard, /const pinnedKeys = new Set\(plan\.pinnedKeys\)/);
-  assert.match(taskBoard, /raw:\s*\{\s*\.\.\.\(session\.raw \?\? \{\}\),\s*lastMessage,/);
-  assert.match(taskBoard, /void hydrateTaskBoardSessionPreviews\(flatSessions, nextTaskBoardState\)/);
-  assert.match(taskBoard, /const key = taskBoardSessionKey\(session\.type, session\.id\)/);
-  assert.match(taskBoard, /setSessions\(\(current\) => mergeSessionListSnapshot\(current, hydratedSessions\)\)/);
+  assert.doesNotMatch(taskBoard, /hydrateTaskBoardSessionPreviews|readSessionLastMessage|fetchProviderSession\b/);
+  assert.doesNotMatch(taskBoard, /selectedConversationLoading|conversationRefreshVersion/);
 });

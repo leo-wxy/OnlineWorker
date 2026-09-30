@@ -79,6 +79,94 @@ logger = logging.getLogger(__name__)
 
 # 流式输出节流间隔（秒）
 THROTTLE_INTERVAL = 0.6
+IM_EVENT_QUEUE_SIZE = 256
+
+
+class _OrderedDeliveryConsumer:
+    def __init__(self, state, provider_id):
+        self.state, self.provider_id = state, provider_id
+        self.queue = asyncio.Queue(maxsize=IM_EVENT_QUEUE_SIZE)
+        self.task = None
+        self.last_delta = None
+        self.closed = False
+        self.unsubscribers = []
+
+    def enqueue(self, callback, *args, delta_key=None):
+        if self.closed:
+            return False
+        if delta_key and self.last_delta and self.last_delta[0] == delta_key:
+            previous = self.last_delta[1]
+            text = previous.message_payload.get("delta", "") + args[0].message_payload.get("delta", "")
+            previous.message_event = replace(previous.message_event, conversation_payload={"delta": text})
+            return True
+        try:
+            self.queue.put_nowait((callback, args, delta_key))
+        except asyncio.QueueFull:
+            self.last_delta = None
+            logger.error("[IM] delivery queue full provider=%s; local events continue", self.provider_id)
+            self.state.message_bus.publish(create_message_event(
+                "notification.failed", provider_id=self.provider_id,
+                payload={"reason": "im_queue_full", "text": "IM 消费队列已满，本次出站未执行"},
+            ))
+            return False
+        self.last_delta = (delta_key, args[0]) if delta_key else None
+        if self.task is None or self.task.done():
+            self.task = asyncio.create_task(self._run())
+        return True
+
+    async def _run(self):
+        while not self.queue.empty():
+            callback, args, delta_key = self.queue.get_nowait()
+            if delta_key and self.last_delta and self.last_delta[1] is args[0]:
+                self.last_delta = None
+            try:
+                await callback(*args)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("[IM] delivery failed provider=%s", self.provider_id, exc_info=True)
+            finally:
+                self.queue.task_done()
+
+    async def close(self):
+        self.closed = True
+        for unsubscribe in self.unsubscribers:
+            unsubscribe()
+        self.unsubscribers.clear()
+        if self.task is not None:
+            self.task.cancel()
+            await asyncio.gather(self.task, return_exceptions=True)
+        while not self.queue.empty():
+            self.queue.get_nowait()
+            self.queue.task_done()
+        self.last_delta = None
+
+
+def _delivery_consumer(state, provider_id):
+    key = provider_id or "events"
+    consumer = state.im_event_consumers.get(key)
+    if consumer is None or consumer.closed:
+        consumer = _OrderedDeliveryConsumer(state, key)
+        state.im_event_consumers[key] = consumer
+    return consumer
+
+
+async def stop_event_delivery(state, provider_id=None):
+    keys = [provider_id] if provider_id else list(state.im_event_consumers)
+    for key in keys:
+        consumer = state.im_event_consumers.pop(key, None)
+        if consumer is not None:
+            await consumer.close()
+    tasks = []
+    for thread_id, streaming in state.streaming_turns.items():
+        if provider_id and _provider_for_thread_id(state, thread_id) != provider_id:
+            continue
+        if streaming.throttle_task is not None:
+            streaming.throttle_task.cancel()
+            tasks.append(streaming.throttle_task)
+            streaming.throttle_task = None
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 # 防止 turn/started 并发重复建同一个 thread topic
@@ -466,7 +554,7 @@ def _resolve_approval_target(
     ws_daemon_id: str,
     thread_id: Optional[str],
 ) -> tuple[str, Optional[int], Optional[str]]:
-    """审批消息必须命中明确 thread topic，否则返回错误原因并交给 owner DM 兜底。"""
+    """审批消息必须命中明确 thread topic，否则只丢弃 IM 出站。"""
     if not thread_id:
         return "", None, "approval missing thread_id"
 
@@ -738,7 +826,7 @@ def _resolve_workspace_info(
     return None
 
 
-def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notification_router=None):
+def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notification_router=None, *, provider_id=""):
     """
     返回 daemon 事件回调。
 
@@ -1276,9 +1364,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 logger.debug(f"[streaming] 收口被替换旧 turn 失败 thread={thread_id[:8]}: {e}")
 
         state.streaming_turns.pop(thread_id, None)
-        provider_id = _provider_for_thread_id(state, thread_id)
-        if provider_id:
-            state.mark_provider_tui_turn_completed(provider_id, thread_id)
 
     def _ensure_throttle_task(thread_id: str, st: StreamingTurn) -> None:
         """
@@ -1342,16 +1427,17 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         @property
         def message_payload(self) -> dict:
             payload = getattr(self.message_event, "payload", None)
-            return payload if isinstance(payload, dict) else {}
+            return {**(payload if isinstance(payload, dict) else {}), **getattr(self.message_event, "conversation_payload", {})}
 
     def _message_event_text(ctx: EventContext) -> str:
         payload = ctx.message_payload
-        return str(
+        text = str(
             payload.get("text")
             or payload.get("delta")
             or payload.get("message")
             or ""
-        ).strip()
+        )
+        return text if ctx.event.kind == "assistant_delta" else text.strip()
 
     def _message_event_title(ctx: EventContext) -> str:
         return str(ctx.message_payload.get("title") or "").strip()
@@ -1437,12 +1523,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             )
             return
 
-        if info.tool_type and thread_id and request_id is not None:
-            state.add_provider_interruption(
-                info.tool_type,
-                thread_id=thread_id,
-                interruption_id=str(request_id),
-            )
         await send_approval_to_telegram(state, bot, group_chat_id, topic_id, workspace_id, info)
         await _emit_notification(
             ctx,
@@ -1529,7 +1609,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         ):
             current_run = state.get_provider_current_run(ctx.event.provider, thread_id)
             if current_run is not None and current_run.turn_id == turn_id:
-                state.mark_provider_tui_turn_completed(ctx.event.provider, thread_id)
+                pass
             logger.info(
                 "[streaming] 跳过已同步 provider turn/started duplicate provider=%s thread=%s turn=%s",
                 ctx.event.provider,
@@ -1537,22 +1617,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 turn_id[:12],
             )
             return
-
-        if ctx.event.provider and turn_id:
-            current_run = state.get_provider_current_run(ctx.event.provider, thread_id)
-            if current_run is None or current_run.turn_id != turn_id:
-                state.start_provider_run(
-                    ctx.event.provider,
-                    workspace_id=ctx.ws_daemon_id,
-                    thread_id=thread_id,
-                    turn_id=turn_id,
-                )
-            else:
-                state.mark_provider_run(
-                    ctx.event.provider,
-                    thread_id=thread_id,
-                    status="started",
-                )
 
         topic_id = _resolve_topic_id(state, ctx.ws_daemon_id, thread_id, ctx.event_params)
         if topic_id is None:
@@ -1595,16 +1659,12 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             else:
                 if turn_id:
                     st.turn_id = turn_id
-                if ctx.event.provider:
-                    state.mark_provider_tui_turn_started(ctx.event.provider, thread_id)
                 logger.debug(f"[streaming] turn/started 重复，复用已有占位 thread={thread_id[:8]}")
                 return
 
         try:
             sent = await _send_to_group(bot, group_chat_id, "⏳ 思考中...", topic_id=topic_id)
             if sent:
-                if ctx.event.provider:
-                    state.mark_provider_tui_turn_started(ctx.event.provider, thread_id)
                 state.streaming_turns[thread_id] = StreamingTurn(
                     message_id=sent.message_id,
                     topic_id=topic_id,
@@ -1649,9 +1709,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 f"event_turn={event_turn_id[:12]} current_turn={st.turn_id[:12]}"
             )
             return
-        if ctx.event.provider:
-            state.mark_provider_run(ctx.event.provider, thread_id=thread_id, first_progress_at=True)
-
         # 第一个 delta：删除占位消息，发新消息，切换 message_id
         if not st.placeholder_deleted:
             st.placeholder_deleted = True
@@ -1822,15 +1879,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                         except Exception as e:
                             logger.error(f"[event→TG] fallback 发 agentMessage 失败：{e}")
             if delivered_to_tg and phase == "final_answer" and ws is not None and ctx.event.provider:
-                if event_turn_id:
-                    current_run = state.get_provider_current_run(ctx.event.provider, thread_id)
-                    if current_run is None or current_run.turn_id != event_turn_id:
-                        state.start_provider_run(
-                            ctx.event.provider,
-                            workspace_id=ctx.ws_daemon_id or ws.daemon_workspace_id,
-                            thread_id=thread_id,
-                            turn_id=event_turn_id,
-                        )
                 _remember_provider_tg_synced_final_reply(
                     state,
                     ctx.event.provider,
@@ -1933,7 +1981,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                         save_storage(_storage)
                 state.streaming_turns.pop(thread_id, None)
                 if ctx.event.provider:
-                    state.mark_provider_tui_turn_completed(ctx.event.provider, thread_id)
                     state.mark_provider_run(
                         ctx.event.provider,
                         thread_id=thread_id,
@@ -2057,11 +2104,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                     save_storage(_storage)
             # 从内存中移除，确保下一次 turn/started 不会误"复用"
             state.streaming_turns.pop(thread_id, None)
-            if ctx.event.provider:
-                state.mark_provider_tui_turn_completed(ctx.event.provider, thread_id)
         else:
-            if ctx.event.provider:
-                state.mark_provider_tui_turn_completed(ctx.event.provider, thread_id)
             logger.debug(f"[streaming] turn/completed 无 streaming state thread={thread_id[:8]}")
 
         if ctx.event.provider:
@@ -2160,7 +2203,7 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                     message=notification_message,
                 )
 
-    async def _handle_session_created(ctx: EventContext) -> None:
+    def _handle_session_created(ctx: EventContext) -> None:
         """session.created"""
         thread_id = ctx.thread_id
         if not thread_id:
@@ -2226,9 +2269,6 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
                 message_thread_id=topic_id,
                 name=new_topic_name,
             )
-            thread_info.preview = title
-            if state.storage:
-                save_storage(state.storage)
             logger.info(f"[title_update] Topic {topic_id} renamed → {new_topic_name}")
         except Exception as e:
             logger.warning(f"[title_update] rename Topic {topic_id} 失败：{e}")
@@ -2243,14 +2283,84 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
         "item_completed": _handle_item_completed,
         "turn_completed": _handle_turn_completed,
         "turn_aborted": _handle_turn_completed,
-        "session_created": _handle_session_created,
         "session_title_updated": _handle_session_title_updated,
     }
 
+    consumer = _delivery_consumer(state, provider_id)
+    scope = object()
+
+    def update_local(ctx):
+        if ctx.event.kind == "session_created":
+            _handle_session_created(ctx)
+        elif ctx.event.kind == "session_title_updated":
+            found = state.find_thread_by_id_global(ctx.thread_id)
+            title = _message_event_title(ctx)
+            if found and title and found[1].preview != title:
+                found[1].preview = title
+                if state.storage:
+                    save_storage(state.storage)
+
+        tool, thread_id = ctx.event.provider, ctx.thread_id
+        if not tool or not thread_id:
+            return True
+        turn_id = ctx.event.turn_id or _extract_turn_id(ctx.event_params)
+        run = state.get_provider_current_run(tool, thread_id)
+        if ctx.event.kind == "turn_started":
+            previous = state.get_provider_run_for_turn(tool, thread_id, turn_id) if turn_id else None
+            if previous and (previous.final_reply_synced_to_tg or previous.status in {"completed", "failed", "error", "aborted", "cancelled"}):
+                return False
+            if turn_id and (run is None or run.turn_id != turn_id):
+                run = state.start_provider_run(tool, workspace_id=ctx.ws_daemon_id, thread_id=thread_id, turn_id=turn_id)
+            if run is None or run.status not in {"completed", "failed", "error", "aborted", "cancelled"}:
+                state.mark_provider_tui_turn_started(tool, thread_id)
+        elif run and turn_id and run.turn_id != turn_id:
+            return False
+        elif ctx.message_kind in {"message.assistant.delta", "message.assistant.final"}:
+            if run is None and turn_id:
+                run = state.start_provider_run(tool, workspace_id=ctx.ws_daemon_id, thread_id=thread_id, turn_id=turn_id)
+            state.mark_provider_run(tool, thread_id=thread_id, turn_id=turn_id or None, first_progress_at=True,
+                                    status="completed" if ctx.message_kind == "message.assistant.final" else None)
+        elif ctx.event.kind in {"turn_completed", "turn_aborted"}:
+            state.mark_provider_tui_turn_completed(tool, thread_id)
+            state.mark_provider_run(tool, thread_id=thread_id, turn_id=turn_id or None, status=_canonical_turn_status(ctx) or "completed")
+        elif ctx.event.kind == "approval_requested" and ctx.event_params.get("_mirroredOnly") is not True:
+            request_id = ctx.event_params.get("request_id") or ctx.msg.get("id")
+            if request_id is not None:
+                state.add_provider_interruption(tool, thread_id=thread_id, interruption_id=str(request_id))
+        if not turn_id and run is not None:
+            ctx.event = replace(ctx.event, payload={**ctx.event.payload, "turnId": run.turn_id})
+        return True
+
+    def consume_event(_message_event, context):
+        if not context or context[0] is not scope or consumer.closed:
+            return
+        ctx = context[1]
+        if (ctx.event.payload.get("_mirroredOnly") is True and ctx.thread_id and ctx.event.provider
+                and ctx.thread_id in state.get_provider_runtime(ctx.event.provider).watched_threads):
+            return
+        if not update_local(ctx):
+            return False
+        handler = _EVENT_HANDLERS.get(ctx.event.kind)
+        if handler:
+            delta_key = (ctx.event.provider, ctx.thread_id, ctx.event.turn_id, ctx.message_payload.get("itemId")) if ctx.event.kind == "assistant_delta" else None
+            consumer.enqueue(handler, ctx, delta_key=delta_key)
+
+    subscribe = getattr(state.message_bus, "subscribe_delivery", None)
+    if callable(subscribe):
+        consumer.unsubscribers.append(subscribe(consume_event))
+
     async def on_event(method: str, params: dict) -> None:
+        if consumer.closed:
+            return
         event = normalize_session_event(method, params)
         if event is None:
             return
+        resolved_provider = provider_id or state.get_tool_for_workspace(event.workspace_id) or event.provider
+        if not resolved_provider and event.thread_id:
+            found = state.find_thread_by_id_global(event.thread_id)
+            resolved_provider = found[0].tool if found else ""
+        if resolved_provider != event.provider:
+            event = replace(event, provider=resolved_provider or "")
         message_event = message_event_from_session_event(event)
 
         msg = params.get("message", {})
@@ -2262,45 +2372,51 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
             f"ws={ws_daemon_id[:8] if ws_daemon_id else '?'} "
             f"thread={thread_id[:8] if thread_id else '?'}"
         )
-        publish_result = publish_session_message_event(state, event)
-        if publish_result is False:
-            return
-        if (
-            event.payload.get("_mirroredOnly") is True
-            and thread_id
-            and event.provider
-            and thread_id in state.get_provider_runtime(event.provider).watched_threads
-        ):
-            return
-
         ctx = EventContext(
             event=event,
             message_event=message_event,
             msg=msg,
         )
 
-        handler = _EVENT_HANDLERS.get(event.kind)
-        if handler:
-            await handler(ctx)
+        publish_session_message_event(state, event, message_event=message_event, delivery_context=(scope, ctx))
+        await asyncio.sleep(0)
 
+    on_event.enqueue_delivery = consumer.enqueue
+    on_event.drain_delivery = consumer.queue.join
     return on_event
 
 
-def make_server_request_handler(state: AppState, bot: Bot, group_chat_id: int):
+def make_server_request_handler(state: AppState, bot: Bot, group_chat_id: int, *, provider_id=""):
     """
     返回 daemon server request 回调（处理需要用户响应的请求）。
 
     目前处理：
         Provider app-server approval requests → 推送沙盒权限授权请求
     """
+    consumer = _delivery_consumer(state, provider_id)
+    scope = object()
+
+    def consume_approval(event, context):
+        if not context or context[0] is not scope or consumer.closed:
+            return
+        topic_id, workspace_id, info = context[1:]
+        if info.thread_id:
+            state.add_provider_interruption(info.tool_type, thread_id=info.thread_id, interruption_id=str(info.request_id))
+        if topic_id is not None:
+            consumer.enqueue(send_approval_to_telegram, state, bot, group_chat_id, topic_id, workspace_id, info)
+
+    consumer.unsubscribers.append(state.message_bus.subscribe_delivery(consume_approval))
+
     async def on_server_request(method: str, params: dict, request_id: int) -> None:
-        provider_id = _provider_for_server_request_method(state, method, params)
-        if not provider_id:
+        if consumer.closed:
+            return
+        resolved_provider = _provider_for_server_request_method(state, method, params)
+        if not resolved_provider:
             logger.debug(f"[server_request] 忽略未处理的 method={method}")
             return
 
         info = _parse_provider_approval_request(
-            provider_id,
+            resolved_provider,
             params,
             request_id=request_id,
             approval_source=method,
@@ -2322,7 +2438,7 @@ def make_server_request_handler(state: AppState, bot: Bot, group_chat_id: int):
             logger.error(
                 "[approval_target] %s tool=%s thread=%s ws=%s",
                 route_error,
-                provider_id,
+                resolved_provider,
                 thread_id or "N/A",
                 workspace_id or "N/A",
             )
@@ -2331,14 +2447,11 @@ def make_server_request_handler(state: AppState, bot: Bot, group_chat_id: int):
                 route_error=route_error,
                 ws_daemon_id=workspace_id,
             )
-            return
-
-        logger.info(
-            f"[approval_request] id={request_id} thread={thread_id[:8] if thread_id else '?'} "
-            f"cmd={info.command[:60]} topic={topic_id}"
+        publish_approval_requested(
+            state, info, workspace_id=workspace_id or ws_daemon_id,
+            delivery_context=(scope, topic_id if route_error is None else None, workspace_id, info),
         )
-        await send_approval_to_telegram(
-            state, bot, group_chat_id, topic_id, workspace_id, info,
-        )
+        await asyncio.sleep(0)
 
+    on_server_request.drain_delivery = consumer.queue.join
     return on_server_request

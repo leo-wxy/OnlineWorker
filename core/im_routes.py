@@ -662,48 +662,23 @@ class ImRouteStore:
         )
 
     def _migrate_route_conn(self, conn: sqlite3.Connection, **kwargs) -> None:
-        clauses = [
-            "im_provider = ?",
-            "im_account_id = ?",
-            "im_space_id = ?",
-            "route_scope = ?",
-            "agent_provider = ?",
-            "route_scope != 'unknown'",
-        ]
-        params: list[object] = [
-            kwargs["im_provider"],
-            kwargs["im_account_id"],
-            kwargs["im_space_id"],
-            kwargs["route_scope"],
-            kwargs.get("agent_provider"),
-        ]
-        for column in ("workspace_id", "session_id"):
-            value = kwargs.get(column)
-            if value is None:
-                clauses.append(f"{column} IS NULL")
-            else:
-                clauses.append(f"{column} = ?")
-                params.append(value)
         existing = conn.execute(
-            f"""
+            """
             SELECT 1 FROM im_routes
-            WHERE ({' AND '.join(clauses)})
-               OR (
-                    im_provider = ?
-                AND im_account_id = ?
-                AND im_space_id = ?
-                AND im_entry_id = ?
-                AND route_scope != 'unknown'
-               )
+            WHERE im_provider = :im_provider
+              AND im_account_id = :im_account_id
+              AND im_space_id = :im_space_id
+              AND route_scope != 'unknown'
+              AND (
+                  (route_scope = :route_scope
+                   AND agent_provider = :agent_provider
+                   AND workspace_id IS :workspace_id
+                   AND session_id IS :session_id)
+                  OR im_entry_id = :im_entry_id
+              )
             LIMIT 1
             """,
-            (
-                *params,
-                kwargs["im_provider"],
-                kwargs["im_account_id"],
-                kwargs["im_space_id"],
-                kwargs["im_entry_id"],
-            ),
+            kwargs,
         ).fetchone()
         if existing is None:
             self._upsert_route_conn(conn, **kwargs)

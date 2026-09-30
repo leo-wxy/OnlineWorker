@@ -4,7 +4,6 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 use super::super::config_provider::{
@@ -12,9 +11,7 @@ use super::super::config_provider::{
     provider_metadata_from_raw, provider_uses_shared_app_server_transport,
     public_default_provider_ids, ProviderIconEntry, ProviderMetadata, ProviderTuiHostEntry,
 };
-use super::super::provider_bridge_common::{
-    command_program_token, expand_home_path, provider_rich_path,
-};
+use super::super::config::resolve_provider_cli_path;
 use super::{ProviderDashboardStatus, ServiceHealth};
 
 #[derive(Deserialize, Default)]
@@ -292,7 +289,7 @@ fn provider_stopped_detail(provider: &ProviderConfigSnapshot) -> Option<String> 
 
 fn provider_missing_cli_detail(provider: &ProviderConfigSnapshot) -> Option<String> {
     let bin = provider.bin.as_deref()?;
-    if check_cli_available_sync(bin) {
+    if resolve_provider_cli_path(bin).is_some() {
         None
     } else {
         Some(format!("CLI not found in PATH: {bin}"))
@@ -433,23 +430,4 @@ fn derive_provider_health(
     } else {
         (ServiceHealth::Unknown, None)
     }
-}
-
-fn check_cli_available_sync(bin: &str) -> bool {
-    let program = command_program_token(bin);
-    if program.is_empty() {
-        return false;
-    }
-    let resolved = expand_home_path(&program);
-    if resolved.starts_with('/') {
-        let path = Path::new(&resolved);
-        return path.exists() && path.is_file();
-    }
-
-    Command::new("which")
-        .arg(&resolved)
-        .env("PATH", provider_rich_path())
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
 }

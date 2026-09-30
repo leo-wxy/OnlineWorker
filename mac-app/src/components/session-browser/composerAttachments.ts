@@ -1,4 +1,4 @@
-import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type { ComposerAttachment } from "../../types";
 import { stageComposerAttachments } from "./api";
 
@@ -29,17 +29,25 @@ export async function stageBrowserFiles(files: File[]): Promise<ComposerAttachme
 }
 
 export function useStagedAttachments({
+  scopeKey,
   supportsAttachments,
   unsupportedMessage,
   setError,
   setAttachments,
 }: {
+  scopeKey: string;
   supportsAttachments: boolean;
   unsupportedMessage: string;
   setError: (message: string | null) => void;
   setAttachments: Dispatch<SetStateAction<ComposerAttachment[]>>;
 }) {
   const [stagingAttachments, setStagingAttachments] = useState(false);
+  const scopeGeneration = useRef(0);
+  useEffect(() => {
+    scopeGeneration.current += 1;
+    setStagingAttachments(false);
+    return () => { scopeGeneration.current += 1; };
+  }, [scopeKey]);
 
   const handlePickFiles = useCallback(async (_kind: "file" | "image", files: FileList | File[]) => {
     if (!supportsAttachments) {
@@ -47,14 +55,16 @@ export function useStagedAttachments({
       return;
     }
     setStagingAttachments(true);
+    const generation = scopeGeneration.current;
     try {
       const staged = await stageBrowserFiles(Array.from(files));
+      if (generation !== scopeGeneration.current) return;
       setError(null);
       setAttachments((current) => [...current, ...staged]);
     } catch (error) {
-      setError((error as Error).message);
+      if (generation === scopeGeneration.current) setError((error as Error).message);
     } finally {
-      setStagingAttachments(false);
+      if (generation === scopeGeneration.current) setStagingAttachments(false);
     }
   }, [setAttachments, setError, supportsAttachments, unsupportedMessage]);
 

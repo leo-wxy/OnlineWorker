@@ -35,6 +35,7 @@ from core.messages.publishing import (
     publish_question_answered,
     publish_user_message_accepted,
     publish_user_message_submitted,
+    report_user_message_failure,
 )
 from bot.keyboards import (
     build_command_wrapper_keyboard,
@@ -284,151 +285,158 @@ async def _dispatch_thread_message(
         event_id=f"tg:{tg_message_id}" if tg_message_id > 0 else "",
     )
 
-    handle_local_owner = (
-        getattr(message_hooks, "handle_local_owner", None)
-        if message_hooks is not None
-        else None
-    )
-    if callable(handle_local_owner):
-        handled = await handle_local_owner(
-            state,
-            adapter,
-            ws_info,
-            thread_info,
-            update=update,
-            context=context,
-            group_chat_id=group_chat_id,
-            src_topic_id=src_topic_id,
-            text=send_text,
-            has_photo=has_photo,
-            attachments=attachments,
-        )
-        if handled is not False:
-            if handled is True:
-                publish_user_message_accepted(
-                    state,
-                    message_event_request,
-                    text=send_text,
-                    workspace_path=str(getattr(ws_info, "path", "") or ""),
-                    event_id=f"tg:{tg_message_id}" if tg_message_id > 0 else "",
-                )
-            return
-
-    if message_hooks is not None:
-        adapter = await message_hooks.ensure_connected(
-            state,
-            adapter,
-            ws_info,
-            update=update,
-            context=context,
-            group_chat_id=group_chat_id,
-            src_topic_id=src_topic_id,
-        )
-
-    if adapter is None or not adapter.connected:
-        raise RuntimeError(f"{ws_info.tool} 未连接")
-
-    should_continue = True
-    preview_value = _preview_for_message(send_text, None, has_photo)
-    send_result = None
-    try:
-        if message_hooks is not None:
-            prepare_kwargs = dict(
-                update=update,
-                context=context,
-                group_chat_id=group_chat_id,
-                src_topic_id=src_topic_id,
-                text=send_text,
-                has_photo=has_photo,
-            )
-            if attachments:
-                prepare_kwargs["attachments"] = attachments
-            should_continue = await message_hooks.prepare_send(
-                state,
-                adapter,
-                ws_info,
-                thread_info,
-                **prepare_kwargs,
-            )
-        else:
-            await adapter.resume_thread(workspace_id, thread_info.thread_id)
-
-        if not should_continue:
-            return
-
-        if preview_value:
-            state.mark_provider_task_summary(ws_info.tool, thread_info.thread_id, preview_value)
-
-        if message_hooks is not None:
-            send_kwargs = dict(
-                update=update,
-                context=context,
-                group_chat_id=group_chat_id,
-                src_topic_id=src_topic_id,
-                text=send_text,
-                has_photo=has_photo,
-            )
-            if attachments:
-                send_kwargs["attachments"] = attachments
-            send_result = await message_hooks.send(
-                state,
-                adapter,
-                ws_info,
-                thread_info,
-                **send_kwargs,
-            )
-        else:
-            if attachments:
-                send_result = await adapter.send_user_message(
-                    workspace_id,
-                    thread_info.thread_id,
-                    send_text,
-                    attachments=attachments,
-                )
-            else:
-                send_result = await adapter.send_user_message(
-                    workspace_id,
-                    thread_info.thread_id,
-                    send_text,
-                )
-    except Exception:
-        if thread_info.thread_id != original_thread_id:
-            ws_info.threads.pop(thread_info.thread_id, None)
-            thread_info.thread_id = original_thread_id
-            thread_info.topic_id = original_topic_id
-            thread_info.preview = original_preview
-            thread_info.source = original_source
-            thread_info.is_active = original_is_active
-            thread_info.history_sync_cursor = original_history_sync_cursor
-            thread_info.streaming_msg_id = original_streaming_msg_id
-            thread_info.last_tg_user_message_id = original_last_tg_user_message_id
-            ws_info.threads[original_thread_id] = thread_info
-        raise
-    delivery_status = (
-        str(send_result.get("status") or "sent")
-        if isinstance(send_result, dict)
-        else "sent"
-    )
-    publish_user_message_accepted(
-        state,
-        UserMessageSendRequest(
-            source="telegram",
-            provider_id=str(ws_info.tool),
-            workspace_id=str(workspace_id),
-            thread_id=str(thread_info.thread_id),
-            text=send_text,
-            attachments=attachments or [],
-            metadata={
-                "source_topic_id": src_topic_id,
-                "telegram_message_id": tg_message_id,
-                "delivery_status": delivery_status,
-                **(message_metadata or {}),
-            },
-        ),
-        text=send_text,
+    with report_user_message_failure(
+        state, message_event_request, text=send_text,
         workspace_path=str(getattr(ws_info, "path", "") or ""),
         event_id=f"tg:{tg_message_id}" if tg_message_id > 0 else "",
-    )
+    ):
+        handle_local_owner = (
+            getattr(message_hooks, "handle_local_owner", None)
+            if message_hooks is not None
+            else None
+        )
+        if callable(handle_local_owner):
+            handled = await handle_local_owner(
+                state,
+                adapter,
+                ws_info,
+                thread_info,
+                update=update,
+                context=context,
+                group_chat_id=group_chat_id,
+                src_topic_id=src_topic_id,
+                text=send_text,
+                has_photo=has_photo,
+                attachments=attachments,
+            )
+            if handled is not False:
+                if handled is True:
+                    publish_user_message_accepted(
+                        state,
+                        message_event_request,
+                        text=send_text,
+                        workspace_path=str(getattr(ws_info, "path", "") or ""),
+                        event_id=f"tg:{tg_message_id}" if tg_message_id > 0 else "",
+                    )
+                return
+
+        if message_hooks is not None:
+            adapter = await message_hooks.ensure_connected(
+                state,
+                adapter,
+                ws_info,
+                update=update,
+                context=context,
+                group_chat_id=group_chat_id,
+                src_topic_id=src_topic_id,
+            )
+
+        if adapter is None or not adapter.connected:
+            raise RuntimeError(f"{ws_info.tool} 未连接")
+
+        should_continue = True
+        preview_value = _preview_for_message(send_text, None, has_photo)
+        send_result = None
+        try:
+            if message_hooks is not None:
+                prepare_kwargs = dict(
+                    update=update,
+                    context=context,
+                    group_chat_id=group_chat_id,
+                    src_topic_id=src_topic_id,
+                    text=send_text,
+                    has_photo=has_photo,
+                )
+                if attachments:
+                    prepare_kwargs["attachments"] = attachments
+                should_continue = await message_hooks.prepare_send(
+                    state,
+                    adapter,
+                    ws_info,
+                    thread_info,
+                    **prepare_kwargs,
+                )
+            else:
+                await adapter.resume_thread(workspace_id, thread_info.thread_id)
+
+            if not should_continue:
+                return
+
+            if preview_value:
+                state.mark_provider_task_summary(ws_info.tool, thread_info.thread_id, preview_value)
+
+            if message_hooks is not None:
+                send_kwargs = dict(
+                    update=update,
+                    context=context,
+                    group_chat_id=group_chat_id,
+                    src_topic_id=src_topic_id,
+                    text=send_text,
+                    has_photo=has_photo,
+                )
+                if attachments:
+                    send_kwargs["attachments"] = attachments
+                send_result = await message_hooks.send(
+                    state,
+                    adapter,
+                    ws_info,
+                    thread_info,
+                    **send_kwargs,
+                )
+            else:
+                if attachments:
+                    send_result = await adapter.send_user_message(
+                        workspace_id,
+                        thread_info.thread_id,
+                        send_text,
+                        attachments=attachments,
+                    )
+                else:
+                    send_result = await adapter.send_user_message(
+                        workspace_id,
+                        thread_info.thread_id,
+                        send_text,
+                    )
+        except Exception:
+            if thread_info.thread_id != original_thread_id:
+                ws_info.threads.pop(thread_info.thread_id, None)
+                thread_info.thread_id = original_thread_id
+                thread_info.topic_id = original_topic_id
+                thread_info.preview = original_preview
+                thread_info.source = original_source
+                thread_info.is_active = original_is_active
+                thread_info.history_sync_cursor = original_history_sync_cursor
+                thread_info.streaming_msg_id = original_streaming_msg_id
+                thread_info.last_tg_user_message_id = original_last_tg_user_message_id
+                ws_info.threads[original_thread_id] = thread_info
+            raise
+        if isinstance(send_result, dict) and send_result.get("status") == "error":
+            raise RuntimeError(str(send_result.get("error") or f"{ws_info.tool} send failed"))
+        delivery_status = (
+            str(send_result.get("status") or "sent")
+            if isinstance(send_result, dict)
+            else "sent"
+        )
+        publish_user_message_accepted(
+            state,
+            UserMessageSendRequest(
+                source="telegram",
+                provider_id=str(ws_info.tool),
+                workspace_id=str(workspace_id),
+                thread_id=str(thread_info.thread_id),
+                text=send_text,
+                attachments=attachments or [],
+                metadata={
+                    "source_topic_id": src_topic_id,
+                    "telegram_message_id": tg_message_id,
+                    "delivery_status": delivery_status,
+                    **(message_metadata or {}),
+                },
+            ),
+            text=send_text,
+            workspace_path=str(getattr(ws_info, "path", "") or ""),
+            event_id=f"tg:{tg_message_id}" if tg_message_id > 0 else "",
+        )
 
     remapped = thread_info.thread_id != original_thread_id
     source_changed = str(getattr(thread_info, "source", "") or "unknown") != original_source

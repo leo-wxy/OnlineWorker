@@ -294,14 +294,6 @@ class CodexDesktopRolloutIngress:
             found = self._state.find_thread_by_id_global(state.session_id)
             if not found:
                 continue
-            workspace, thread = found
-            workspace_id = (
-                self._state.get_workspace_storage_key(workspace)
-                or workspace.daemon_workspace_id
-                or f"{workspace.tool}:{workspace.name}"
-            )
-            if self._state.get_thread_topic_id(workspace_id, workspace, thread) is None:
-                continue
             if self._arm_active_watch(state.session_id):
                 restored += 1
             else:
@@ -653,6 +645,7 @@ class CodexDesktopRolloutIngress:
                 state.source,
                 thread_source=state.thread_source,
                 cwd=state.cwd,
+                ephemeral=payload.get("ephemeral", False),
             )
         elif row_type == "turn_context":
             state.turn_id = str(
@@ -749,6 +742,7 @@ class CodexDesktopRolloutIngress:
                     "cwd": state.cwd,
                     "message": text,
                     "phase": phase,
+                    "item_id": payload.get("id") or payload.get("item_id") or payload.get("itemId"),
                     "source": "codex_rollout",
                 }
             )

@@ -1,4 +1,4 @@
-import type { DashboardState } from "../types";
+import type { DashboardState, SessionTurn } from "../types";
 import type { UnifiedSession } from "../components/session-browser/presentation";
 
 export interface TaskBoardSessionRef {
@@ -29,6 +29,7 @@ export interface TaskBoardSessionActivity {
   controlReason?: string;
   controlMode?: "owned" | "external" | string;
   recentEvents?: TaskBoardRecentEvent[];
+  conversationTurns?: SessionTurn[];
   lastUserMessage: string;
   lastAssistantMessage: string;
   lastFinalMessage: string;
@@ -73,6 +74,7 @@ export interface TaskBoardTask {
   controlReason: string;
   controlMode: string;
   recentEvents: TaskBoardRecentEvent[];
+  conversationTurns: SessionTurn[];
   lastUserMessage: string;
   lastAssistantMessage: string;
   interrupted: boolean;
@@ -116,21 +118,6 @@ export function removeTaskBoardActivity(
   providerId: string,
   sessionId: string,
 ): TaskBoardSessionActivity[];
-
-export function selectRecentConversationTurns(
-  turns: Array<{ role?: string; content?: string }> | null | undefined,
-  limit?: number,
-): Array<{ role: "user" | "assistant"; content: string }>;
-
-export function collectTaskBoardPreviewHydrationPlan(input?: {
-  sessions?: UnifiedSession[];
-  taskBoardState?: TaskBoardState | null;
-  pinnedLimit?: number;
-  lowSignalLimit?: number;
-}): {
-  keys: string[];
-  pinnedKeys: string[];
-};
 
 export function buildTaskBoardModel(input: {
   sessions: UnifiedSession[];

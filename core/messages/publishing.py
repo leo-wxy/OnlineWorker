@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import uuid
+from contextlib import contextmanager
+from dataclasses import replace
 from typing import Any
 
 from core.messages.events import create_message_event
@@ -38,13 +41,13 @@ def _attachment_summary(attachments: list[dict] | None) -> list[dict[str, Any]]:
     return public
 
 
-def _publish_result(state: Any, event) -> bool | None:
+def _publish_result(state: Any, event, *, delivery_context=None) -> bool | None:
     bus = getattr(state, "message_bus", None)
     publish = getattr(bus, "publish", None)
     if not callable(publish):
         return None
     try:
-        return bool(publish(event))
+        return bool(publish(event, delivery_context=delivery_context) if delivery_context is not None else publish(event))
     except Exception:
         logger.warning(
             "[message-bus] publish failed kind=%s event_id=%s",
@@ -59,8 +62,18 @@ def _publish(state: Any, event) -> bool:
     return _publish_result(state, event) is True
 
 
-def publish_session_message_event(state: Any, session_event: SessionEvent) -> bool | None:
-    return _publish_result(state, message_event_from_session_event(session_event))
+def publish_session_message_event(state: Any, session_event: SessionEvent, *, message_event=None, delivery_context=None) -> bool | None:
+    event = message_event or message_event_from_session_event(session_event)
+    find_workspace = getattr(state, "find_workspace_by_daemon_id", None)
+    workspace = find_workspace(session_event.workspace_id) if callable(find_workspace) else None
+    if workspace is None and session_event.thread_id:
+        find_thread = getattr(state, "find_thread_by_id_global", None)
+        found = find_thread(session_event.thread_id) if callable(find_thread) else None
+        workspace = found[0] if found else None
+    path = getattr(workspace, "path", None)
+    if isinstance(path, str) and path:
+        event = replace(event, workspace_path=path)
+    return _publish_result(state, event, delivery_context=delivery_context)
 
 
 def publish_user_message_event(
@@ -71,6 +84,8 @@ def publish_user_message_event(
     workspace_path: str = "",
     event_id: str = "",
     kind: str = "message.user.accepted",
+    error: str = "",
+    delivery_status: str = "",
 ) -> bool:
     event_kind = _clean(kind) or "message.user.accepted"
     provider_id = _clean(request.provider_id)
@@ -85,6 +100,13 @@ def publish_user_message_event(
     }
     if request.metadata:
         payload["metadata"] = dict(request.metadata)
+    event_id = _clean(event_id or request.metadata.get("messageRequestId"))
+    if event_id:
+        payload["messageRequestId"] = event_id
+    if error:
+        payload["error"] = _clean(error)
+    if delivery_status:
+        payload["deliveryStatus"] = delivery_status
 
     dedupe_parts = ["user", event_kind, source, provider_id, workspace_id, thread_id, event_id]
     resolved_event_id = f"{event_kind}:{event_id}" if event_id else ""
@@ -110,6 +132,7 @@ def publish_user_message_submitted(
     workspace_path: str = "",
     event_id: str = "",
 ) -> bool:
+    request.metadata.setdefault("messageRequestId", event_id or str(uuid.uuid4()))
     return publish_user_message_event(
         state,
         request,
@@ -136,6 +159,25 @@ def publish_user_message_accepted(
         event_id=event_id,
         kind="message.user.accepted",
     )
+
+
+def publish_user_message_failed(state, request, *, text, workspace_path="", event_id="", error):
+    return publish_user_message_event(
+        state, request, text=text, workspace_path=workspace_path, event_id=event_id,
+        kind="message.user.send_failed", error=str(error),
+        delivery_status="uncertain" if isinstance(error, (TimeoutError, ConnectionError, OSError)) else "failed",
+    )
+
+
+@contextmanager
+def report_user_message_failure(state, request, *, text, workspace_path="", event_id=""):
+    try:
+        yield
+    except Exception as error:
+        publish_user_message_failed(
+            state, request, text=text, workspace_path=workspace_path, event_id=event_id, error=error,
+        )
+        raise
 
 
 def publish_approval_answered(
@@ -185,6 +227,7 @@ def publish_approval_requested(
     workspace_id: str = "",
     workspace_path: str = "",
     source: str = "app_server",
+    delivery_context=None,
 ) -> bool:
     provider_id = _clean(getattr(approval, "tool_type", "") or getattr(approval, "tool_name", ""))
     resolved_workspace_id = _clean(workspace_id or getattr(approval, "workspace_id", ""))
@@ -227,7 +270,7 @@ def publish_approval_requested(
             if part
         ),
     )
-    return _publish(state, event)
+    return _publish_result(state, event, delivery_context=delivery_context) is True
 
 
 def publish_session_archived(

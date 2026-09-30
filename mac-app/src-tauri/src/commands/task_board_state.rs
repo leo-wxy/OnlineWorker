@@ -60,6 +60,8 @@ pub struct TaskBoardSessionActivity {
     pub control_mode: String,
     #[serde(default)]
     pub recent_events: Vec<TaskBoardRecentEvent>,
+    #[serde(default)]
+    pub conversation_turns: Vec<serde_json::Value>,
     pub last_user_message: String,
     pub last_assistant_message: String,
     pub last_final_message: String,
@@ -773,7 +775,7 @@ mod tests {
     #[test]
     fn parses_task_board_activity_with_session_control_metadata() {
         let event = parse_task_board_activity_stream_event(
-            r#"{"ok":true,"kind":"activity","activity":{"providerId":"codex","workspaceId":"codex:/tmp/project","workspacePath":"/tmp/project","sessionId":"thread-a","title":"Run tests","status":"running","attentionReason":"","attentionKind":"","requestId":"","approvalSource":"","mirroredOnly":false,"canInterrupt":true,"canRecover":false,"controlReason":"","controlMode":"owned","recentEvents":[{"kind":"turn.started","createdAt":20.0,"summary":""}],"lastUserMessage":"Run tests","lastAssistantMessage":"working","lastFinalMessage":"","lastEventKind":"message.assistant.delta","updatedAt":20.0}}"#,
+            r#"{"ok":true,"kind":"activity","activity":{"providerId":"codex","workspaceId":"codex:/tmp/project","workspacePath":"/tmp/project","sessionId":"thread-a","title":"Run tests","status":"running","attentionReason":"","attentionKind":"","requestId":"","approvalSource":"","mirroredOnly":false,"canInterrupt":true,"canRecover":false,"controlReason":"","controlMode":"owned","conversationTurns":[{"role":"assistant","content":"working","itemId":"sample-item","turnId":"sample-turn"}],"recentEvents":[{"kind":"turn.started","createdAt":20.0,"summary":""}],"lastUserMessage":"Run tests","lastAssistantMessage":"working","lastFinalMessage":"","lastEventKind":"message.assistant.delta","updatedAt":20.0}}"#,
         )
         .expect("event");
 
@@ -782,6 +784,8 @@ mod tests {
         assert!(!activity.can_recover);
         assert_eq!(activity.control_mode, "owned");
         assert_eq!(activity.recent_events.len(), 1);
+        assert_eq!(activity.conversation_turns[0]["content"], "working");
+        assert_eq!(activity.conversation_turns[0]["itemId"], "sample-item");
         assert_eq!(activity.recent_events[0].kind, "turn.started");
     }
 

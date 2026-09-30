@@ -1,4 +1,5 @@
 import json
+import asyncio
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -10,6 +11,65 @@ from core.state import AppState
 from core.storage import AppStorage, ThreadInfo, WorkspaceInfo
 
 GROUP_CHAT_ID = -100123456789
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["topic", "send", "save"])
+async def test_new_recovery_preserves_session_and_does_not_resend_first_message(monkeypatch, failure):
+    from bot.handlers import thread as thread_module
+    from bot.handlers.slash import make_slash_command_handler
+    from core import provider_session_new as new
+
+    state = _build_state(tool="codex")
+    ws = state.storage.workspaces["codex:onlineWorker"]
+    ws.threads["sample-source"] = ThreadInfo(thread_id="sample-source", topic_id=100)
+    adapter = MagicMock(connected=True)
+    adapter.start_thread = AsyncMock(return_value={"id": "sample-created"})
+    adapter.send_user_message = AsyncMock(return_value={})
+    if failure == "send":
+        adapter.send_user_message.side_effect = TimeoutError("sample uncertain response")
+    state.set_adapter("codex", adapter)
+    monkeypatch.setattr(thread_module, "send_thread_control_panel", AsyncMock())
+    original_save = new.save_storage
+    fail_save = failure == "save"
+
+    def persist(storage):
+        nonlocal fail_save
+        created = ws.threads.get("sample-created")
+        if fail_save and created and created.new_session_recovery.get("send_status") == "sent":
+            fail_save = False
+            raise OSError("sample save failure")
+        original_save(storage)
+
+    monkeypatch.setattr(new, "save_storage", persist)
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.effective_message.message_id = 1234567890
+    update.effective_message.message_thread_id = 100
+    update.effective_message.text = "/new sample first message"
+    update.effective_message.caption = update.effective_message.photo = None
+    ctx = MagicMock()
+    ctx.args = None
+    ctx.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=1234567890))
+    ctx.bot.create_forum_topic = AsyncMock(side_effect=[RuntimeError("sample topic failure"), SimpleNamespace(message_thread_id=200)]) if failure == "topic" else AsyncMock(return_value=SimpleNamespace(message_thread_id=200))
+    ctx.bot.delete_forum_topic = AsyncMock()
+    ctx.bot.close_forum_topic = AsyncMock()
+    handler = make_slash_command_handler(state, GROUP_CHAT_ID, state.config)
+    await handler(update, ctx)
+    assert "sample-created" in ws.threads
+    update.effective_message.text = "/new --resume sample-created"
+    update.effective_message.message_id += 1
+    await handler(update, ctx)
+    adapter.start_thread.assert_awaited_once()
+    adapter.send_user_message.assert_awaited_once()
+    ctx.bot.delete_forum_topic.assert_not_awaited()
+    ctx.bot.close_forum_topic.assert_not_awaited()
+    recovery = ws.threads["sample-created"].new_session_recovery
+    assert recovery["send_status"] == ("unknown" if failure == "send" else "sent")
+    assert recovery["bind_status"] == "bound"
+    if failure != "send":
+        assert state.message_bus.session_activity("codex", "sample-created")["attentionReason"] == ""
+
 
 
 def _build_state(
@@ -1114,7 +1174,7 @@ async def test_slash_router_new_from_thread_topic_publishes_user_message_events(
     handler = make_slash_command_handler(state, GROUP_CHAT_ID, state.config)
     await handler(update, ctx)
 
-    assert [event["kind"] for event in state.message_bus.recent_events()] == [
+    assert [event["kind"] for event in state.message_bus.recent_events() if event["kind"].startswith("message.user.")] == [
         "message.user.submitted",
         "message.user.accepted",
     ]

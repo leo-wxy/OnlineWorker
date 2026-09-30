@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from core.im_routes import ImRouteStore
 from core.state import AppState
 from core.storage import AppStorage, ThreadInfo, WorkspaceInfo, save_storage
@@ -332,10 +334,50 @@ def test_json_migration_does_not_replace_new_active_sqlite_route(tmp_path):
     assert new_route.status == "active"
 
 
+@pytest.mark.parametrize("conflict", ["target", "entry"])
+def test_json_migration_preserves_existing_bindings_across_all_scopes(tmp_path, conflict):
+    workspace_id = "sample-workspace"
+    storage = AppStorage(
+        global_topic_ids={"codex": 11},
+        workspaces={
+            workspace_id: WorkspaceInfo(
+                name="Sample",
+                path="/tmp/sample-workspace",
+                tool="codex",
+                topic_id=22,
+                threads={"sample-session": ThreadInfo(thread_id="sample-session", topic_id=33)},
+            )
+        },
+    )
+    store = _route_store(tmp_path)
+    for scope, topic_id, workspace, session in [
+        ("agent", 11, None, None),
+        ("workspace", 22, workspace_id, None),
+        ("session", 33, workspace_id, "sample-session"),
+    ]:
+        store.upsert_route(
+            im_provider="telegram",
+            im_account_id="default",
+            im_space_id=str(GROUP_CHAT_ID),
+            im_entry_id=str(topic_id + 100 if conflict == "target" else topic_id),
+            im_entry_kind="topic",
+            route_scope=scope,
+            agent_provider="codex" if conflict == "target" else "claude",
+            workspace_id=workspace,
+            session_id=session,
+        )
+    existing = store.list_routes()
+
+    store.migrate_telegram_json_topics(storage, GROUP_CHAT_ID)
+
+    assert store.list_routes() == existing
+
+
 def test_unknown_observation_does_not_block_first_json_migration(tmp_path):
     storage = AppStorage(global_topic_ids={"codex": 11})
     store = _route_store(tmp_path)
     store.observe_unknown_telegram_entry(GROUP_CHAT_ID, 999)
+    store.observe_unknown_telegram_entry(GROUP_CHAT_ID, 11)
 
     store.migrate_telegram_json_topics(storage, GROUP_CHAT_ID)
 

@@ -207,17 +207,10 @@ async def handle_approval_callback(state, approval, action: str, query, msg_id: 
     return True
 
 
-async def mark_codex_app_server_approval_resolved(
-    state: "AppState",
-    bot,
-    group_chat_id: int,
-    *,
-    request_id,
-    thread_id: str = "",
-) -> int:
+def _take_resolved_approvals(state, request_id, thread_id=""):
     request_key = _request_key(request_id)
     if not request_key:
-        return 0
+        return []
 
     resolved: list[tuple[int, object]] = []
     for msg_id, approval in list(state.pending_approvals.items()):
@@ -228,7 +221,10 @@ async def mark_codex_app_server_approval_resolved(
         ):
             resolved.append((msg_id, approval))
             state.pending_approvals.pop(msg_id, None)
+    return resolved
 
+
+async def _edit_resolved_approvals(bot, group_chat_id, resolved):
     for msg_id, approval in resolved:
         command = str(getattr(approval, "cmd", "") or "").strip()
         lines = ["⚠️ 此 Codex 授权请求已由 Codex 端处理或清理，TG 按钮已失效。"]
@@ -244,52 +240,11 @@ async def mark_codex_app_server_approval_resolved(
         except Exception as e:
             logger.debug(
                 "[codex-approval-sync] 更新已失效 TG 授权消息失败 request=%s msg=%s thread=%s err=%s",
-                request_key,
+                getattr(approval, "request_id", ""),
                 msg_id,
-                thread_id or str(getattr(approval, "thread_id", "") or ""),
+                str(getattr(approval, "thread_id", "") or ""),
                 e,
             )
-
-    if resolved:
-        logger.info(
-            "[codex-approval-sync] app-server resolved request=%s thread=%s cleared_tg=%s",
-            request_key,
-            thread_id or "-",
-            len(resolved),
-        )
-    return len(resolved)
-
-
-async def handle_codex_app_server_resolution_event(
-    state: "AppState",
-    bot,
-    group_chat_id: int,
-    method: str,
-    params: dict,
-) -> int:
-    if method != "app-server-event" or not isinstance(params, dict):
-        return 0
-    message = params.get("message")
-    if not isinstance(message, dict):
-        return 0
-    if str(message.get("method") or "") != CODEX_APP_SERVER_RESOLVED_METHOD:
-        return 0
-    payload = message.get("params")
-    if not isinstance(payload, dict):
-        payload = {}
-    request_id = (
-        payload.get("requestId")
-        or payload.get("request_id")
-        or message.get("id")
-    )
-    thread_id = str(payload.get("threadId") or payload.get("thread_id") or "")
-    return await mark_codex_app_server_approval_resolved(
-        state,
-        bot,
-        group_chat_id,
-        request_id=request_id,
-        thread_id=thread_id,
-    )
 
 
 def is_codex_capacity_abort_reason(reason: str) -> bool:
@@ -1352,7 +1307,7 @@ def validate_new_thread(state, ws, initial_text: str | None) -> str | None:
     if is_codex_local_owner_mode(state, ws):
         return (
             "当前主控模式暂不支持 /new。\n"
-            "请先在现有 thread 中继续对话，后续再补 thread 创建链路。"
+            "请切换到 App 或 Hybrid 主控后使用 `/new <初始消息>`，或继续现有 thread。"
         )
     return None
 
@@ -1701,29 +1656,54 @@ async def prime_thread_mappings(manager, adapter) -> None:
                     thread_id,
                 )
             adapter._thread_workspace_map[thread_id] = ws_info.daemon_workspace_id
+            if (str(thread_info.source or "") == "unknown"
+                    and not storage_runtime.find_session_file(thread_id)
+                    and not await adapter._check_session_visibility(thread_id)):
+                await adapter._hide_session(thread_id, ws_info.daemon_workspace_id)
 
     if needs_save:
         _save_storage_via_lifecycle(manager)
 
 
 async def setup_connection(manager, bot, adapter, **kwargs) -> None:
-    from bot.events import make_event_handler, make_server_request_handler
+    from bot.events import make_event_handler, make_server_request_handler, stop_event_delivery
     from plugins.providers.builtin.codex.python.owner_bridge import ensure_codex_owner_bridge_started
     from core.storage import ThreadInfo
 
+    await stop_event_delivery(manager.state, "codex")
     manager.state.set_adapter("codex", adapter)
     if hasattr(adapter, "enable_thread_policy_lookup"):
         adapter.enable_thread_policy_lookup(True)
-    event_handler = make_event_handler(manager.state, bot, manager.gid)
+    event_handler = make_event_handler(manager.state, bot, manager.gid, provider_id="codex")
+
+    def consume_resolution(event, context):
+        if event.provider_id != "codex" or event.kind != CODEX_APP_SERVER_RESOLVED_METHOD or not context:
+            return
+        ctx = context[1]
+        request_id = ctx.event_params.get("requestId") or ctx.event_params.get("request_id") or ctx.msg.get("id")
+        resolved = _take_resolved_approvals(manager.state, request_id, ctx.thread_id or "")
+        manager.state.resolve_provider_interruption("codex", str(request_id), status="resolved")
+        activity = manager.state.message_bus.session_activity("codex", ctx.thread_id or "") or {}
+        if str(activity.get("requestId") or "") == str(request_id):
+            from core.messages.publishing import publish_approval_answered
+            from core.state import PendingApproval
+            publish_approval_answered(manager.state, PendingApproval(
+                request_id=request_id, workspace_id=ctx.ws_daemon_id, thread_id=ctx.thread_id or "",
+                cmd="", justification="", tool_type="codex",
+            ), action="resolved", source="app_server")
+
+        async def finish_resolution():
+            # Earlier queued sends may have materialized the Telegram button since local resolution.
+            later = _take_resolved_approvals(manager.state, request_id, ctx.thread_id or "")
+            await _edit_resolved_approvals(bot, manager.gid, resolved + later)
+
+        event_handler.enqueue_delivery(finish_resolution)
+
+    consumer = manager.state.im_event_consumers.get("codex")
+    if consumer is not None:
+        consumer.unsubscribers.append(manager.state.message_bus.subscribe_delivery(consume_resolution))
 
     async def codex_event_handler(method: str, params: dict) -> None:
-        await handle_codex_app_server_resolution_event(
-            manager.state,
-            bot,
-            manager.gid,
-            method,
-            params,
-        )
         await event_handler(method, params)
         await maybe_auto_continue_capacity_abort(manager.state, adapter, method, params)
 
@@ -1731,7 +1711,7 @@ async def setup_connection(manager, bot, adapter, **kwargs) -> None:
     adapter.on_server_request(
         make_codex_server_request_handler(
             manager.state,
-            make_server_request_handler(manager.state, bot, manager.gid),
+            make_server_request_handler(manager.state, bot, manager.gid, provider_id="codex"),
         )
     )
     await prime_thread_mappings(manager, adapter)
@@ -2043,7 +2023,9 @@ async def reconnect_loop(
     ws_url: str,
 ) -> None:
     from bot.handlers.common import _send_to_group
+    from bot.events import stop_event_delivery
 
+    await stop_event_delivery(manager.state, "codex")
     notify_topic_id = manager._resolve_provider_reconnect_topic_id("codex")
 
     try:

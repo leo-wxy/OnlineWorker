@@ -25,6 +25,8 @@ class ThreadInfo:
     history_sync_cursor: Optional[str] = None
     is_active: bool = False
     source: str = "unknown"
+    archive_mode: str = ""
+    new_session_recovery: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -64,6 +66,8 @@ def _thread_info_from_dict(d: dict) -> ThreadInfo:
         history_sync_cursor=d.get("history_sync_cursor"),
         is_active=d.get("is_active", False),
         source=str(d.get("source") or "unknown"),
+        archive_mode=str(d.get("archive_mode") or ""),
+        new_session_recovery=dict(d.get("new_session_recovery") or {}),
     )
 
 
@@ -78,6 +82,8 @@ def _thread_info_to_dict(t: ThreadInfo) -> dict:
         "history_sync_cursor": t.history_sync_cursor,
         "is_active": t.is_active,
         "source": t.source,
+        **({"archive_mode": t.archive_mode} if t.archive_mode else {}),
+        **({"new_session_recovery": t.new_session_recovery} if t.new_session_recovery else {}),
     }
 
 

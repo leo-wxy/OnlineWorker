@@ -27,10 +27,14 @@ test("new session opens an in-memory composer instead of creating an app-state s
   assert.match(api, /export async function startProviderSessionMessage\(/);
   assert.match(api, /pending: typeof payload\.pending === "boolean" \? payload\.pending : undefined/);
   assert.match(genericChat, /startProviderSessionMessage/);
+  assert.match(genericChat, /newSessionRequestRef\.current\?\.payload !== payload/);
+  assert.match(genericChat, /newSessionRequestRef\.current\?\.id,/);
+  assert.match(api, /requestId: requestId \?\? null/);
+  assert.match(genericChat, /if \(sendResult\.error\) setError\(sendResult\.error\)/);
   assert.match(sessionBrowser, /mode="new-session"/);
   assert.match(genericChat, /enabled:\s*active && mode !== "new-session" && Boolean\(activeSession\.id\)/);
   assert.match(genericChat, /await onNewSessionStarted\?\.\(sendResult\)/);
-  assert.match(genericChat, /if \(sendResult\.pending && sendResult\.accepted !== false\) \{/);
+  assert.match(genericChat, /if \(sendResult\.pending\) \{/);
   assert.match(genericChat, /await onNewSessionPending\?\.\(sendResult,\s*trimmedText\)/);
   assert.match(sessionBrowser, /pendingMessage\?: string;/);
   assert.match(sessionBrowser, /pendingSince\?: number;/);

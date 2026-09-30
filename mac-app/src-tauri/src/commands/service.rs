@@ -13,7 +13,8 @@ use super::config::{
 };
 
 use super::provider_bridge_common::{
-    command_program_token, expand_home_path, provider_bridge_env as bot_sidecar_env,
+    command_program_token, expand_home_path, kill_pid, kill_provider_bridge_process_tree,
+    pid_parent_pairs_from_output, provider_bridge_env as bot_sidecar_env,
     provider_rich_path,
 };
 
@@ -229,22 +230,6 @@ fn pids_from_bot_process_rows(output: &[u8], data_dir: &Path) -> Vec<u32> {
         .unwrap_or_default()
 }
 
-fn pid_parent_pairs_from_output(output: &[u8]) -> HashMap<u32, u32> {
-    std::str::from_utf8(output)
-        .ok()
-        .map(|text| {
-            text.lines()
-                .filter_map(|line| {
-                    let mut parts = line.split_whitespace();
-                    let pid = parts.next()?.parse::<u32>().ok()?;
-                    let ppid = parts.next()?.parse::<u32>().ok()?;
-                    Some((pid, ppid))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 fn pid_depth_within_candidates(
     pid: u32,
     parents: &HashMap<u32, u32>,
@@ -294,53 +279,11 @@ fn select_primary_pid(pids: &[u32], parents: &HashMap<u32, u32>) -> Option<u32> 
     })
 }
 
-fn process_tree_pids(root_pid: u32, parents: &HashMap<u32, u32>) -> Vec<u32> {
-    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
-    for (pid, ppid) in parents {
-        children.entry(*ppid).or_default().push(*pid);
-    }
-
-    fn visit(pid: u32, children: &HashMap<u32, Vec<u32>>, ordered: &mut Vec<u32>) {
-        if let Some(child_pids) = children.get(&pid) {
-            let mut sorted = child_pids.clone();
-            sorted.sort_unstable();
-            for child in sorted {
-                visit(child, children, ordered);
-            }
-        }
-        ordered.push(pid);
-    }
-
-    let mut ordered = Vec::new();
-    visit(root_pid, &children, &mut ordered);
-    ordered
-}
-
-fn running_process_tree_pids(root_pid: u32) -> Vec<u32> {
-    let ps_output = match std::process::Command::new("ps")
-        .args(["-axo", "pid=,ppid="])
-        .output()
-    {
-        Ok(output) if output.status.success() => output,
-        _ => return vec![root_pid],
-    };
-    let parents = pid_parent_pairs_from_output(&ps_output.stdout);
-    process_tree_pids(root_pid, &parents)
-}
-
-fn kill_pid(pid: u32) {
-    let _ = std::process::Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .output();
-}
-
 fn cleanup_tracked_process_tree(root_pid: Option<u32>) {
     let Some(root_pid) = root_pid else {
         return;
     };
-    for pid in running_process_tree_pids(root_pid) {
-        kill_pid(pid);
-    }
+    kill_provider_bridge_process_tree(root_pid);
 }
 
 fn find_external_bot_pid(data_dir: &std::path::Path) -> Option<u32> {
@@ -839,7 +782,7 @@ mod tests {
         apply_manual_stop_policy, apply_service_start_policy,
         cleanup_owner_bridge_socket_files_in_dir, cleanup_process_matchers, command_program_token,
         compute_service_status, managed_bot_cleanup_pids_from_rows, pid_parent_pairs_from_output,
-        pids_from_bot_process_rows, process_tree_pids, select_primary_pid, service_owner_matches,
+        pids_from_bot_process_rows, select_primary_pid, service_owner_matches,
         service_restart_is_still_owned, should_attempt_background_service_recovery, BotState,
         ManagedProcessCleanupPolicy, LEGACY_OWNER_BRIDGE_SOCKET_FILENAME,
     };
@@ -1049,13 +992,6 @@ mod tests {
         let parents = HashMap::from([(21014, 1), (21035, 21014)]);
         let pid = select_primary_pid(&[21014, 21035], &parents);
         assert_eq!(pid, Some(21035));
-    }
-
-    #[test]
-    fn process_tree_pids_returns_only_descendants_before_root() {
-        let parents = HashMap::from([(100, 1), (110, 100), (120, 110), (200, 1), (210, 200)]);
-
-        assert_eq!(process_tree_pids(100, &parents), vec![120, 110, 100]);
     }
 
     #[test]

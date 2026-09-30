@@ -224,6 +224,19 @@ def _publish_startup_activity_bootstrap(
         return False
 
     history = read_thread_history(thread_id, sessions_dir=sessions_dir, limit=20)
+    history_turns = [
+        {"role": item.get("role"), "content": str(item.get("text") or "").strip()}
+        for item in history
+        if item.get("role") in {"user", "assistant"} and str(item.get("text") or "").strip()
+    ][-6:]
+    if history_turns:
+        publish(create_message_event(
+            "session.history.loaded", provider_id="codex",
+            workspace_id=_workspace_key(state, ws), workspace_path=ws.path,
+            session_id=thread_id, source="startup_bootstrap",
+            payload={"turns": history_turns},
+            dedupe_key=f"codex:startup-bootstrap:history:{_workspace_key(state, ws)}:{thread_id}",
+        ))
     latest_user = next(
         (
             str(item.get("text") or "").strip()
@@ -351,6 +364,13 @@ def _ensure_bound_codex_thread_watches(
                 not _should_watch_thread_from_session_file(state, thread)
                 and not needs_polling_fallback
             ):
+                # A live ingress starts at EOF; restore the initial projection once,
+                # without adding a second session-file watch for that ingress.
+                if (_uses_shared_live_transport(state) and source == "unknown"
+                        and state.message_bus.session_activity("codex", thread_id) is None):
+                    changed = _publish_startup_activity_bootstrap(
+                        state, ws, thread_id, thread, sessions_dir=sessions_dir,
+                    ) or changed
                 continue
 
             runtime = codex_state.get_runtime(state)

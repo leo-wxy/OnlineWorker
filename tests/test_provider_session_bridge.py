@@ -1,6 +1,15 @@
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
+import pytest
+
 from core import provider_session_bridge as bridge
+
+
+async def _read_session_adapter(descriptor, provider_id):
+    async with bridge._provider_session_adapter(descriptor, provider_id) as adapter:
+        return adapter
+
 
 
 def _overlay_descriptor(*, facts=None, thread_hooks=None, message_hooks=None):
@@ -554,7 +563,7 @@ def test_provider_session_adapter_uses_configured_runtime_context(monkeypatch, t
     monkeypatch.setattr(bridge, "get_data_dir", lambda: str(tmp_path))
     monkeypatch.setattr(bridge, "load_provider_runtime_config", lambda *args, **kwargs: config)
 
-    adapter = asyncio.run(bridge._provider_session_adapter(Descriptor(), "overlay-tool"))
+    adapter = asyncio.run(_read_session_adapter(Descriptor(), "overlay-tool"))
 
     assert adapter == {"provider_id": "overlay-tool"}
     assert captured == {
@@ -637,7 +646,7 @@ logging:
 
     monkeypatch.setattr(bridge, "get_data_dir", lambda: str(tmp_path))
 
-    adapter = asyncio.run(bridge._provider_session_adapter(Descriptor(), "claude"))
+    adapter = asyncio.run(_read_session_adapter(Descriptor(), "claude"))
 
     assert adapter == {"provider_id": "claude"}
     assert captured == {
@@ -725,7 +734,7 @@ providers:
 
     monkeypatch.setattr(bridge, "get_data_dir", lambda: None)
 
-    adapter = asyncio.run(bridge._provider_session_adapter(Descriptor(), "overlay-tool"))
+    adapter = asyncio.run(_read_session_adapter(Descriptor(), "overlay-tool"))
 
     assert adapter == {"provider_id": "overlay-tool"}
     assert captured == {
@@ -789,7 +798,7 @@ def test_provider_session_adapter_exposes_lifecycle_reconnect_api(monkeypatch, t
     monkeypatch.setattr(bridge, "get_data_dir", lambda: str(tmp_path))
     monkeypatch.setattr(bridge, "load_provider_runtime_config", lambda *args, **kwargs: config)
 
-    adapter = asyncio.run(bridge._provider_session_adapter(Descriptor(), "codex"))
+    adapter = asyncio.run(_read_session_adapter(Descriptor(), "codex"))
 
     assert adapter == {"provider_id": "codex"}
     assert captured == {
@@ -1021,10 +1030,11 @@ def test_archive_provider_session_uses_descriptor_real_archive_hook(monkeypatch)
 
     descriptor = _overlay_descriptor(thread_hooks=ThreadHooks)
 
+    @asynccontextmanager
     async def fake_provider_session_adapter(active_descriptor, provider_id):
         assert active_descriptor is descriptor
         assert provider_id == "overlay-tool"
-        return Adapter()
+        yield Adapter()
 
     monkeypatch.setattr(bridge, "_load_provider_descriptor", lambda provider_id: descriptor)
     monkeypatch.setattr(bridge, "_provider_session_adapter", fake_provider_session_adapter)
@@ -1043,3 +1053,62 @@ def test_archive_provider_session_uses_descriptor_real_archive_hook(monkeypatch)
         "workspace_id": "overlay-tool:/tmp/project-a",
         "thread_id": "ses_123",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "operation, failure",
+    (("send", None), ("send", "operation"), ("archive", None),
+     ("archive", "operation"), ("send", "start"), ("send", "adapter")),
+)
+async def test_session_runtime_always_shuts_down(monkeypatch, operation, failure):
+    events = []
+
+    async def perform(*args, **kwargs):
+        events.append("operation")
+        if failure == "operation":
+            raise RuntimeError("operation failed")
+
+    adapter = SimpleNamespace(archive_thread=perform)
+    manager = SimpleNamespace(state=SimpleNamespace(
+        get_adapter=lambda provider_id: None if failure == "adapter" else adapter,
+    ))
+
+    async def start(active_manager, **kwargs):
+        assert active_manager is manager
+        events.append("start")
+        if failure == "start":
+            raise RuntimeError("start failed")
+
+    async def shutdown(active_manager):
+        assert active_manager is manager
+        events.append("shutdown")
+
+    async def prepare(state, request):
+        return SimpleNamespace(text=request.text)
+
+    descriptor = SimpleNamespace(
+        runtime_hooks=SimpleNamespace(start=start, shutdown=shutdown),
+        message_hooks=SimpleNamespace(send=perform),
+        thread_hooks=None,
+    )
+    monkeypatch.setattr(bridge, "_load_provider_descriptor", lambda provider_id: descriptor)
+    monkeypatch.setattr(bridge, "_runtime_config_and_tool_cfg", lambda *args: (None, None))
+    monkeypatch.setattr(bridge, "_build_runtime_manager_stub", lambda config: manager)
+    monkeypatch.setattr(bridge, "_message_gateway_state", lambda: None)
+    monkeypatch.setattr(bridge, "prepare_user_message_text", prepare)
+    if operation == "send":
+        action = bridge.send_provider_session_message(
+            "overlay-tool", "sample-session", "hello", workspace_dir="/tmp/sample-workspace",
+        )
+    else:
+        action = bridge.archive_provider_session(
+            "overlay-tool", "sample-session", workspace_dir="/tmp/sample-workspace",
+        )
+    if failure:
+        with pytest.raises(RuntimeError):
+            await action
+    else:
+        await action
+    assert events == (["start", "shutdown"] if failure in {"start", "adapter"}
+                      else ["start", "operation", "shutdown"])

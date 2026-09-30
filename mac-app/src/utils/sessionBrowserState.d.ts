@@ -51,3 +51,4 @@ export function mergeLiveSessionActivities(
   sessions: UnifiedSession[],
   activities?: TaskBoardSessionActivity[],
 ): UnifiedSession[];
+export function sessionIdentityKey(session: { type: string; id: string; workspace?: string | null }): string;

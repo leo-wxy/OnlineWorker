@@ -70,6 +70,8 @@ def clear_stale_thread_archive_if_active(state: AppState, ws_info, thread_info, 
     """当 source 事实源显示 thread 仍活跃时，清除本地误标 archived。"""
     if not getattr(thread_info, "archived", False):
         return False
+    if getattr(thread_info, "archive_mode", "") == "local_overlay":
+        return False
     provider = get_provider(getattr(ws_info, "tool", ""))
     facts = provider.facts if provider is not None else None
     if bool(getattr(facts, "preserve_archived_threads", False)):

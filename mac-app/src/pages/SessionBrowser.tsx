@@ -26,6 +26,7 @@ import {
   nextSelectedSessionId,
   resolveSessionSnapshotUpdate,
   sessionWorkspaceGroup,
+  sessionIdentityKey,
 } from "../utils/sessionBrowserState.js";
 import { createSingleFlightByKey } from "../utils/singleFlight.js";
 import {
@@ -145,6 +146,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
   const emptyForceRefreshAttemptsRef = useRef<Map<ProviderFilter, number>>(new Map());
   const refreshedLiveMetadataRef = useRef<Map<ProviderFilter, string>>(new Map());
   const loadTokenRef = useRef(0);
+  const archiveScopeRef = useRef<{ providerId: string; session: UnifiedSession | null }>({ providerId: providerFilter, session: null });
   const retryTimerRef = useRef<number | null>(null);
   const visibleProviders = useMemo(
     () => visibleSessionProviders(providers) as ProviderMetadata[],
@@ -549,13 +551,19 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     setArchiveNotice(null);
     const nextNotice = await archiveSessionWithFeedback({
       session,
-      selectedSessionId,
-      refreshCurrentProvider,
-      onArchivedSelection: () => setSelectedSessionId(null),
+      refreshCurrentProvider: async () => {
+        if (archiveScopeRef.current.providerId === session.type) await refreshCurrentProvider();
+      },
+      onArchivedSelection: () => {
+        const current = archiveScopeRef.current;
+        if (current.session && sessionIdentityKey(current.session) === sessionIdentityKey(session)) {
+          setSelectedSessionId((selected) => selected === session.id ? null : selected);
+        }
+      },
       successText: t.sessions.archiveSucceeded,
       failureText: t.sessions.archiveFailed,
     });
-    setArchiveNotice(nextNotice);
+    if (archiveScopeRef.current.providerId === session.type) setArchiveNotice(nextNotice);
     setArchivingSessionId(null);
   }, [archivingSessionId, refreshCurrentProvider, selectedSessionId, t.sessions]);
 
@@ -702,6 +710,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
   const effectiveSelectedSession = useMemo(() => (
     selectedSession ?? (!selectedSessionId ? filteredSessions[0] ?? null : null)
   ), [filteredSessions, selectedSession, selectedSessionId]);
+  archiveScopeRef.current = { providerId: providerFilter, session: effectiveSelectedSession };
 
   const newSessionComposerChat = useMemo<UnifiedSession | null>(() => {
     if (!newSessionComposer || newSessionComposer.providerId !== providerFilter) {
@@ -805,7 +814,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
           {newSessionComposerChat ? (
             <GenericProviderChat
               session={newSessionComposerChat}
-              key={newSessionComposerChat.id}
+              key={sessionIdentityKey(newSessionComposerChat)}
               mode="new-session"
               providerSupportsAttachments={Boolean(
                 providerCapabilities[newSessionComposerChat.type]?.files ||
@@ -818,7 +827,7 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
           ) : effectiveSelectedSession ? (
             <GenericProviderChat
               session={effectiveSelectedSession}
-              key={effectiveSelectedSession.id}
+              key={sessionIdentityKey(effectiveSelectedSession)}
               providerSupportsAttachments={Boolean(
                 providerCapabilities[effectiveSelectedSession.type]?.files ||
                 providerCapabilities[effectiveSelectedSession.type]?.photos
