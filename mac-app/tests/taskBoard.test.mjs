@@ -6,11 +6,23 @@ import { fileURLToPath } from "node:url";
 
 import {
   buildTaskBoardModel,
+  formatTaskBoardRelativeTime,
+  taskBoardStatusKey,
 } from "../src/utils/taskBoard.js";
 
 const nowEpochMs = 1_800_000_000_000;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
+
+test("task status follows execution state rather than pin state", () => {
+  for (const pinned of [false, true]) {
+    assert.equal(taskBoardStatusKey({ status: "completed", pinned }), "statusCompleted");
+    assert.equal(taskBoardStatusKey({ status: "completed", interrupted: true, pinned }), "statusInterrupted");
+    assert.equal(taskBoardStatusKey({ status: "running", running: true, pinned }), "statusRunning");
+    assert.equal(taskBoardStatusKey({ status: "needs_attention", needsAttention: true, pinned }), "statusNeedsAttention");
+    assert.equal(taskBoardStatusKey({ status: "idle", pinned }), null);
+  }
+});
 
 const fixedThemeColor = /\b(?:bg|text|border|ring|divide|from|via|to)-(?:white|black|gray|slate|red|rose|orange|amber|green|emerald|sky|blue|violet|purple)(?:-\d+)?(?:\/[^\s"'`}]+)?/;
 
@@ -541,7 +553,7 @@ test("buildTaskBoardModel puts interrupted and completed activities in recent en
         lastAssistantMessage: "",
         lastFinalMessage: "",
         lastEventKind: "turn.failed",
-        updatedAt: 20,
+        updatedAt: (nowEpochMs - 10_000) / 1000,
       },
       {
         providerId: "claude",
@@ -564,7 +576,7 @@ test("buildTaskBoardModel puts interrupted and completed activities in recent en
         lastAssistantMessage: "done",
         lastFinalMessage: "done",
         lastEventKind: "turn.completed",
-        updatedAt: 10,
+        updatedAt: (nowEpochMs - 20_000) / 1000,
       },
     ],
     providerLabels: { codex: "Codex", claude: "Claude" },
@@ -579,6 +591,58 @@ test("buildTaskBoardModel puts interrupted and completed activities in recent en
   assert.equal(board.recentEnded[0].recentEvents[0].kind, "turn.failed");
   assert.equal(board.recentEnded[0].lastUserMessage, "implement phase 19");
   assert.equal(board.recentEnded[1].lastAssistantMessage, "done");
+});
+
+test("recent ended includes only completed sessions within seven days even when pinned", () => {
+  const week = 7 * 86400_000;
+  const rows = [
+    ["recent", "completed", nowEpochMs - 1000],
+    ["boundary", "completed", nowEpochMs - week],
+    ["old-pinned", "completed", nowEpochMs - week - 1],
+    ["idle-pinned", "idle", nowEpochMs - 1000],
+    ["running", "running", nowEpochMs - 1000],
+    ["failed", "failed", nowEpochMs - 1000],
+    ["unknown-time", "completed", 0],
+    ["future", "completed", nowEpochMs + 1000],
+    ["archived", "completed", nowEpochMs - 1000],
+  ];
+  const board = buildTaskBoardModel({
+    sessions: [session({ id: "archived", archived: true })],
+    sessionActivities: rows.map(([sessionId, status, updatedAt]) => ({ providerId: "codex", sessionId, status, updatedAt })),
+    taskBoardState: { pinned: ["old-pinned", "idle-pinned"].map(sessionId => ({ providerId: "codex", sessionId })) },
+    providerLabels: {}, dashboardState: null, nowEpochMs,
+  });
+  assert.deepEqual(board.recentEnded.map(task => task.sessionId), ["recent", "boundary"]);
+  assert.equal(board.counts.recentEnded, 2);
+  assert.equal(board.counts.running, 1);
+  assert.equal(board.counts.needsAttention, 1);
+});
+
+test("recent ended keeps only the latest five sessions and reports the visible count", () => {
+  const board = buildTaskBoardModel({
+    sessions: [],
+    sessionActivities: Array.from({ length: 7 }, (_, index) => ({
+      providerId: "codex", sessionId: `sample-${index}`, status: "completed",
+      updatedAt: nowEpochMs - (index + 1) * 1000,
+    })).reverse(),
+    providerLabels: {}, dashboardState: null, nowEpochMs,
+  });
+  assert.deepEqual(board.recentEnded.map(task => task.sessionId), ["sample-0", "sample-1", "sample-2", "sample-3", "sample-4"]);
+  assert.equal(board.counts.recentEnded, 5);
+});
+
+test("task times use natural relative units in Chinese and English", () => {
+  const cases = [[59, "59秒钟前", "59 seconds ago"], [60, "1分钟前", "1 minute ago"],
+    [3600, "1小时前", "1 hour ago"], [86400, "1天前", "1 day ago"],
+    [7 * 86400, "1周前", "1 week ago"], [30 * 86400, "1个月前", "1 month ago"],
+    [365 * 86400, "1年前", "1 year ago"]];
+  for (const [seconds, zh, en] of cases) {
+    assert.equal(formatTaskBoardRelativeTime(nowEpochMs - seconds * 1000, nowEpochMs, "zh"), zh);
+    assert.equal(formatTaskBoardRelativeTime(nowEpochMs - seconds * 1000, nowEpochMs, "en"), en);
+  }
+  assert.equal(formatTaskBoardRelativeTime(null, nowEpochMs, "zh"), null);
+  assert.equal(formatTaskBoardRelativeTime(NaN, nowEpochMs, "zh"), null);
+  assert.equal(formatTaskBoardRelativeTime(nowEpochMs + 1000, nowEpochMs, "zh"), "0秒钟前");
 });
 
 test("buildTaskBoardModel shows Claude permission command as dynamic preview", () => {

@@ -14,6 +14,7 @@ from config import get_data_dir
 from core.telegram_formatting import format_telegram_assistant_final_text
 from core.providers.lifecycle_runtime import _save_storage_via_lifecycle
 from core.providers.thread_runtime import interrupt_default_thread
+from core.user_messages.recovery import record_delivery_receipt
 from plugins.providers.builtin.codex.python.adapter import CodexAdapter
 from plugins.providers.builtin.codex.python.approval_policy import (
     SOURCE_REMOTE_PROXY,
@@ -1136,6 +1137,11 @@ async def _queue_codex_message(
     text: str,
     attachments=None,
 ) -> dict:
+    thread = getattr(ws_info, "threads", {}).get(thread_id)
+    if thread is not None:
+        for record, key in ((getattr(thread, "send_recovery", {}), "requestId"), (getattr(thread, "new_session_recovery", {}), "request_id")):
+            if record.get(key) and record.get("status", record.get("send_status")) == "sending":
+                record_delivery_receipt(state, ws_info, thread, record[key], {}, require_persistence=True)
     tool_cfg = state.config.get_tool("codex") if state.config is not None else None
     codex_bin = str(getattr(tool_cfg, "bin", "") or "codex")
     command = [codex_bin, "queue", "--thread", thread_id, "--message", text]
@@ -1207,17 +1213,27 @@ async def send_message(
     active_turn = state.streaming_turns.get(thread_id)
     if active_turn is not None and (active_turn.completed or not active_turn.turn_id):
         active_turn = None
+    record = getattr(thread_info, "send_recovery", {})
+    request_id = record.get("requestId") if record.get("status") == "sending" else None
+    new_record = getattr(thread_info, "new_session_recovery", {})
+    if not request_id and new_record.get("send_status") == "sending":
+        record = new_record
+        request_id = record.get("request_id")
+    receipt_kwargs = {"on_response": lambda receipt: record_delivery_receipt(state, ws_info, thread_info, request_id, receipt)} if request_id else {}
 
     async def send() -> None:
+        if request_id and record.get("providerReceipt"):
+            record_delivery_receipt(state, ws_info, thread_info, request_id, {}, require_persistence=True)
         if attachments:
             await adapter.send_user_message(
                 workspace_id,
                 thread_id,
                 text,
                 attachments=attachments,
+                **receipt_kwargs,
             )
             return
-        await adapter.send_user_message(workspace_id, thread_id, text)
+        await adapter.send_user_message(workspace_id, thread_id, text, **receipt_kwargs)
 
     delivery = {"status": "sent"}
     if active_turn is not None:
@@ -1228,6 +1244,7 @@ async def send_message(
                 active_turn.turn_id,
                 text,
                 attachments=attachments,
+                **receipt_kwargs,
             )
             delivery = {"status": "steered"}
         except Exception as exc:

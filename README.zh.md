@@ -89,23 +89,17 @@ Setup 处理首次运行时最实际的检查：必要 CLI 是否可见、Telegr
 ### 运行要求
 
 - macOS
-- Node.js 20
-- Python 3.13
-- Tauri 后端所需的 Rust 工具链
 - Codex 工作流所需的 `codex` CLI
 - Claude 工作流所需的 `claude` CLI
 
+安装打包好的 DMG 不需要 Python 或 Rust。Node.js 用于通过 npm 安装相关 CLI；从源码构建所需的完整工具链见[打包指南](deploy/BUILD.md)。
+
 ### 快速开始
 
-1. 本地构建 DMG，或直接下载打包好的 DMG。
+1. 从[官方 Release](https://github.com/leo-wxy/OnlineWorker/releases/latest) 下载与你的 Mac 匹配的 DMG：Apple Silicon 选 `aarch64`，Intel 选 `x64`。
 2. 打开 DMG，并将 `OnlineWorker.app` 拖到 `/Applications`。
-3. 如果 macOS 首次启动时拦截了应用，移除 quarantine 属性：
-
-```bash
-xattr -cr /Applications/OnlineWorker.app
-```
-
-4. 启动 `OnlineWorker.app`。
+3. 启动 `OnlineWorker.app`。未经正式签名、公证的开发版可能需要按 [Apple 的系统设置流程](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac) 手动允许打开。
+4. 后续在“设置 → 维护 → 应用更新”检查并下载新版本，通过签名校验后显式点击“安装并重启”。安装前结束任务并关闭连接中的远程 CLI；也可打开官方下载页手动安装 DMG。用户数据保存在独立的应用支持目录。
 
 ### 初始设置
 
@@ -169,6 +163,7 @@ thread、飞书群聊或其他 IM 入口只是外部 entry。`onlineworker_state
 OnlineWorker 会把 provider 审批和问题提示统一呈现在 App / Telegram
 链路中。Codex 审批只接受 app-server server request，Telegram 按钮点击后
 通过 `reply_server_request(...)` 回写该 request。
+支持回答的 provider 问题可直接在 Task Board 选择单选、多选或自定义文本并提交全部子问题；目前 builtin Claude 已注册该能力，Codex question 能力尚未启用。
 
 ### Codex 文本发送
 
@@ -280,7 +275,7 @@ bash scripts/build.sh
 
 这条构建链路打包的是当前仓库里的基础 App。额外 provider 扩展包可以在运行态通过 `ONLINEWORKER_PROVIDER_OVERLAY` 挂载，额外通知渠道可以通过 `ONLINEWORKER_NOTIFICATION_OVERLAY` 挂载；provider 扩展包也可以在调用同一个 `scripts/build.sh` 前通过 `ONLINEWORKER_PLUGIN_SOURCE_DIRS` 做打包注入。
 
-推送版本 tag（例如 `1.2.1`）也会通过 `.github/workflows/release-dmg.yml` 自动构建同一条 Apple Silicon DMG 链路。workflow 会先上传一份 Actions artifact；如果对应 GitHub Release 不存在，会先自动创建，再把 DMG 追加到该 Release 的资产列表。
+普通本地构建不需要 updater 私钥；未配置时只生成 App 和 DMG，不生成签名更新包。推送版本 tag（例如 `1.2.1`）会通过 `.github/workflows/release-dmg.yml` 构建两种 macOS 架构；正式发布必须配置与 App 公钥配对的 updater 私钥，并发布两个 DMG、签名更新包和 `latest.json`。配置方法及验证边界见[打包指南](deploy/BUILD.md)。
 
 如果本地 DMG 已经构建完成，可以用下面的脚本覆盖安装到
 `/Applications`、重启打包 App，并确认 app/bot 进程都已启动：

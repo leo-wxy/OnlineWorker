@@ -104,7 +104,8 @@ function normalizedActivityStatus(activity) {
 
 function activityCreatesSyntheticSession(activity) {
   const status = normalizedActivityStatus(activity);
-  return status === "running" || status === "needs_attention" || status === "failed";
+  return status === "running" || status === "needs_attention" || status === "failed"
+    || Boolean(normalizedString(activity?.newSessionRequestId));
 }
 
 export function sessionPreviewText(session) {
@@ -332,4 +333,12 @@ export function mergeLiveSessionActivities(sessions, activities) {
   });
 
   return nextSessions;
+}
+
+export function activityMatchesPendingNewSession(activity, composer) {
+  return Boolean(composer.pendingRequestId && activity.sessionId)
+    && activity.newSessionRequestId === composer.pendingRequestId
+    && activity.providerId === composer.providerId
+    && (activity.workspacePath === composer.workspace
+      || activity.workspaceId === `${composer.providerId}:${composer.workspace}`);
 }

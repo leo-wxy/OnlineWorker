@@ -161,11 +161,11 @@ def publish_user_message_accepted(
     )
 
 
-def publish_user_message_failed(state, request, *, text, workspace_path="", event_id="", error):
+def publish_user_message_failed(state, request, *, text, workspace_path="", event_id="", error, delivery_status=""):
     return publish_user_message_event(
         state, request, text=text, workspace_path=workspace_path, event_id=event_id,
         kind="message.user.send_failed", error=str(error),
-        delivery_status="uncertain" if isinstance(error, (TimeoutError, ConnectionError, OSError)) else "failed",
+        delivery_status=delivery_status or ("uncertain" if isinstance(error, (TimeoutError, ConnectionError, OSError)) else "failed"),
     )
 
 

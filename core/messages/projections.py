@@ -82,6 +82,7 @@ def _clear_attention(activity: SessionActivity) -> None:
     activity.attention_kind = ""
     activity.request_id = ""
     activity.approval_source = ""
+    activity.questions = []
     activity.mirrored_only = False
 
 
@@ -325,8 +326,9 @@ class SessionActivityProjection:
                 activity.active_turn_id = event.turn_id
             if event.kind != "turn.started" and summary:
                 activity.last_assistant_message = summary
-            activity.status = RUNNING_STATUS
-            _clear_attention(activity)
+            if activity.attention_kind != "question" or event.kind == "turn.started":
+                activity.status = RUNNING_STATUS
+                _clear_attention(activity)
         elif event.kind == "message.assistant.final":
             if summary:
                 activity.last_assistant_message = summary
@@ -350,6 +352,7 @@ class SessionActivityProjection:
                 elif activity.attention_kind != "interrupted":
                     _clear_attention(activity)
         elif event.kind == "turn.failed":
+            activity.questions = []
             activity.active_turn_id = ""
             if _is_user_interruption(event):
                 activity.status = COMPLETED_STATUS
@@ -363,22 +366,43 @@ class SessionActivityProjection:
             activity.approval_source = ""
             activity.mirrored_only = False
         elif event.kind == "session.recovery.updated":
+            recovery_payload = event.conversation_payload if self._full_conversation else payload
+            if "sendRecovery" in recovery_payload:
+                activity.send_recovery = dict(recovery_payload["sendRecovery"])
+                recovery_status = activity.send_recovery.get("status")
+                if recovery_status in {"failed", "unknown"}:
+                    activity.delivery_status = "uncertain" if recovery_status == "unknown" else "failed"
+                    activity.delivery_error = str(activity.send_recovery.get("error") or "")
+                    if not activity.active_turn_id and activity.status != RUNNING_STATUS:
+                        if "sendRecovery" in payload and not activity._recovery_status:
+                            activity._recovery_status = activity.status
+                        activity.status = FAILED_STATUS
+                elif recovery_status == "sent":
+                    activity.delivery_status = "accepted"
+                    activity.delivery_error = ""
+                    if "sendRecovery" in payload and activity._recovery_status:
+                        if activity.status == FAILED_STATUS:
+                            activity.status = activity._recovery_status
+                        activity._recovery_status = ""
+            if payload.get("newSessionRequestId"):
+                activity.new_session_request_id = str(payload["newSessionRequestId"])
             if payload.get("text"):
                 activity.last_user_message = str(payload["text"])[:500]
-            if payload.get("error"):
+            if "sendRecovery" not in payload and payload.get("error"):
                 if not activity._recovery_status or activity.status != NEEDS_ATTENTION_STATUS:
                     activity._recovery_status = activity.status
                 activity.status = NEEDS_ATTENTION_STATUS
                 activity.attention_reason = str(payload["error"])
                 activity.attention_kind = "failure"
                 activity.delivery_error = str(payload["error"])
-            elif activity._recovery_status:
+            elif "sendRecovery" not in payload and activity._recovery_status:
                 if activity.status == NEEDS_ATTENTION_STATUS and activity.attention_kind == "failure":
                     activity.status = activity._recovery_status
                     _clear_attention(activity)
                 activity._recovery_status = ""
                 activity.delivery_error = ""
         elif event.kind == "approval.requested":
+            activity.questions = []
             prompt = _compact(payload.get("prompt") or payload.get("user_prompt") or payload.get("userPrompt"))
             if prompt:
                 activity.last_user_message = prompt[:500]
@@ -399,16 +423,31 @@ class SessionActivityProjection:
             activity.status = NEEDS_ATTENTION_STATUS
             activity.attention_reason = summary or "需要回答问题"
             activity.attention_kind = "question"
-            activity.request_id = ""
+            question_id = _compact(payload.get("questionId"))
+            if activity.request_id != question_id:
+                activity.questions = []
+            activity.request_id = question_id
             activity.approval_source = ""
             activity.mirrored_only = payload.get("mirroredOnly") is True
+            if question_id:
+                question = {key: payload.get(key) for key in (
+                    "questionId", "header", "question", "options", "multiple", "custom", "subIndex", "subTotal",
+                )}
+                activity.questions = sorted(
+                    [item for item in activity.questions if item.get("subIndex") != question.get("subIndex")] + [question],
+                    key=lambda item: item.get("subIndex") or 0,
+                )
         elif event.kind == "question.answered":
-            if not _is_terminal(activity):
+            if not _is_terminal(activity) and (
+                not activity.request_id or activity.request_id == _compact(payload.get("questionId"))
+            ):
                 activity.status = RUNNING_STATUS
                 _clear_attention(activity)
 
         activity.last_event_kind = event.kind
-        activity.updated_at = max(activity.updated_at, event.created_at)
+        # Loading history is not new activity in the session.
+        if event.kind != "session.history.loaded":
+            activity.updated_at = max(activity.updated_at, event.created_at)
 
     def list(self) -> list[dict]:
         return [self._to_dict(activity) for activity in self._sorted_activities()]

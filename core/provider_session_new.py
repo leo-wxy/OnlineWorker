@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import replace
+import time
 
 from core.messages.publishing import (
     publish_user_message_accepted,
@@ -12,6 +14,7 @@ from core.storage import ThreadInfo, WorkspaceInfo, save_storage
 from core.messages.events import create_message_event
 from core.user_messages.contracts import UserMessageSendRequest
 from core.user_messages.gateway import prepare_user_message_text
+from core.user_messages.recovery import new_session_recovery_view
 
 
 @dataclass(frozen=True)
@@ -31,25 +34,36 @@ class _FirstMessageRejected(RuntimeError):
     pass
 
 
+def validate_provider_thread_target(ws_info, thread_info, *, provider_id, thread_id, workspace_path):
+    if (ws_info.tool != provider_id or ws_info.path != workspace_path
+            or thread_info.thread_id != thread_id or ws_info.threads.get(thread_id) is not thread_info):
+        raise _FirstMessageRejected("会话绑定已变化，消息未发送，请刷新会话后重试。")
+    if thread_info.archived:
+        raise _FirstMessageRejected("会话已归档，消息未发送。")
+
+
 def _checkpoint_new_session(state, ws_info, thread_info):
     recovery = thread_info.new_session_recovery
+    recovery["updated_at"] = time.time()
     try:
         if state.storage is not None:
             save_storage(state.storage)
     except Exception as exc:
         prefix = "首消息已发送，保存恢复状态失败" if recovery.get("send_status") == "sent" else "保存恢复状态失败"
         recovery["error"] = f"{prefix}: {exc}"
-        state.message_bus.publish(create_message_event(
-            "session.recovery.updated", provider_id=ws_info.tool, session_id=thread_info.thread_id,
-            workspace_id=ws_info.daemon_workspace_id or "", workspace_path=ws_info.path,
-            payload={"summary": recovery["error"], "recoveryStatus": recovery.get("send_status", "pending"), "error": recovery["error"], "text": recovery.get("text", ""), "title": thread_info.preview or ""},
-        ))
+        publish_new_session_recovery(state, ws_info, thread_info)
         raise
-    state.message_bus.publish(create_message_event(
+    publish_new_session_recovery(state, ws_info, thread_info)
+
+
+def publish_new_session_recovery(state, ws_info, thread_info):
+    recovery = thread_info.new_session_recovery
+    event = create_message_event(
         "session.recovery.updated", provider_id=ws_info.tool, session_id=thread_info.thread_id,
         workspace_id=ws_info.daemon_workspace_id or "", workspace_path=ws_info.path,
-        payload={"recoveryStatus": recovery.get("send_status", "pending"), "error": recovery.get("error") or recovery.get("bind_error", ""), "text": recovery.get("text", ""), "title": thread_info.preview or ""},
-    ))
+        payload={"newSessionRequestId": recovery.get("request_id", ""), "recoveryStatus": recovery.get("send_status", "pending"), "error": recovery.get("error") or recovery.get("bind_error", ""), "text": recovery.get("text", ""), "title": thread_info.preview or ""},
+    )
+    state.message_bus.publish(replace(event, conversation_payload={**event.payload, "sendRecovery": new_session_recovery_view(thread_info)}))
 
 
 def extract_started_thread_id(result: object) -> str:
@@ -91,8 +105,9 @@ async def start_real_provider_thread(
     if state is None:
         return await _start_real_provider_thread(adapter, ws_info, workspace_id, **kwargs)
     # ponytail: serialize creation per app state; use per-request locks if throughput matters.
-    async with state.new_session_lock:
-        return await _start_real_provider_thread(adapter, ws_info, workspace_id, **kwargs)
+    with state.task_admission():
+        async with state.new_session_lock:
+            return await _start_real_provider_thread(adapter, ws_info, workspace_id, **kwargs)
 
 
 async def _start_real_provider_thread(
@@ -181,10 +196,10 @@ async def send_started_provider_thread_message(state, ws_info, thread_info, work
         recovery.pop("error", None)
         _checkpoint_new_session(state, ws_info, thread_info)
         return SentProviderThreadMessage(thread_info.thread_id, recovery.get("sent_text", recovery.get("text", "")))
-    if status in {"sending", "unknown"}:
+    if status in {"preparing", "sending", "unknown"}:
         raise RuntimeError("首消息发送结果不确定，请先核实原会话；禁止自动重复发送")
     recovery.pop("error", None)
-    recovery["send_status"] = "sending"
+    recovery["send_status"] = "preparing"
     try:
         _checkpoint_new_session(state, ws_info, thread_info)
     except Exception:
@@ -216,25 +231,29 @@ async def _send_started_provider_thread_message(
     adapter=None,
     metadata: dict | None = None,
 ) -> SentProviderThreadMessage:
+    target_thread_id, target_workspace = thread_info.thread_id, ws_info.path
+    validate_provider_thread_target(ws_info, thread_info, provider_id=provider_id,
+                                    thread_id=target_thread_id, workspace_path=target_workspace)
     resolved_provider = provider or get_provider(
         str(getattr(ws_info, "tool", "") or ""),
         getattr(state, "config", None),
     )
     if resolved_provider is None:
-        raise RuntimeError(f"Provider '{provider_id}' 未启用")
+        raise _FirstMessageRejected(f"Provider '{provider_id}' 未启用")
 
-    prepared = await prepare_user_message_text(
-        state,
-        UserMessageSendRequest(
-            source=source,
-            provider_id=provider_id,
-            workspace_id=str(workspace_id),
-            thread_id=str(thread_info.thread_id),
-            text=text,
-            attachments=attachments,
-            metadata=metadata or {},
-        ),
-    )
+    if thread_info.new_session_recovery.get("request_id"):
+        metadata = {"messageRequestId": thread_info.new_session_recovery["request_id"], **(metadata or {})}
+
+    try:
+        prepared = await prepare_user_message_text(
+            state,
+            UserMessageSendRequest(
+                source=source, provider_id=provider_id, workspace_id=str(workspace_id),
+                thread_id=str(thread_info.thread_id), text=text, attachments=attachments, metadata=metadata or {},
+            ),
+        )
+    except Exception as exc:
+        raise _FirstMessageRejected(str(exc)) from exc
     prepared_text = prepared.text
 
     message_request = UserMessageSendRequest(
@@ -262,25 +281,31 @@ async def _send_started_provider_thread_message(
             resolved_adapter = adapter
             ensure_connected = getattr(message_hooks, "ensure_connected", None)
             if callable(ensure_connected):
-                connected_adapter = await ensure_connected(
-                    state,
-                    resolved_adapter,
-                    ws_info,
-                    update=None,
-                    context=None,
-                    group_chat_id=0,
-                    src_topic_id=None,
-                )
+                try:
+                    connected_adapter = await ensure_connected(
+                        state, resolved_adapter, ws_info, update=None, context=None,
+                        group_chat_id=0, src_topic_id=None,
+                    )
+                except Exception as exc:
+                    raise _FirstMessageRejected(str(exc)) from exc
                 if connected_adapter is not None:
                     resolved_adapter = connected_adapter
                     if hasattr(state, "set_adapter"):
                         state.set_adapter(provider_id, resolved_adapter)
 
             if resolved_adapter is None:
-                raise RuntimeError(f"{provider_id} adapter 未连接")
+                raise _FirstMessageRejected(f"{provider_id} adapter 未连接")
 
+            validate_provider_thread_target(ws_info, thread_info, provider_id=provider_id,
+                                            thread_id=target_thread_id, workspace_path=target_workspace)
             if hasattr(state, "mark_provider_send_started"):
                 state.mark_provider_send_started(provider_id, str(thread_info.thread_id))
+            if thread_info.new_session_recovery:
+                thread_info.new_session_recovery["send_status"] = "sending"
+                try:
+                    _checkpoint_new_session(state, ws_info, thread_info)
+                except Exception as exc:
+                    raise _FirstMessageRejected(str(exc)) from exc
 
             send_result = await message_hooks.send(
                 state,
@@ -300,10 +325,18 @@ async def _send_started_provider_thread_message(
         else:
             resolved_adapter = adapter
             if resolved_adapter is None:
-                raise RuntimeError(f"{provider_id} adapter 未连接")
+                raise _FirstMessageRejected(f"{provider_id} adapter 未连接")
 
             thread_hooks = getattr(resolved_provider, "thread_hooks", None)
             activate_new_thread = getattr(thread_hooks, "activate_new_thread", None) if thread_hooks is not None else None
+            validate_provider_thread_target(ws_info, thread_info, provider_id=provider_id,
+                                            thread_id=target_thread_id, workspace_path=target_workspace)
+            if thread_info.new_session_recovery:
+                thread_info.new_session_recovery["send_status"] = "sending"
+                try:
+                    _checkpoint_new_session(state, ws_info, thread_info)
+                except Exception as exc:
+                    raise _FirstMessageRejected(str(exc)) from exc
             if callable(activate_new_thread):
                 await activate_new_thread(
                     state,
@@ -315,6 +348,8 @@ async def _send_started_provider_thread_message(
                 )
             else:
                 await resolved_adapter.resume_thread(workspace_id, str(thread_info.thread_id))
+                validate_provider_thread_target(ws_info, thread_info, provider_id=provider_id,
+                                                thread_id=target_thread_id, workspace_path=target_workspace)
                 if prepared_text:
                     await resolved_adapter.send_user_message(
                         workspace_id,

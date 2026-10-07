@@ -21,6 +21,7 @@ import {
   writeCachedProviderSessionSnapshot,
 } from "../components/session-browser/sessionData";
 import {
+  activityMatchesPendingNewSession,
   hasPendingSelectedSession,
   mergeLiveSessionActivities,
   nextSelectedSessionId,
@@ -68,8 +69,7 @@ type NewSessionComposerState = {
   providerId: ProviderFilter;
   workspace: string;
   composeId: string;
-  pendingMessage?: string;
-  pendingSince?: number;
+  pendingRequestId?: string;
 };
 
 const DEFAULT_TASK_BOARD_STATE: TaskBoardState = {
@@ -79,45 +79,6 @@ const DEFAULT_TASK_BOARD_STATE: TaskBoardState = {
 
 function sessionTaskBoardKey(session: UnifiedSession) {
   return `${session.type}:${session.id}`;
-}
-
-function compactSessionText(value: unknown) {
-  return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
-}
-
-function activityUpdatedAtMs(activity: TaskBoardSessionActivity) {
-  const value = Number(activity.updatedAt || 0);
-  if (!Number.isFinite(value) || value <= 0) {
-    return 0;
-  }
-  return value > 1_000_000_000_000 ? value : value * 1000;
-}
-
-function activityMatchesPendingNewSession(
-  activity: TaskBoardSessionActivity,
-  composer: NewSessionComposerState,
-) {
-  if (!activity.sessionId || activity.providerId !== composer.providerId) {
-    return false;
-  }
-  const workspace = compactSessionText(activity.workspacePath || activity.workspaceId);
-  if (workspace && workspace !== composer.workspace && activity.workspaceId !== `${composer.providerId}:${composer.workspace}`) {
-    return false;
-  }
-  if (composer.pendingSince && activityUpdatedAtMs(activity) + 1000 < composer.pendingSince) {
-    return false;
-  }
-  const pendingMessage = compactSessionText(composer.pendingMessage);
-  if (!pendingMessage) {
-    return false;
-  }
-  const haystack = compactSessionText([
-    activity.lastUserMessage,
-    activity.title,
-    activity.lastAssistantMessage,
-    activity.lastFinalMessage,
-  ].join(" "));
-  return haystack.includes(pendingMessage);
 }
 
 export function SessionBrowser({ openTarget = null, taskBoardActivities = [], active = true }: Props) {
@@ -623,13 +584,15 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
     if (normalizedSession) {
       loadedProvidersRef.current.add(newSessionComposer.providerId);
       activatedProvidersRef.current.add(newSessionComposer.providerId);
+      const nextSessions = writeCachedProviderSessionSnapshot(newSessionComposer.providerId, [
+        normalizedSession,
+        ...readCachedProviderSessionSnapshot(newSessionComposer.providerId)
+          .filter((session) => session.id !== normalizedSession.id),
+      ]);
       setGenericSessionsByProvider((current) => mergeSessionSnapshotsByProvider(
         current,
         newSessionComposer.providerId,
-        [
-          normalizedSession,
-          ...(current[newSessionComposer.providerId] ?? []).filter((session) => session.id !== normalizedSession.id),
-        ],
+        nextSessions,
       ));
     }
     setNewSessionComposer(null);
@@ -642,21 +605,19 @@ export function SessionBrowser({ openTarget = null, taskBoardActivities = [], ac
   }, [newSessionComposer, loadProvider]);
 
   const handleNewSessionPending = useCallback(async (
-    _sendResult: ProviderSessionSendResult,
-    text: string,
+    sendResult: ProviderSessionSendResult,
   ) => {
     if (!newSessionComposer) {
       return;
     }
-    setNewSessionComposer({
-      ...newSessionComposer,
-      pendingMessage: text,
-      pendingSince: Date.now(),
-    });
+    const pendingRequestId = sendResult.requestId?.trim();
+    if (!pendingRequestId) throw new Error("provider did not return a request id");
+    setNewSessionComposer(current => current?.composeId === newSessionComposer.composeId
+      ? { ...current, pendingRequestId } : current);
   }, [newSessionComposer]);
 
   useEffect(() => {
-    if (!newSessionComposer?.pendingMessage) {
+    if (!newSessionComposer?.pendingRequestId) {
       return;
     }
     const activity = taskBoardActivities.find((item) =>

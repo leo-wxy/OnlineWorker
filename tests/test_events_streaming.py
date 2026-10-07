@@ -18,6 +18,42 @@ GROUP_CHAT_ID = -100123456789
 SEMANTIC_FIXTURE_PATH = Path(__file__).parent / "fixtures" / "codex_semantic_sequences.json"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("active,preserve,local,method,accepted", [
+    (False, False, False, "turn/started", False),
+    (True, False, False, "turn/started", True),
+    (True, True, False, "turn/started", False),
+    (True, False, True, "turn/started", False),
+    (True, False, False, "item/completed", False),
+])
+async def test_archived_live_events_require_source_confirmed_reactivation(
+    monkeypatch, active, preserve, local, method, accepted,
+):
+    from bot.events import stop_event_delivery
+
+    thread = ThreadInfo(thread_id="sample-session", archived=True, is_active=False, topic_id=123,
+                        archive_mode="local_overlay" if local else "provider")
+    workspace = WorkspaceInfo(name="sample", path="/tmp/sample-workspace", tool="overlay-tool",
+                              daemon_workspace_id="overlay-tool:/tmp/sample-workspace", threads={thread.thread_id: thread})
+    state = AppState(storage=AppStorage(workspaces={workspace.daemon_workspace_id: workspace}))
+    monkeypatch.setattr("bot.handlers.common.get_provider", lambda *_: SimpleNamespace(
+        facts=SimpleNamespace(preserve_archived_threads=preserve)))
+    monkeypatch.setattr("bot.handlers.common.query_provider_active_thread_ids", lambda *_: {thread.thread_id} if active else set())
+    monkeypatch.setattr("bot.events.save_storage", lambda *_: None)
+    bot = SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(message_id=123)))
+    handler = make_event_handler(state, bot, 1234567890, provider_id="overlay-tool")
+    try:
+        await handler("app-server-event", {"workspace_id": workspace.daemon_workspace_id, "message": {
+            "method": method, "params": {"threadId": thread.thread_id, "turn": {"id": "sample-turn"},
+                                           "item": {"type": "agentMessage", "text": "late content"}},
+        }})
+        await handler.drain_delivery()
+        assert (state.message_bus.session_activity("overlay-tool", thread.thread_id) is not None) is accepted
+        assert thread.archived is (not accepted)
+    finally:
+        await stop_event_delivery(state)
+
+
 class RecordingNotificationRouter:
     def __init__(self):
         self.events = []

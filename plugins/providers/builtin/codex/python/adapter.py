@@ -64,6 +64,7 @@ class CodexAdapter:
         self._transport: str = "ws"
         self._next_id = 1
         self._pending: dict[int, asyncio.Future] = {}
+        self._delivery_receipts: dict[int, tuple[str, Any]] = {}
         self._event_callbacks: list[EventCallback] = []
         self._server_request_callbacks: list[ServerRequestCallback] = []
         self._disconnect_callbacks: list[Callable[[], None]] = []
@@ -1177,7 +1178,7 @@ class CodexAdapter:
     # 内部 RPC 调用
     # ------------------------------------------------------------------
 
-    async def _call(self, method: str, params: dict) -> Any:
+    async def _call(self, method: str, params: dict, *, on_response=None) -> Any:
         """发送 JSON-RPC 请求，等待响应，返回 result。"""
         if self.idle_restart_in_progress:
             await asyncio.shield(self._idle_restart_task)
@@ -1195,6 +1196,14 @@ class CodexAdapter:
         loop = asyncio.get_event_loop()
         fut: asyncio.Future = loop.create_future()
         self._pending[req_id] = fut
+        if on_response is not None:
+            for previous, (target, _) in tuple(self._delivery_receipts.items()):
+                if target == thread_id:
+                    self._delivery_receipts.pop(previous)
+            # ponytail: retain at most 128 late RPC receipts; use a durable broker if this ceiling matters.
+            if len(self._delivery_receipts) >= 128:
+                self._delivery_receipts.pop(next(iter(self._delivery_receipts)))
+            self._delivery_receipts[req_id] = (thread_id, (method, on_response))
 
         payload = json.dumps({"id": req_id, "method": method, "params": params})
         try:
@@ -1351,6 +1360,7 @@ class CodexAdapter:
         approval_policy: Any | None = None,
         approvals_reviewer: str | None = None,
         sandbox_policy: Any | None = None,
+        on_response=None,
     ) -> dict:
         """发送用户消息。注意 input 是数组格式（Pitfall 8）。"""
         if thread_id and workspace_id:
@@ -1394,7 +1404,7 @@ class CodexAdapter:
                 params.get("approvalPolicy") or "-",
                 params.get("sandboxPolicy") or "-",
             )
-        return await self._call("turn/start", params)
+        return await self._call("turn/start", params, **({"on_response": on_response} if on_response else {}))
 
     async def turn_steer(
         self,
@@ -1403,6 +1413,8 @@ class CodexAdapter:
         expected_turn_id: str,
         text: str,
         attachments: list[dict[str, Any]] | None = None,
+        *,
+        on_response=None,
     ) -> dict:
         if thread_id and workspace_id:
             self._thread_workspace_map[thread_id] = workspace_id
@@ -1423,6 +1435,7 @@ class CodexAdapter:
                 "expectedTurnId": expected_turn_id,
                 "input": input_items,
             },
+            **({"on_response": on_response} if on_response else {}),
         )
 
     async def list_models(self, *, include_hidden: bool = False, limit: int = 20) -> list[dict]:
@@ -1977,6 +1990,19 @@ class CodexAdapter:
 
         elif msg_id is not None and not method:
             # ── RPC 响应 ──
+            receipt = self._delivery_receipts.pop(msg_id, None)
+            if receipt is not None:
+                thread_id, (rpc_method, callback) = receipt
+                result = msg.get("result") or {}
+                result = result if isinstance(result, dict) else {}
+                turn = result.get("turn") or {}
+                try:
+                    callback({"threadId": thread_id, "rpcId": msg_id, "method": rpc_method,
+                              "turnId": result.get("turnId") or (turn.get("id") if isinstance(turn, dict) else ""),
+                              "status": "failed" if "error" in msg else "sent",
+                              "error": str((msg.get("error") or {}).get("message") or "")})
+                except Exception:
+                    logger.exception("[codex] 保存发送回执失败")
             fut = self._pending.pop(msg_id, None)
             if fut is None or fut.done():
                 return

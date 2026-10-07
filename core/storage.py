@@ -27,6 +27,7 @@ class ThreadInfo:
     source: str = "unknown"
     archive_mode: str = ""
     new_session_recovery: dict = field(default_factory=dict)
+    send_recovery: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -41,6 +42,7 @@ class WorkspaceInfo:
     daemon_workspace_id: Optional[str] = None
     header_message_id: Optional[int] = None
     threads: dict = field(default_factory=dict)
+    pending_new_session: dict = field(default_factory=dict)
     _legacy_active_thread_id: Optional[str] = field(default=None, repr=False)
 
 
@@ -68,6 +70,7 @@ def _thread_info_from_dict(d: dict) -> ThreadInfo:
         source=str(d.get("source") or "unknown"),
         archive_mode=str(d.get("archive_mode") or ""),
         new_session_recovery=dict(d.get("new_session_recovery") or {}),
+        send_recovery=dict(d.get("send_recovery") or {}),
     )
 
 
@@ -84,6 +87,7 @@ def _thread_info_to_dict(t: ThreadInfo) -> dict:
         "source": t.source,
         **({"archive_mode": t.archive_mode} if t.archive_mode else {}),
         **({"new_session_recovery": t.new_session_recovery} if t.new_session_recovery else {}),
+        **({"send_recovery": t.send_recovery} if t.send_recovery else {}),
     }
 
 
@@ -105,6 +109,7 @@ def _workspace_info_from_dict(storage_key: str, d: dict) -> WorkspaceInfo:
         daemon_workspace_id=d.get("daemon_workspace_id"),
         header_message_id=d.get("header_message_id"),
         threads=threads,
+        pending_new_session=dict(d.get("pending_new_session") or {}),
     )
     legacy_tid = d.get("active_thread_id")
     if legacy_tid and not threads:
@@ -119,6 +124,7 @@ def _workspace_info_to_dict(ws: WorkspaceInfo) -> dict:
         "tool": ws.tool,
         "daemon_workspace_id": ws.daemon_workspace_id,
         "header_message_id": ws.header_message_id,
+        **({"pending_new_session": ws.pending_new_session} if ws.pending_new_session else {}),
         "threads": {
             tid: _thread_info_to_dict(t)
             for tid, t in ws.threads.items()

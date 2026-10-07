@@ -36,9 +36,9 @@ test("new session opens an in-memory composer instead of creating an app-state s
   assert.match(genericChat, /await onNewSessionStarted\?\.\(sendResult\)/);
   assert.match(genericChat, /if \(sendResult\.pending\) \{/);
   assert.match(genericChat, /await onNewSessionPending\?\.\(sendResult,\s*trimmedText\)/);
-  assert.match(sessionBrowser, /pendingMessage\?: string;/);
-  assert.match(sessionBrowser, /pendingSince\?: number;/);
-  assert.match(sessionBrowser, /function activityMatchesPendingNewSession/);
+  assert.match(sessionBrowser, /pendingRequestId\?: string;/);
+  assert.match(sessionBrowser, /pendingRequestId = sendResult\.requestId/);
+  assert.doesNotMatch(sessionBrowser, /pendingMessage|pendingSince|haystack/);
   assert.match(sessionBrowser, /activityMatchesPendingNewSession\(item,\s*newSessionComposer\)/);
   assert.match(sessionBrowser, /setSelectedSessionId\(activity\.sessionId\)/);
   assert.match(sessionBrowser, /onNewSessionPending=\{handleNewSessionPending\}/);

@@ -120,6 +120,8 @@ def message_event_from_session_event(event: SessionEvent) -> MessageEvent:
         stable_identity.append("created")
     elif kind == "session.title_updated":
         stable_identity.append(title)
+    elif kind == "question.requested":
+        stable_identity.extend([_text(payload.get("questionId")), str(payload.get("subIndex", 0))])
     dedupe_key = ""
     # A turn contains multiple commentary messages; only a concrete item/request
     # can identify a repeated snapshot within that turn.
@@ -179,11 +181,27 @@ def message_event_from_session_event(event: SessionEvent) -> MessageEvent:
         else:
             public_payload["message"] = "需要处理授权请求"
     if kind == "question.requested":
-        question = _text(payload.get("question") or payload.get("header"))
+        from core.providers.interactions import parse_standard_question_request
+
+        provider = get_provider(event.provider)
+        parse_question = getattr(getattr(provider, "interactions", None), "parse_question_request", None)
+        info = (parse_question or parse_standard_question_request)(
+            payload, provider_id=event.provider, default_thread_id=event.thread_id,
+        )
+        public_payload.update({
+            "questionId": info.question_id,
+            "header": info.header,
+            "question": info.question,
+            "options": info.options,
+            "multiple": info.multiple,
+            "custom": info.custom,
+            "subIndex": info.sub_index,
+            "subTotal": info.sub_total,
+        })
         prompt = _text(payload.get("prompt") or payload.get("user_prompt") or payload.get("userPrompt"))
         if prompt:
             public_payload["prompt"] = prompt
-        public_payload["message"] = question or "需要回答问题"
+        public_payload["message"] = info.question or info.header or "需要回答问题"
 
     return create_message_event(
         kind,

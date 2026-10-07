@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  activityMatchesPendingNewSession,
   hasPendingSelectedSession,
   mergeLiveSessionActivities,
   mergeSessionListSnapshot,
@@ -10,6 +11,18 @@ import {
   sessionPreviewText,
   sessionWorkspaceGroup,
 } from "../src/utils/sessionBrowserState.js";
+
+test("pending creation matches request identity, never equal text in an old session", () => {
+  const composer = { providerId: "codex", workspace: "/tmp/sample-workspace", pendingRequestId: "sample-request" };
+  const activity = { providerId: "codex", workspacePath: composer.workspace, sessionId: "sample-session",
+    lastUserMessage: "same prompt", newSessionRequestId: "older-request" };
+  assert.equal(activityMatchesPendingNewSession(activity, composer), false);
+  const created = { ...activity, newSessionRequestId: composer.pendingRequestId };
+  assert.equal(activityMatchesPendingNewSession(created, composer), true);
+  assert.equal(activityMatchesPendingNewSession({ ...created, providerId: "claude" }, composer), false);
+  assert.equal(activityMatchesPendingNewSession({ ...created, workspacePath: "/tmp/other-workspace" }, composer), false);
+  assert.equal(activityMatchesPendingNewSession(created, { ...composer, pendingRequestId: "" }), false);
+});
 
 function session(overrides = {}) {
   return {
@@ -22,6 +35,26 @@ function session(overrides = {}) {
     ...overrides,
   };
 }
+
+test("created session stays selected from idle through completion before provider list catches up", () => {
+  const composer = { providerId: "codex", workspace: "/tmp/sample-workspace", pendingRequestId: "sample-request" };
+  const old = session({ id: "sample-old", workspace: composer.workspace });
+  const activity = { providerId: composer.providerId, sessionId: "sample-new", workspacePath: composer.workspace,
+    newSessionRequestId: composer.pendingRequestId, lastUserMessage: "sample first message", updatedAt: 10 };
+
+  for (const status of ["idle", "running", "completed"]) {
+    const current = { ...activity, status };
+    assert.equal(activityMatchesPendingNewSession(current, composer), true);
+    const visible = mergeLiveSessionActivities([old], [current]);
+    assert.equal(nextSelectedSessionId(visible, activity.sessionId), activity.sessionId);
+    assert.equal(visible.find(row => row.id === activity.sessionId).raw.providerActive, status === "running");
+  }
+
+  const archived = session({ id: activity.sessionId, workspace: composer.workspace, archived: true });
+  assert.equal(mergeLiveSessionActivities([archived], [{ ...activity, status: "completed" }])[0].archived, true);
+  assert.equal(mergeLiveSessionActivities([old], [{ ...activity, status: "idle", newSessionRequestId: " " }]).length, 1);
+  assert.equal(nextSelectedSessionId(mergeLiveSessionActivities([old], []), activity.sessionId), old.id);
+});
 
 test("provider workspace grouping preserves the real task directory and normal projects", () => {
   const root = "/Users/example/Documents/Codex";

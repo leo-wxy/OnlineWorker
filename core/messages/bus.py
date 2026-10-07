@@ -107,5 +107,9 @@ class MessageEventBus:
         activity = self._conversation_projection.get(provider_id, session_id)
         return activity["conversationTurns"] if activity else []
 
+    def session_send_recovery(self, provider_id: str, session_id: str) -> dict | None:
+        activity = self._conversation_projection.get(provider_id, session_id)
+        return activity.get("sendRecovery") or None if activity else None
+
     def session_history_loaded(self, provider_id: str, session_id: str) -> bool:
         return (provider_id, session_id) in self._hydrated_sessions

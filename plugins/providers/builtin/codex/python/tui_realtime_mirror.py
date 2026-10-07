@@ -10,7 +10,11 @@ from core.provider_runtime_state import ProviderWatchState
 from core.state import AppState
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
 from core.storage import WorkspaceInfo
-from plugins.providers.builtin.codex.python.storage_runtime import find_session_file, read_thread_history
+from plugins.providers.builtin.codex.python.storage_runtime import (
+    _parse_codex_timestamp_ms,
+    find_session_file,
+    read_thread_history,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +228,9 @@ def _publish_startup_activity_bootstrap(
         return False
 
     history = read_thread_history(thread_id, sessions_dir=sessions_dir, limit=20)
+    history_created_at = max(
+        (_parse_codex_timestamp_ms(item.get("timestamp")) for item in history), default=0,
+    ) / 1000.0
     history_turns = [
         {"role": item.get("role"), "content": str(item.get("text") or "").strip()}
         for item in history
@@ -234,17 +241,19 @@ def _publish_startup_activity_bootstrap(
             "session.history.loaded", provider_id="codex",
             workspace_id=_workspace_key(state, ws), workspace_path=ws.path,
             session_id=thread_id, source="startup_bootstrap",
+            created_at=history_created_at,
             payload={"turns": history_turns},
             dedupe_key=f"codex:startup-bootstrap:history:{_workspace_key(state, ws)}:{thread_id}",
         ))
-    latest_user = next(
+    latest_user_item = next(
         (
-            str(item.get("text") or "").strip()
+            item
             for item in reversed(history)
             if item.get("role") == "user" and str(item.get("text") or "").strip()
         ),
-        "",
+        {},
     )
+    latest_user = str(latest_user_item.get("text") or "").strip()
     latest_assistant = next(
         (
             item
@@ -268,6 +277,7 @@ def _publish_startup_activity_bootstrap(
                     workspace_path=workspace_path,
                     session_id=thread_id,
                     source="startup_bootstrap",
+                    created_at=_parse_codex_timestamp_ms(latest_user_item.get("timestamp")) / 1000.0,
                     payload={"text": latest_user, "title": title or latest_user},
                     dedupe_key=f"codex:startup-bootstrap:user:{workspace_id}:{thread_id}",
                 )
@@ -283,6 +293,7 @@ def _publish_startup_activity_bootstrap(
                     workspace_path=workspace_path,
                     session_id=thread_id,
                     source="startup_bootstrap",
+                    created_at=history_created_at,
                     payload={"title": title, "preview": title},
                     dedupe_key=f"codex:startup-bootstrap:session:{workspace_id}:{thread_id}",
                 )
@@ -297,6 +308,7 @@ def _publish_startup_activity_bootstrap(
         return published
 
     phase = str(latest_assistant.get("phase") or "").strip()
+    assistant_created_at = _parse_codex_timestamp_ms(latest_assistant.get("timestamp")) / 1000.0
     if phase == "commentary":
         published = bool(
             publish(
@@ -308,6 +320,7 @@ def _publish_startup_activity_bootstrap(
                     session_id=thread_id,
                     turn_id=str(latest_assistant.get("turn_id") or ""),
                     source="startup_bootstrap",
+                    created_at=assistant_created_at,
                     payload={"delta": assistant_text, "title": title},
                     dedupe_key=f"codex:startup-bootstrap:commentary:{workspace_id}:{thread_id}",
                 )
@@ -324,6 +337,7 @@ def _publish_startup_activity_bootstrap(
                     session_id=thread_id,
                     turn_id=str(latest_assistant.get("turn_id") or ""),
                     source="startup_bootstrap",
+                    created_at=assistant_created_at,
                     payload={"text": assistant_text, "status": "completed", "title": title},
                     dedupe_key=f"codex:startup-bootstrap:final:{workspace_id}:{thread_id}",
                 )

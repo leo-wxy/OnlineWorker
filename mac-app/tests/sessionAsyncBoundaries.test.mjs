@@ -41,6 +41,7 @@ for (const fails of [false, true]) {
     const record = (...args) => writes.push(args);
     const handleSend = loadFunction("../src/components/session-browser/GenericProviderChat.tsx", "handleSend", {
       messagesRef: { current: [] }, limitSessionTurns: (value) => value,
+      recovery: null, newSessionRequestRef: { current: null }, sessionIdentityKey, crypto: { randomUUID: () => "sample-request" },
       replyWatchTokenRef: { current: 0 }, scopeGenerationRef,
       countAssistantEntries: () => 0,
       mode: "session", activeSession: { type: "codex", id: "sample-session", workspace: "/tmp/sample-workspace" },
@@ -84,6 +85,34 @@ test("archive A finishing after selecting B preserves B", async () => {
   assert.equal(selected, "session-b");
 });
 
+test("failed input restores explicitly without overwriting a new draft or resending unknown input", () => {
+  const original = { requestId: "sample-request", status: "failed", text: "sample original", attachments: [{ id: "sample-file" }] };
+  for (const [status, draft, expected] of [["failed", "", 2], ["failed", "new draft", 0], ["unknown", "", 0]]) {
+    const writes = [];
+    const restore = loadFunction("../src/components/session-browser/shared.tsx", "handleRestore", {
+      recovery: { ...original, status }, draft, attachments: [], sending: false,
+      setDraft: value => writes.push(value), onAttachmentsChange: value => writes.push(value),
+      textareaRef: { current: null },
+    });
+    restore();
+    assert.equal(writes.length, expected);
+    if (expected) assert.deepEqual(writes, [original.text, original.attachments]);
+  }
+});
+
+test("unknown delivery blocks both composer submit and provider dispatch", async () => {
+  const submit = loadFunction("../src/components/session-browser/shared.tsx", "handleSubmit", {
+    draft: "sample original", attachments: [], sending: false, stagingAttachments: false,
+    disabled: false, recoveryBlocksSend: true,
+    onSend: () => assert.fail("must not send"),
+  });
+  await submit();
+  const send = loadFunction("../src/components/session-browser/GenericProviderChat.tsx", "handleSend", {
+    recovery: { status: "unknown" },
+  });
+  assert.equal(await send("sample original", []), false);
+});
+
 test("attachment staging completion cannot write after scope cleanup", async () => {
   const stage = deferred();
   let cleanup;
@@ -111,4 +140,34 @@ test("attachment staging completion cannot write after scope cleanup", async () 
   stage.resolve([{ id: "sample-attachment" }]);
   await pending;
   assert.equal(writes.length, before);
+});
+
+test("a late recheck cannot select or update a different chat", async () => {
+  const reply = deferred();
+  const writes = [];
+  const generation = { current: 1 };
+  const handler = loadFunction("../src/components/session-browser/GenericProviderChat.tsx", "handleRecheck", {
+    mode: "new-session", rechecking: false, recovery: { requestId: "sample-request" },
+    activeSession: { type: "codex", workspace: "/tmp/sample-workspace" },
+    scopeGenerationRef: generation, recheckProviderSessionSend: () => reply.promise,
+    setRechecking: value => writes.push(value), setRecovery: value => writes.push(value),
+    setError: value => writes.push(value), onNewSessionStarted: value => writes.push(value),
+  });
+  const pending = handler();
+  const before = writes.length;
+  generation.current += 1;
+  reply.resolve({ threadId: "sample-session", recovery: { status: "sent" } });
+  await pending;
+  assert.equal(writes.length, before);
+});
+
+test("stopping UI waiting preserves the request and performs no provider action", () => {
+  const writes = [];
+  const stop = loadFunction("../src/components/session-browser/GenericProviderChat.tsx", "handleStopWaiting", {
+    cancelReplyWatch: () => writes.push("stopped"), setWaitingDismissed: value => writes.push(value),
+    sendProviderSessionMessage: () => assert.fail("must not send"),
+    setRecovery: () => assert.fail("must preserve the recovery record"),
+  });
+  stop();
+  assert.deepEqual(writes, ["stopped", true]);
 });

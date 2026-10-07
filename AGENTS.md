@@ -10,6 +10,22 @@ rules needed to work safely in this codebase.
 - Additional provider packages may be mounted through the public extension
   boundary, but they are outside this repository.
 
+## Execution Pace
+
+- 默认一次完成用户当前指定的阶段或一个可交付段；用户明确要求连续执行时，
+  按授权推进，不自行追加下一阶段、整仓审查或额外优化。
+- 理解实际调用链后采用最小可行修改，不提前展开尚无证据的失败场景，
+  不为显得完整而增加抽象、子代理、过程文档或独立审查。
+- 只做最小相关验证。已有检查通过后，除非出现新改动、新失败、明确风险或
+  项目强制要求，不重复运行或扩大回归；已有结果可直接用于交付。
+- 持续执行时至少每分钟反馈一次实质进展。约五分钟可检查进展，但不是
+  执行截止；进展顺畅就继续，不要求用户重复授权。
+- 检查停顿、重复失败或没有新增证据时，立即定位卡点并收窄处理；无法推进
+  就说明阻塞，不继续扩大检索或推演。用户催问耗时或要求停止时立即回应，
+  停止不必要操作并交还控制权；已停止的应用先完成必要恢复。
+- 安全校验和防止数据损失的处理必须保留。完成已授权段并交付验证结果后
+  结束，不以“更保险”为由继续追加工作。
+
 ## Core Rules
 
 1. Validate packaged-app behavior against an installed `OnlineWorker.app`, not

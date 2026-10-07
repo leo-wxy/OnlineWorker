@@ -23,6 +23,15 @@ def test_pyinstaller_specs_bundle_builtin_provider_manifests() -> None:
         assert "'plugins/providers/builtin/codex/plugin.yaml'" in spec_text, spec_path.name
 
 
+def test_both_architectures_bundle_usage_and_sign_embedded_python_binaries() -> None:
+    for spec_path in SPEC_PATHS:
+        source = spec_path.read_text(encoding="utf-8")
+        assert "'plugins/usage/builtin/ccusage/plugin.yaml'" in source
+        assert "usage_hiddenimports" in source
+        assert "codesign_identity = os.environ.get('APPLE_SIGNING_IDENTITY') or None" in source
+        assert "codesign_identity=None if codesign_identity == '-' else codesign_identity" in source
+
+
 def test_pyinstaller_specs_bundle_codex_account_feature_discovery_entries() -> None:
     required = [
         "'plugins/providers/builtin/codex/icon.svg'",

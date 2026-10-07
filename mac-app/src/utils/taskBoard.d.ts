@@ -22,7 +22,9 @@ export interface TaskBoardSessionActivity {
   attentionReason: string;
   attentionKind: string;
   requestId: string;
+  newSessionRequestId?: string;
   approvalSource: string;
+  questions?: TaskBoardQuestion[];
   mirroredOnly?: boolean;
   canInterrupt?: boolean;
   canRecover?: boolean;
@@ -35,6 +37,17 @@ export interface TaskBoardSessionActivity {
   lastFinalMessage: string;
   lastEventKind: string;
   updatedAt: number;
+}
+
+export interface TaskBoardQuestion {
+  questionId: string;
+  header: string;
+  question: string;
+  options: { label: string; description?: string }[];
+  multiple: boolean;
+  custom: boolean;
+  subIndex: number;
+  subTotal: number;
 }
 
 export interface TaskBoardRecentEvent {
@@ -68,6 +81,7 @@ export interface TaskBoardTask {
   attentionKind: string;
   requestId: string;
   approvalSource: string;
+  questions: TaskBoardQuestion[];
   mirroredOnly: boolean;
   canInterrupt: boolean;
   canRecover: boolean;
@@ -103,6 +117,15 @@ export interface TaskBoardModel {
 }
 
 export function isLowSignalTaskBoardText(value: unknown): boolean;
+
+export function taskBoardStatusKey(task: TaskBoardTask):
+  "statusNeedsAttention" | "statusRunning" | "statusInterrupted" | "statusCompleted" | null;
+
+export function formatTaskBoardRelativeTime(epochMs: number | null, nowMs: number, locale: string): string | null;
+
+export function buildTaskBoardQuestionAnswers(
+  questions: TaskBoardQuestion[], selections: Record<number, number[]>, customAnswers: Record<number, string>,
+): string[][] | null;
 
 export function taskBoardActivityKey(activity: TaskBoardSessionActivity): string;
 

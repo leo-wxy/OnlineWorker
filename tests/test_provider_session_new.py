@@ -53,9 +53,14 @@ async def test_new_session_recovery_reuses_thread_and_never_repeats_uncertain_or
     assert restarted.thread_id == started.thread_id
     assert load_storage(str(path)).workspaces[ws.daemon_workspace_id].threads[started.thread_id].source == "telegram_new_thread"
     adapter.start_thread.assert_awaited_once()
-    send = AsyncMock(return_value=new.SentProviderThreadMessage(started.thread_id, "sample first message"))
-    if failure == "unknown_send":
-        send.side_effect = TimeoutError("sample uncertain response")
+    assert state.message_bus.session_activity("overlay-tool", "sample-session")["newSessionRequestId"] == "sample-request"
+    async def provider_send(*args, **kwargs):
+        started.thread_info.new_session_recovery["send_status"] = "sending"
+        new._checkpoint_new_session(state, ws, started.thread_info)
+        if failure == "unknown_send":
+            raise TimeoutError("sample uncertain response")
+        return new.SentProviderThreadMessage(started.thread_id, "sample first message")
+    send = AsyncMock(side_effect=provider_send)
     monkeypatch.setattr(new, "_send_started_provider_thread_message", send)
     if failure != "topic_pending":
         with pytest.raises((OSError, TimeoutError)):
@@ -70,6 +75,7 @@ async def test_new_session_recovery_reuses_thread_and_never_repeats_uncertain_or
         await new.send_started_provider_thread_message(state, ws, started.thread_info, ws.daemon_workspace_id)
         assert started.thread_info.new_session_recovery["send_status"] == "sent"
     send.assert_awaited_once()
+    assert state.message_bus.session_activity("overlay-tool", "sample-session")["newSessionRequestId"] == "sample-request"
 
 
 @pytest.mark.asyncio

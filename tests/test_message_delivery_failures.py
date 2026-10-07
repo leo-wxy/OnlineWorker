@@ -54,6 +54,7 @@ async def test_new_session_message_accepts_only_after_send_and_reports_failure(f
     state = AppState(storage=AppStorage())
     workspace = WorkspaceInfo(name="sample", path="/tmp/sample-workspace", tool="overlay-tool")
     thread = ThreadInfo(thread_id="sample-thread")
+    workspace.threads[thread.thread_id] = thread
     entered = asyncio.Event()
     release = asyncio.Event()
 
@@ -88,12 +89,13 @@ async def test_new_session_message_accepts_only_after_send_and_reports_failure(f
 
 
 @pytest.mark.asyncio
-async def test_owner_bridge_reports_queued_then_background_send_failure(monkeypatch, tmp_path):
+@pytest.mark.parametrize("reject_prepare", [False, True])
+async def test_owner_bridge_reports_queued_then_background_send_failure(monkeypatch, tmp_path, reject_prepare):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
     adapter = SimpleNamespace(connected=True)
-    provider = SimpleNamespace(message_hooks=SimpleNamespace(
-        ensure_connected=AsyncMock(return_value=adapter), prepare_send=AsyncMock(return_value=True),
+    provider = SimpleNamespace(facts=SimpleNamespace(query_active_thread_ids=lambda _: {"sample-thread"}), message_hooks=SimpleNamespace(
+        ensure_connected=AsyncMock(return_value=adapter), prepare_send=AsyncMock(return_value=not reject_prepare),
         send=AsyncMock(side_effect=RuntimeError("sample rejection")),
     ))
     monkeypatch.setattr("core.provider_owner_bridge.get_provider", lambda *args: provider)
@@ -106,6 +108,12 @@ async def test_owner_bridge_reports_queued_then_background_send_failure(monkeypa
         "workspace_dir": "/tmp/sample-workspace",
     })
     assert result["ok"] is True
+    if reject_prepare:
+        assert result["accepted"] is False
+        assert state.message_bus.session_activity("overlay-tool", "sample-thread")["deliveryStatus"] == "failed"
+        provider.message_hooks.send.assert_not_awaited()
+        assert bridge._handle_prepare_app_update()["ok"]
+        return
     assert [event["kind"] for event in state.message_bus.recent_events()] == [
         "message.user.submitted", "message.user.queued",
     ]
@@ -116,3 +124,4 @@ async def test_owner_bridge_reports_queued_then_background_send_failure(monkeypa
     ]
     assert len({event["payload"]["messageRequestId"] for event in events}) == 1
     assert state.message_bus.session_activity("overlay-tool", "sample-thread")["status"] == "failed"
+    assert bridge._handle_prepare_app_update()["ok"]

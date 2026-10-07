@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import contextlib
 import json
 import logging
@@ -476,6 +477,15 @@ class CodexRemoteMessageProxy:
         return f"{self._connection_seq}"
 
     async def _handle_client(self, client: websockets.ServerConnection) -> None:
+        # ponytail: a connected remote CLI must close before app updates; track individual RPCs only if idle-client updates are needed.
+        try:
+            with self.state.task_admission():
+                await self._handle_admitted_client(client)
+        except RuntimeError:
+            await _close_websocket_safely(client, code=UPSTREAM_UNAVAILABLE_CLOSE_CODE,
+                                          reason="app update in progress")
+
+    async def _handle_admitted_client(self, client: websockets.ServerConnection) -> None:
         connection_id = self._next_connection_id()
         context = _ProxyConnectionContext(
             connection_id=connection_id,
@@ -545,6 +555,16 @@ class CodexRemoteMessageProxy:
             suppress_client_response = False
             outbound = message
             if isinstance(message, str):
+                try:
+                    request = json.loads(message)
+                except (ValueError, TypeError):
+                    request = None
+                if isinstance(request, dict) and request.get("method") in {*CODEX_REMOTE_TEXT_METHODS, "review/start"}:
+                    if getattr(self.state, "app_update_deadline", 0) > time.monotonic():
+                        await client.send(_json_dumps({"id": request.get("id"), "error": {
+                            "code": -32000, "message": "应用正在准备更新，请稍后再发起任务。",
+                        }}))
+                        continue
                 suppress_client_response = self._maybe_mark_cli_approval_response(
                     message,
                     context,

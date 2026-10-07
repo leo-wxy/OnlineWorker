@@ -1,5 +1,6 @@
 # core/state.py
 import asyncio
+from contextlib import contextmanager
 import logging
 from dataclasses import dataclass, field
 import time
@@ -158,6 +159,7 @@ class AppState:
     pending_approvals: dict[int, PendingApproval] = field(default_factory=dict)
     # key: telegram message_id → PendingQuestion
     pending_questions: dict[int, PendingQuestion] = field(default_factory=dict)
+    question_replies_in_flight: set[tuple[str, str, str]] = field(default_factory=set)
     # key: wrapper_id（通常复用触发命令的 telegram message_id）→ PendingCommandWrapper
     pending_command_wrappers: dict[int, PendingCommandWrapper] = field(default_factory=dict)
     # key: question_id → PendingQuestionGroup（多 sub-question 共享）
@@ -179,6 +181,18 @@ class AppState:
     message_bus: MessageEventBus = field(default_factory=MessageEventBus)
     im_event_consumers: dict[str, Any] = field(default_factory=dict)
     new_session_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    app_update_deadline: float = 0.0
+    active_task_dispatches: int = 0
+
+    @contextmanager
+    def task_admission(self):
+        if self.app_update_deadline > time.monotonic():
+            raise RuntimeError("应用正在准备更新，请稍后再发起任务。")
+        self.active_task_dispatches += 1
+        try:
+            yield
+        finally:
+            self.active_task_dispatches -= 1
 
     def set_im_route_store(
         self,

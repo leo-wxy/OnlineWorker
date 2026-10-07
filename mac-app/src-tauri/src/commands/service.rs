@@ -26,6 +26,7 @@ pub struct BotState {
     pub pid: Option<u32>,
     pub auto_restart: bool,
     pub session_auto_start_enabled: bool,
+    pub updating: bool,
     pub last_started_at: Option<SystemTime>,
     pub(crate) generation: u64,
 }
@@ -39,6 +40,7 @@ impl BotState {
             pid: None,
             auto_restart: true,
             session_auto_start_enabled: true,
+            updating: false,
             last_started_at: None,
             generation: 0,
         }
@@ -681,6 +683,9 @@ pub(crate) async fn start_service_internal_at_generation(
 
     let generation = {
         let mut bot = state.lock().await;
+        if bot.updating {
+            return Err("应用正在安装更新，暂时不能启动服务。".into());
+        }
         if bot.starting {
             return Ok("Start already in progress".to_string());
         }

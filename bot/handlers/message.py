@@ -32,8 +32,8 @@ from core.user_messages.contracts import UserMessageSendRequest
 from core.user_messages.gateway import prepare_user_message_text
 from core.messages.publishing import (
     publish_approval_answered,
-    publish_question_answered,
     publish_user_message_accepted,
+    publish_user_message_failed,
     publish_user_message_submitted,
     report_user_message_failure,
 )
@@ -183,7 +183,12 @@ def _resolve_question_runtime(state: AppState, pending_question) -> tuple[str, o
 
 
 async def _reply_pending_question(state: AppState, pending_question, answers: list[list[str]]) -> None:
+    from core.providers.interaction_runtime import require_pending_question, submit_question_reply
+
     tool_name, adapter, reply_question = _resolve_question_runtime(state, pending_question)
+    if tool_name:
+        pending_question.tool_name = tool_name
+    require_pending_question(state, pending_question)
     label = tool_name or "当前 provider"
     if tool_name:
         unavailable = _provider_unavailable_message(state, tool_name)
@@ -195,11 +200,17 @@ async def _reply_pending_question(state: AppState, pending_question, answers: li
     if not callable(reply_question):
         raise RuntimeError(f"{label} 未注册问题回复能力。")
 
-    await reply_question(adapter, pending_question, answers)
-    publish_question_answered(state, pending_question, answers)
+    await submit_question_reply(state, adapter, reply_question, pending_question, answers)
 
 
 async def _dispatch_thread_message(
+    state: AppState, ws_info, thread_info, **kwargs,
+) -> None:
+    with state.task_admission():
+        await _dispatch_admitted_thread_message(state, ws_info, thread_info, **kwargs)
+
+
+async def _dispatch_admitted_thread_message(
     state: AppState,
     ws_info,
     thread_info,
@@ -360,6 +371,8 @@ async def _dispatch_thread_message(
                 await adapter.resume_thread(workspace_id, thread_info.thread_id)
 
             if not should_continue:
+                publish_user_message_failed(state, message_event_request, text=send_text,
+                                            workspace_path=ws_info.path, error="Provider 未接收消息，发送已取消。")
                 return
 
             if preview_value:
@@ -607,65 +620,43 @@ def make_message_handler(state: AppState, group_chat_id: int) -> Callable:
                     a_msg_id, pq = awaiting
                     pq.awaiting_text = False  # 消费掉
 
-                    tool_name, question_adapter, reply_question = _resolve_question_runtime(state, pq)
-                    if question_adapter is None or not getattr(question_adapter, "connected", False):
-                        await _send_to_group(
-                            context.bot, group_chat_id,
-                            f"❌ {(tool_name or '当前 provider')} 未连接，无法回复。",
-                            topic_id=src_topic_id,
-                        )
-                        return
-                    if not callable(reply_question):
-                        await _send_to_group(
-                            context.bot, group_chat_id,
-                            f"❌ {(tool_name or '当前 provider')} 未注册问题回复能力。",
-                            topic_id=src_topic_id,
-                        )
+                    from core.providers.interaction_runtime import require_pending_question
+                    try:
+                        require_pending_question(state, pq)
+                    except LookupError as e:
+                        await _send_to_group(context.bot, group_chat_id,
+                                             f"⚠️ {e}\n本条消息未发送，请作为普通消息重新发送。", topic_id=src_topic_id)
                         return
 
                     answer = [text.strip()]
-                    display = f"✅ 自定义输入：*{text.strip()[:100]}*"
-
-                    # 编辑原 question 消息
+                    pq.answer = answer
+                    if pq.group is not None:
+                        pq.group.answers[pq.sub_index] = answer
+                    complete = pq.group is None or pq.group.all_answered
+                    if complete:
+                        answers = pq.group.collect_answers() if pq.group is not None else [answer]
+                        try:
+                            await _reply_pending_question(state, pq, answers)
+                        except LookupError as e:
+                            await _send_to_group(context.bot, group_chat_id,
+                                                 f"⚠️ {e}\n本条消息未发送，请作为普通消息重新发送。", topic_id=src_topic_id)
+                            return
+                        except Exception as e:
+                            pq.awaiting_text = state.pending_questions.get(a_msg_id) is pq
+                            logger.error(f"回复 question 失败：{e}")
+                            await _send_to_group(context.bot, group_chat_id,
+                                                 f"❌ 回复失败，请重新发送回答：{e}", topic_id=src_topic_id)
+                            return
+                    else:
+                        state.pending_questions.pop(a_msg_id, None)
                     try:
                         await context.bot.edit_message_text(
-                            chat_id=group_chat_id,
-                            message_id=a_msg_id,
-                            text=f"{display}\n\n问题：{pq.header or pq.question_text[:100]}",
+                            chat_id=group_chat_id, message_id=a_msg_id,
+                            text=f"✅ 自定义输入：*{text.strip()[:100]}*\n\n问题：{pq.header or pq.question_text[:100]}",
                             parse_mode="Markdown",
                         )
                     except Exception as e:
                         logger.debug(f"[custom_input] edit 消息失败: {e}")
-
-                    # 提交答案
-                    pq.answer = answer
-                    if pq.group is not None:
-                        pq.group.answers[pq.sub_index] = answer
-                        state.pending_questions.pop(a_msg_id, None)
-
-                        if pq.group.all_answered:
-                            all_answers = pq.group.collect_answers()
-                            try:
-                                await _reply_pending_question(state, pq, all_answers)
-                                logger.info(f"[question] custom input 完成，全部 sub 已提交 question={pq.group.question_id}")
-                            except Exception as e:
-                                logger.error(f"回复 question group 失败：{e}")
-                            state.pending_question_groups.pop(pq.group.question_id, None)
-                        else:
-                            remaining = pq.group.total - len(pq.group.answers)
-                            logger.info(f"[question] custom input sub {pq.sub_index + 1}/{pq.group.total}，剩余 {remaining}")
-                    else:
-                        state.pending_questions.pop(a_msg_id, None)
-                        try:
-                            await _reply_pending_question(state, pq, [answer])
-                            logger.info(f"[question] 自定义输入已提交 question={pq.question_id} answer={text.strip()[:50]}")
-                        except Exception as e:
-                            logger.error(f"回复 question 失败：{e}")
-                            await _send_to_group(
-                                context.bot, group_chat_id,
-                                f"❌ 回复失败：{e}",
-                                topic_id=src_topic_id,
-                            )
                     return
 
                 awaiting_wrapper = state.find_awaiting_text_command_wrapper(src_topic_id)
@@ -763,65 +754,30 @@ def make_callback_handler(state: AppState, group_chat_id: int) -> Callable:
         如果是多 sub-question group，等所有都回答完再一次性调用 reply_question。
         单独的 question（无 group）直接提交。
         """
-        from core.state import PendingQuestionGroup
-
         pq.answer = answer
-
         if pq.group is not None:
-            # 多 sub-question：记录答案到 group
-            group: PendingQuestionGroup = pq.group
-            group.answers[pq.sub_index] = answer
-
-            # 更新此 sub-question 的消息显示
+            pq.group.answers[pq.sub_index] = answer
+        complete = pq.group is None or pq.group.all_answered
+        if complete:
+            answers = pq.group.collect_answers() if pq.group is not None else [answer]
             try:
-                await query.edit_message_text(  # type: ignore[union-attr]
-                    f"{display}\n\n问题：{pq.header or pq.question_text[:100]}",
-                    parse_mode="Markdown",
-                )
-            except Exception as e:
-                logger.debug(f"[question] edit sub msg 失败: {e}")
-
-            # 从 pending 移除此 sub
-            state.pending_questions.pop(msg_id, None)
-
-            if not group.all_answered:
-                # 还有未回答的 sub-question
-                remaining = group.total - len(group.answers)
-                logger.info(
-                    f"[question] sub {pq.sub_index + 1}/{group.total} 已回答，"
-                    f"剩余 {remaining} 个"
-                )
+                await _reply_pending_question(state, pq, answers)
+            except LookupError as e:
+                await query.edit_message_text(f"⚠️ {e}")
                 return
-
-            # 全部回答完毕，合并提交
-            all_answers = group.collect_answers()
-            try:
-                await _reply_pending_question(state, pq, all_answers)
-                logger.info(
-                    f"[question] 全部 {group.total} 个 sub-question 已回答，"
-                    f"已提交 question={group.question_id}"
-                )
-            except Exception as e:
-                logger.error(f"回复 question group 失败：{e}")
-
-            # 清理 group
-            state.pending_question_groups.pop(group.question_id, None)
-        else:
-            # 单独 question，直接提交
-            state.pending_questions.pop(msg_id, None)
-            try:
-                await _reply_pending_question(state, pq, [answer])
-                await query.edit_message_text(  # type: ignore[union-attr]
-                    f"{display}\n\n问题：{pq.header or pq.question_text[:100]}",
-                    parse_mode="Markdown",
-                )
-                logger.info(
-                    f"[question] 已回复 question={pq.question_id} "
-                    f"answer={answer}"
-                )
             except Exception as e:
                 logger.error(f"回复 question 失败：{e}")
-                await query.edit_message_text(f"❌ 回复失败：{e}")  # type: ignore[union-attr]
+                await _safe_answer_callback(query, context="question-reply-failed",
+                                            text=f"回复失败，可重试：{e}"[:200], show_alert=True)
+                return
+        else:
+            state.pending_questions.pop(msg_id, None)
+        try:
+            await query.edit_message_text(
+                f"{display}\n\n问题：{pq.header or pq.question_text[:100]}", parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.debug(f"[question] edit 消息失败: {e}")
 
     async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -923,6 +879,10 @@ def make_callback_handler(state: AppState, group_chat_id: int) -> Callable:
             act, msg_id, cb_ts, option_idx, expired = parse_question_callback(data)
 
             if expired:
+                pending = state.pending_questions.get(msg_id)
+                if pending is not None:
+                    from core.providers.interaction_runtime import discard_question
+                    discard_question(state, pending)
                 try:
                     await query.edit_message_reply_markup(reply_markup=None)  # type: ignore[union-attr]
                 except Exception as e:
@@ -938,6 +898,13 @@ def make_callback_handler(state: AppState, group_chat_id: int) -> Callable:
             pq = state.pending_questions.get(msg_id)
             if pq is None:
                 await query.edit_message_text("⚠️ 此提问已失效或已回答。")  # type: ignore[union-attr]
+                return
+
+            from core.providers.interaction_runtime import require_pending_question
+            try:
+                require_pending_question(state, pq)
+            except LookupError as e:
+                await query.edit_message_text(f"⚠️ {e}")
                 return
 
             tool_name, question_adapter, reply_question = _resolve_question_runtime(state, pq)

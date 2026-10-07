@@ -938,6 +938,24 @@ def test_bus_conversation_keeps_each_item_and_folds_incremental_chunks():
     assert activity["lastAssistantMessage"] == "Done"
 
 
+def test_history_reload_does_not_advance_activity_time_but_new_events_do():
+    bus = MessageEventBus()
+    def publish(kind, created_at, payload):
+        bus.publish(create_message_event(kind, provider_id="codex", session_id="sample-session",
+                                         created_at=created_at, payload=payload))
+
+    publish("session.history.loaded", 100, {"turns": [{"role": "user", "content": "old question"}]})
+    assert bus.session_activity("codex", "sample-session")["updatedAt"] == 0
+    publish("message.assistant.final", 20, {"text": "old answer"})
+    publish("session.history.loaded", 200, {"turns": [{"role": "user", "content": "old question"}]})
+    activity = bus.session_activity("codex", "sample-session")
+    assert activity["updatedAt"] == 20
+    assert activity["status"] == "completed"
+    assert activity["lastFinalMessage"] == "old answer"
+    publish("turn.started", 300, {})
+    assert bus.session_activity("codex", "sample-session")["updatedAt"] == 300
+
+
 def test_bus_conversation_keeps_six_messages_and_does_not_reapply_stale_history():
     bus = MessageEventBus()
     def publish(kind, payload):

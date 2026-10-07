@@ -7,6 +7,7 @@ import type {
   UsageSourceCatalogEntry,
   UsageSourceSummary,
   SessionTurn,
+  SessionSendRecovery,
 } from "../../types";
 import { limitSessionTurns } from "./shared";
 
@@ -103,6 +104,7 @@ function normalizeProviderSessionSendResult(
         ? payload.createdNewThread
         : undefined,
     pending: typeof payload.pending === "boolean" ? payload.pending : undefined,
+    recovery: payload.recovery as SessionSendRecovery | null | undefined,
     session: payload.session ?? null,
   };
 }
@@ -113,6 +115,7 @@ export async function sendProviderSessionMessage(
   text: string,
   attachments: ComposerAttachment[] = [],
   workspaceDir?: string | null,
+  requestId?: string,
 ): Promise<ProviderSessionSendResult> {
   const result = await invoke<Record<string, unknown> | null>("send_provider_session_message", {
     providerId,
@@ -120,6 +123,7 @@ export async function sendProviderSessionMessage(
     text,
     attachments,
     workspaceDir: workspaceDir ?? null,
+    requestId: requestId ?? null,
   });
   return normalizeProviderSessionSendResult(result);
 }
@@ -137,6 +141,18 @@ export async function startProviderSessionMessage(
     text,
     attachments,
     requestId: requestId ?? null,
+  });
+  return normalizeProviderSessionSendResult(result);
+}
+
+export async function recheckProviderSessionSend(
+  providerId: string,
+  workspaceDir: string,
+  requestId?: string,
+  sessionId?: string,
+): Promise<ProviderSessionSendResult> {
+  const result = await invoke<Record<string, unknown>>("recheck_provider_session_send", {
+    providerId, workspaceDir, requestId: requestId ?? null, sessionId: sessionId ?? null,
   });
   return normalizeProviderSessionSendResult(result);
 }

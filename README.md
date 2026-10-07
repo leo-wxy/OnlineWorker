@@ -114,23 +114,17 @@ the main control surface.
 ### Requirements
 
 - macOS
-- Node.js 20
-- Python 3.13
-- Rust toolchain for the Tauri backend
 - `codex` CLI for Codex-backed workflows
 - `claude` CLI for Claude-backed workflows
 
 ### Quick Start
 
-1. Build the DMG locally or download a packaged DMG.
+Installing a packaged DMG does not require Python or Rust. Node.js is needed when installing provider CLIs through npm. See the [build guide](deploy/BUILD.md) for source build dependencies.
+
+1. Download the matching DMG from the [official Release](https://github.com/leo-wxy/OnlineWorker/releases/latest): `aarch64` for Apple Silicon, `x64` for Intel.
 2. Open the DMG and drag `OnlineWorker.app` into `/Applications`.
-3. If macOS blocks the app on first launch, remove the quarantine attribute:
-
-```bash
-xattr -cr /Applications/OnlineWorker.app
-```
-
-4. Launch `OnlineWorker.app`.
+3. Launch `OnlineWorker.app`. Development builds without Developer ID signing and notarization may require manual approval through [Apple's system settings flow](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
+4. Use Setup → Maintenance → App updates to check, download, then explicitly install and restart. Downloads are signature-verified. Finish tasks and close connected remote CLIs before installing. Official downloads remain available for manual DMG installation. User data is stored separately in Application Support.
 
 ### Initial Setup
 
@@ -293,7 +287,7 @@ bash scripts/build.sh
 
 This build path packages the base app from this repository. Additional provider packages can be mounted at runtime through `ONLINEWORKER_PROVIDER_OVERLAY`, notification packages can be mounted through `ONLINEWORKER_NOTIFICATION_OVERLAY`, and provider packages can be staged at build time through `ONLINEWORKER_PLUGIN_SOURCE_DIRS` before calling the same `scripts/build.sh`.
 
-Pushing a version tag such as `1.2.1` also builds this same Apple Silicon DMG automatically through `.github/workflows/release-dmg.yml`. The workflow uploads the DMG as a workflow artifact, creates the matching GitHub Release if needed, and then attaches the DMG to that Release asset list.
+Local builds without an updater signing key produce the App and DMG without signed updater artifacts. Pushing a version tag such as `1.2.1` builds both macOS architectures through `.github/workflows/release-dmg.yml`; release publishing requires the updater signing key matching the app's public key. The workflow publishes both DMGs, signed updater archives, and `latest.json`. See the [build guide](deploy/BUILD.md) for signing setup and verification limits.
 
 After a local DMG is already built, this helper installs it into
 `/Applications`, restarts the packaged app, and verifies that both app and bot

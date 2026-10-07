@@ -1236,6 +1236,7 @@ async def test_provider_owner_bridge_uses_registry_message_hooks(monkeypatch, tm
     monkeypatch.setattr(
         "core.provider_owner_bridge.get_provider",
         lambda name, *args, **kwargs: SimpleNamespace(
+            facts=SimpleNamespace(query_active_thread_ids=lambda _: {"tid-1"}),
             message_hooks=SimpleNamespace(
                 ensure_connected=ensure_connected,
                 prepare_send=prepare_send,
@@ -1767,6 +1768,7 @@ async def test_provider_owner_bridge_keeps_text_before_registry_message_hooks_wh
     monkeypatch.setattr(
         "core.provider_owner_bridge.get_provider",
         lambda name, *args, **kwargs: SimpleNamespace(
+            facts=SimpleNamespace(query_active_thread_ids=lambda _: {"tid-1"}),
             message_hooks=SimpleNamespace(
                 ensure_connected=AsyncMock(return_value=state.get_adapter(name)),
                 prepare_send=prepare_send,
@@ -2005,6 +2007,7 @@ async def test_provider_owner_bridge_persists_new_workspace_for_event_routing(mo
     monkeypatch.setattr(
         "core.provider_owner_bridge.get_provider",
         lambda name, *args, **kwargs: SimpleNamespace(
+            facts=SimpleNamespace(query_active_thread_ids=lambda _: {"tid-new"}),
             message_hooks=SimpleNamespace(
                 ensure_connected=AsyncMock(return_value=state.get_adapter(name)),
                 prepare_send=AsyncMock(return_value=True),
@@ -2052,6 +2055,7 @@ async def test_provider_owner_bridge_returns_send_error(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "core.provider_owner_bridge.get_provider",
         lambda name, *args, **kwargs: SimpleNamespace(
+            facts=SimpleNamespace(query_active_thread_ids=lambda _: {"tid-new"}),
             message_hooks=SimpleNamespace(
                 ensure_connected=AsyncMock(return_value=state.get_adapter(name)),
                 prepare_send=AsyncMock(return_value=True),
@@ -2107,6 +2111,7 @@ async def test_provider_owner_bridge_accepts_send_before_slow_send_completes(mon
     monkeypatch.setattr(
         "core.provider_owner_bridge.get_provider",
         lambda name, *args, **kwargs: SimpleNamespace(
+            facts=SimpleNamespace(query_active_thread_ids=lambda _: {"tid-new"}),
             message_hooks=SimpleNamespace(
                 ensure_connected=AsyncMock(return_value=state.get_adapter(name)),
                 prepare_send=AsyncMock(return_value=True),
@@ -2280,7 +2285,7 @@ async def test_provider_owner_bridge_returns_and_persists_remapped_thread(monkey
 
 
 @pytest.mark.asyncio
-async def test_provider_owner_bridge_prefers_existing_workspace_thread_binding(monkeypatch, tmp_path):
+async def test_provider_owner_bridge_rejects_existing_binding_workspace_mismatch(monkeypatch, tmp_path):
     from core.provider_owner_bridge import ProviderOwnerBridge
 
     class _FakeAdapter:
@@ -2327,12 +2332,10 @@ async def test_provider_owner_bridge_prefers_existing_workspace_thread_binding(m
         }
     )
 
-    assert response["ok"] is True
-    assert response["workspace_id"] == "ws-1"
-    if bridge._pending_send_tasks:
-        await asyncio.gather(*tuple(bridge._pending_send_tasks), return_exceptions=True)
-    assert send.await_args.args[2] is ws
-    assert send.await_args.args[3] is ws.threads["tid-1"]
+    assert response["ok"] is False
+    assert "绑定已变化" in response["error"]
+    assert not bridge._pending_send_tasks
+    send.assert_not_awaited()
 
 
 @pytest.mark.asyncio

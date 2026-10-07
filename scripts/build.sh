@@ -139,6 +139,36 @@ if [ -z "$TARGET_TRIPLE" ]; then
 	echo "ERROR: Could not detect target triple from rustc"
 	exit 1
 fi
+TAURI_BUILD_ARGS=(build)
+if [ -n "${ONLINEWORKER_TARGET_TRIPLE:-}" ]; then
+	TAURI_BUILD_ARGS+=(--target "$TARGET_TRIPLE")
+	BUNDLE_ROOT="$PROJECT_ROOT/mac-app/src-tauri/target/$TARGET_TRIPLE/release/bundle"
+fi
+case "$TARGET_TRIPLE" in
+	aarch64-apple-darwin)
+		PYINSTALLER_SPEC="onlineworker.spec"
+		EXPECTED_ARCH="arm64"
+		PYTHON_EXECUTABLE="${PYTHON_EXECUTABLE:-${PYTHON_ARM64:-$HOME/.pyenv/versions/3.13.1/bin/python3}}"
+		;;
+	x86_64-apple-darwin)
+		PYINSTALLER_SPEC="onlineworker-x86_64.spec"
+		EXPECTED_ARCH="x86_64"
+		PYTHON_EXECUTABLE="${PYTHON_EXECUTABLE:-${PYTHON_X86_64:-/usr/local/bin/python3.13}}"
+		;;
+	*) echo "ERROR: unsupported target: $TARGET_TRIPLE" >&2; exit 1 ;;
+esac
+PYTHON_CMD=("$PYTHON_EXECUTABLE")
+if [ "$EXPECTED_ARCH" = "x86_64" ] && [ "$(uname -m)" = "arm64" ]; then
+	PYTHON_CMD=(arch -x86_64 "$PYTHON_EXECUTABLE")
+fi
+if [ ! -x "$PYTHON_EXECUTABLE" ]; then
+	echo "ERROR: Python executable not found: $PYTHON_EXECUTABLE" >&2
+	exit 1
+fi
+if [ "$("${PYTHON_CMD[@]}" -c 'import platform; print(platform.machine())')" != "$EXPECTED_ARCH" ]; then
+	echo "ERROR: Python architecture must match $EXPECTED_ARCH" >&2
+	exit 1
+fi
 
 echo "=== Build OnlineWorker ==="
 echo "Project: $PROJECT_ROOT"
@@ -150,20 +180,24 @@ echo "=== Sync app version ==="
 python3 "$PROJECT_ROOT/scripts/sync-app-version.py" --root "$PROJECT_ROOT"
 echo ""
 
-cleanup_previous_bundle_outputs
-
-# Configure arm64 Python for PyInstaller
-PYTHON_ARM64="${PYTHON_ARM64:-$HOME/.pyenv/versions/3.13.1/bin/python3}"
-if [ ! -f "$PYTHON_ARM64" ]; then
-	echo "ERROR: arm64 Python not found at $PYTHON_ARM64"
-	exit 1
+# The private key stays outside tracked files and is never included in the bundle.
+if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+	LOCAL_UPDATER_KEY="$PROJECT_ROOT/.onlineworker-local/updater/onlineworker.key"
+	if [ -f "$LOCAL_UPDATER_KEY" ]; then
+		export TAURI_SIGNING_PRIVATE_KEY="$LOCAL_UPDATER_KEY"
+	else
+		echo "No updater signing key: building the App and DMG without updater artifacts"
+		TAURI_BUILD_ARGS+=(--config '{"bundle":{"createUpdaterArtifacts":false}}')
+	fi
 fi
-PYINSTALLER_CMD="$PYTHON_ARM64 -m PyInstaller"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
+
+cleanup_previous_bundle_outputs
 
 # Step 1: Build Python bot binary
 echo "=== Step 1/4: PyInstaller build ==="
 cd "$PROJECT_ROOT"
-$PYINSTALLER_CMD onlineworker.spec --clean --noconfirm
+"${PYTHON_CMD[@]}" -m PyInstaller "$PYINSTALLER_SPEC" --clean --noconfirm
 echo "Binary: $(ls -lh dist/onlineworker-bot)"
 echo ""
 
@@ -208,13 +242,13 @@ if [ ! -x "$PROJECT_ROOT/mac-app/node_modules/.bin/tauri" ]; then
 	npm install --no-package-lock
 	echo ""
 fi
-npm run tauri -- build
+npm run tauri -- "${TAURI_BUILD_ARGS[@]}"
 
 echo ""
 echo "=== Build Complete ==="
-DMG_PATH=$(ls "$PROJECT_ROOT/mac-app/src-tauri/target/release/bundle/dmg/"*.dmg 2>/dev/null || echo "")
+DMG_PATH=$(ls "$BUNDLE_ROOT/dmg/"*.dmg 2>/dev/null || echo "")
 if [ -n "$DMG_PATH" ]; then
 	echo "DMG: $DMG_PATH"
 else
-	echo "DMG: check mac-app/src-tauri/target/release/bundle/dmg/"
+	echo "DMG: check $BUNDLE_ROOT/dmg/"
 fi

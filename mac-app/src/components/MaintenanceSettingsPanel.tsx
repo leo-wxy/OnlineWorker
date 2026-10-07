@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { appUpdateBusy, appUpdateProgress, mergeAppUpdateStatus, type AppUpdateInfo } from "../utils/appUpdate.js";
 import { useI18n } from "../i18n";
 
 interface AttachmentCachePathStats {
@@ -65,6 +67,55 @@ export function MaintenanceSettingsPanel() {
   const { t } = useI18n();
   const setup = t.setup;
   const common = t.common;
+  const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
+  const [updateOperation, setUpdateOperation] = useState<string | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const updateBusy = Boolean(updateOperation) || appUpdateBusy(updateInfo);
+  const updateProgress = appUpdateProgress(updateInfo);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      try {
+        const stop = await listen<AppUpdateInfo>("app-update-status", event => {
+          if (!disposed) setUpdateInfo(current => mergeAppUpdateStatus(current, event.payload));
+        });
+        if (disposed) { stop(); return; }
+        unlisten = stop;
+        const info = await invoke<AppUpdateInfo>("get_app_update_status");
+        if (!disposed) setUpdateInfo(current => mergeAppUpdateStatus(current, info));
+      } catch (error) {
+        if (!disposed) setUpdateError(String(error));
+      }
+    })();
+    return () => { disposed = true; unlisten?.(); };
+  }, []);
+
+  const runUpdate = async (command: "check_app_update" | "download_app_update" | "install_app_update") => {
+    setUpdateOperation(command);
+    setUpdateError(null);
+    try {
+      const result = await invoke<AppUpdateInfo | null>(command);
+      if (result) setUpdateInfo(current => mergeAppUpdateStatus(current, result));
+    } catch (error) {
+      setUpdateError(String(error));
+      try {
+        const info = await invoke<AppUpdateInfo>("get_app_update_status");
+        setUpdateInfo(current => mergeAppUpdateStatus(current, info));
+      } catch { /* Keep the last known update state. */ }
+    } finally {
+      setUpdateOperation(null);
+    }
+  };
+
+  const openReleasePage = async () => {
+    try {
+      await invoke("open_app_release_page");
+    } catch (error) {
+      setUpdateError(String(error));
+    }
+  };
 
   const [attachmentCache, setAttachmentCache] = useState<AttachmentCacheStats | null>(null);
   const [cacheLoading, setCacheLoading] = useState(false);
@@ -205,6 +256,39 @@ export function MaintenanceSettingsPanel() {
           {setup.maintenanceDescription}
         </p>
       </div>
+
+      <section className="rounded-lg border border-[var(--ow-line)] bg-[var(--ow-panel)] p-6" aria-labelledby="app-update-title">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h3 id="app-update-title" className="text-base font-bold text-[var(--ow-text)]">{setup.appUpdateTitle}</h3>
+            <p className="mt-2 text-sm text-[var(--ow-muted)]">{setup.currentAppVersion(updateInfo?.currentVersion ?? common.unknown)}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => void runUpdate("check_app_update")} disabled={updateBusy} className="ow-btn h-9 rounded-lg px-4 text-sm font-semibold text-[var(--ow-text)] disabled:opacity-50">
+              {updateOperation === "check_app_update" || updateInfo?.phase === "checking" ? setup.checkingAppUpdate : setup.checkAppUpdate}
+            </button>
+            {updateInfo?.updateAvailable ? <button type="button" disabled={updateBusy}
+              onClick={() => void runUpdate(updateInfo.phase === "ready" ? "install_app_update" : "download_app_update")}
+              className="ow-btn-primary h-9 rounded-lg px-4 text-sm font-semibold disabled:opacity-50">
+              {updateInfo.phase === "installing" || updateOperation === "install_app_update" ? setup.installingAppUpdate
+                : updateInfo.phase === "downloading" || updateOperation === "download_app_update" ? setup.downloadingAppUpdate
+                : updateInfo.phase === "ready" ? setup.installAppUpdate : setup.downloadAppUpdate}
+            </button> : null}
+            <button type="button" onClick={() => void openReleasePage()} className="ow-btn-primary h-9 rounded-lg px-4 text-sm font-semibold">{setup.openAppReleasePage}</button>
+          </div>
+        </div>
+        <div aria-live="polite">
+          {updateInfo?.updateAvailable ? <p className="mt-3 text-sm text-[var(--ow-text)]">{setup.appUpdateAvailable(updateInfo.latestVersion)}</p>
+            : updateInfo?.phase === "current" && !updateError ? <p className="mt-3 text-sm text-[var(--ow-text)]">{setup.appUpToDate}</p> : null}
+          {updateInfo?.phase === "downloading" ? <div className="mt-3 text-sm text-[var(--ow-muted)]">
+            <progress className="w-full" max={100} value={updateProgress ?? undefined} aria-label={setup.downloadingAppUpdate} />
+            <p>{updateProgress === null ? formatBytes(updateInfo.downloadedBytes) : `${updateProgress}%`}</p>
+          </div> : null}
+          {updateInfo?.phase === "ready" ? <p className="mt-3 text-sm text-[var(--ow-muted)]">{setup.appUpdateReady}</p> : null}
+          {updateInfo?.notes ? <details className="mt-3 text-sm text-[var(--ow-muted)]"><summary className="cursor-pointer">{setup.appUpdateNotes}</summary><p className="mt-2 whitespace-pre-wrap break-words">{updateInfo.notes}</p></details> : null}
+          {updateError ? <p role="alert" className="mt-3 text-sm text-[var(--ow-error-text)]">{setup.appUpdateError(updateError)}</p> : null}
+        </div>
+      </section>
 
       <div className="ow-page-frame rounded-[26px] p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">

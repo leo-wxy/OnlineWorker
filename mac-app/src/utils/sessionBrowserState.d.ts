@@ -1,6 +1,11 @@
 import type { UnifiedSession } from "../components/session-browser/presentation";
 import type { TaskBoardSessionActivity } from "./taskBoard";
 
+export function activityMatchesPendingNewSession(
+  activity: TaskBoardSessionActivity,
+  composer: { providerId: string; workspace: string; pendingRequestId?: string },
+): boolean;
+
 export function formatSessionPreviewText(value: unknown): string;
 
 export function sessionPreviewFromRaw(raw?: Record<string, unknown> | null): string | null;

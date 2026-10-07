@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -932,7 +933,8 @@ async def test_sync_watched_thread_once_ignores_reasoning_items_with_null_conten
 
 
 @pytest.mark.asyncio
-async def test_shared_live_imported_thread_bootstraps_bus_activity_without_live_event(tmp_path):
+@pytest.mark.parametrize("source", ["imported", "unknown"])
+async def test_shared_live_imported_thread_bootstraps_bus_activity_without_live_event(tmp_path, source):
     from plugins.providers.builtin.codex.python.tui_realtime_mirror import sync_codex_tui_realtime_once
 
     state, ws, session_file, sessions_dir = _make_state(tmp_path)
@@ -943,7 +945,7 @@ async def test_shared_live_imported_thread_bootstraps_bus_activity_without_live_
     imported_thread = ws.threads.pop("tid-1")
     imported_thread.thread_id = "tid-imported"
     imported_thread.preview = "继续查 codex 通知"
-    imported_thread.source = "imported"
+    imported_thread.source = source
     imported_thread.is_active = True
     imported_thread.topic_id = None
     ws.topic_id = None
@@ -977,13 +979,14 @@ async def test_shared_live_imported_thread_bootstraps_bus_activity_without_live_
     )
 
     runtime = codex_state.get_runtime(state)
-    assert "tid-imported" in runtime.watched_threads
+    assert ("tid-imported" in runtime.watched_threads) is (source == "imported")
     activity = state.message_bus.session_activity("codex", "tid-imported")
     assert activity is not None
     assert activity["status"] == "completed"
     assert activity["title"] == "继续查 codex 通知"
     assert activity["lastUserMessage"] == "继续查 codex 通知"
     assert activity["lastFinalMessage"] == "已经定位到 shared-live 启动后缺少 session activity 恢复。"
+    assert activity["updatedAt"] == datetime.fromisoformat("2026-04-06T10:00:05+00:00").timestamp()
     handler.assert_not_awaited()
 
 

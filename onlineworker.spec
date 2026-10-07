@@ -3,11 +3,12 @@
 # Run: pyinstaller onlineworker.spec --clean --noconfirm
 # Output: dist/onlineworker-bot (single macOS binary)
 
-import platform
+import os
 
 from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
+codesign_identity = os.environ.get('APPLE_SIGNING_IDENTITY') or None
 
 provider_hiddenimports = (
     collect_submodules('plugins.providers.builtin.claude.python')
@@ -70,4 +71,5 @@ exe = EXE(
     upx=False,    # UPX not used on macOS
     console=True,  # stdout/stderr for Tauri sidecar to capture
     target_arch='arm64',  # Apple Silicon
+    codesign_identity=None if codesign_identity == '-' else codesign_identity,
 )

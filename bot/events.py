@@ -31,6 +31,7 @@ from core.messages.session_bridge import message_event_from_session_event
 from core.providers.session_events import SessionEvent, normalize_session_event
 from core.providers.topic_policy import provider_allows_unbound_thread_topic_materialization
 from core.providers.registry import get_provider, list_providers
+from core.providers.interaction_runtime import question_is_pending
 from core.providers.interactions import (
     ProviderApprovalRequest as ApprovalInfo,
     ProviderQuestionRequest,
@@ -383,6 +384,16 @@ def _repair_local_archived_thread_if_active(
     return repaired
 
 
+def _provider_session_event_allowed(state, provider_id, thread_id, *, allow_reactivation=False):
+    found = state.find_thread_by_id_global(thread_id) if thread_id else None
+    if not found or found[0].tool != provider_id:
+        return True
+    workspace, thread = found
+    if thread.archived and allow_reactivation:
+        _repair_local_archived_thread_if_active(state, workspace, thread)
+    return not thread.archived
+
+
 async def send_approval_to_telegram(
     state: AppState,
     bot: Bot,
@@ -478,6 +489,10 @@ def _question_text(info: ProviderQuestionRequest) -> str:
     return "\n".join(lines)
 
 
+def _question_is_pending(state: AppState, info: ProviderQuestionRequest) -> bool:
+    return question_is_pending(state, info.tool_type, info.thread_id or "", info.question_id)
+
+
 async def send_question_to_telegram(
     state: AppState,
     bot: Bot,
@@ -487,6 +502,8 @@ async def send_question_to_telegram(
     info: ProviderQuestionRequest,
 ) -> None:
     """Shared question UI: send prompt, record PendingQuestion, attach keyboard."""
+    if topic_id is None or not _question_is_pending(state, info):
+        return
     try:
         sent = await _send_to_group(bot, group_chat_id, _question_text(info), topic_id=topic_id)
         if sent is None:
@@ -494,6 +511,10 @@ async def send_question_to_telegram(
             return
 
         msg_id = sent.message_id
+        if not _question_is_pending(state, info):
+            await bot.edit_message_text(chat_id=group_chat_id, message_id=msg_id,
+                                        text="此问题已在其他入口处理或已失效。")
+            return
         group: PendingQuestionGroup | None = None
         if info.sub_total > 1:
             if info.question_id not in state.pending_question_groups:
@@ -532,6 +553,12 @@ async def send_question_to_telegram(
             message_id=msg_id,
             reply_markup=keyboard,
         )
+        if not _question_is_pending(state, info):
+            state.pending_questions.pop(msg_id, None)
+            if group is not None:
+                state.pending_question_groups.pop(info.question_id, None)
+            await bot.edit_message_reply_markup(chat_id=group_chat_id, message_id=msg_id, reply_markup=None)
+            return
         logger.info(
             "[question] 已推送 tool=%s question=%s request=%s sub=%s/%s msg_id=%s "
             "options=%s multiple=%s custom=%s",
@@ -2290,6 +2317,11 @@ def make_event_handler(state: AppState, bot: Bot, group_chat_id: int, notificati
     scope = object()
 
     def update_local(ctx):
+        if not _provider_session_event_allowed(
+            state, ctx.event.provider, ctx.thread_id,
+            allow_reactivation=ctx.event.kind in {"turn_started", "session_created"},
+        ):
+            return False
         if ctx.event.kind == "session_created":
             _handle_session_created(ctx)
         elif ctx.event.kind == "session_title_updated":
@@ -2400,6 +2432,8 @@ def make_server_request_handler(state: AppState, bot: Bot, group_chat_id: int, *
         if not context or context[0] is not scope or consumer.closed:
             return
         topic_id, workspace_id, info = context[1:]
+        if not _provider_session_event_allowed(state, info.tool_type, info.thread_id):
+            return False
         if info.thread_id:
             state.add_provider_interruption(info.tool_type, thread_id=info.thread_id, interruption_id=str(info.request_id))
         if topic_id is not None:

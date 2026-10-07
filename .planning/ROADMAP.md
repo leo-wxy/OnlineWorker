@@ -29,7 +29,7 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [x] **Phase 21: Provider Child-Session Visibility** - Provider-owned visibility now blocks child/internal sessions before EventBus and Topic creation, provider-native titles are shared across Desktop and Telegram, and the installed `v1.8.4` runtime passed real child-suppression verification. The remaining live Telegram visual comparison was explicitly waived at closeout and is not claimed as passed. (completed 2026-08-15)
 - [ ] **Phase 22: Dark Mode Support** - Add consistent dark-theme support across the macOS app while preserving existing light-mode behavior.
 - [x] **Phase 24: Runtime Authority and Durability Hardening** - Completed and archived on 2026-09-05 with eight delivered plans; 24-07 / STAB-07 explicitly deferred and feature UAT retained as unverified. [Archive](phases/24-runtime-authority-and-durability-hardening/24-ARCHIVE.md).
-- [ ] **Phase 25: Session Delivery and Recovery** - 按顺序修复发送重试、写入权威、会话失效、消费积压与新建恢复。
+- [ ] **Phase 25: Session Delivery and Recovery** - 修复发送、状态与流恢复，并补齐用户恢复、桌面问题回答、通知补发、会话搜索、账号生效反馈与发布易用性；独立 owner 控制按条件跟踪。
 
 ## Phase Details
 
@@ -978,12 +978,13 @@ Latest verification:
 
 ### Phase 25: Session Delivery and Recovery
 
-**Goal:** 发送与归档不会因响应不确定而重复执行，旧会话结果不能污染新会话，状态只有一个写入权威，慢 IM 和流积压不阻塞或破坏总线投影，新建失败可恢复已有真实会话。
-**Requirements:** DELIVERY-01–DELIVERY-06
+**Goal:** 保持发送、归档与消息总线的真实状态和单一权威，完成异常后的用户恢复、桌面 question 回答、通知失败补发与日常会话查找，说明账号生效范围并改善发布入口。
+**Requirements:** DELIVERY-01–DELIVERY-12；STAB-07 为条件项，继续保留 deferred。
 **Depends on:** Phase 14, Phase 18, Phase 24
-**Status:** In progress; opened on 2026-09-30 by user instruction.
-**Scope Fence:** 复用现有 registry、owner bridge、MessageEventBus、AppStorage 和原子写入；不新增依赖、不引入离线归档 journal、不重新开启 STAB-07。
+**Status:** In progress; 2026-10-02 复审修复已通过源码检查与 1.11.0 快速安装验证。新建后选中项回退已追加修复，通过 27 项前端检查、TypeScript、再次快速安装及 Codex 真实新建回归：pending、流式回复、最终回复和刷新后均保持新会话选中。后续仅验收 Codex，线上 updater 缺少 manifest，完整功能 UAT 与其余补充功能待完成，详见 25-FOLLOWUP。
+**Scope Fence:** 复用现有 registry、owner bridge、MessageEventBus、AppStorage 和原子写入；不另建消息读取链或新增轮询，不引入离线归档 journal。普通发送与通知可保存最小恢复记录，未知发送不自动重发。STAB-07 不作为其余工作的前置依赖，签名、公证与架构发布需满足各自前提。
 
 - [x] [25-01-PLAN.md](phases/25-session-delivery-and-recovery/25-01-PLAN.md) — 发送边界、会话失效、状态写入权威与发送失败事件
 - [x] [25-02-PLAN.md](phases/25-session-delivery-and-recovery/25-02-PLAN.md) — IM 消费隔离、有界流队列与重连快照（源码与快速打包安装验证通过；功能验收待确认）
 - [x] [25-03-PLAN.md](phases/25-session-delivery-and-recovery/25-03-PLAN.md) — 新建会话分阶段恢复（源码与快速打包安装验证通过；功能 UAT 待确认）
+- [ ] [25-FOLLOWUP.md](phases/25-session-delivery-and-recovery/25-FOLLOWUP.md) — 初轮 6 项和追加 4 项修复已源码验证；其余用户操作、STAB-07 条件跟踪及功能 UAT 待完成

@@ -8,6 +8,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from core.state import AppState, PendingApproval, PendingQuestion, PendingQuestionGroup
+from core.messages.events import create_message_event
 from plugins.providers.builtin.codex.python import runtime_state as codex_state
 from core.storage import AppStorage, WorkspaceInfo, ThreadInfo
 from bot.keyboards import (
@@ -23,6 +24,18 @@ SAMPLE_OPTIONS = [
     {"label": "TypeScript", "description": "Frontend/backend"},
     {"label": "Rust", "description": "Systems programming"},
 ]
+
+
+def register_question(state, message_id, pending):
+    pending.tool_name = pending.tool_name or (
+        pending.workspace_id.partition(":")[0] if ":" in pending.workspace_id
+        else next(iter(state.adapters), "sample-provider")
+    )
+    state.message_bus.publish(create_message_event(
+        "question.requested", provider_id=pending.tool_name, session_id=pending.session_id,
+        payload={"questionId": pending.question_id},
+    ))
+    state.pending_questions[message_id] = pending
 
 
 # ── keyboards tests ──────────────────────────────────────────────────────
@@ -199,7 +212,7 @@ class TestAppStateQuestionHelpers:
             question_text="What?", options=[],
             awaiting_text=True, topic_id=100,
         )
-        state.pending_questions[42] = pq
+        register_question(state, 42, pq)
         result = state.find_awaiting_text_question(100)
         assert result is not None
         assert result[0] == 42
@@ -214,7 +227,7 @@ class TestAppStateQuestionHelpers:
             question_text="What?", options=[],
             awaiting_text=True, topic_id=100,
         )
-        state.pending_questions[42] = pq
+        register_question(state, 42, pq)
         result = state.find_awaiting_text_question(999)
         assert result is None
 
@@ -227,7 +240,7 @@ class TestAppStateQuestionHelpers:
             question_text="What?", options=[],
             awaiting_text=False, topic_id=100,
         )
-        state.pending_questions[42] = pq
+        register_question(state, 42, pq)
         result = state.find_awaiting_text_question(100)
         assert result is None
 
@@ -353,7 +366,7 @@ async def test_q_ans_single_select(state, mock_cm_adapter):
         question_text="Pick one", options=SAMPLE_OPTIONS,
         multiple=False, custom=False, topic_id=100,
     )
-    state.pending_questions[42] = pq
+    register_question(state, 42, pq)
 
     update, query = _make_update_with_query(f"q_ans:42:{ts}:1")
     ctx = MagicMock()
@@ -377,7 +390,7 @@ async def test_q_tog_toggle(state, mock_cm_adapter):
         question_text="Pick many", options=SAMPLE_OPTIONS,
         multiple=True, custom=False, topic_id=100,
     )
-    state.pending_questions[42] = pq
+    register_question(state, 42, pq)
 
     # 第一次点击 index=0 → 选中
     update, query = _make_update_with_query(f"q_tog:42:{ts}:0")
@@ -407,7 +420,7 @@ async def test_q_sub_submit(state, mock_cm_adapter):
         multiple=True, custom=False, topic_id=100,
         selected={0, 2},  # Python, Rust
     )
-    state.pending_questions[42] = pq
+    register_question(state, 42, pq)
 
     update, query = _make_update_with_query(f"q_sub:42:{ts}")
     ctx = MagicMock()
@@ -431,7 +444,7 @@ async def test_q_sub_empty_selection(state, mock_cm_adapter):
         question_text="Pick many", options=SAMPLE_OPTIONS,
         multiple=True, custom=False, topic_id=100,
     )
-    state.pending_questions[42] = pq
+    register_question(state, 42, pq)
 
     update, query = _make_update_with_query(f"q_sub:42:{ts}")
     ctx = MagicMock()
@@ -455,7 +468,7 @@ async def test_q_cus_custom_input(state, mock_cm_adapter):
         question_text="Pick or type", options=SAMPLE_OPTIONS,
         custom=True, topic_id=100,
     )
-    state.pending_questions[42] = pq
+    register_question(state, 42, pq)
 
     update, query = _make_update_with_query(f"q_cus:42:{ts}")
     ctx = MagicMock()
@@ -487,7 +500,7 @@ async def test_awaiting_text_message_intercept(state, mock_cm_adapter):
         question_text="Pick or type", options=SAMPLE_OPTIONS,
         custom=True, awaiting_text=True, topic_id=100,
     )
-    state.pending_questions[42] = pq
+    register_question(state, 42, pq)
 
     # 模拟用户发消息
     update = MagicMock()
@@ -527,7 +540,7 @@ async def test_awaiting_text_ignores_photo_and_prompts_for_text(state, mock_cm_a
         question_text="Pick or type", options=SAMPLE_OPTIONS,
         custom=True, awaiting_text=True, topic_id=100,
     )
-    state.pending_questions[42] = pq
+    register_question(state, 42, pq)
 
     update = MagicMock()
     update.effective_message = MagicMock()
@@ -1020,8 +1033,8 @@ async def test_multi_sub_question_group(state, mock_cm_adapter):
         options=[{"label": "X"}, {"label": "Y"}],
         group=group, sub_index=1, topic_id=100,
     )
-    state.pending_questions[42] = pq0
-    state.pending_questions[43] = pq1
+    register_question(state, 42, pq0)
+    register_question(state, 43, pq1)
 
     handler = make_callback_handler(state, GROUP_CHAT_ID)
 
@@ -1085,7 +1098,7 @@ async def test_awaiting_text_routes_via_provider_question_hook(state, monkeypatc
         awaiting_text=True,
         topic_id=100,
     )
-    state.pending_questions[42] = pq
+    register_question(state, 42, pq)
 
     async def _reply_question(adapter, pending_question, answers):
         await adapter.reply_question(pending_question.question_id, answers)

@@ -45,7 +45,8 @@ def test_build_script_keeps_frontend_dependency_setup_non_interactive():
     assert "pnpm-lock.yaml" in build_script
     assert "pnpm-workspace.yaml" in build_script
     assert "npm install --no-package-lock" in build_script
-    assert "npm run tauri -- build" in build_script
+    assert 'TAURI_BUILD_ARGS=(build)' in build_script
+    assert 'npm run tauri -- "${TAURI_BUILD_ARGS[@]}"' in build_script
     assert "pnpm tauri build" not in build_script
     assert "pnpm install" not in build_script
     assert "PUPPETEER_SKIP_DOWNLOAD" in build_script
@@ -74,6 +75,9 @@ def test_sync_app_version_updates_all_packaging_version_fields(tmp_path):
         json.dumps({"productName": "Fixture", "version": "0.0.1"}, indent=2) + "\n",
         encoding="utf-8",
     )
+    (fixture / "mac-app/src-tauri/Cargo.lock").write_text(
+        'version = 4\n\n[[package]]\nname = "onlineworker-app"\nversion = "0.0.1"\n', encoding="utf-8",
+    )
 
     subprocess.run(
         [
@@ -94,3 +98,11 @@ def test_sync_app_version_updates_all_packaging_version_fields(tmp_path):
     assert json.loads(
         (fixture / "mac-app/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
     )["version"] == "9.8.7"
+    assert 'version = "9.8.7"' in (fixture / "mac-app/src-tauri/Cargo.lock").read_text(encoding="utf-8")
+    checked = subprocess.run(["python3", str(ROOT / "scripts/sync-app-version.py"), "--root", str(fixture),
+                              "--check", "--tag", "v9.8.7"], capture_output=True, text=True)
+    assert checked.returncode == 0, checked.stderr
+    mismatch = subprocess.run(["python3", str(ROOT / "scripts/sync-app-version.py"), "--root", str(fixture),
+                               "--check", "--tag", "9.8.8"], capture_output=True, text=True)
+    assert mismatch.returncode != 0
+    assert "Packaging versions must match" in mismatch.stderr

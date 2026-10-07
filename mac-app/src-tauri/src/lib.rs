@@ -40,7 +40,7 @@ use commands::dashboard::get_dashboard_state;
 use commands::logs::{get_log_file_path, start_log_tail, stop_log_tail};
 use commands::provider_sessions::{
     archive_provider_session, create_provider_session, list_provider_sessions,
-    read_provider_session, send_provider_session_message, stage_session_composer_attachments,
+    read_provider_session, recheck_provider_session_send, send_provider_session_message, stage_session_composer_attachments,
     start_provider_session_event_stream, start_provider_session_message,
     stop_provider_session_event_stream,
 };
@@ -49,15 +49,18 @@ use commands::service::{
     check_cli, service_restart, service_start, service_status, service_stop,
     shutdown_managed_processes_for_app_exit, snapshot_service_status,
     start_service_internal_at_generation, BotState, ServiceStatus,
+    start_service_internal,
 };
 use commands::support_bundle::{
     export_support_bundle, reveal_support_bundle, run_support_diagnostics,
 };
 use commands::task_board_state::{
     control_task_board_session, get_task_board_session_activities, get_task_board_state,
-    pin_task_board_session, reply_task_board_approval, start_task_board_activity_stream,
+    pin_task_board_session, reply_task_board_approval, reply_task_board_question, start_task_board_activity_stream,
     stop_task_board_activity_stream, unpin_task_board_session,
 };
+use commands::app_update::{check_app_update, download_app_update, get_app_update_status,
+    install_app_update, open_app_release_page, AppUpdateState};
 use commands::telegram::{test_bot_permissions, test_bot_token, test_group_access};
 use commands::terminal::{open_finder, open_provider_tui_host_terminal, open_terminal};
 use menubar::{
@@ -396,6 +399,7 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_denylist(&[MENUBAR_POPOVER_WINDOW_LABEL])
@@ -405,6 +409,7 @@ pub fn run() {
         .manage(AccountFeatureHostState::default())
         .manage(MenubarPopoverSnapshotStore::default())
         .manage(AppExitState::default())
+        .manage(AppUpdateState::default())
         .setup(|app| {
             apply_default_provider_overlay_env(&app.handle());
             // Ensure main window is visible on startup
@@ -414,6 +419,23 @@ pub fn run() {
             }
             let state = app.state::<Arc<Mutex<BotState>>>().inner().clone();
             let app_handle = app.handle().clone();
+            let service_after_update = std::env::var("ONLINEWORKER_SERVICE_AFTER_UPDATE").ok();
+            std::env::remove_var("ONLINEWORKER_SERVICE_AFTER_UPDATE");
+            if service_after_update.as_deref() == Some("stopped") {
+                tauri::async_runtime::block_on(async {
+                    let mut bot = state.lock().await;
+                    bot.auto_restart = false;
+                    bot.session_auto_start_enabled = false;
+                });
+            } else if service_after_update.as_deref() == Some("running") {
+                let handle = app_handle.clone();
+                let bot_state = state.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = start_service_internal(&handle, &bot_state).await {
+                        eprintln!("[app] restoring service after update failed: {error}");
+                    }
+                });
+            }
             setup_menubar(&app_handle, state)?;
             spawn_single_instance_listener(app_handle.clone(), single_instance_listener);
             spawn_service_guard_loop(
@@ -474,6 +496,7 @@ pub fn run() {
             archive_provider_session,
             send_provider_session_message,
             start_provider_session_message,
+            recheck_provider_session_send,
             stage_session_composer_attachments,
             start_provider_session_event_stream,
             stop_provider_session_event_stream,
@@ -487,6 +510,12 @@ pub fn run() {
             control_task_board_session,
             pin_task_board_session,
             reply_task_board_approval,
+            reply_task_board_question,
+            check_app_update,
+            get_app_update_status,
+            download_app_update,
+            install_app_update,
+            open_app_release_page,
             start_task_board_activity_stream,
             stop_task_board_activity_stream,
             unpin_task_board_session,

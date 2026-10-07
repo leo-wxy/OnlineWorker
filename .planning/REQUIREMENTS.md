@@ -39,6 +39,14 @@ The v1.2.1 milestone requirements are archived at [milestones/v1.2.1-REQUIREMENT
 - [x] **DELIVERY-04**: 慢 IM 消费不阻塞 MessageEventBus 发布、本地状态与会话投影。
 - [x] **DELIVERY-05**: 流发送积压有界，断线后通过消息中心快照恢复，无静默丢失或重复。
 - [x] **DELIVERY-06**: 新建与首消息失败保留真实会话和恢复状态，重试不创建或发送第二份。
+- [ ] **DELIVERY-07**: 普通发送与新建请求在失败、结果未知和重启后可追踪并由用户安全核实、恢复；未知结果不自动重发。
+- [ ] **DELIVERY-08**: App 可展示并回答 provider 的真实 question 请求，过期、已处理和仅镜像请求不会重复回写。
+- [ ] **DELIVERY-09**: 通知未送达状态可按渠道查看并在重启后恢复，用户可显式补发通知且不会重新执行任务或审批。
+- [ ] **DELIVERY-10**: 主 Sessions 支持标题、目录和近期摘要关键词搜索，并与 provider、工作区和归档筛选协同。
+- [ ] **DELIVERY-11**: 账号 Apply 与当前连接、会话的实际生效范围可区分已确认和未知，不伪造切换成功。
+- [ ] **DELIVERY-12**: App 提供检查版本与官方发布入口；架构产物、签名和公证在条件具备后有可验证的发布流程。
+
+新增范围与验收标准见 [Phase 25 补充](phases/25-session-delivery-and-recovery/25-FOLLOWUP.md)。STAB-07 作为条件项在该阶段跟踪，仍保留延期状态；25-02/25-03 的既有功能 UAT 不因补充需求而视为完成。
 
 ## Deferred Backlog
 
@@ -75,3 +83,9 @@ These items remain candidates for future work. UX/PLT items came from v1.2.1; ST
 | DELIVERY-04 | Phase 25 / 25-02 | Source and fast package verified; feature UAT pending |
 | DELIVERY-05 | Phase 25 / 25-02 | Source and fast package verified; feature UAT pending |
 | DELIVERY-06 | Phase 25 / 25-03 | Source and fast package verified; feature UAT pending |
+| DELIVERY-07 | Phase 25 / Follow-up | Scope recorded; implementation and UAT pending |
+| DELIVERY-08 | Phase 25 / Follow-up | Desktop reply and question lifecycle fixes source verified; feature UAT pending |
+| DELIVERY-09 | Phase 25 / Follow-up | Scope recorded; implementation and UAT pending |
+| DELIVERY-10 | Phase 25 / Follow-up | Scope recorded; implementation and UAT pending |
+| DELIVERY-11 | Phase 25 / Follow-up | Scope recorded; implementation and UAT pending |
+| DELIVERY-12 | Phase 25 / Follow-up | Updater, release flow and review fixes source verified; release prerequisites and feature UAT pending |

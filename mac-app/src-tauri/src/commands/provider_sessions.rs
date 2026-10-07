@@ -76,6 +76,7 @@ pub struct ProviderSessionStreamEvent {
     pub snapshot: Option<Vec<ProviderSessionStreamEventTurn>>,
     pub reason: Option<String>,
     pub error: Option<String>,
+    pub recovery: Option<Value>,
 }
 
 fn begin_provider_session_stream() -> u64 {
@@ -209,6 +210,7 @@ fn send_provider_session_message_request(
     text: &str,
     attachments: &[ComposerAttachment],
     workspace_dir: Option<&str>,
+    request_id: Option<&str>,
 ) -> Result<Value, String> {
     let mut payload = serde_json::json!({
         "type": "send_message",
@@ -216,6 +218,7 @@ fn send_provider_session_message_request(
         "thread_id": session_id,
         "text": text,
         "source": "session_tab",
+        "request_id": request_id,
     });
     if !attachments.is_empty() {
         payload["attachments"] = serde_json::to_value(attachments)
@@ -407,6 +410,7 @@ fn stream_provider_session_events_via_owner_bridge(
                 snapshot: None,
                 reason: None,
                 error: Some(error),
+                recovery: None,
             });
         };
         while provider_session_stream_is_active(stream_id) {
@@ -515,6 +519,7 @@ fn send_provider_session_message_via_owner_bridge_with_retry(
     text: &str,
     attachments: &[ComposerAttachment],
     workspace_dir: Option<&str>,
+    request_id: Option<&str>,
     timeout: std::time::Duration,
 ) -> Result<Value, String> {
     let started_at = std::time::Instant::now();
@@ -531,6 +536,7 @@ fn send_provider_session_message_via_owner_bridge_with_retry(
                     text,
                     attachments,
                     workspace_dir,
+                    request_id,
                 )
             }
             Err(error) if started_at.elapsed() >= timeout => return Err(error),
@@ -821,6 +827,7 @@ pub async fn send_provider_session_message(
     text: String,
     attachments: Option<Vec<ComposerAttachment>>,
     workspace_dir: Option<String>,
+    request_id: Option<String>,
 ) -> Result<Value, String> {
     let provider = require_runtime_provider(&provider_id)?;
     let attachments = attachments.unwrap_or_default();
@@ -840,6 +847,7 @@ pub async fn send_provider_session_message(
                     &trimmed,
                     &attachments,
                     workspace_dir.as_deref(),
+                    request_id.as_deref(),
                     std::time::Duration::from_secs(8),
                 )
             })
@@ -900,6 +908,24 @@ pub async fn start_provider_session_message(
             provider_session_send_access(&provider)
         )),
     }
+}
+
+#[tauri::command]
+pub async fn recheck_provider_session_send(
+    provider_id: String,
+    workspace_dir: String,
+    request_id: Option<String>,
+    session_id: Option<String>,
+) -> Result<Value, String> {
+    let provider = require_runtime_provider(&provider_id)?;
+    let data_dir = ensure_data_dir()?;
+    run_owner_bridge_blocking("recheck provider session send", move || {
+        let socket = connect_owner_bridge_socket(&data_dir, PROVIDER_OWNER_BRIDGE_REQUEST_TIMEOUT)?;
+        request_owner_bridge(socket, &serde_json::json!({
+            "type": "recheck_session_send", "provider_id": provider.id,
+            "workspace_dir": workspace_dir, "request_id": request_id, "session_id": session_id,
+        }))
+    }).await
 }
 
 #[tauri::command]
@@ -1297,6 +1323,7 @@ mod tests {
             assert_eq!(payload["thread_id"], "tid-1");
             assert_eq!(payload["text"], "hello");
             assert_eq!(payload["workspace_dir"], "/tmp/workspace");
+            assert_eq!(payload["request_id"], "sample-request");
             assert_eq!(payload["attachments"][0]["kind"], "image");
             assert_eq!(
                 payload["attachments"][0]["path"],
@@ -1325,6 +1352,7 @@ mod tests {
             "hello",
             &attachments,
             Some("/tmp/workspace"),
+            Some("sample-request"),
         )
         .expect("send via owner bridge");
 
@@ -1468,6 +1496,7 @@ mod tests {
             "hello",
             &[],
             Some("/tmp/workspace"),
+            None,
             Duration::from_secs(2),
         )
         .expect("owner bridge should become ready within timeout");
@@ -1527,6 +1556,7 @@ mod tests {
                 "sample message",
                 &[],
                 Some("/tmp/sample-workspace"),
+                Some("sample-request"),
                 Duration::from_millis(400),
             )
             .is_err());

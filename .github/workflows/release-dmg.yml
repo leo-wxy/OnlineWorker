@@ -7,29 +7,62 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Release tag to build and publish
+        description: Existing release tag to build and publish
         required: true
         type: string
 
 permissions:
   contents: write
 
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+
 jobs:
   build-dmg:
-    name: Build Apple Silicon DMG
-    runs-on: macos-15
+    name: Build ${{ matrix.arch }} DMG
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            arch: arm64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
     env:
-      GH_TOKEN: ${{ github.token }}
+      ONLINEWORKER_TARGET_TRIPLE: ${{ matrix.target }}
+      BUNDLE_ROOT: mac-app/src-tauri/target/${{ matrix.target }}/release/bundle
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
-      - name: Checkout repository
+      - name: Checkout release tag
         uses: actions/checkout@v6
         with:
+          ref: ${{ env.RELEASE_TAG }}
           submodules: recursive
 
       - name: Setup Python 3.13
+        id: python
         uses: actions/setup-python@v6
         with:
           python-version: "3.13"
+          architecture: ${{ matrix.arch == 'arm64' && 'arm64' || 'x64' }}
+
+      - name: Check tag and packaging versions
+        run: python scripts/sync-app-version.py --check --tag "$RELEASE_TAG"
+
+      - name: Require updater signing key
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::Configure TAURI_SIGNING_PRIVATE_KEY before publishing updater packages"
+            exit 1
+          fi
 
       - name: Install Python build dependencies
         run: |
@@ -41,67 +74,129 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Enable pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@latest-10 --activate
-          pnpm --version
-
       - name: Setup Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin
+          targets: ${{ matrix.target }}
 
-      - name: Verify GitHub CLI
-        run: gh --version
+      - name: Prepare signing and notarization
+        id: signing
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          required=(APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID)
+          configured=false
+          for name in "${required[@]}"; do
+            if [ -n "${!name}" ]; then configured=true; fi
+          done
+          if [ "$configured" = false ]; then
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Apple release credentials are not configured; producing an unnotarized development build"
+            exit 0
+          fi
+          for name in "${required[@]}"; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Incomplete release credentials: missing $name"
+              exit 1
+            fi
+          done
+          certificate="$RUNNER_TEMP/onlineworker-certificate.p12"
+          keychain="$RUNNER_TEMP/onlineworker-signing.keychain-db"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security import "$certificate" -P "$APPLE_CERTIFICATE_PASSWORD" -k "$keychain" -T /usr/bin/codesign -T /usr/bin/security >/dev/null
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+          security find-identity -v -p codesigning "$keychain" | grep -Fq "\"$APPLE_SIGNING_IDENTITY\""
+          echo "signed=true" >> "$GITHUB_OUTPUT"
 
       - name: Build DMG
         env:
-          PYTHON_ARM64: ${{ env.pythonLocation }}/bin/python
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          PYTHON_EXECUTABLE: ${{ steps.python.outputs.python-path }}
+          APPLE_SIGNING_IDENTITY: ${{ steps.signing.outputs.signed == 'true' && secrets.APPLE_SIGNING_IDENTITY || '-' }}
+          SIGNED_RELEASE: ${{ steps.signing.outputs.signed }}
+          ONLINEWORKER_DMG_ARCH: ${{ matrix.arch }}
         run: |
           if bash scripts/build.sh; then
             exit 0
           fi
-
-          echo "::warning::Tauri DMG bundling failed; trying the headless fallback"
-          bash scripts/create-dmg-from-app.sh
-
-      - name: Resolve release tag
-        id: release_tag
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            tag="${GITHUB_REF_NAME}"
-          else
-            tag="${{ inputs.release_tag }}"
-          fi
-
-          if [ -z "$tag" ]; then
-            echo "ERROR: release tag is required"
+          if [ "$SIGNED_RELEASE" = true ]; then
+            echo "::error::Signed build failed; refusing a fallback that could bypass notarization"
             exit 1
           fi
+          echo "::warning::Tauri DMG bundling failed; trying the headless fallback"
+          ONLINEWORKER_APP_BUNDLE_PATH="$BUNDLE_ROOT/macos/OnlineWorker.app" \
+            ONLINEWORKER_DMG_OUTPUT_DIR="$BUNDLE_ROOT/dmg" \
+            bash scripts/create-dmg-from-app.sh
+          bash scripts/create-updater-artifacts.sh "$BUNDLE_ROOT"
 
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Verify app version, architecture and signing
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+          SIGNED_RELEASE: ${{ steps.signing.outputs.signed }}
+        run: |
+          app="$BUNDLE_ROOT/macos/OnlineWorker.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "${RELEASE_TAG#v}"
+          for binary in onlineworker-app onlineworker-bot ccusage; do
+            test "$(lipo -archs "$app/Contents/MacOS/$binary")" = "$EXPECTED_ARCH"
+          done
+          codesign --verify --deep --strict "$app"
+          if [ "$SIGNED_RELEASE" = true ]; then
+            team="$(codesign -dv --verbose=4 "$app" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+            test "$team" = "$APPLE_TEAM_ID"
+            xcrun stapler validate "$app"
+            spctl --assess --type execute "$app"
+          fi
+
+      - name: Name updater packages by architecture
+        run: |
+          archive="$BUNDLE_ROOT/macos/OnlineWorker.app.tar.gz"
+          test -s "$archive"
+          test -s "$archive.sig"
+          name="OnlineWorker_${RELEASE_TAG#v}_${{ matrix.arch }}.app.tar.gz"
+          cp "$archive" "$BUNDLE_ROOT/macos/$name"
+          cp "$archive.sig" "$BUNDLE_ROOT/macos/$name.sig"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: onlineworker-dmg-${{ steps.release_tag.outputs.tag }}
-          path: mac-app/src-tauri/target/release/bundle/dmg/*.dmg
+          name: onlineworker-dmg-${{ env.RELEASE_TAG }}-${{ matrix.arch }}
+          path: |
+            ${{ env.BUNDLE_ROOT }}/dmg/*.dmg
+            ${{ env.BUNDLE_ROOT }}/macos/OnlineWorker_*.app.tar.gz
+            ${{ env.BUNDLE_ROOT }}/macos/OnlineWorker_*.app.tar.gz.sig
           if-no-files-found: error
 
-      - name: Ensure GitHub Release exists
+  publish-release:
+    needs: build-dmg
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: onlineworker-dmg-${{ env.RELEASE_TAG }}-*
+          path: release-dmg
+          merge-multiple: true
+      - name: Publish both architectures
         run: |
-          tag="${{ steps.release_tag.outputs.tag }}"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            exit 0
+          python3 scripts/create-updater-manifest.py --artifacts release-dmg/macos \
+            --tag "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --output release-dmg/latest.json
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            args=(--verify-tag --title "$RELEASE_TAG" --notes "Automated release for $RELEASE_TAG")
+            if [[ "$RELEASE_TAG" == *-* ]]; then args+=(--prerelease); fi
+            gh release create "$RELEASE_TAG" "${args[@]}"
           fi
-
-          gh release create "$tag" \
-            --title "$tag" \
-            --notes "Automated release for $tag"
-
-      - name: Upload DMG to GitHub Release
-        run: |
-          gh release upload "${{ steps.release_tag.outputs.tag }}" \
-            mac-app/src-tauri/target/release/bundle/dmg/*.dmg \
-            --clobber
+          gh release upload "$RELEASE_TAG" release-dmg/dmg/*.dmg \
+            release-dmg/macos/*.app.tar.gz release-dmg/macos/*.app.tar.gz.sig --clobber
+          # Publish the manifest only after both signed packages are uploaded.
+          gh release upload "$RELEASE_TAG" release-dmg/latest.json --clobber

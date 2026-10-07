@@ -94,12 +94,15 @@ class SessionActivity:
     attention_kind: str = ""
     request_id: str = ""
     approval_source: str = ""
+    questions: list[dict[str, Any]] = field(default_factory=list)
     mirrored_only: bool = False
     active_turn_id: str = ""
     delivery_status: str = ""
     delivery_error: str = ""
     _recovery_status: str = ""
     last_message_request_id: str = ""
+    new_session_request_id: str = ""
+    send_recovery: dict = field(default_factory=dict)
     last_user_message: str = ""
     last_assistant_message: str = ""
     last_final_message: str = ""
@@ -119,11 +122,14 @@ class SessionActivity:
             "attentionKind": self.attention_kind,
             "requestId": self.request_id,
             "approvalSource": self.approval_source,
+            "questions": [dict(question) for question in self.questions],
             "mirroredOnly": self.mirrored_only,
             "activeTurnId": self.active_turn_id,
             "deliveryStatus": self.delivery_status,
             "deliveryError": self.delivery_error,
             "lastMessageRequestId": self.last_message_request_id,
+            "newSessionRequestId": self.new_session_request_id,
+            "sendRecovery": dict(self.send_recovery),
             "lastUserMessage": self.last_user_message,
             "lastAssistantMessage": self.last_assistant_message,
             "lastFinalMessage": self.last_final_message,

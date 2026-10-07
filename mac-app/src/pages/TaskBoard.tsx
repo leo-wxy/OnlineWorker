@@ -15,6 +15,9 @@ import { mergeSessionListSnapshot } from "../utils/sessionBrowserState.js";
 import { visibleSessionProviders } from "../utils/sessionProviders.js";
 import {
   buildTaskBoardModel,
+  buildTaskBoardQuestionAnswers,
+  formatTaskBoardRelativeTime,
+  taskBoardStatusKey,
   type TaskBoardSessionActivity,
   type TaskBoardState,
   type TaskBoardTask,
@@ -54,21 +57,6 @@ interface PendingTaskBoardControl {
   taskId: string;
   action: TaskBoardControlAction;
   startedAtEpochMs: number;
-}
-
-function formatRelativeTime(epochMs: number | null, nowMs: number, texts: ReturnType<typeof useI18n>["t"]) {
-  if (!epochMs) {
-    return texts.common.unknown;
-  }
-  const seconds = Math.max(0, Math.floor((nowMs - epochMs) / 1000));
-  if (seconds < 60) {
-    return texts.common.secondsAgo(seconds);
-  }
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {
-    return texts.common.minutesAgo(minutes);
-  }
-  return texts.common.hoursAgo(Math.floor(minutes / 60));
 }
 
 function formatLoadError(error: string, texts: ReturnType<typeof useI18n>["t"]) {
@@ -140,17 +128,90 @@ function laneTone(tone: "needsAttention" | "running" | "pinned") {
 }
 
 function statusLabel(task: TaskBoardTask, texts: ReturnType<typeof useI18n>["t"]) {
-  if (task.needsAttention) {
-    return texts.taskBoard.statusNeedsAttention;
-  }
-  if (task.running) {
-    return texts.taskBoard.statusRunning;
-  }
-  return texts.taskBoard.statusPinned;
+  const key = taskBoardStatusKey(task);
+  return key ? texts.taskBoard[key] : texts.common.unknown;
 }
 
 function isApprovalTask(task: TaskBoardTask) {
   return task.needsAttention && !task.mirroredOnly && task.attentionKind === "approval" && Boolean(task.requestId);
+}
+
+function TaskQuestionForm({ task }: { task: TaskBoardTask }) {
+  const { t } = useI18n();
+  const [selections, setSelections] = useState<Record<number, number[]>>({});
+  const [customAnswers, setCustomAnswers] = useState<Record<number, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const answers = buildTaskBoardQuestionAnswers(task.questions, selections, customAnswers);
+
+  const select = (index: number, optionIndex: number, multiple: boolean) => {
+    setSelections(current => {
+      const selected = current[index] ?? [];
+      return { ...current, [index]: multiple
+        ? selected.includes(optionIndex) ? selected.filter(value => value !== optionIndex) : [...selected, optionIndex]
+        : [optionIndex] };
+    });
+  };
+
+  return (
+    <form className="border-b border-[var(--ow-line-soft)] py-4" onSubmit={async event => {
+      event.preventDefault();
+      if (!answers || busy || submitted) return;
+      setBusy(true);
+      setError(null);
+      try {
+        await invoke("reply_task_board_question", {
+          providerId: task.providerId, sessionId: task.sessionId,
+          questionId: task.requestId, answers,
+        });
+        setSubmitted(true);
+      } catch (replyError) {
+        setError(t.taskBoard.questionReplyFailed(String(replyError)));
+      } finally {
+        setBusy(false);
+      }
+    }}>
+      <h3 className="text-sm font-bold text-[var(--ow-text)]">{t.taskBoard.answerQuestions}</h3>
+      {task.questions.length === 0 ? <p className="mt-2 text-sm text-[var(--ow-muted)]">{t.taskBoard.questionsUnavailable}</p> : null}
+      {task.questions.map((question, index) => (
+        <fieldset key={question.subIndex} disabled={busy || submitted} className="mt-4 space-y-2 text-sm text-[var(--ow-text)]">
+          <legend className="mb-2 whitespace-pre-wrap font-semibold">{question.header || question.question}</legend>
+          {question.header && question.question ? <p className="whitespace-pre-wrap">{question.question}</p> : null}
+          {question.multiple ? <p className="text-xs text-[var(--ow-muted)]">{t.taskBoard.multipleAnswers}</p> : null}
+          {question.options.map((option, optionIndex) => (
+            <label key={optionIndex} className="flex cursor-pointer items-start gap-2 rounded-md border border-[var(--ow-line)] px-3 py-2">
+              <input type={question.multiple ? "checkbox" : "radio"} name={`question-${index}`} className="mt-1 shrink-0"
+                checked={selections[index]?.includes(optionIndex) ?? false}
+                onChange={() => select(index, optionIndex, question.multiple)} />
+              <span className="min-w-0 break-words"><span className="font-semibold">{option.label}</span>
+                {option.description ? <span className="mt-1 block text-xs text-[var(--ow-muted)]">{option.description}</span> : null}
+              </span>
+            </label>
+          ))}
+          {question.custom ? (
+            <label className="block">
+              <span className="flex items-center gap-2">
+                {question.options.length > 0 ? <input type={question.multiple ? "checkbox" : "radio"} name={`question-${index}`}
+                  checked={selections[index]?.includes(-1) ?? false} onChange={() => select(index, -1, question.multiple)} /> : null}
+                {t.taskBoard.customAnswer}
+              </span>
+              <textarea rows={2} value={customAnswers[index] ?? ""} aria-label={t.taskBoard.customAnswer}
+                onChange={event => {
+                  setCustomAnswers(current => ({ ...current, [index]: event.target.value }));
+                  if (!selections[index]?.includes(-1)) select(index, -1, question.multiple);
+                }}
+                className="mt-2 w-full rounded-md border border-[var(--ow-line)] bg-[var(--ow-panel)] px-3 py-2 text-[var(--ow-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ow-focus)]" />
+            </label>
+          ) : null}
+        </fieldset>
+      ))}
+      {error ? <p role="alert" className="mt-3 text-sm text-[var(--ow-error-text)]">{error}</p> : null}
+      <button type="submit" disabled={!answers || busy || submitted} className="ow-btn-primary mt-3 h-9 rounded-lg px-4 text-sm font-semibold disabled:opacity-50">
+        {submitted ? t.taskBoard.answersSubmitted : busy ? t.taskBoard.submittingAnswers : t.taskBoard.submitAnswers}
+      </button>
+    </form>
+  );
 }
 
 function TaskCard({
@@ -178,7 +239,7 @@ function TaskCard({
   onToggleSelect: (task: TaskBoardTask) => void;
   onApprovalAction: (task: TaskBoardTask, action: TaskBoardApprovalAction) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const accent = taskAccent(task.providerId);
   const toneClasses = laneTone(tone);
   const pinLabel = task.pinned ? t.taskBoard.unpin : t.taskBoard.pin;
@@ -312,7 +373,7 @@ function TaskCard({
           <span />
         )}
         <span className="shrink-0">
-          {formatRelativeTime(task.updatedAtEpochMs, nowMs, t)}
+          {formatTaskBoardRelativeTime(task.updatedAtEpochMs, nowMs, locale) ?? t.common.unknown}
         </span>
       </div>
     </div>
@@ -394,7 +455,7 @@ export function TaskBoard({
   onOpenSession,
   sessionActivities: sharedSessionActivities,
 }: Props) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [providers, setProviders] = useState<ProviderMetadata[]>([]);
   const [dashboardState, setDashboardState] = useState<DashboardState | null>(null);
   const [taskBoardState, setTaskBoardState] = useState<TaskBoardState>(DEFAULT_TASK_BOARD_STATE);
@@ -840,7 +901,7 @@ export function TaskBoard({
               <BoardLane
                 title="最近结束"
                 count={board.counts.recentEnded}
-                empty="当前没有最近结束的 Session。"
+                empty="最近 7 天没有结束的 Session。"
                 tasks={board.recentEnded}
                 tone="pinned"
                 nowMs={nowMs}
@@ -867,7 +928,7 @@ export function TaskBoard({
                       </p>
                     </div>
                     <span className="shrink-0 rounded-full border border-[var(--ow-line)] bg-[var(--ow-panel)] px-2.5 py-1 text-xs font-semibold text-[var(--ow-muted)]">
-                      {selectedTask.interrupted ? "已中断" : selectedTask.needsAttention ? "需要你" : selectedTask.running ? "运行中" : "已结束"}
+                      {statusLabel(selectedTask, t)}
                     </span>
                   </div>
 
@@ -876,8 +937,12 @@ export function TaskBoard({
                     <dt className="font-semibold text-[var(--ow-subtle)]">Workspace</dt><dd className="truncate text-[var(--ow-text)]">{selectedTask.workspace || "—"}</dd>
                     <dt className="font-semibold text-[var(--ow-subtle)]">Session</dt><dd className="truncate font-mono text-[var(--ow-text)]">{selectedTask.sessionId}</dd>
                     <dt className="font-semibold text-[var(--ow-subtle)]">控制模式</dt><dd className="text-[var(--ow-text)]">{selectedTask.controlMode === "owned" ? "OnlineWorker 托管" : "外部客户端"}</dd>
-                    <dt className="font-semibold text-[var(--ow-subtle)]">更新时间</dt><dd className="text-[var(--ow-text)]">{formatRelativeTime(selectedTask.updatedAtEpochMs, nowMs, t)}</dd>
+                    <dt className="font-semibold text-[var(--ow-subtle)]">更新时间</dt><dd className="text-[var(--ow-text)]">{formatTaskBoardRelativeTime(selectedTask.updatedAtEpochMs, nowMs, locale) ?? t.common.unknown}</dd>
                   </dl>
+
+                  {selectedTask.needsAttention && !selectedTask.mirroredOnly && selectedTask.attentionKind === "question" && selectedTask.requestId ? (
+                    <TaskQuestionForm key={`${selectedTask.id}:${selectedTask.requestId}`} task={selectedTask} />
+                  ) : null}
 
                   <section className="border-b border-[var(--ow-line-soft)] py-4">
                     <div className="flex items-center justify-between gap-3">

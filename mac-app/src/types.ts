@@ -371,6 +371,7 @@ export interface ProviderSessionSendResult {
   remapped?: boolean;
   createdNewThread?: boolean;
   pending?: boolean;
+  recovery?: SessionSendRecovery | null;
   session?: unknown | null;
 }
 
@@ -382,7 +383,19 @@ export interface SessionStreamEvent {
   cursor?: { offset: number } | null;
   reason?: string | null;
   error?: string | null;
+  recovery?: SessionSendRecovery | null;
   sessionTabVisibleAt?: number | null;
+}
+
+export interface SessionSendRecovery {
+  kind?: "new-session";
+  threadId?: string;
+  requestId: string;
+  status: "preparing" | "sending" | "failed" | "unknown" | "sent";
+  text: string;
+  attachments: ComposerAttachment[];
+  error: string;
+  updatedAt: number;
 }
 
 // Log streaming

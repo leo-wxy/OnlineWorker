@@ -15,8 +15,11 @@ from config import get_data_dir
 from core.messages.events import create_message_event
 from core.provider_session_new import (
     build_provider_session_summary,
+    _checkpoint_new_session,
+    publish_new_session_recovery,
     send_started_provider_thread_message,
     start_real_provider_thread,
+    validate_provider_thread_target,
     validate_new_provider_thread_request,
 )
 from core.provider_session_archive import commit_session_archive
@@ -24,6 +27,7 @@ from core.providers.registry import get_provider
 from core.storage import ThreadInfo, WorkspaceInfo, save_storage
 from core.user_messages.contracts import UserMessageSendRequest
 from core.user_messages.gateway import prepare_user_message_text
+from core.user_messages.recovery import checkpoint_send_recovery, new_session_recovery_view, publish_send_recovery, restore_send_recoveries
 from core.messages.publishing import (
     publish_approval_answered,
     publish_user_message_accepted,
@@ -103,9 +107,11 @@ def _resolve_workspace_and_thread(state, provider_id: str, thread_id: str, works
     normalized_workspace_dir = str(workspace_dir or "").strip()
 
     if normalized_thread_id:
-        found = state.find_thread_by_id_global(normalized_thread_id)
-        if found is not None:
-            return found
+        workspace, thread = _find_existing_session_binding(state, provider_id, normalized_thread_id)
+        if workspace is not None:
+            if normalized_workspace_dir and workspace.path != normalized_workspace_dir:
+                return None, None
+            return workspace, thread
 
     if not normalized_workspace_dir:
         return None, None
@@ -335,6 +341,11 @@ def _session_archived_in_storage(state, provider_id: str, session_id: str) -> bo
 
 
 def _find_existing_session_binding(state, provider_id: str, session_id: str):
+    storage = getattr(state, "storage", None)
+    if storage is not None:
+        for workspace in storage.workspaces.values():
+            if workspace.tool == provider_id and session_id in workspace.threads:
+                return workspace, workspace.threads[session_id]
     find_thread = getattr(state, "find_thread_by_id_global", None)
     found = find_thread(session_id) if callable(find_thread) and session_id else None
     if found is None:
@@ -343,6 +354,20 @@ def _find_existing_session_binding(state, provider_id: str, session_id: str):
     if str(getattr(ws, "tool", "") or "").strip() != provider_id:
         return None, None
     return ws, thread
+
+
+async def _ensure_message_adapter(state, provider_id, provider, workspace):
+    adapter = state.get_adapter(provider_id)
+    ensure_connected = getattr(getattr(provider, "message_hooks", None), "ensure_connected", None)
+    if callable(ensure_connected):
+        connected = await ensure_connected(state, adapter, workspace, update=None, context=None,
+                                           group_chat_id=0, src_topic_id=None)
+        if connected is not None:
+            adapter = connected
+    if adapter is None or not getattr(adapter, "connected", False):
+        raise RuntimeError(f"{provider_id} adapter 未连接")
+    state.set_adapter(provider_id, adapter)
+    return adapter
 
 
 def _resolve_session_adapter(state, provider_id: str, ws):
@@ -698,6 +723,8 @@ class ProviderOwnerBridge:
         if not self.socket_path:
             raise RuntimeError("缺少 data_dir，无法启动 provider owner bridge")
 
+        restore_send_recoveries(self.state)
+
         try:
             from core.usage.registry import get_usage_source_catalog
             await _run_sync_with_timeout(
@@ -789,8 +816,17 @@ class ProviderOwnerBridge:
                 return
             elif request_type == "reply_approval":
                 response = await self._handle_reply_approval(request)
+            elif request_type == "reply_question":
+                response = await self._handle_reply_question(request)
             elif request_type == "session_control":
                 response = await self._handle_session_control(request)
+            elif request_type == "recheck_session_send":
+                response = self._handle_recheck_session_send(request)
+            elif request_type == "prepare_app_update":
+                response = self._handle_prepare_app_update()
+            elif request_type == "cancel_app_update":
+                self.state.app_update_deadline = 0.0
+                response = {"ok": True}
             elif request_type == "provider_hook_event":
                 response = await self._handle_provider_hook_event(request)
             elif request_type == "mirror_approval":
@@ -1252,6 +1288,7 @@ class ProviderOwnerBridge:
             return {
                 "kind": "replace_snapshot", "snapshot": bus.session_conversation(provider_id, session_id),
                 "error": activity.get("deliveryError") or None,
+                "recovery": bus.session_send_recovery(provider_id, session_id),
             }
 
         def on_event(event) -> None:
@@ -1264,7 +1301,8 @@ class ProviderOwnerBridge:
             if event.kind == "message.user.send_failed":
                 activity = bus.session_activity(provider_id, session_id) or {}
                 if activity.get("lastMessageRequestId") == event.payload.get("messageRequestId"):
-                    enqueue({"kind": "send_failed", "semanticKind": event.kind, "error": event.payload.get("error")})
+                    enqueue({"kind": "send_failed", "semanticKind": event.kind, "error": event.payload.get("error"),
+                             "recovery": bus.session_send_recovery(provider_id, session_id)})
             elif event.kind in {
                 "message.user.submitted", "message.user.accepted", "message.assistant.delta",
                 "message.assistant.final", "session.history.loaded", "turn.completed", "turn.failed",
@@ -1275,13 +1313,20 @@ class ProviderOwnerBridge:
 
         unsubscribe = bus.subscribe(on_event)
         try:
+            workspace, thread = _find_existing_session_binding(self.state, provider_id, session_id)
+            if thread is not None and not bus.session_send_recovery(provider_id, session_id):
+                if thread.new_session_recovery:
+                    publish_new_session_recovery(self.state, workspace, thread)
+                if thread.send_recovery:
+                    publish_send_recovery(self.state, workspace, thread)
             if not bus.session_history_loaded(provider_id, session_id):
                 response = await self._handle_read_session({
                     "provider_id": provider_id, "session_id": session_id, "limit": 50,
                     "workspace_dir": workspace_dir,
                 })
                 if not response.get("ok"):
-                    writer.write((json.dumps({"kind": "error", "error": response.get("error")}) + "\n").encode())
+                    writer.write((json.dumps({"kind": "error", "error": response.get("error"),
+                        "recovery": bus.session_send_recovery(provider_id, session_id)}) + "\n").encode())
                     await writer.drain()
                     return
             initial_snapshot = snapshot()
@@ -1290,6 +1335,57 @@ class ProviderOwnerBridge:
             await _run_stream_writer(reader, writer, queue, closed, initial_snapshot)
         finally:
             unsubscribe()
+
+    def _handle_recheck_session_send(self, request: dict) -> dict:
+        provider_id = str(request.get("provider_id") or "").strip()
+        workspace_dir = str(request.get("workspace_dir") or "").strip()
+        session_id = str(request.get("session_id") or "").strip()
+        request_id = str(request.get("request_id") or "").strip()
+        if not provider_id or not workspace_dir or len(request_id) > 128:
+            return {"ok": False, "error": "无效的恢复请求"}
+        workspace = next((ws for ws in getattr(self.state.storage, "workspaces", {}).values()
+                          if ws.tool == provider_id and ws.path == workspace_dir), None)
+        if workspace is None:
+            return {"ok": False, "error": "工作区绑定已失效"}
+        thread = workspace.threads.get(session_id) if session_id else next((item for item in workspace.threads.values()
+            if request_id and item.new_session_recovery.get("request_id") == request_id), None)
+        if session_id and thread is None:
+            return {"ok": False, "error": "原会话不存在或绑定已变化"}
+        if thread is None:
+            pending = workspace.pending_new_session
+            if pending and (not request_id or pending.get("requestId") == request_id):
+                return {"ok": True, "accepted": False, "pending": pending.get("status") == "preparing",
+                        "request_id": pending.get("requestId"), "recovery": dict(pending), "error": pending.get("error") or None}
+            return {"ok": True, "accepted": False, "recovery": None,
+                    "error": "尚未找到可核实的原请求；没有重新创建或发送消息。" if request_id else None}
+        if thread.archived:
+            return {"ok": False, "error": "原会话已归档"}
+        is_new = thread.new_session_recovery.get("request_id") == request_id
+        record = thread.new_session_recovery if is_new else thread.send_recovery
+        if not request_id or record.get("request_id" if is_new else "requestId") != request_id:
+            return {"ok": False, "error": "恢复请求与原会话不一致"}
+        receipt = record.get("providerReceipt") or {}
+        status_key = "send_status" if is_new else "status"
+        if (receipt.get("requestId") == request_id and receipt.get("threadId") == thread.thread_id
+                and receipt.get("status") in {"sent", "failed"}
+                and record.get(status_key) not in {"pending", "preparing", "sending"}):
+            if is_new:
+                record.update(send_status=receipt["status"], error=receipt.get("error", ""))
+                try:
+                    _checkpoint_new_session(self.state, workspace, thread)
+                except Exception:
+                    pass  # The saved receipt still proves the provider outcome.
+            else:
+                checkpoint_send_recovery(self.state, workspace, thread, receipt["status"], receipt.get("error", ""))
+                record = thread.send_recovery
+        elif is_new:
+            publish_new_session_recovery(self.state, workspace, thread)
+        else:
+            publish_send_recovery(self.state, workspace, thread)
+        return {"ok": True, "accepted": record.get(status_key) == "sent", "thread_id": thread.thread_id,
+                "request_id": request_id, "provider_id": provider_id, "workspace_id": workspace.daemon_workspace_id,
+                "recovery": new_session_recovery_view(thread) if is_new else dict(record),
+                "error": "未收到能关联原请求的 Provider 回执，发送结果仍未知。" if record.get(status_key) == "unknown" else record.get("error") or None}
 
     async def _handle_archive_session(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
@@ -1397,6 +1493,13 @@ class ProviderOwnerBridge:
         return {"ok": True, "summary": summary}
 
     async def _handle_create_session(self, request: dict) -> dict:
+        try:
+            with self.state.task_admission():
+                return await self._handle_admitted_create_session(request)
+        except RuntimeError as exc:
+            return {"ok": False, "error": str(exc)}
+
+    async def _handle_admitted_create_session(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
         workspace_dir = str(request.get("workspace_dir") or "").strip()
         create_mode = str(request.get("create_mode") or request.get("mode") or "").strip()
@@ -1530,6 +1633,37 @@ class ProviderOwnerBridge:
             normalized = bus.session_conversation(provider_id, session_id)[-limit:]
         return {"ok": True, "session": normalized}
 
+    def _handle_prepare_app_update(self) -> dict:
+        busy = any(
+            activity.get("status") in {"running", "needs_attention"}
+            or activity.get("activeTurnId")
+            or activity.get("deliveryStatus") in {"submitted", "queued", "uncertain"}
+            for activity in self.state.message_bus.session_activities()
+        )
+        pending = self.state.active_task_dispatches or self.state.new_session_lock.locked()
+        pending = pending or any(not task.done() for task in self._pending_send_tasks)
+        pending = pending or any(runtime.active_threads
+                                 for runtime in self.state.provider_runtime_state.values())
+        if self.state.storage is not None:
+            pending = pending or any(
+                workspace.pending_new_session.get("status") in {"preparing", "unknown"}
+                for workspace in self.state.storage.workspaces.values()
+            )
+            pending = pending or any(
+                thread.send_recovery.get("status") in {"preparing", "sending", "unknown"}
+                for workspace in self.state.storage.workspaces.values() for thread in workspace.threads.values()
+            )
+            pending = pending or any(
+                thread.new_session_recovery.get("send_status") in {"pending", "preparing", "sending", "unknown"}
+                and (thread.new_session_recovery.get("text") or thread.new_session_recovery.get("attachments"))
+                for workspace in self.state.storage.workspaces.values() for thread in workspace.threads.values()
+            )
+        if busy or pending:
+            return {"ok": False, "error": "仍有运行中、等待回答或正在发送的任务，或远程 CLI 连接尚未关闭，请处理完成后再安装更新。"}
+        # A lost client must not leave task admission closed indefinitely.
+        self.state.app_update_deadline = time.monotonic() + 30
+        return {"ok": True}
+
     async def _handle_runtime_status(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
         if not provider_id:
@@ -1550,6 +1684,13 @@ class ProviderOwnerBridge:
         }
 
     async def _handle_session_control(self, request: dict) -> dict:
+        try:
+            with self.state.task_admission():
+                return await self._handle_admitted_session_control(request)
+        except RuntimeError as exc:
+            return {"ok": False, "error": str(exc)}
+
+    async def _handle_admitted_session_control(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
         session_id = str(request.get("session_id") or request.get("thread_id") or "").strip()
         action = str(request.get("action") or "").strip().lower()
@@ -1809,7 +1950,69 @@ class ProviderOwnerBridge:
             "label": label,
         }
 
+    async def _handle_reply_question(self, request: dict) -> dict:
+        from core.providers.interaction_runtime import reply_question_via_adapter, submit_question_reply
+        from core.state import PendingQuestion, PendingQuestionGroup
+
+        provider_id = str(request.get("provider_id") or "").strip()
+        session_id = str(request.get("session_id") or "").strip()
+        question_id = str(request.get("question_id") or "").strip()
+        activity = self.state.message_bus.session_activity(provider_id, session_id) or {}
+        if (not question_id or activity.get("status") != "needs_attention"
+                or activity.get("attentionKind") != "question" or activity.get("requestId") != question_id
+                or activity.get("mirroredOnly")):
+            return {"ok": False, "error": "问题已回答、已失效或由外部客户端控制。"}
+        questions = activity.get("questions") or []
+        answers = request.get("answers")
+        if (not questions or not isinstance(answers, list) or len(answers) != len(questions)
+                or [question.get("subIndex") for question in questions] != list(range(len(questions)))
+                or any(question.get("subTotal") != len(questions) for question in questions)):
+            return {"ok": False, "error": "问题尚未完整加载或答案数量不匹配。"}
+        normalized = []
+        for question, answer in zip(questions, answers):
+            if not isinstance(answer, list) or not answer or any(not isinstance(value, str) or not value.strip() for value in answer):
+                return {"ok": False, "error": "请回答所有问题。"}
+            values = list(dict.fromkeys(value.strip() for value in answer))
+            labels = {str(option.get("label") or "") for option in question.get("options") or []}
+            if ((not question.get("multiple") and len(values) != 1)
+                    or (not question.get("custom") and any(value not in labels for value in values))):
+                return {"ok": False, "error": "答案不符合问题的选项或输入要求。"}
+            normalized.append(values)
+        provider = get_provider(provider_id, getattr(self.state, "config", None))
+        if provider is None:
+            return {"ok": False, "error": f"Provider '{provider_id}' 未启用"}
+        adapter = self.state.get_adapter(provider_id)
+        if adapter is None or not getattr(adapter, "connected", False):
+            adapter = self.state.get_adapter_for_workspace(activity.get("workspaceId") or "")
+        if adapter is None or not getattr(adapter, "connected", False):
+            return {"ok": False, "error": f"{provider_id} adapter 未连接"}
+        reply = getattr(getattr(provider, "interactions", None), "reply_question", None)
+        if not callable(reply) and callable(getattr(adapter, "reply_question", None)):
+            reply = reply_question_via_adapter
+        if not callable(reply):
+            return {"ok": False, "error": f"{provider_id} 未注册问题回复能力"}
+        workspace_id = activity.get("workspaceId") or ""
+        first = questions[0]
+        group = PendingQuestionGroup(question_id, session_id, workspace_id, len(questions),
+                                     answers=dict(enumerate(normalized))) if len(questions) > 1 else None
+        pending = PendingQuestion(question_id, session_id, workspace_id, first.get("header") or "",
+                                  first.get("question") or "", first.get("options") or [],
+                                  multiple=bool(first.get("multiple")), custom=bool(first.get("custom")),
+                                  group=group, tool_name=provider_id)
+        try:
+            await submit_question_reply(self.state, adapter, reply, pending, normalized, source="desktop_app")
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True}
+
     async def _handle_send_message(self, request: dict) -> dict:
+        try:
+            with self.state.task_admission():
+                return await self._handle_admitted_send_message(request)
+        except RuntimeError as exc:
+            return {"ok": False, "error": str(exc)}
+
+    async def _handle_admitted_send_message(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
         thread_id = str(request.get("thread_id") or "").strip()
         text = str(request.get("text") or "").strip()
@@ -1827,18 +2030,69 @@ class ProviderOwnerBridge:
         if provider is None:
             return {"ok": False, "error": f"Provider '{provider_id}' 未启用"}
 
-        adapter = self.state.get_adapter(provider_id)
-        if adapter is None or not getattr(adapter, "connected", False):
-            return {"ok": False, "error": f"{provider_id} adapter 未连接"}
-
-        ws_info, thread_info = _resolve_workspace_and_thread(
-            self.state,
-            provider_id,
-            thread_id,
-            workspace_dir,
-        )
+        ws_info, thread_info = _find_existing_session_binding(self.state, provider_id, thread_id)
+        if ws_info is None:
+            query_ids = getattr(getattr(provider, "facts", None), "query_active_thread_ids", None)
+            if not workspace_dir or not callable(query_ids):
+                return {"ok": False, "error": "无法确认目标会话，请刷新会话列表后重试。"}
+            try:
+                active_ids = await _run_sync_with_timeout(
+                    f"{provider_id}.query_active_thread_ids", query_ids, workspace_dir,
+                    timeout=OWNER_BRIDGE_FACTS_TIMEOUT_SECONDS,
+                )
+            except Exception as exc:
+                return {"ok": False, "error": f"无法确认目标会话：{exc}"}
+            if thread_id not in (active_ids or set()):
+                return {"ok": False, "error": "目标会话不存在、已归档或不属于当前工作区，消息未发送。"}
+            ws_info, thread_info = _resolve_workspace_and_thread(self.state, provider_id, thread_id, workspace_dir)
         if ws_info is None or thread_info is None:
             return {"ok": False, "error": "缺少 workspace_dir，无法定位 provider 会话"}
+
+        target_workspace = workspace_dir or ws_info.path
+
+        def validate_target(expected_thread_id):
+            validate_provider_thread_target(ws_info, thread_info, provider_id=provider_id,
+                                            thread_id=expected_thread_id, workspace_path=target_workspace)
+            if self.state.storage is not None and not any(ws is ws_info for ws in self.state.storage.workspaces.values()):
+                raise RuntimeError("工作区绑定已失效，消息未发送，请刷新会话后重试。")
+
+        try:
+            validate_target(thread_id)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        request_id = str(request.get("request_id") or "").strip() if request.get("source", "session_tab") == "session_tab" else ""
+        if len(request_id) > 128:
+            return {"ok": False, "error": "无效的发送请求 ID"}
+        if request.get("source", "session_tab") == "session_tab":
+            if thread_info.new_session_recovery.get("send_status") in {"pending", "preparing", "sending", "unknown"}:
+                return {"ok": False, "error": "原首消息尚未确认送达，请先核实会话，避免重复发送。"}
+            if (thread_info.send_recovery.get("status") in {"preparing", "sending", "unknown"}
+                    and thread_info.send_recovery.get("requestId") != request_id):
+                return {"ok": False, "error": "上一条消息尚未确认送达，请先核实会话，避免重复发送。"}
+
+        def checkpoint(status, error=""):
+            if request_id and thread_info.send_recovery.get("requestId") == request_id:
+                checkpoint_send_recovery(self.state, ws_info, thread_info, status, error)
+
+        if request_id:
+            previous = thread_info.send_recovery
+            if previous.get("requestId") == request_id:
+                if previous.get("text") != text or previous.get("attachments") != attachments:
+                    return {"ok": False, "error": "发送请求 ID 与原输入不一致"}
+                publish_send_recovery(self.state, ws_info, thread_info)
+                return {"ok": True, "request_id": request_id, "thread_id": thread_id,
+                        "accepted": previous.get("status") == "sent",
+                        "error": previous.get("error") or (None if previous.get("status") == "sent" else "原请求尚未确认送达，请先核实会话。")}
+            if previous.get("status") in {"preparing", "sending", "unknown"}:
+                return {"ok": False, "error": "上一条消息尚未确认送达，请先核实会话，避免重复发送。"}
+            # ponytail: retain the latest attempt per session; add an outbox if multiple failed drafts are needed.
+            thread_info.send_recovery = {"requestId": request_id, "text": text, "attachments": attachments}
+            try:
+                checkpoint("preparing")
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
+        adapter = self.state.get_adapter(provider_id)
 
         workspace_id = getattr(ws_info, "daemon_workspace_id", None) or _workspace_key(provider_id, ws_info.path)
         ws_info.daemon_workspace_id = workspace_id
@@ -1851,19 +2105,21 @@ class ProviderOwnerBridge:
 
         message_hooks = getattr(provider, "message_hooks", None)
         if message_hooks is None:
+            checkpoint("failed", f"Provider '{provider_id}' 不支持发送消息")
             return {"ok": False, "error": f"Provider '{provider_id}' 不支持发送消息"}
 
-        gateway_result = await prepare_user_message_text(
-            self.state,
-            UserMessageSendRequest(
+        try:
+            gateway_result = await prepare_user_message_text(self.state, UserMessageSendRequest(
                 source=str(request.get("source") or "session_tab"),
                 provider_id=provider_id,
                 workspace_id=str(workspace_id),
                 thread_id=thread_id,
                 text=text,
                 attachments=attachments,
-            ),
-        )
+            ))
+        except Exception as exc:
+            checkpoint("failed", exc)
+            raise
         text = gateway_result.text
         message_event_request = UserMessageSendRequest(
             source=str(request.get("source") or "session_tab"),
@@ -1872,7 +2128,7 @@ class ProviderOwnerBridge:
             thread_id=thread_id,
             text=text,
             attachments=attachments,
-            metadata={"bridge": "provider_owner"},
+            metadata={"bridge": "provider_owner", **({"messageRequestId": request_id} if request_id else {})},
         )
         publish_user_message_submitted(
             self.state,
@@ -1885,10 +2141,12 @@ class ProviderOwnerBridge:
         owner_bridge_router = getattr(message_hooks, "try_route_owner_bridge_send", None)
         if callable(owner_bridge_router) and not attachments and source != "session_tab":
             with report_user_message_failure(self.state, message_event_request, text=text, workspace_path=ws_info.path):
+                validate_target(thread_id)
                 route_result = await owner_bridge_router(
                     self.state, ws_info, thread_info, text=text,
                 )
             if route_result:
+                checkpoint("sent")
                 self.state.mark_provider_send_started(provider_id, thread_id)
                 publish_user_message_accepted(
                     self.state,
@@ -1919,6 +2177,8 @@ class ProviderOwnerBridge:
         def rollback_thread_remap() -> bool:
             if thread_info.thread_id == original_thread_id:
                 return False
+            if thread_info.archived or ws_info.threads.get(thread_info.thread_id) is not thread_info:
+                return False
             ws_info.threads.pop(thread_info.thread_id, None)
             thread_info.thread_id = original_thread_id
             thread_info.topic_id = original_topic_id
@@ -1933,20 +2193,13 @@ class ProviderOwnerBridge:
 
         skip_prepare_send = bool(request.get("_skip_prepare_send", False))
         try:
+            validate_target(original_thread_id)
+            previous_adapter = adapter
+            adapter = await _ensure_message_adapter(self.state, provider_id, provider, ws_info)
+            if adapter is not previous_adapter and hasattr(adapter, "register_workspace_cwd"):
+                adapter.register_workspace_cwd(workspace_id, ws_info.path)
+            validate_target(original_thread_id)
             self.state.mark_provider_send_started(provider_id, thread_id)
-            connected_adapter = await message_hooks.ensure_connected(
-                self.state,
-                adapter,
-                ws_info,
-                update=None,
-                context=None,
-                group_chat_id=0,
-                src_topic_id=None,
-            )
-            if connected_adapter is not None:
-                adapter = connected_adapter
-                self.state.set_adapter(provider_id, adapter)
-
             if not skip_prepare_send:
                 should_continue = await message_hooks.prepare_send(
                     self.state,
@@ -1962,6 +2215,9 @@ class ProviderOwnerBridge:
                     attachments=attachments,
                 )
                 if should_continue is False:
+                    checkpoint("failed", "Provider 未接收消息，发送已取消。")
+                    publish_user_message_failed(self.state, message_event_request, text=text,
+                                                workspace_path=ws_info.path, error="Provider 未接收消息，发送已取消。")
                     return {
                         "ok": True,
                         "accepted": False,
@@ -1977,7 +2233,9 @@ class ProviderOwnerBridge:
                 )
         except Exception as exc:
             rollback_thread_remap()
-            publish_user_message_failed(self.state, message_event_request, text=text, workspace_path=ws_info.path, error=exc)
+            checkpoint("failed", exc)
+            publish_user_message_failed(self.state, message_event_request, text=text, workspace_path=ws_info.path, error=exc,
+                                        delivery_status="failed" if request_id else "")
             return {"ok": False, "error": str(exc)}
 
         if thread_info.thread_id != original_thread_id and getattr(self.state, "storage", None) is not None:
@@ -1985,6 +2243,7 @@ class ProviderOwnerBridge:
                 save_storage(self.state.storage)
             except Exception as exc:
                 rollback_thread_remap()
+                checkpoint("failed", exc)
                 publish_user_message_failed(self.state, message_event_request, text=text, workspace_path=ws_info.path, error=exc)
                 return {"ok": False, "error": f"保存 remapped thread 失败，消息未发送: {exc}"}
 
@@ -2003,7 +2262,17 @@ class ProviderOwnerBridge:
         )
 
         async def execute_send() -> None:
+            entered_send = False
             try:
+                validate_target(delivery_request.thread_id)
+                if request_id:
+                    attachment_root = os.path.realpath(os.path.join(self.data_dir or "", "composer-attachments"))
+                    for attachment in attachments:
+                        path = os.path.realpath(str(attachment.get("path") or ""))
+                        if not path.startswith(attachment_root + os.sep) or not os.path.isfile(path):
+                            raise RuntimeError("附件已失效，请移除后重新选择附件。")
+                checkpoint("sending")
+                entered_send = True
                 send_result = await message_hooks.send(
                     self.state,
                     adapter,
@@ -2019,10 +2288,13 @@ class ProviderOwnerBridge:
                 )
                 if isinstance(send_result, dict) and str(send_result.get("status") or "") == "error":
                     raise RuntimeError(str(send_result.get("error") or f"{provider_id} send failed"))
+                checkpoint("sent")
                 publish_user_message_accepted(self.state, delivery_request, text=text, workspace_path=ws_info.path)
-            except Exception as exc:
-                publish_user_message_failed(self.state, delivery_request, text=text, workspace_path=ws_info.path, error=exc)
-                rolled_back = rollback_thread_remap()
+            except (Exception, asyncio.CancelledError) as exc:
+                checkpoint("unknown" if entered_send else "failed", str(exc) or "发送已中断")
+                publish_user_message_failed(self.state, delivery_request, text=text, workspace_path=ws_info.path, error=exc,
+                    delivery_status=("uncertain" if entered_send else "failed") if request_id else "")
+                rolled_back = rollback_thread_remap() if not request_id else False
                 if rolled_back and getattr(self.state, "storage", None) is not None:
                     try:
                         save_storage(self.state.storage)
@@ -2037,6 +2309,8 @@ class ProviderOwnerBridge:
                     provider_id,
                     thread_id[:12] if thread_id else "?",
                 )
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
 
         task = asyncio.create_task(execute_send())
         self._pending_send_tasks.add(task)
@@ -2045,6 +2319,7 @@ class ProviderOwnerBridge:
         return {
             "ok": True,
             "accepted": True,
+            **({"request_id": request_id} if request_id else {}),
             "provider_id": provider_id,
             "thread_id": thread_info.thread_id,
             "requested_thread_id": thread_id,
@@ -2080,15 +2355,30 @@ class ProviderOwnerBridge:
         except Exception as exc:
             saved_thread = next((thread for thread in ws_info.threads.values()
                                  if thread.new_session_recovery.get("request_id") == recovery_key), None)
+            if saved_thread is not None:
+                saved_thread.new_session_recovery.update(send_status="failed", error=f"首消息未发送: {exc}")
+                try:
+                    _checkpoint_new_session(self.state, ws_info, saved_thread)
+                except Exception:
+                    pass
+            if saved_thread is None and ws_info.pending_new_session.get("requestId") == recovery_key:
+                ws_info.pending_new_session.update(status="unknown", error=f"创建结果未知，原输入已保留: {exc}")
+                try:
+                    save_storage(self.state.storage)
+                except Exception as save_exc:
+                    ws_info.pending_new_session["error"] += f"；恢复记录保存失败: {save_exc}"
             self._list_sessions_cache.clear()
             return {
-                "ok": saved_thread is not None, "accepted": False, "error": str(exc), "request_id": recovery_key,
+                "ok": True, "accepted": False, "error": str(exc), "request_id": recovery_key,
                 "thread_id": saved_thread.thread_id if saved_thread else "",
-                "recovery": dict(saved_thread.new_session_recovery) if saved_thread else {},
+                "recovery": new_session_recovery_view(saved_thread) if saved_thread else dict(ws_info.pending_new_session),
             }
         thread_id = started.thread_id
         created_thread = started.created_thread
         thread_info = started.thread_info
+        # The real thread checkpoint contains the input; the creation-only record is no longer needed.
+        if ws_info.pending_new_session.get("requestId") == recovery_key:
+            ws_info.pending_new_session = {}
 
         try:
             sent = await send_started_provider_thread_message(
@@ -2115,7 +2405,7 @@ class ProviderOwnerBridge:
                 "workspace_id": workspace_id,
                 "created_new_thread": created_thread,
                 "request_id": recovery_key,
-                "recovery": dict(thread_info.new_session_recovery),
+                "recovery": new_session_recovery_view(thread_info),
                 "accepted": thread_info.new_session_recovery.get("send_status") == "sent",
             }
         self._list_sessions_cache.clear()
@@ -2131,7 +2421,7 @@ class ProviderOwnerBridge:
             "workspace_id": workspace_id,
             "created_new_thread": created_thread,
             "request_id": recovery_key,
-            "recovery": dict(thread_info.new_session_recovery),
+            "recovery": new_session_recovery_view(thread_info),
             "remapped": effective_thread_id != thread_id,
             "session": build_provider_session_summary(
                 ws_info,
@@ -2143,6 +2433,13 @@ class ProviderOwnerBridge:
         }
 
     async def _handle_start_session_message(self, request: dict) -> dict:
+        try:
+            with self.state.task_admission():
+                return await self._handle_admitted_start_session_message(request)
+        except RuntimeError as exc:
+            return {"ok": False, "error": str(exc)}
+
+    async def _handle_admitted_start_session_message(self, request: dict) -> dict:
         provider_id = str(request.get("provider_id") or "").strip()
         workspace_dir = str(request.get("workspace_dir") or "").strip()
         text = str(request.get("text") or "").strip()
@@ -2161,10 +2458,6 @@ class ProviderOwnerBridge:
         if getattr(provider, "message_hooks", None) is None:
             return {"ok": False, "error": f"Provider '{provider_id}' 不支持发送消息"}
 
-        adapter = self.state.get_adapter(provider_id)
-        if adapter is None or not getattr(adapter, "connected", False):
-            return {"ok": False, "error": f"{provider_id} adapter 未连接"}
-
         ws_info = _resolve_workspace(self.state, provider_id, workspace_dir)
         if ws_info is None:
             return {"ok": False, "error": "缺少 workspace_dir，无法创建 provider 会话"}
@@ -2179,6 +2472,11 @@ class ProviderOwnerBridge:
         if validation_error:
             return {"ok": False, "error": validation_error}
 
+        try:
+            adapter = await _ensure_message_adapter(self.state, provider_id, provider, ws_info)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
         workspace_id = getattr(ws_info, "daemon_workspace_id", None) or _workspace_key(provider_id, ws_info.path)
         ws_info.daemon_workspace_id = workspace_id
 
@@ -2189,11 +2487,29 @@ class ProviderOwnerBridge:
                 logger.debug("[provider-owner-bridge] register_workspace_cwd 失败", exc_info=True)
 
         recovery_key = str(request.get("request_id") or uuid.uuid4())
+        if len(recovery_key) > 128:
+            return {"ok": False, "error": "无效的发送请求 ID"}
         request = {**request, "request_id": recovery_key}
         task_key = (provider_id, workspace_id, recovery_key)
         pending = self._new_session_tasks.get(task_key)
         if pending and (pending[0] != text or pending[1] != attachments):
             return {"ok": False, "error": "恢复请求与原始首消息不一致"}
+        saved_thread = next((item for item in ws_info.threads.values()
+                            if item.new_session_recovery.get("request_id") == recovery_key), None)
+        creation = ws_info.pending_new_session
+        if not pending and not saved_thread:
+            if creation and creation.get("status") in {"preparing", "unknown"}:
+                return {"ok": True, "accepted": False, "error": "上一次创建尚未确认，请先核实原请求。",
+                        "request_id": creation.get("requestId"), "recovery": dict(creation)}
+            # ponytail: retain one unresolved creation per workspace; use an outbox if parallel creation is required.
+            ws_info.pending_new_session = {"kind": "new-session", "requestId": recovery_key, "status": "preparing",
+                "text": text, "attachments": attachments, "error": "", "updatedAt": time.time()}
+            try:
+                save_storage(self.state.storage)
+            except Exception as exc:
+                ws_info.pending_new_session.update(status="failed", error=f"保存原输入失败，尚未创建会话: {exc}")
+                return {"ok": True, "accepted": False, "error": ws_info.pending_new_session["error"],
+                        "request_id": recovery_key, "recovery": dict(ws_info.pending_new_session)}
         task = pending[2] if pending else asyncio.create_task(
             self._execute_start_session_message(
                 request=request,

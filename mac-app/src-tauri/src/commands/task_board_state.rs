@@ -47,7 +47,11 @@ pub struct TaskBoardSessionActivity {
     #[serde(default)]
     pub request_id: String,
     #[serde(default)]
+    pub new_session_request_id: String,
+    #[serde(default)]
     pub approval_source: String,
+    #[serde(default)]
+    pub questions: Vec<serde_json::Value>,
     #[serde(default)]
     pub mirrored_only: bool,
     #[serde(default)]
@@ -403,6 +407,45 @@ pub async fn reply_task_board_approval(
     .map_err(|error| format!("approval reply blocking task failed: {error}"))?
 }
 
+fn reply_task_board_question_at_socket_path(
+    socket_path: &Path,
+    provider_id: &str,
+    session_id: &str,
+    question_id: &str,
+    answers: Vec<Vec<String>>,
+) -> Result<(), String> {
+    let mut socket = connect_owner_bridge_socket(socket_path, TASK_BOARD_APPROVAL_REPLY_TIMEOUT)?;
+    let payload = serde_json::json!({
+        "type": "reply_question", "provider_id": provider_id,
+        "session_id": session_id, "question_id": question_id, "answers": answers,
+    });
+    socket.write_all(format!("{payload}\n").as_bytes())
+        .map_err(|e| format!("write question reply failed: {e}"))?;
+    socket.shutdown(Shutdown::Write)
+        .map_err(|e| format!("shutdown question reply write failed: {e}"))?;
+    let mut response_line = String::new();
+    BufReader::new(socket).read_line(&mut response_line)
+        .map_err(|e| format!("read question reply failed: {e}"))?;
+    let response: ReplyApprovalResponse = serde_json::from_str(response_line.trim())
+        .map_err(|e| format!("parse question reply failed: {e}"))?;
+    if response.ok { Ok(()) } else {
+        Err(response.error.unwrap_or_else(|| "question reply failed".to_string()))
+    }
+}
+
+#[tauri::command]
+pub async fn reply_task_board_question(
+    provider_id: String,
+    session_id: String,
+    question_id: String,
+    answers: Vec<Vec<String>>,
+) -> Result<(), String> {
+    let socket_path = provider_owner_bridge_socket_path(&ensure_data_dir()?);
+    tauri::async_runtime::spawn_blocking(move || {
+        reply_task_board_question_at_socket_path(&socket_path, &provider_id, &session_id, &question_id, answers)
+    }).await.map_err(|error| format!("question reply task failed: {error}"))?
+}
+
 fn control_task_board_session_at_socket_path(
     socket_path: &Path,
     provider_id: &str,
@@ -690,6 +733,34 @@ mod tests {
     use std::thread;
 
     #[test]
+    fn question_reply_forwards_group_and_reports_provider_errors() {
+        let dir = PathBuf::from(format!("/tmp/owtb-question-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let socket_path = dir.join("bridge.sock");
+        let listener = UnixListener::bind(&socket_path).expect("bind socket");
+        let server = thread::spawn(move || {
+            for response in [b"{\"ok\":true}\n".as_slice(), b"{\"ok\":false,\"error\":\"question expired\"}\n".as_slice()] {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let mut request = String::new();
+                BufReader::new(stream.try_clone().unwrap()).read_line(&mut request).unwrap();
+                let payload: serde_json::Value = serde_json::from_str(request.trim()).unwrap();
+                assert_eq!(payload["type"], "reply_question");
+                assert_eq!(payload["provider_id"], "claude");
+                assert_eq!(payload["session_id"], "sample-session");
+                assert_eq!(payload["question_id"], "sample-question");
+                assert_eq!(payload["answers"], serde_json::json!([["Python"], ["Rust", "Custom"]]));
+                stream.write_all(response).unwrap();
+            }
+        });
+        let reply = || reply_task_board_question_at_socket_path(&socket_path, "claude", "sample-session",
+            "sample-question", vec![vec!["Python".into()], vec!["Rust".into(), "Custom".into()]]);
+        assert!(reply().is_ok());
+        assert_eq!(reply().unwrap_err(), "question expired");
+        server.join().unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn missing_task_board_state_returns_default() {
         let dir = std::env::temp_dir().join(format!(
             "onlineworker-task-board-missing-{}",
@@ -732,13 +803,14 @@ mod tests {
     #[test]
     fn parses_task_board_activity_stream_snapshot() {
         let event = parse_task_board_activity_stream_event(
-            r#"{"ok":true,"kind":"snapshot","activities":[{"providerId":"primary","workspaceId":"primary:/tmp/project","workspacePath":"/tmp/project","sessionId":"thread-a","title":"Run tests","status":"running","attentionReason":"","lastUserMessage":"Run tests","lastAssistantMessage":"","lastFinalMessage":"","lastEventKind":"message.user.accepted","updatedAt":10.0}]}"#,
+            r#"{"ok":true,"kind":"snapshot","activities":[{"providerId":"primary","workspaceId":"primary:/tmp/project","workspacePath":"/tmp/project","sessionId":"thread-a","title":"Run tests","status":"running","attentionReason":"","newSessionRequestId":"sample-request","lastUserMessage":"Run tests","lastAssistantMessage":"","lastFinalMessage":"","lastEventKind":"message.user.accepted","updatedAt":10.0}]}"#,
         )
         .expect("event");
 
         assert_eq!(event.kind, "snapshot");
         assert_eq!(event.activities.len(), 1);
         assert_eq!(event.activities[0].last_user_message, "Run tests");
+        assert_eq!(event.activities[0].new_session_request_id, "sample-request");
     }
 
     #[test]

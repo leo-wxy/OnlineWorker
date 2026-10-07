@@ -2029,16 +2029,17 @@ class ClaudeAdapter:
         question_key = str(question_id or "").strip()
         entry = self._pending_hook_questions.get(question_key)
         if entry is None:
-            raise RuntimeError(f"Claude question 请求不存在：{question_key}")
+            raise LookupError(f"Claude question 请求不存在：{question_key}")
+        future = entry.get("future")
+        if future is None or future.done():
+            raise LookupError(f"Claude question 已失效：{question_key}")
         response = _build_question_hook_response(
             entry.get("payload") or {},
             entry.get("questions") or [],
             entry.get("answer_keys") or [],
             answers,
         )
-        future = entry.get("future")
-        if future is not None and not future.done():
-            future.set_result(response)
+        future.set_result(response)
         return response
 
     def _render_text_with_attachments(

@@ -37,3 +37,4 @@ dist-x86_64/
 .DS_Store
 .codex-app-server-schema/
 test_list_fix.py
+.onlineworker-local/

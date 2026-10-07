@@ -1,5 +1,6 @@
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
-import type { ComposerAttachment, SessionTurn } from "../../types";
+import type { ComposerAttachment, SessionSendRecovery, SessionTurn } from "../../types";
+import { useI18n } from "../../i18n";
 import {
   limitSessionTurns,
   mergeSessionTurns,
@@ -109,6 +110,11 @@ export function SessionComposer({
   attachmentButtonLabel,
   imageButtonLabel,
   onSend,
+  recovery,
+  onRecheck,
+  rechecking = false,
+  waitingDismissed = false,
+  onStopWaiting,
 }: {
   resetKey: string;
   focusKey?: number;
@@ -125,8 +131,15 @@ export function SessionComposer({
   attachmentButtonLabel: string;
   imageButtonLabel: string;
   onSend: (text: string, attachments: ComposerAttachment[]) => Promise<boolean | void>;
+  recovery?: SessionSendRecovery | null;
+  onRecheck?: () => void;
+  rechecking?: boolean;
+  waitingDismissed?: boolean;
+  onStopWaiting?: () => void;
 }) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState("");
+  const recoveryBlocksSend = Boolean(recovery && ["preparing", "sending", "unknown"].includes(recovery.status));
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -143,7 +156,7 @@ export function SessionComposer({
 
   const handleSubmit = async () => {
     const text = draft.trim();
-    if ((!text && attachments.length === 0) || sending || stagingAttachments || disabled) {
+    if ((!text && attachments.length === 0) || sending || stagingAttachments || disabled || recoveryBlocksSend) {
       return;
     }
 
@@ -162,8 +175,41 @@ export function SessionComposer({
     }
   };
 
+  const handleRestore = () => {
+    if (!recovery || recovery.status !== "failed" || draft || attachments.length || sending) return;
+    setDraft(recovery.text);
+    onAttachmentsChange(recovery.attachments);
+    textareaRef.current?.focus();
+  };
+
   return (
     <div className="border-t border-[var(--ow-line)] bg-[var(--ow-panel)] p-4 backdrop-blur">
+      {recovery && (recovery.status !== "sent" || recovery.error) ? (
+        <div role="status" className="mb-3 space-y-2 rounded-md border border-[var(--ow-line)] p-3 text-sm text-[var(--ow-text)]">
+          <p>{recovery.status === "failed" ? t.sessions.sendRecoveryFailed
+            : recovery.status === "unknown" ? t.sessions.sendRecoveryUnknown
+              : recovery.status === "sent" ? t.sessions.sendRecoverySent : t.sessions.sendRecoveryPending}</p>
+          {recovery.error ? <p className="text-xs text-[var(--ow-warning-text)]">{recovery.error}</p> : null}
+          <details>
+            <summary className="cursor-pointer text-xs text-[var(--ow-muted)]">{t.sessions.sendRecoveryInput}</summary>
+            <p className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words">{recovery.text}</p>
+            {recovery.attachments.map(attachment => <p key={attachment.id} className="text-xs">{attachment.name}</p>)}
+          </details>
+          <div className="flex items-center gap-2">
+            {recovery.status === "failed" ? <button type="button" className="ow-btn px-3 py-1 text-xs"
+              disabled={Boolean(draft || attachments.length || sending)}
+              onClick={handleRestore}>
+              {t.sessions.sendRecoveryRestore}
+            </button> : null}
+            <button type="button" className="ow-btn px-3 py-1 text-xs" disabled={rechecking} onClick={onRecheck}>{t.sessions.sendRecoveryRecheck}</button>
+            {recovery.kind === "new-session" && recoveryBlocksSend && !waitingDismissed ? (
+              <button type="button" className="ow-btn px-3 py-1 text-xs" onClick={onStopWaiting}>{t.sessions.sendRecoveryStopWaiting}</button>
+            ) : null}
+          </div>
+          {waitingDismissed && recoveryBlocksSend ? <p className="text-xs text-[var(--ow-subtle)]">{t.sessions.sendRecoveryWaitingStopped}</p> : null}
+          {recovery.status === "failed" && (draft || attachments.length) ? <p className="text-xs text-[var(--ow-subtle)]">{t.sessions.sendRecoveryDraftPresent}</p> : null}
+        </div>
+      ) : null}
       <div className="ow-page-frame-soft rounded-[24px] p-3">
         <div className="rounded-[20px] border border-[var(--ow-line)] bg-[var(--ow-panel)] shadow-sm transition-colors focus-within:border-[var(--ow-blue)] focus-within:[box-shadow:var(--ow-shadow-sm)]">
           <textarea
@@ -275,7 +321,7 @@ export function SessionComposer({
 
             <button
               onClick={() => void handleSubmit()}
-              disabled={sending || stagingAttachments || disabled || (!draft.trim() && attachments.length === 0)}
+              disabled={sending || stagingAttachments || disabled || recoveryBlocksSend || (!draft.trim() && attachments.length === 0)}
               className="ow-btn-primary inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-40"
             >
               {sendLabel}

@@ -10,6 +10,8 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
 
 产物目录：`mac-app/src-tauri/target/release/bundle/dmg/`。文件名中的版本号来自 `VERSION`，构建脚本会同步至应用配置，当前为 `1.11.0`。
 
+普通本地构建不要求 updater 私钥。未设置 `TAURI_SIGNING_PRIVATE_KEY` 且没有仓库本地 `.onlineworker-local/updater/onlineworker.key` 时，脚本仅在本次构建参数中关闭 updater 产物，仍生成 App 和 DMG；不会改写配置公钥。
+
 > 说明：这条命令对应当前仓库的基础构建路径。额外 provider 扩展包不会自动被打进这个 DMG；如果你需要把扩展包一起打包，请在调用 `scripts/build.sh` 前设置 `ONLINEWORKER_PLUGIN_SOURCE_DIRS`。
 
 ### GitHub Tag 自动打包
@@ -20,25 +22,62 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
   - 推送版本 tag（例如 `1.10.0`）后自动执行
   - 手动 `workflow_dispatch`，并传入一个已存在的 `release_tag`
 - 运行环境：
-  - `macos-15`
+  - Apple Silicon：`macos-15`
+  - Intel：`macos-15-intel`
 - 构建入口：
   - 直接复用仓库根目录的 `bash scripts/build.sh`
 - 产物处理：
-  - 先作为 Actions artifact 上传
-  - 如果对应 GitHub Release 不存在，先自动创建
-  - 再追加上传到对应的 GitHub Release 资产列表
+  - 从指定 tag 检出源码，构建前校验 tag、`VERSION`、应用配置和 `Cargo.lock` 的版本一致
+  - 两种架构分别构建、验证 App 版本与主程序/sidecar 架构，再上传 Actions artifact
+  - 两种架构均成功后，统一创建或更新对应 GitHub Release，上传两个 DMG、`.app.tar.gz` 与 `.sig`，最后上传 `latest.json`
 
-当前 CI 只构建 **Apple Silicon / aarch64** DMG，不包含 Intel DMG，也不包含签名或 notarization。
+CI 已配置 **Apple Silicon / aarch64** 和 **Intel / x86_64** 两条原生构建链。实际产物是否可运行仍须在对应架构的安装版验证，源码检查不能代替安装态验收。
+
+### Updater 更新包签名
+
+发布 CI 必须设置 `TAURI_SIGNING_PRIVATE_KEY`，加密密钥还需设置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。它们是 GitHub Actions Secrets，独立于下方 Apple 代码签名、公证凭据。私钥必须与 `mac-app/src-tauri/tauri.conf.json` 中 `plugins.updater.pubkey` 配对；生成 manifest 时会核对 key id，App 下载后再验证完整签名。
+
+维护现有发行版时使用原有配对密钥，不要重新生成并替换公钥；旧版 App 无法验证另一套密钥签出的更新。独立发行版初次建立自己的更新渠道时，可在本地运行 Tauri signer 并将对应公钥配置到自己的 App：
+
+```bash
+mkdir -p .onlineworker-local/updater
+mac-app/node_modules/.bin/tauri signer generate --write-keys .onlineworker-local/updater/onlineworker.key
+```
+
+通过 GitHub Secrets 设置页保存生成的私钥文件内容及密码，不在终端输出或提交私钥。受忽略的本地密钥目录不会进入仓库或安装包；原始密钥应由维护者安全备份。本地签名构建可使用该路径，或通过 `TAURI_SIGNING_PRIVATE_KEY` 指定私钥文件/内容。CI 缺少密钥会在构建前失败，不能发布无签名的更新包。
+
+### 正式签名与公证
+
+在仓库的 GitHub Actions Secrets 中配置以下值；证书、密码和账号信息不要写进源码、文档示例或日志：
+
+- `APPLE_CERTIFICATE`：Developer ID Application `.p12` 证书的 base64 内容
+- `APPLE_CERTIFICATE_PASSWORD`：证书导出密码
+- `APPLE_SIGNING_IDENTITY`：该证书的完整签名身份，后续发布保持一致
+- `KEYCHAIN_PASSWORD`：CI 临时钥匙串密码
+- `APPLE_ID`、`APPLE_PASSWORD`（App 专用密码）、`APPLE_TEAM_ID`：Apple 公证凭据
+
+完整配置后，PyInstaller 使用同一身份签署内嵌 Python 二进制，Tauri 签署并公证 App；CI 校验代码签名、Team ID、公证票据和 Gatekeeper 结果后才上传。正式签名构建失败时禁止使用未公证的 DMG fallback。配置部分凭据会直接失败；全部未配置时仅使用 ad-hoc 签名产出开发版，不能宣称已正式签名或公证。
+
+配置依据：[Tauri macOS 签名与公证](https://v2.tauri.app/distribute/sign/macos/)、[PyInstaller 内嵌二进制签名](https://pyinstaller.org/en/stable/feature-notes.html#macos-binary-code-signing)。当前仓库代码接通这些步骤，不代表凭据已配置或真实签名、公证已验收。
+
+### 应用内更新
+
+在“设置 → 维护 → 应用更新”查看当前版本，点击“检查更新”读取官方最新稳定 Release 的 `latest.json`，再分别点击“下载更新”和“安装并重启”。下载包通过公钥验证后才可安装；网络失败、缺少 manifest 或签名错误会显示错误。检查本身不会下载或安装，“打开官方下载页”保留手动 DMG 安装入口。
+
+安装前要求任务已结束、没有未确认的发送，以及已关闭通过 OnlineWorker proxy 连接的远程 CLI。远程连接按生命周期保护安装，即使 CLI 暂时空闲也需先关闭；其真实 turn 状态仍由消息总线管理。独立 CLI 和直接连接 provider 的外部客户端不由该准入锁控制。
+
+App 在确认空闲后创建旧包备份，复制完成后重新确认并续期准入，再停止 bot、安装、验证包版本与标识并重启。备份位于安装目录下的 `.OnlineWorker-update-*/previous.app`，同目录 `manifest.json` 记录原路径；安装失败尝试恢复旧包并重新启动先前运行的 bot。备份保留供人工恢复，不自动清理。重启后的自动健康回滚尚未实现。
+
+当前源码检查与快速打包覆盖安装已完成过；线上 Release 的完整 updater 路径、实际签名拒绝、安装失败恢复、更新后服务恢复和 Intel 安装态仍待功能验收。配置 CI 不代表这些验收已经通过。
 
 ### x86_64 (Intel) DMG
 
-前提：以下两个 x86_64 sidecar 已存在：
-
-- `mac-app/src-tauri/binaries/onlineworker-bot-x86_64-apple-darwin`
-- `mac-app/src-tauri/binaries/ccusage-x86_64-apple-darwin`
+在 Intel Mac 使用对应架构的 Python；Apple Silicon 可使用 Rosetta 和 x86_64 Python。共享构建入口会重建两个 sidecar，并为 Tauri 传入同一 target：
 
 ```bash
-export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /path/to/OnlineWorker/mac-app && npm run tauri -- build --target x86_64-apple-darwin
+cd /path/to/OnlineWorker
+ONLINEWORKER_TARGET_TRIPLE=x86_64-apple-darwin \
+  PYTHON_EXECUTABLE=/usr/local/bin/python3.13 bash scripts/build.sh
 ```
 
 产物目录：`mac-app/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/`。
@@ -88,7 +127,7 @@ export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /pat
 
 ### build.sh 做了什么
 
-`scripts/build.sh` 会同步应用版本，然后自动检测当前机器架构并执行四个构建阶段：
+`scripts/build.sh` 会同步应用配置与 Cargo 锁文件的版本，然后自动检测当前机器架构并执行四个构建阶段。可用 `ONLINEWORKER_TARGET_TRIPLE` 指定架构，`PYTHON_EXECUTABLE` 指定相应 Python；显式 target 的产物位于 `target/<target>/release/bundle/`，默认本机构建仍位于 `target/release/bundle/`：
 
 1. 使用 PyInstaller 构建 Python bot binary (`dist/onlineworker-bot`)
 2. 将 binary 复制为带 target-triple 后缀的 sidecar (`mac-app/src-tauri/binaries/onlineworker-bot-{target}`)

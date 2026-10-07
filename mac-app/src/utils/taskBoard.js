@@ -1,6 +1,39 @@
 import { formatSessionPreviewText, sessionPreviewFromRaw } from "./sessionBrowserState.js";
 
 const BOARD_LANE_LIMIT = 12;
+const RECENT_ENDED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function taskBoardStatusKey(task) {
+  if (task.needsAttention) return "statusNeedsAttention";
+  if (task.running) return "statusRunning";
+  if (task.interrupted) return "statusInterrupted";
+  return task.status === "completed" ? "statusCompleted" : null;
+}
+
+export function formatTaskBoardRelativeTime(epochMs, nowMs, locale) {
+  if (!Number.isFinite(epochMs) || epochMs <= 0) return null;
+  const seconds = Math.max(0, Math.floor((nowMs - epochMs) / 1000));
+  const [unit, size] = [
+    ["year", 365 * 86400], ["month", 30 * 86400], ["week", 7 * 86400],
+    ["day", 86400], ["hour", 3600], ["minute", 60],
+  ].find(([, size]) => seconds >= size) ?? ["second", 1];
+  return new Intl.RelativeTimeFormat(locale, { numeric: "always" })
+    .format(-Math.floor(seconds / size), unit);
+}
+
+export function buildTaskBoardQuestionAnswers(questions, selections, customAnswers) {
+  if (!questions.length || questions.some((question, index) => question.subIndex !== index || question.subTotal !== questions.length)) {
+    return null;
+  }
+  const answers = questions.map((question, index) => {
+    const indices = selections[index] ?? (question.options.length === 0 && question.custom ? [-1] : []);
+    return indices.map(optionIndex => optionIndex === -1 && question.custom
+      ? (customAnswers[index] ?? "").trim()
+      : question.options[optionIndex]?.label ?? "");
+  });
+  return answers.some((answer, index) => !answer.length || answer.some(value => !value) || (!questions[index].multiple && answer.length !== 1))
+    ? null : answers;
+}
 
 function normalizeTimestamp(value) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
@@ -219,7 +252,9 @@ export function buildTaskBoardModel({
     const status = normalizedString(activity.status).toLowerCase();
     const attentionKind = normalizedString(activity.attentionKind).toLowerCase();
     const interrupted = status === "completed" && attentionKind === "interrupted";
-    const recentEnded = status === "completed";
+    const updatedAtEpochMs = normalizeTimestamp(activity.updatedAt);
+    const recentEnded = status === "completed" && updatedAtEpochMs !== null
+      && updatedAtEpochMs >= nowEpochMs - RECENT_ENDED_WINDOW_MS && updatedAtEpochMs <= nowEpochMs;
     const running = !needsAttention && activityRunning(activity);
     const pinned = pinnedKeys.has(key);
     const title = activityTitle({ ...activity, sessionId }, session);
@@ -250,6 +285,7 @@ export function buildTaskBoardModel({
       attentionKind,
       requestId: normalizedString(activity.requestId),
       approvalSource: normalizedString(activity.approvalSource),
+      questions: Array.isArray(activity.questions) ? activity.questions : [],
       mirroredOnly: activity.mirroredOnly === true,
       canInterrupt: activity.canInterrupt === true,
       canRecover: activity.canRecover === true,
@@ -266,7 +302,7 @@ export function buildTaskBoardModel({
       pinned,
       statusReason: activityStatusReason(activity, fallbackReason),
       recentEvent: normalizedString(activity.lastEventKind) || null,
-      updatedAtEpochMs: normalizeTimestamp(activity.updatedAt),
+      updatedAtEpochMs,
     }];
   });
   const projectedKeys = new Set(tasks.map((task) => task.id));
@@ -299,6 +335,7 @@ export function buildTaskBoardModel({
       attentionKind: "",
       requestId: "",
       approvalSource: "",
+      questions: [],
       mirroredOnly: false,
       canInterrupt: false,
       canRecover: false,
@@ -344,9 +381,9 @@ export function buildTaskBoardModel({
     .sort(compareTasks)
     .slice(0, BOARD_LANE_LIMIT);
   const recentEndedTasks = boardTasks
-    .filter((task) => !needsAttentionTaskKeys.has(task.id) && !runningTaskKeys.has(task.id) && (task.recentEnded || task.pinned))
+    .filter((task) => task.recentEnded)
     .sort(compareTasks)
-    .slice(0, BOARD_LANE_LIMIT);
+    .slice(0, 5);
 
   return {
     needsAttention: needsAttentionTasks,
@@ -357,7 +394,7 @@ export function buildTaskBoardModel({
       needsAttention: boardTasks.filter((task) => task.needsAttention).length,
       running: boardTasks.filter((task) => !task.needsAttention && task.running).length,
       pinnedIdle: boardTasks.filter((task) => !task.needsAttention && !task.running && task.pinned).length,
-      recentEnded: boardTasks.filter((task) => !task.needsAttention && !task.running && (task.recentEnded || task.pinned)).length,
+      recentEnded: recentEndedTasks.length,
       total: tasks.length,
     },
     generatedAtEpochMs,

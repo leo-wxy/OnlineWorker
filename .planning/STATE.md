@@ -4,10 +4,10 @@ milestone: general-ai-capability-and-session-operations
 milestone_name: General AI Capability and Session Operations
 current_phase: 25
 last_completed_phase: 24 — Runtime Authority and Durability Hardening
-current_plan: 25-03
-status: Phase 25 in progress; Phase 24 remains archived; STAB-07 deferred
-stopped_at: 25-03 source and fast package verified; Phase 25 feature UAT pending
-last_updated: "2026-09-30"
+current_plan: null
+status: Phase 25 Codex selection and historical timestamps fixed; seven-day latest-five task board installed verified; remaining feature UAT pending
+stopped_at: Task Board status labels, recent-ended window and relative times passed 39 frontend checks, TypeScript and fast installed verification
+last_updated: "2026-10-02"
 progress:
   total_phases: 20
   completed_phases: 13
@@ -20,11 +20,11 @@ current_phase_name: Session Delivery and Recovery
 
 # Project State
 
-**Updated:** 2026-09-30
+**Updated:** 2026-10-02
 **Current milestone:** General AI Capability and Session Operations
 **Current phase:** 25 — Session Delivery and Recovery
-**Status:** In progress; Phase 24 remains archived and STAB-07 deferred
-**Current plan:** 25-03 — 源码与快速打包安装验证通过；功能 UAT 待确认
+**Status:** In progress; question/updater review fixes source verified; Phase 24 remains archived and STAB-07 deferred
+**Current plan:** 25-FOLLOWUP — Codex 新建选中项、历史时间戳及看板最近 7 天最新 5 条规则已修复并安装验证；其余功能 UAT 待完成，线上 updater 受限
 **Last archived milestone:** v1.2.1
 
 ## Current Status
@@ -91,14 +91,14 @@ current_phase_name: Session Delivery and Recovery
 | 22. Dark Mode Support | Source verified through `22-06` | Await explicit permission for installed-app visual and native-window verification |
 | 23. Plugin-Owned Codex Account and Session Asset Management | Completed; OAuth/Token-only entry and fixed row tracks source/visual verified; earlier resident cache path installed verified | Current follow-up is not packaged; session refresh remains 6.0 s and real mutations remain unverified |
 | 24. Runtime Authority and Durability Hardening | Completed and archived with accepted scope; 8 retained plans delivered | None; STAB-07 deferred separately, feature UAT retained as unverified |
-| 25. Session Delivery and Recovery | In progress | 25-01 complete and installed verified; 25-02 source and fast package verified, feature UAT pending; 25-03 source and fast package verified, feature UAT pending |
+| 25. Session Delivery and Recovery | In progress; review fixes packaged, partial installed UAT | Codex 回执核实与等待恢复已源码验证，安装版响应丢失及重启恢复通过；无回执仍未知；DELIVERY-09/10/11 待实施，完整功能 UAT 未通过 |
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 **Core value:** Developers can reliably control local AI coding CLI workflows from an installed Mac app while receiving timely remote notifications and final results through supported notification channels.
-**Current focus:** Phase 25 follows the user-approved order: send/session/state boundaries, consumer/stream recovery, then new-session recovery. STAB-07 remains deferred.
+**Current focus:** Phase 25 补充范围及复审修复见 [25-FOLLOWUP.md](phases/25-session-delivery-and-recovery/25-FOLLOWUP.md)。6 项初轮修复与 4 项后续修复均已通过源码检查；普通发送失败恢复入口已通过安装检查；DELIVERY-07 精确回执核实、新建等待恢复已通过源码检查，安装版客户端响应丢失与 App/bot 重启恢复通过；完全无回执和长等待的安装版故障注入未验收，结果继续保守处理。DELIVERY-09/10/11 分别推进。STAB-07 保留条件项，既有 UAT 不标为已完成，既有计划统计不增加。
 
 ## Key Preserved Decisions
 
@@ -246,6 +246,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 ## Session Continuity
 
-Last session: 2026-09-30
-Stopped at: Phase 25-03 source and fast package verified; feature UAT pending; Phase 24 remains archived
+Last session: 2026-10-02
+Stopped at: All ten review fixes source verified; installed verification and remaining Phase 25 work pending
 Resume file: none

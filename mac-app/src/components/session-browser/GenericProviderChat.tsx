@@ -5,6 +5,7 @@ import type {
   ComposerAttachment,
   ProviderSessionSendResult,
   SessionStreamEvent,
+  SessionSendRecovery,
   SessionTurn,
 } from "../../types";
 import { shouldClearReplyWatch } from "../../utils/replyWatch.js";
@@ -12,6 +13,7 @@ import { applySessionStreamEvent } from "../../utils/sessionEventModel.js";
 import { ProviderSessionBadges } from "./badges";
 import {
   sendProviderSessionMessage,
+  recheckProviderSessionSend,
   startProviderSessionMessage,
 } from "./api";
 import { useStagedAttachments } from "./composerAttachments";
@@ -64,6 +66,9 @@ export function GenericProviderChat({
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [recovery, setRecovery] = useState<SessionSendRecovery | null>(null);
+  const [rechecking, setRechecking] = useState(false);
+  const [waitingDismissed, setWaitingDismissed] = useState(false);
   const { stagingAttachments, handlePickFiles } = useStagedAttachments({
     scopeKey: sessionIdentityKey(session),
     supportsAttachments: providerSupportsAttachments,
@@ -151,6 +156,9 @@ export function GenericProviderChat({
   }, [messages]);
 
   const handleSessionEvent = useCallback((event: SessionStreamEvent) => {
+    if (event.recovery || (["replace_snapshot", "send_failed"].includes(event.kind) && event.recovery !== undefined)) {
+      setRecovery(event.recovery);
+    }
     if (event?.kind === "stream_ready") {
       return;
     }
@@ -197,6 +205,7 @@ export function GenericProviderChat({
     if (!trimmedText.trim() && nextAttachments.length === 0) {
       return;
     }
+    if (recovery && ["preparing", "sending", "unknown"].includes(recovery.status)) return false;
 
     const previousMessages = messagesRef.current;
     const optimisticMessages = limitSessionTurns([
@@ -217,9 +226,9 @@ export function GenericProviderChat({
     setError(null);
     applyMessages(optimisticMessages, "smooth");
     setReplyWatchState("foreground");
-    if (mode === "new-session") {
+    {
       const payload = JSON.stringify([sessionIdentityKey(activeSession), trimmedText, nextAttachments]);
-      if (newSessionRequestRef.current?.payload !== payload) {
+      if (newSessionRequestRef.current?.payload !== payload || recovery?.status === "failed") {
         newSessionRequestRef.current = { payload, id: crypto.randomUUID() };
       }
     }
@@ -239,9 +248,15 @@ export function GenericProviderChat({
             trimmedText,
             nextAttachments,
             activeSession.workspace,
+            newSessionRequestRef.current?.id,
       );
       if (!isCurrentScope()) return;
+      if (sendResult.recovery) setRecovery(sendResult.recovery);
       if (sendResult.error) setError(sendResult.error);
+      if (mode === "new-session" && sendResult.threadId && sendResult.accepted === false) {
+        await onNewSessionStarted?.(sendResult);
+        return false;
+      }
       if (sendResult.accepted === false) {
         cancelReplyWatch();
         applyMessages(previousMessages, "auto");
@@ -250,6 +265,8 @@ export function GenericProviderChat({
       const remappedSessionId = sendResult.threadId?.trim();
       if (mode === "new-session" && !remappedSessionId) {
         if (sendResult.pending) {
+          setRecovery({ kind: "new-session", requestId: sendResult.requestId!, status: "preparing",
+            text: trimmedText, attachments: nextAttachments, error: "", updatedAt: Date.now() / 1000 });
           await onNewSessionPending?.(sendResult, trimmedText);
           if (!isCurrentScope()) return;
           setAttachments([]);
@@ -282,13 +299,40 @@ export function GenericProviderChat({
     } catch (sendError) {
       if (!isCurrentScope()) return;
       cancelReplyWatch();
-      setError((sendError as Error).message);
+      setError(sendError instanceof Error ? sendError.message : String(sendError));
       applyMessages(previousMessages, "auto");
       return false;
     } finally {
       if (isCurrentScope()) setSending(false);
     }
   };
+
+  const handleRecheck = async () => {
+    if (rechecking) return;
+    if (mode !== "new-session" && !recovery) { loadMessages(); return; }
+    const generation = scopeGenerationRef.current;
+    setRechecking(true);
+    try {
+      const result = await recheckProviderSessionSend(activeSession.type, activeSession.workspace,
+        recovery?.requestId || newSessionRequestRef.current?.id,
+        mode === "new-session" ? undefined : activeSession.id);
+      if (scopeGenerationRef.current !== generation) return;
+      if (result.recovery !== undefined) setRecovery(result.recovery ?? null);
+      setError(result.error ?? null);
+      if (mode === "new-session" && result.threadId) await onNewSessionStarted?.(result);
+      else if (mode !== "new-session") loadMessages();
+    } catch (recheckError) {
+      if (scopeGenerationRef.current === generation) setError(String(recheckError));
+    } finally {
+      if (scopeGenerationRef.current === generation) setRechecking(false);
+    }
+  };
+
+  useEffect(() => {
+    if (active && mode === "new-session") void handleRecheck();
+  }, [active, mode, session.id, session.type, session.workspace]);
+
+  const handleStopWaiting = () => { cancelReplyWatch(); setWaitingDismissed(true); };
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-[var(--ow-line-soft)] bg-[var(--ow-panel)] [box-shadow:var(--ow-shadow-md)] backdrop-blur-xl">
@@ -342,6 +386,11 @@ export function GenericProviderChat({
         attachmentButtonLabel={t.sessions.attachFile}
         imageButtonLabel={t.sessions.attachImage}
         onSend={handleSend}
+        recovery={recovery}
+        onRecheck={() => void handleRecheck()}
+        rechecking={rechecking}
+        waitingDismissed={waitingDismissed}
+        onStopWaiting={handleStopWaiting}
       />
     </div>
   );
