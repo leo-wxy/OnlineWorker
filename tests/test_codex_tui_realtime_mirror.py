@@ -990,6 +990,50 @@ async def test_shared_live_imported_thread_bootstraps_bus_activity_without_live_
     handler.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_startup_history_keeps_display_metadata_after_full_history_load(tmp_path, monkeypatch):
+    from core import provider_owner_bridge
+    from plugins.providers.builtin.codex.python.storage_runtime import read_thread_history
+    from plugins.providers.builtin.codex.python.tui_realtime_mirror import bootstrap_bound_codex_thread_activity
+
+    state, ws, session_file, sessions_dir = _make_state(tmp_path)
+    state.config = _make_shared_live_app_mode_config()
+    ws.threads["tid-1"].source = "imported"
+    rows = [
+        ("user", "", "请整理输出", "plain"),
+        ("assistant", "commentary", "正在**检查**", "plain"),
+        ("assistant", "final_answer", "**已完成**：`value`\n\n- 保留列表", "markdown"),
+        ("assistant", "", "**旧版最终回复**", "markdown"),
+    ]
+    expected = []
+    for index, (role, phase, text, display_mode) in enumerate(rows):
+        timestamp = f"2026-04-06T10:00:0{index}Z"
+        _append_response_item(session_file, role=role, phase=phase, text=text, timestamp=timestamp)
+        expected.append({
+            "role": role, "content": text, "phase": phase,
+            "timestamp": timestamp, "displayMode": display_mode,
+        })
+
+    delivery = MagicMock()
+    state.message_bus.subscribe_delivery(delivery)
+    assert bootstrap_bound_codex_thread_activity(state, sessions_dir=str(sessions_dir))
+    assert state.message_bus.session_activity("codex", "tid-1")["conversationTurns"] == expected
+    assert state.message_bus.session_conversation("codex", "tid-1") == expected
+
+    facts = SimpleNamespace(read_thread_history=lambda session_id, *, limit:
+                            read_thread_history(session_id, str(sessions_dir), limit))
+    monkeypatch.setattr(provider_owner_bridge, "get_provider", lambda *args: SimpleNamespace(facts=facts))
+    bridge = provider_owner_bridge.ProviderOwnerBridge(state, data_dir=str(tmp_path))
+    response = await bridge._handle_read_session({
+        "provider_id": "codex", "session_id": "tid-1", "workspace_dir": ws.path, "limit": 50,
+    })
+
+    assert response == {"ok": True, "session": expected}
+    assert state.message_bus.session_history_loaded("codex", "tid-1")
+    assert delivery.call_count > 0
+    assert all(call.args[1] is None for call in delivery.call_args_list)
+
+
 def test_touch_codex_tui_watch_state_updates_runtime_marker(tmp_path):
     from plugins.providers.builtin.codex.python.tui_realtime_mirror import touch_codex_tui_watch_state
 

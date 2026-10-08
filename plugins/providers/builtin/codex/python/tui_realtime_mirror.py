@@ -232,7 +232,17 @@ def _publish_startup_activity_bootstrap(
         (_parse_codex_timestamp_ms(item.get("timestamp")) for item in history), default=0,
     ) / 1000.0
     history_turns = [
-        {"role": item.get("role"), "content": str(item.get("text") or "").strip()}
+        {
+            "role": item.get("role"),
+            "content": str(item.get("text") or "").strip(),
+            "phase": item.get("phase") or "",
+            "timestamp": item.get("timestamp") or "",
+            "displayMode": (
+                "markdown"
+                if item.get("role") == "assistant" and item.get("phase") != "commentary"
+                else "plain"
+            ),
+        }
         for item in history
         if item.get("role") in {"user", "assistant"} and str(item.get("text") or "").strip()
     ][-6:]

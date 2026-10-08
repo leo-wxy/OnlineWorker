@@ -2,33 +2,34 @@
 gsd_state_version: 1.0
 milestone: general-ai-capability-and-session-operations
 milestone_name: General AI Capability and Session Operations
-current_phase: 25
-last_completed_phase: 24 — Runtime Authority and Durability Hardening
-current_plan: null
-status: Phase 25 Codex selection and historical timestamps fixed; seven-day latest-five task board installed verified; remaining feature UAT pending
-stopped_at: Task Board status labels, recent-ended window and relative times passed 39 frontend checks, TypeScript and fast installed verification
-last_updated: "2026-10-02"
+current_phase: 26
+last_completed_phase: 26 — Codex Compressed Session History Support
+current_plan: 26-01
+status: Phase 26 completed; source and installed compressed-history snapshot verified
+stopped_at: Phase 26 fast build/install/restart passed; installed compressed session snapshot returned 50 messages
+last_updated: "2026-10-08"
 progress:
-  total_phases: 20
-  completed_phases: 13
-  total_plans: 61
-  completed_plans: 46
+  total_phases: 21
+  completed_phases: 14
+  total_plans: 62
+  completed_plans: 47
   deferred_plans: 1
-  percent: 75
-current_phase_name: Session Delivery and Recovery
+  percent: 76
+current_phase_name: Codex Compressed Session History Support
 ---
 
 # Project State
 
-**Updated:** 2026-10-02
+**Updated:** 2026-10-08
 **Current milestone:** General AI Capability and Session Operations
-**Current phase:** 25 — Session Delivery and Recovery
-**Status:** In progress; question/updater review fixes source verified; Phase 24 remains archived and STAB-07 deferred
-**Current plan:** 25-FOLLOWUP — Codex 新建选中项、历史时间戳及看板最近 7 天最新 5 条规则已修复并安装验证；其余功能 UAT 待完成，线上 updater 受限
+**Current phase:** 26 — Codex Compressed Session History Support
+**Status:** Phase 26 complete; source and installed snapshot verified. Phase 25 remaining feature UAT stays open; Phase 24 remains archived and STAB-07 deferred
+**Current plan:** 26-01 — 压缩历史读取和启动历史展示字段仅修改 Codex 插件，源码及安装版初始快照与 Markdown 渲染通过，已覆盖安装并重启
 **Last archived milestone:** v1.2.1
 
 ## Current Status
 
+- Phase 26 `26-01` is complete: compressed history, metadata and terminal reads share a plugin-owned text stream; existing realtime file consumers retain their ordinary-JSONL lookup behavior. Decoder errors preserve prior bus history. Startup history retains phase, timestamp and display mode through full-history merging. Source checks and authorized fast package/install/restart passed; the installed original compressed-session snapshot returned 50 messages and no plugin load failures, and affected final replies render Markdown correctly. Three related realtime failures were reproduced with the HEAD storage implementation and remain baseline limitations.
 - v1.2.1 is archived.
 - Phase 6, Notification Channel Abstraction, is complete.
 - Phase 7, OnlineWorker User Message Gateway, is closed.
@@ -154,6 +155,10 @@ See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 ## Roadmap Evolution
 
+- Phase 26 added on 2026-10-07: Codex Compressed Session History Support. Confirmed `.jsonl.zst` history is ignored by the current reader; scope covers provider-owned streaming decompression, existing MessageEventBus snapshots, read-failure diagnostics and package decoder availability. Phase 26 is not planned yet; Phase 25 retains its recorded implementation and pending UAT status.
+- Phase 26 `26-01` source verified on 2026-10-07: production implementation is confined to the Codex storage plugin, compressed history enters the existing bus snapshot, and decoder errors remain query failures. Installed validation is pending; existing realtime baseline failures are recorded without changing their production paths.
+- Phase 26 completed on 2026-10-08: authorized combined fast packaging exited 0, the installed app restarted successfully, and the compressed-session initial snapshot returned 50 messages with no plugin load failures. Phase 25 remaining feature UAT and the recorded realtime baseline failures remain separate open items.
+
 - Phase 6 added: Notification Channel Abstraction.
 - Phase 6 plan added: 06-01 minimal notification channel abstraction.
 - Phase 6 completed: added core notification event/router/registry, builtin Telegram notification plugin, notification channel config UI, local Telegram setup guide, notification plugin development docs, and a Codex TG routing regression fix discovered during installed-app validation.
@@ -246,6 +251,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-11)
 
 ## Session Continuity
 
-Last session: 2026-10-02
-Stopped at: All ten review fixes source verified; installed verification and remaining Phase 25 work pending
-Resume file: none
+Last session: 2026-10-08
+Stopped at: Phase 26 completed; remaining Phase 25 work pending
+Resume file: .planning/phases/26-codex-compressed-session-history-support/26-01-SUMMARY.md

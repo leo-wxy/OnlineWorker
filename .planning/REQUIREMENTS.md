@@ -48,6 +48,12 @@ The v1.2.1 milestone requirements are archived at [milestones/v1.2.1-REQUIREMENT
 
 新增范围与验收标准见 [Phase 25 补充](phases/25-session-delivery-and-recovery/25-FOLLOWUP.md)。STAB-07 作为条件项在该阶段跟踪，仍保留延期状态；25-02/25-03 的既有功能 UAT 不因补充需求而视为完成。
 
+## Codex Compressed Session History
+
+- [x] **HIST-01**: Codex `.jsonl.zst` 历史可通过现有会话详情读取，保留与 `.jsonl` 一致的消息内容、phase、时间戳和去重行为（源码及安装版初始快照验证通过）。
+- [x] **HIST-02**: 压缩格式适配仅在 Codex 插件内部实现，禁止修改 `core/`；历史、元数据及终态读取共享该能力，通过已有 provider facts 与 MessageEventBus 接口向现有消费者提供结果（源码验证通过）。
+- [x] **HIST-03**: 压缩历史读取失败明确可诊断；打包应用自带解压能力，不依赖用户机器额外安装的 CLI（源码异常回归及安装版解压验证通过）。
+
 ## Deferred Backlog
 
 - [ ] **STAB-07**: OnlineWorker can discover the current Codex session owner, steer/queue ordinary TG input through that owner, invoke its real interrupt capability, and return commentary/final to the original TG Topic. Deferred from Phase 24 by user acceptance; not implemented/verified. Resume only when supported owner control becomes available; preserve the acceptance criteria in [24-07-PLAN.md](phases/24-runtime-authority-and-durability-hardening/24-07-PLAN.md).
@@ -89,3 +95,6 @@ These items remain candidates for future work. UX/PLT items came from v1.2.1; ST
 | DELIVERY-10 | Phase 25 / Follow-up | Scope recorded; implementation and UAT pending |
 | DELIVERY-11 | Phase 25 / Follow-up | Scope recorded; implementation and UAT pending |
 | DELIVERY-12 | Phase 25 / Follow-up | Updater, release flow and review fixes source verified; release prerequisites and feature UAT pending |
+| HIST-01 | Phase 26 / 26-01 | Source and installed initial-snapshot verified |
+| HIST-02 | Phase 26 / 26-01 | Source verified; production changes confined to Codex plugin history reading and startup metadata |
+| HIST-03 | Phase 26 / 26-01 | Read errors source verified; installed package decoder verified |

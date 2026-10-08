@@ -30,6 +30,7 @@ This milestone adds a shared AI capability layer and strengthens user-visible se
 - [ ] **Phase 22: Dark Mode Support** - Add consistent dark-theme support across the macOS app while preserving existing light-mode behavior.
 - [x] **Phase 24: Runtime Authority and Durability Hardening** - Completed and archived on 2026-09-05 with eight delivered plans; 24-07 / STAB-07 explicitly deferred and feature UAT retained as unverified. [Archive](phases/24-runtime-authority-and-durability-hardening/24-ARCHIVE.md).
 - [ ] **Phase 25: Session Delivery and Recovery** - 修复发送、状态与流恢复，并补齐用户恢复、桌面问题回答、通知补发、会话搜索、账号生效反馈与发布易用性；独立 owner 控制按条件跟踪。
+- [x] **Phase 26: Codex Compressed Session History Support** - 支持 `.jsonl.zst` 压缩历史，经现有 provider facts 和消息总线恢复会话详情内容；源码及安装版初始快照验证通过（completed 2026-10-08）。
 
 ## Phase Details
 
@@ -988,3 +989,23 @@ Latest verification:
 - [x] [25-02-PLAN.md](phases/25-session-delivery-and-recovery/25-02-PLAN.md) — IM 消费隔离、有界流队列与重连快照（源码与快速打包安装验证通过；功能验收待确认）
 - [x] [25-03-PLAN.md](phases/25-session-delivery-and-recovery/25-03-PLAN.md) — 新建会话分阶段恢复（源码与快速打包安装验证通过；功能 UAT 待确认）
 - [ ] [25-FOLLOWUP.md](phases/25-session-delivery-and-recovery/25-FOLLOWUP.md) — 初轮 6 项和追加 4 项修复已源码验证；其余用户操作、STAB-07 条件跟踪及功能 UAT 待完成
+
+### Phase 26: Codex Compressed Session History Support
+
+**Goal:** 让 Codex 压缩历史与普通 JSONL 历史通过同一 provider 读取接口进入 MessageEventBus，解决会话列表有记录但详情消息为空的问题。
+**Requirements:** HIST-01–HIST-03；沿用 STAB-02、STAB-04。
+**Depends on:** Phase 25
+**Status:** Completed on 2026-10-08. Source checks, combined fast build/install/restart, installed compressed-session initial snapshot and startup-history Markdown rendering passed. Three related realtime baseline failures remain recorded; live message transport and delivery behavior were not modified.
+**Scope Fence:** 生产代码适配严格限定在 `plugins/providers/builtin/codex/python/`，禁止修改 `core/`。在插件内部统一文件发现、流式解压和现有解析器，覆盖历史、元数据及终态读取；结果通过已有 provider facts 和消息总线接口提供，历史文件只读，实时入口保持单一权威。必要的测试和解压依赖打包配置须直接对应此功能。
+**Success Criteria** (what must be TRUE):
+
+1. 相同内容的 `.jsonl` 与 `.jsonl.zst` 输出一致的消息、phase、时间戳和元数据。
+2. 压缩会话通过现有 owner bridge 和 MessageEventBus 生成非空历史快照。
+3. 解压或读取失败可诊断，不作为成功的空历史覆盖已有消息。
+4. 定向回归通过，打包后的解压能力不依赖用户机器额外安装的 CLI；安装验证另行取得明确授权。
+
+**Plans:** 1/1 complete
+
+Plans:
+
+- [x] [26-01-PLAN.md](phases/26-codex-compressed-session-history-support/26-01-PLAN.md) — 在 Codex 插件中读取压缩历史、保持既有实时入口行为并验证总线快照（源码及安装版协议验证通过）

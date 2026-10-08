@@ -7,6 +7,8 @@ import re
 from datetime import datetime
 from typing import Optional
 
+import zstandard
+
 logger = logging.getLogger(__name__)
 
 CODEX_SESSIONS_DIR = "~/.codex/sessions"
@@ -121,6 +123,12 @@ def _collect_jsonl_files(root: str) -> list[str]:
     return result
 
 
+def _open_codex_session_file(fpath: str):
+    if fpath.endswith(".jsonl.zst"):
+        return zstandard.open(fpath, "rt", encoding="utf-8", errors="ignore")
+    return open(fpath, "r", encoding="utf-8", errors="ignore")
+
+
 def _session_file_signature(fpath: str) -> tuple[int, int] | None:
     try:
         stat = os.stat(fpath)
@@ -162,7 +170,7 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
     latest_event_at = 0
 
     try:
-        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+        with _open_codex_session_file(fpath) as f:
             first_line = f.readline().strip()
             if first_line:
                 try:
@@ -244,6 +252,9 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
                 elif payload_type in {"task_complete", "turn_aborted"} and turn_id and current_turn_id == turn_id:
                     current_turn_id = None
 
+    except zstandard.ZstdError as exc:
+        logger.warning("Cannot decompress Codex session metadata: %s: %s", fpath, exc)
+        return None, False
     except Exception:
         return None, False
 
@@ -349,7 +360,9 @@ def _build_codex_session_index(
 
 
 def _extract_codex_thread_id_from_filename(fname: str) -> str:
-    """从 rollout-*.jsonl 文件名中提取 thread id。"""
+    """从普通或压缩 rollout 文件名中提取 thread id。"""
+    if fname.endswith(".jsonl.zst"):
+        fname = fname[:-4]
     if not fname.endswith(".jsonl"):
         return ""
     parts = fname[:-6].split("-")
@@ -568,17 +581,26 @@ def query_codex_running_thread_ids(
     }
 
 
-def find_session_file(thread_id: str, sessions_dir: Optional[str] = None) -> Optional[str]:
+def find_session_file(
+    thread_id: str,
+    sessions_dir: Optional[str] = None,
+    *,
+    include_compressed: bool = False,
+) -> Optional[str]:
+    """文件增量消费者只找普通 JSONL；历史读取显式包含压缩副本。"""
     if sessions_dir is None:
         sessions_dir = os.path.expanduser(CODEX_SESSIONS_DIR)
     if not os.path.isdir(sessions_dir):
         return None
+    compressed = None
     for root, dirs, files in os.walk(sessions_dir):
         dirs.sort()
         for fname in files:
             if thread_id in fname and fname.endswith(".jsonl"):
                 return os.path.join(root, fname)
-    return None
+            if include_compressed and compressed is None and thread_id in fname and fname.endswith(".jsonl.zst"):
+                compressed = os.path.join(root, fname)
+    return compressed
 
 
 def read_thread_history(
@@ -586,13 +608,13 @@ def read_thread_history(
     sessions_dir: Optional[str] = None,
     limit: int = 10,
 ) -> list[dict]:
-    fpath = find_session_file(thread_id, sessions_dir)
+    fpath = find_session_file(thread_id, sessions_dir, include_compressed=True)
     if not fpath:
         return []
 
     turns: list[dict] = []
     try:
-        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+        with _open_codex_session_file(fpath) as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -654,6 +676,10 @@ def read_thread_history(
                             timestamp=timestamp,
                             phase=phase,
                         )
+    except (zstandard.ZstdError, OSError) as exc:
+        if fpath.endswith(".jsonl.zst"):
+            raise RuntimeError(f"Cannot read compressed Codex session history: {exc}") from exc
+        return []
     except Exception:
         return []
 
@@ -677,13 +703,13 @@ def read_codex_turn_terminal_message(
     sessions_dir: Optional[str] = None,
     turn_id: Optional[str] = None,
 ) -> Optional[str]:
-    fpath = find_session_file(thread_id, sessions_dir)
+    fpath = find_session_file(thread_id, sessions_dir, include_compressed=True)
     if not fpath:
         return None
 
     latest_text: Optional[str] = None
     try:
-        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+        with _open_codex_session_file(fpath) as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -718,13 +744,13 @@ def read_codex_turn_terminal_outcome(
     sessions_dir: Optional[str] = None,
     turn_id: Optional[str] = None,
 ) -> Optional[dict]:
-    fpath = find_session_file(thread_id, sessions_dir)
+    fpath = find_session_file(thread_id, sessions_dir, include_compressed=True)
     if not fpath:
         return None
 
     latest: Optional[dict] = None
     try:
-        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+        with _open_codex_session_file(fpath) as f:
             for line in f:
                 line = line.strip()
                 if not line:

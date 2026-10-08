@@ -8,3 +8,4 @@ watchfiles==1.1.1
 pytest==8.3.5
 pytest-asyncio==0.24.0
 cryptography==48.0.1
+zstandard==0.25.0
