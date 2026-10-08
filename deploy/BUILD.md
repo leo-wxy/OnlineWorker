@@ -8,7 +8,7 @@
 export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && nvm use 20 && cd /path/to/OnlineWorker && bash scripts/build.sh
 ```
 
-产物目录：`mac-app/src-tauri/target/release/bundle/dmg/`。文件名中的版本号来自 `VERSION`，构建脚本会同步至应用配置，当前为 `1.11.0`。
+产物目录：`mac-app/src-tauri/target/release/bundle/dmg/`。文件名中的版本号来自 `VERSION`，构建脚本会同步至应用配置，当前为 `1.11.1`。
 
 普通本地构建不要求 updater 私钥。未设置 `TAURI_SIGNING_PRIVATE_KEY` 且没有仓库本地 `.onlineworker-local/updater/onlineworker.key` 时，脚本仅在本次构建参数中关闭 updater 产物，仍生成 App 和 DMG；不会改写配置公钥。
 
