@@ -90,3 +90,52 @@ def test_release_workflow_validates_both_architectures_before_publishing():
             if "run" in step:
                 checked = subprocess.run(["bash", "-n"], input=step["run"], text=True, capture_output=True)
                 assert checked.returncode == 0, checked.stderr
+
+
+@pytest.mark.parametrize("fallback", [False, True])
+def test_dmg_release_build_and_publish_do_not_require_updater_keys(tmp_path, fallback):
+    workflow = yaml.safe_load((ROOT / ".github/workflows/release-dmg.yml").read_text())
+    steps = {step.get("name"): step for step in workflow["jobs"]["build-dmg"]["steps"]}
+    assert "TAURI_SIGNING_PRIVATE_KEY" not in json.dumps(workflow)
+    assert steps["Upload workflow artifact"]["with"]["path"] == "${{ env.BUNDLE_ROOT }}/dmg/*.dmg"
+
+    # Execute the real workflow shell steps with synthetic build tools and DMGs.
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    bundle = tmp_path / "bundle"
+    dmg_script = 'mkdir -p "$BUNDLE_ROOT/dmg"\nprintf dmg > "$BUNDLE_ROOT/dmg/OnlineWorker_9.8.7_arm64.dmg"\nprintf dmg > "$BUNDLE_ROOT/dmg/OnlineWorker_9.8.7_x86_64.dmg"\n'
+    (scripts / "build.sh").write_text("exit 1\n" if fallback else dmg_script)
+    (scripts / "create-dmg-from-app.sh").write_text(dmg_script)
+    env = {**os.environ, "BUNDLE_ROOT": str(bundle), "SIGNED_RELEASE": "false",
+           "TAURI_SIGNING_PRIVATE_KEY": "", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD": ""}
+    result = subprocess.run(["bash", "-e", "-c", steps["Build DMG"]["run"]], cwd=tmp_path,
+                            env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    dmgs = sorted((bundle / "dmg").glob("*.dmg"))
+    assert len(dmgs) == 2
+
+    # A single upload path puts these filenames at the artifact root.
+    downloaded = tmp_path / "release-dmg"
+    downloaded.mkdir()
+    for dmg in dmgs:
+        shutil.copyfile(dmg, downloaded / dmg.name)
+    log = tmp_path / "gh-calls"
+    gh = tmp_path / "gh"
+    gh.write_text(
+        '#!/bin/bash\nset -eu\nprintf "%s\\n" "$*" >> "$TEST_GH_LOG"\n'
+        'case "$1 $2" in\n'
+        '  "release view") exit 1 ;;\n'
+        '  "release upload") shift 3; for file in "$@"; do\n'
+        '    [ "$file" = "--clobber" ] && continue\n'
+        '    [[ "$file" == *.dmg ]] && test -s "$file"\n'
+        '  done ;;\nesac\n'
+    )
+    gh.chmod(0o755)
+    publish = next(step["run"] for step in workflow["jobs"]["publish-release"]["steps"] if "run" in step)
+    result = subprocess.run(["bash", "-e", "-c", publish], cwd=tmp_path,
+                            env={**env, "PATH": str(tmp_path) + os.pathsep + env["PATH"],
+                                 "RELEASE_TAG": "9.8.7", "TEST_GH_LOG": str(log)},
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    uploads = [line for line in log.read_text().splitlines() if line.startswith("release upload ")]
+    assert uploads == ["release upload 9.8.7 release-dmg/OnlineWorker_9.8.7_arm64.dmg release-dmg/OnlineWorker_9.8.7_x86_64.dmg --clobber"]

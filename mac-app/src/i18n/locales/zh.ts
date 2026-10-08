@@ -135,6 +135,7 @@ export const zhTexts: AppTexts = {
       maintenanceEyebrow: "Maintenance",
       maintenanceTitle: "维护",
       appUpdateTitle: "应用更新",
+      appUpdatePaused: "在线更新暂不可用，请从官方下载页手动安装新版本。",
       downloadAppUpdate: "下载更新",
       downloadingAppUpdate: "正在下载…",
       installAppUpdate: "安装并重启",

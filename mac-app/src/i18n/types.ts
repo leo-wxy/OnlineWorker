@@ -110,6 +110,7 @@ export interface AppTexts {
     maintenanceEyebrow: string;
     maintenanceTitle: string;
     appUpdateTitle: string;
+    appUpdatePaused: string;
     downloadAppUpdate: string;
     downloadingAppUpdate: string;
     installAppUpdate: string;

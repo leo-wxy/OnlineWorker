@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { appUpdateBusy, appUpdateProgress, mergeAppUpdateStatus, type AppUpdateInfo } from "../utils/appUpdate.js";
+import { appUpdateProgress, mergeAppUpdateStatus, type AppUpdateInfo } from "../utils/appUpdate.js";
 import { useI18n } from "../i18n";
 
 interface AttachmentCachePathStats {
@@ -70,7 +70,6 @@ export function MaintenanceSettingsPanel() {
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [updateOperation, setUpdateOperation] = useState<string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
-  const updateBusy = Boolean(updateOperation) || appUpdateBusy(updateInfo);
   const updateProgress = appUpdateProgress(updateInfo);
 
   useEffect(() => {
@@ -262,12 +261,13 @@ export function MaintenanceSettingsPanel() {
           <div>
             <h3 id="app-update-title" className="text-base font-bold text-[var(--ow-text)]">{setup.appUpdateTitle}</h3>
             <p className="mt-2 text-sm text-[var(--ow-muted)]">{setup.currentAppVersion(updateInfo?.currentVersion ?? common.unknown)}</p>
+            <p className="mt-2 text-sm text-[var(--ow-muted)]">{setup.appUpdatePaused}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => void runUpdate("check_app_update")} disabled={updateBusy} className="ow-btn h-9 rounded-lg px-4 text-sm font-semibold text-[var(--ow-text)] disabled:opacity-50">
+            <button type="button" onClick={() => void runUpdate("check_app_update")} disabled className="ow-btn h-9 rounded-lg px-4 text-sm font-semibold text-[var(--ow-text)] disabled:opacity-50">
               {updateOperation === "check_app_update" || updateInfo?.phase === "checking" ? setup.checkingAppUpdate : setup.checkAppUpdate}
             </button>
-            {updateInfo?.updateAvailable ? <button type="button" disabled={updateBusy}
+            {updateInfo?.updateAvailable ? <button type="button" disabled
               onClick={() => void runUpdate(updateInfo.phase === "ready" ? "install_app_update" : "download_app_update")}
               className="ow-btn-primary h-9 rounded-lg px-4 text-sm font-semibold disabled:opacity-50">
               {updateInfo.phase === "installing" || updateOperation === "install_app_update" ? setup.installingAppUpdate

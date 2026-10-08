@@ -137,6 +137,7 @@ export const enTexts: AppTexts = {
       maintenanceEyebrow: "Maintenance",
       maintenanceTitle: "Maintenance",
       appUpdateTitle: "App updates",
+      appUpdatePaused: "Online updates are temporarily unavailable. Install new versions from the official downloads page.",
       downloadAppUpdate: "Download update",
       downloadingAppUpdate: "Downloading…",
       installAppUpdate: "Install and restart",

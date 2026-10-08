@@ -27,10 +27,10 @@ def signing_packet(size, key_id=b"sampleid"):
     return base64.b64encode(("untrusted comment: synthetic fixture\n" + base64.b64encode(packet).decode() + "\n").encode()).decode()
 
 
-def test_mac_build_keeps_app_and_generates_updater_artifacts():
+def test_mac_build_keeps_app_and_dmg_with_online_updates_paused():
     config = json.loads((ROOT / "mac-app/src-tauri/tauri.conf.json").read_text())
     assert {"app", "dmg"} <= set(config["bundle"]["targets"])
-    assert config["bundle"]["createUpdaterArtifacts"] is True
+    assert config["bundle"]["createUpdaterArtifacts"] is False
 
 
 def test_manifest_requires_two_architectures_and_matching_app_signing_key(tmp_path):

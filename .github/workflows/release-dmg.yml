@@ -55,15 +55,6 @@ jobs:
       - name: Check tag and packaging versions
         run: python scripts/sync-app-version.py --check --tag "$RELEASE_TAG"
 
-      - name: Require updater signing key
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: |
-          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            echo "::error::Configure TAURI_SIGNING_PRIVATE_KEY before publishing updater packages"
-            exit 1
-          fi
-
       - name: Install Python build dependencies
         run: |
           python -m pip install --upgrade pip
@@ -116,8 +107,6 @@ jobs:
 
       - name: Build DMG
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           PYTHON_EXECUTABLE: ${{ steps.python.outputs.python-path }}
           APPLE_SIGNING_IDENTITY: ${{ steps.signing.outputs.signed == 'true' && secrets.APPLE_SIGNING_IDENTITY || '-' }}
           SIGNED_RELEASE: ${{ steps.signing.outputs.signed }}
@@ -134,7 +123,6 @@ jobs:
           ONLINEWORKER_APP_BUNDLE_PATH="$BUNDLE_ROOT/macos/OnlineWorker.app" \
             ONLINEWORKER_DMG_OUTPUT_DIR="$BUNDLE_ROOT/dmg" \
             bash scripts/create-dmg-from-app.sh
-          bash scripts/create-updater-artifacts.sh "$BUNDLE_ROOT"
 
       - name: Verify app version, architecture and signing
         env:
@@ -154,23 +142,11 @@ jobs:
             spctl --assess --type execute "$app"
           fi
 
-      - name: Name updater packages by architecture
-        run: |
-          archive="$BUNDLE_ROOT/macos/OnlineWorker.app.tar.gz"
-          test -s "$archive"
-          test -s "$archive.sig"
-          name="OnlineWorker_${RELEASE_TAG#v}_${{ matrix.arch }}.app.tar.gz"
-          cp "$archive" "$BUNDLE_ROOT/macos/$name"
-          cp "$archive.sig" "$BUNDLE_ROOT/macos/$name.sig"
-
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: onlineworker-dmg-${{ env.RELEASE_TAG }}-${{ matrix.arch }}
-          path: |
-            ${{ env.BUNDLE_ROOT }}/dmg/*.dmg
-            ${{ env.BUNDLE_ROOT }}/macos/OnlineWorker_*.app.tar.gz
-            ${{ env.BUNDLE_ROOT }}/macos/OnlineWorker_*.app.tar.gz.sig
+          path: ${{ env.BUNDLE_ROOT }}/dmg/*.dmg
           if-no-files-found: error
 
   publish-release:
@@ -189,14 +165,9 @@ jobs:
           merge-multiple: true
       - name: Publish both architectures
         run: |
-          python3 scripts/create-updater-manifest.py --artifacts release-dmg/macos \
-            --tag "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --output release-dmg/latest.json
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             args=(--verify-tag --title "$RELEASE_TAG" --notes "Automated release for $RELEASE_TAG")
             if [[ "$RELEASE_TAG" == *-* ]]; then args+=(--prerelease); fi
             gh release create "$RELEASE_TAG" "${args[@]}"
           fi
-          gh release upload "$RELEASE_TAG" release-dmg/dmg/*.dmg \
-            release-dmg/macos/*.app.tar.gz release-dmg/macos/*.app.tar.gz.sig --clobber
-          # Publish the manifest only after both signed packages are uploaded.
-          gh release upload "$RELEASE_TAG" release-dmg/latest.json --clobber
+          gh release upload "$RELEASE_TAG" release-dmg/*.dmg --clobber
