@@ -280,6 +280,21 @@ def test_read_provider_session_rows_normalizes_content_shape(monkeypatch):
     ]
 
 
+def test_read_provider_session_rows_preserves_message_identity(monkeypatch):
+    class Facts:
+        @staticmethod
+        def read_thread_history(session_id, limit=50, sessions_dir=None):
+            return [{"role": "assistant", "text": "working", "turnId": "turn-a", "itemId": "assistant-a",
+                     "phase": "commentary", "timestamp": "2026-01-01T00:00:00Z"}]
+
+    monkeypatch.setattr(bridge, "_provider_facts", lambda provider_id: Facts)
+
+    assert bridge.read_provider_session_rows("overlay-tool", "sample-session") == [
+        {"role": "assistant", "content": "working", "turnId": "turn-a", "itemId": "assistant-a",
+         "phase": "commentary", "timestamp": "2026-01-01T00:00:00Z"},
+    ]
+
+
 def test_read_provider_session_rows_does_not_treat_workspace_dir_as_sessions_dir(monkeypatch):
     observed = {}
 

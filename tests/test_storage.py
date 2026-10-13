@@ -1079,6 +1079,40 @@ def test_read_thread_history_normalizes_codex_image_wrapper_and_deduplicates_use
     ]
 
 
+def test_read_thread_history_preserves_turn_and_item_identity(tmp_path):
+    lines = [
+        {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "turn-a"}},
+        {"type": "turn_context", "payload": {"turn_id": "turn-a"}},
+        {"type": "response_item", "payload": {
+            "role": "user", "id": "user-a", "content": [{"type": "input_text", "text": "repeat"}],
+        }},
+        {"type": "event_msg", "payload": {"type": "user_message", "message": "repeat"}},
+        {"type": "response_item", "payload": {
+            "role": "user", "id": "user-b", "content": [{"type": "input_text", "text": "repeat"}],
+        }},
+        {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "turn-b"}},
+        {"type": "event_msg", "payload": {"type": "user_message", "message": "repeat"}},
+        {"type": "response_item", "payload": {
+            "role": "assistant", "id": "assistant-b", "phase": "commentary",
+            "content": [{"type": "output_text", "text": "working"}],
+            "internal_chat_message_metadata_passthrough": {"turn_id": "turn-c"},
+        }},
+    ]
+    (tmp_path / "rollout-sample-session.jsonl").write_text(
+        "\n".join(json.dumps(line) for line in lines), encoding="utf-8",
+    )
+
+    history = read_thread_history("sample-session", sessions_dir=str(tmp_path))
+
+    assert [(turn["text"], turn["turnId"], turn.get("itemId")) for turn in history] == [
+        ("repeat", "turn-a", "user-a"),
+        ("repeat", "turn-a", "user-b"),
+        ("repeat", "turn-b", None),
+        ("working", "turn-c", "assistant-b"),
+    ]
+    assert history[-1]["phase"] == "commentary"
+
+
 def test_read_codex_turn_terminal_message_reads_task_complete_last_agent_message(tmp_path):
     sessions_dir = tmp_path / "sessions"
     day_dir = sessions_dir / "2026" / "04" / "10"

@@ -968,3 +968,113 @@ def test_bus_conversation_keeps_six_messages_and_does_not_reapply_stale_history(
     assert [turn["content"] for turn in before] == [f"question {index}" for index in range(1, 7)]
     publish("session.history.loaded", {"turns": [{"role": "user", "content": "stale"}]})
     assert bus.session_activity("codex", "sample-session")["conversationTurns"] == before
+
+
+@pytest.mark.parametrize("history_first", [True, False])
+def test_history_and_late_user_hook_merge_when_history_already_has_assistant(history_first):
+    bus = MessageEventBus()
+    history = create_message_event(
+        "session.history.loaded", provider_id="codex", session_id="sample-session",
+        payload={"turns": [
+            {"role": "user", "content": "same request", "turnId": "turn-a", "itemId": "user-a"},
+            {"role": "assistant", "content": "working", "turnId": "turn-a", "itemId": "assistant-a"},
+        ]},
+    )
+    hook = create_message_event(
+        "message.user.submitted", provider_id="codex", session_id="sample-session",
+        turn_id="turn-a", payload={"text": "same request"},
+    )
+    for event in ([history, hook] if history_first else [hook, history]):
+        bus.publish(event)
+
+    turns = bus.session_conversation("codex", "sample-session")
+    assert [turn["content"] for turn in turns] == ["same request", "working"]
+    assert turns[0]["itemId"] == "user-a"
+    activity = bus.session_activity("codex", "sample-session")
+    assert sum(turn["role"] == "user" for turn in activity["conversationTurns"]) == 1
+
+
+@pytest.mark.parametrize("history_first", [True, False])
+@pytest.mark.parametrize("kind", ["message.user.submitted", "message.user.accepted"])
+@pytest.mark.parametrize("identity", [
+    ({"turnId": "turn-a"}, {"turnId": "turn-b"}),
+    ({"turnId": "turn-a", "itemId": "user-a"}, {"turnId": "turn-a", "itemId": "user-b"}),
+])
+def test_history_merge_preserves_identical_user_messages_with_distinct_identity(history_first, kind, identity):
+    old, new = identity
+    bus = MessageEventBus()
+    history = create_message_event(
+        "session.history.loaded", provider_id="codex", session_id="sample-session",
+        payload={"turns": [{"role": "user", "content": "repeat request", **old}]},
+    )
+    live = create_message_event(
+        kind, provider_id="codex", session_id="sample-session", turn_id=new["turnId"],
+        payload={"text": "repeat request", "itemId": new.get("itemId", "")},
+    )
+    for event in ([history, live] if history_first else [live, history]):
+        bus.publish(event)
+
+    turns = bus.session_conversation("codex", "sample-session")
+    assert [turn["content"] for turn in turns] == ["repeat request", "repeat request"]
+    for turn, expected in zip(turns, identity):
+        assert all(turn[field] == value for field, value in expected.items())
+
+
+def test_user_acceptance_binds_provider_identity_to_submitted_request():
+    bus = MessageEventBus()
+    for kind, turn_id, payload in [
+        ("message.user.submitted", "", {"text": "request", "messageRequestId": "request-a"}),
+        ("message.user.accepted", "turn-a", {
+            "text": "request", "messageRequestId": "request-a", "itemId": "user-a",
+        }),
+    ]:
+        bus.publish(create_message_event(kind, provider_id="codex", session_id="sample-session",
+                                         turn_id=turn_id, payload=payload))
+    turns = bus.session_conversation("codex", "sample-session")
+    assert len(turns) == 1
+    assert turns[0]["turnId"] == "turn-a"
+    assert turns[0]["itemId"] == "user-a"
+    assert turns[0]["messageRequestId"] == "request-a"
+
+
+def test_history_merge_does_not_replace_completed_assistant_with_pending_prefix():
+    bus = MessageEventBus()
+    bus.publish(create_message_event(
+        "message.assistant.delta", provider_id="codex", session_id="sample-session",
+        turn_id="turn-a", payload={"itemId": "assistant-a", "delta": "Hello "},
+    ))
+    bus.publish(create_message_event(
+        "session.history.loaded", provider_id="codex", session_id="sample-session",
+        payload={"turns": [{"role": "assistant", "content": "Hello world", "itemId": "assistant-a",
+                            "turnId": "turn-a", "displayMode": "markdown"}]},
+    ))
+
+    turns = bus.session_conversation("codex", "sample-session")
+    assert len(turns) == 1
+    assert turns[0]["content"] == "Hello world"
+    assert not turns[0].get("pending")
+    assert turns[0]["displayMode"] == "markdown"
+
+
+def test_history_merge_keeps_legacy_user_alignment_beside_identified_assistant():
+    bus = MessageEventBus()
+    bus.publish(create_message_event(
+        "message.user.submitted", provider_id="codex", session_id="sample-session",
+        payload={"text": "request", "messageRequestId": "request-a"},
+    ))
+    bus.publish(create_message_event(
+        "message.assistant.final", provider_id="codex", session_id="sample-session",
+        turn_id="turn-a", payload={"text": "done", "itemId": "assistant-a"},
+    ))
+    bus.publish(create_message_event(
+        "session.history.loaded", provider_id="codex", session_id="sample-session",
+        payload={"turns": [
+            {"role": "user", "content": "request", "turnId": "turn-a", "itemId": "user-a"},
+            {"role": "assistant", "content": "done", "turnId": "turn-a", "itemId": "assistant-a"},
+        ]},
+    ))
+
+    turns = bus.session_conversation("codex", "sample-session")
+    assert [turn["content"] for turn in turns] == ["request", "done"]
+    assert turns[0]["messageRequestId"] == "request-a"
+    assert turns[0]["itemId"] == "user-a"

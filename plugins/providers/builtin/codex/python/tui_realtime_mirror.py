@@ -237,6 +237,7 @@ def _publish_startup_activity_bootstrap(
             "content": str(item.get("text") or "").strip(),
             "phase": item.get("phase") or "",
             "timestamp": item.get("timestamp") or "",
+            **{field: item[field] for field in ("turnId", "itemId") if item.get(field)},
             "displayMode": (
                 "markdown"
                 if item.get("role") == "assistant" and item.get("phase") != "commentary"

@@ -124,6 +124,37 @@ def _is_user_interruption(event: MessageEvent) -> bool:
     } or "interrupted by user" in reason
 
 
+def _same_conversation_message(left: dict, right: dict, *, allow_legacy: bool = False) -> bool:
+    if left["role"] != right["role"]:
+        return False
+    identified = False
+    for field in ("turnId", "itemId", "messageRequestId"):
+        left_id, right_id = left.get(field), right.get(field)
+        if left_id and right_id:
+            if left_id != right_id:
+                return False
+            if field != "turnId":
+                identified = True
+    if identified:
+        return True
+    same_turn = bool(left.get("turnId") and left.get("turnId") == right.get("turnId"))
+    return (same_turn or allow_legacy) and left["content"] == right["content"]
+
+
+def _merge_conversation_turn(history: dict, live: dict) -> dict:
+    merged = {**history, **live}
+    for field in ("turnId", "itemId", "messageRequestId"):
+        if not live.get(field) and history.get(field):
+            merged[field] = history[field]
+    # Historical assistant records are completed snapshots; a delayed live
+    # prefix must not replace their full content or reopen streaming.
+    if history["role"] == "assistant" and live.get("pending"):
+        merged["content"] = history["content"]
+        merged["pending"] = False
+        merged["displayMode"] = history.get("displayMode", "plain")
+    return merged
+
+
 def _update_conversation(activity: SessionActivity, event: MessageEvent, *, full: bool = False) -> None:
     turns = activity.conversation_turns
     payload = {**(event.payload or {}), **event.conversation_payload} if full else event.payload or {}
@@ -165,11 +196,13 @@ def _update_conversation(activity: SessionActivity, event: MessageEvent, *, full
     message_request_id = str(payload.get("messageRequestId") or "")
     turn_id = event.turn_id
     existing = None
-    if role == "user" and event.kind == "message.user.accepted":
+    if role == "user":
+        candidate = {"role": role, "content": text, "itemId": item_id, "turnId": turn_id,
+                     "messageRequestId": message_request_id}
         existing = next((turn for turn in reversed(turns)
-                         if turn["role"] == "user" and (
-                             turn.get("messageRequestId") == message_request_id if message_request_id
-                             else turn["content"] == text
+                         if _same_conversation_message(
+                             turn, candidate,
+                             allow_legacy=event.kind == "message.user.accepted" and not message_request_id,
                          )), None)
     elif role == "assistant":
         existing = next((turn for turn in reversed(turns)
@@ -178,9 +211,10 @@ def _update_conversation(activity: SessionActivity, event: MessageEvent, *, full
                          and (item_id or turn.get("pending"))), None)
     if existing is None:
         existing = {"role": role, "content": "", "itemId": item_id, "turnId": turn_id}
-        if message_request_id:
-            existing["messageRequestId"] = message_request_id
         turns.append(existing)
+    for field, value in (("itemId", item_id), ("turnId", turn_id), ("messageRequestId", message_request_id)):
+        if value:
+            existing[field] = value
     incremental = event.kind == "message.assistant.delta" and not payload.get("isSnapshot")
     if incremental and existing.get("pending") is False:
         return
@@ -192,19 +226,32 @@ def _update_conversation(activity: SessionActivity, event: MessageEvent, *, full
 
 
 def _merge_conversation_history(history: list[dict], live: list[dict]) -> list[dict]:
-    def same(left, right):
-        if left["role"] != right["role"]:
-            return False
-        left_id, right_id = left.get("itemId"), right.get("itemId")
-        if left_id and right_id:
-            return left_id == right_id and left.get("turnId", "") == right.get("turnId", "")
-        # ponytail: legacy history has no item IDs; align its suffix until providers expose them.
-        return left["content"] == right["content"]
+    history = [dict(turn) for turn in history]
+    matched = set()
+    overlap = 0
+    # Preserve boundary alignment for legacy providers and optimistic sends
+    # whose provider identity is not known yet.
+    for size in range(min(len(history), len(live)), 0, -1):
+        if all(_same_conversation_message(left, right, allow_legacy=True)
+               for left, right in zip(history[-size:], live[:size])):
+            overlap = size
+            for offset, turn in enumerate(live[:size]):
+                index = len(history) - size + offset
+                history[index] = _merge_conversation_turn(history[index], turn)
+                matched.add(index)
+            break
 
-    for overlap in range(min(len(history), len(live)), 0, -1):
-        if all(same(left, right) for left, right in zip(history[-overlap:], live[:overlap])):
-            return history[:-overlap] + live
-    return history + live
+    unmatched = []
+    for turn in live[overlap:]:
+        index = next((index for index in range(len(history) - 1, -1, -1)
+                      if index not in matched and _same_conversation_message(history[index], turn)), None)
+        if index is None:
+            unmatched.append(turn)
+        else:
+            history[index] = _merge_conversation_turn(history[index], turn)
+            matched.add(index)
+
+    return history + unmatched
 
 
 class SessionActivityProjection:

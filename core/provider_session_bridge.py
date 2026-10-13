@@ -66,6 +66,9 @@ def _normalize_provider_turn(turn: dict[str, Any]) -> dict[str, str]:
         normalized["displayMode"] = "plain"
     if kind:
         normalized["kind"] = kind
+    for field in ("timestamp", "turnId", "itemId", "phase"):
+        if turn.get(field):
+            normalized[field] = turn[field]
 
     return normalized
 

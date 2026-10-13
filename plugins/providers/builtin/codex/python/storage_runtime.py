@@ -531,7 +531,10 @@ def _build_user_text_from_event_payload(payload: dict) -> str:
     return "\n".join(part for part in parts if part).strip()
 
 
-def _push_turn(turns: list[dict], *, role: str, text: str, timestamp: str, phase: str) -> None:
+def _push_turn(
+    turns: list[dict], *, role: str, text: str, timestamp: str, phase: str,
+    turn_id: str = "", item_id: str = "",
+) -> None:
     normalized_text = _normalize_turn_text(text)
     if not normalized_text:
         return
@@ -542,10 +545,18 @@ def _push_turn(turns: list[dict], *, role: str, text: str, timestamp: str, phase
         "timestamp": timestamp,
         "phase": phase,
     }
+    if turn_id:
+        next_turn["turnId"] = turn_id
+    if item_id:
+        next_turn["itemId"] = item_id
     if turns and turns[-1]["role"] == role:
+        if any(turns[-1].get(field) and next_turn.get(field) and turns[-1][field] != next_turn[field]
+               for field in ("turnId", "itemId")):
+            turns.append(next_turn)
+            return
         previous_text = turns[-1]["text"]
         if previous_text == normalized_text:
-            turns[-1] = next_turn
+            turns[-1] = {**turns[-1], **next_turn}
             return
 
         def _logical_base(value: str) -> str:
@@ -560,7 +571,11 @@ def _push_turn(turns: list[dict], *, role: str, text: str, timestamp: str, phase
             previous_has_attachment = "[Attached " in previous_text
             next_has_attachment = "[Attached " in normalized_text
             if not previous_has_attachment and next_has_attachment:
-                turns[-1] = next_turn
+                turns[-1] = {**turns[-1], **next_turn}
+            else:
+                for field in ("turnId", "itemId"):
+                    if next_turn.get(field):
+                        turns[-1][field] = next_turn[field]
             return
 
     turns.append(next_turn)
@@ -667,6 +682,7 @@ def read_thread_history(
         return []
 
     turns: list[dict] = []
+    current_turn_id = ""
     try:
         with _open_codex_session_file(fpath) as f:
             for line in f:
@@ -682,6 +698,14 @@ def read_thread_history(
                 event_type = obj.get("type")
                 payload = obj.get("payload", {})
                 phase = str(payload.get("phase") or "")
+                if event_type == "turn_context" or (
+                    event_type == "event_msg" and payload.get("type") == "task_started"
+                ):
+                    current_turn_id = str(payload.get("turn_id") or "")
+                    continue
+                metadata = payload.get("internal_chat_message_metadata_passthrough") or {}
+                turn_id = str(payload.get("turn_id") or metadata.get("turn_id") or current_turn_id)
+                item_id = str(payload.get("id") or "")
 
                 if event_type == "response_item":
                     role = payload.get("role")
@@ -693,6 +717,8 @@ def read_thread_history(
                             text=text,
                             timestamp=timestamp,
                             phase=phase,
+                            turn_id=turn_id,
+                            item_id=item_id,
                         )
                     elif role == "assistant":
                         for c in payload.get("content", []):
@@ -706,6 +732,8 @@ def read_thread_history(
                                     text=text,
                                     timestamp=timestamp,
                                     phase=phase,
+                                    turn_id=turn_id,
+                                    item_id=item_id,
                                 )
                                 break
                     continue
@@ -720,6 +748,8 @@ def read_thread_history(
                             text=text,
                             timestamp=timestamp,
                             phase=phase,
+                            turn_id=turn_id,
+                            item_id=item_id,
                         )
                     elif payload_type == "agent_message":
                         text = _normalize_turn_text(payload.get("message") or "")
@@ -729,6 +759,8 @@ def read_thread_history(
                             text=text,
                             timestamp=timestamp,
                             phase=phase,
+                            turn_id=turn_id,
+                            item_id=item_id,
                         )
     except (zstandard.ZstdError, OSError) as exc:
         if fpath.endswith(".jsonl.zst"):

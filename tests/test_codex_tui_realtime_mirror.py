@@ -25,6 +25,7 @@ def _append_response_item(
     timestamp: str,
     turn_id: str = "",
     passthrough_turn_id: str = "",
+    item_id: str = "",
 ) -> None:
     content_type = "input_text" if role == "user" else "output_text"
     record = {
@@ -38,6 +39,8 @@ def _append_response_item(
     }
     if turn_id:
         record["payload"]["turn_id"] = turn_id
+    if item_id:
+        record["payload"]["id"] = item_id
     if passthrough_turn_id:
         record["payload"]["internal_chat_message_metadata_passthrough"] = {
             "turn_id": passthrough_turn_id,
@@ -991,7 +994,8 @@ async def test_shared_live_imported_thread_bootstraps_bus_activity_without_live_
 
 
 @pytest.mark.asyncio
-async def test_startup_history_keeps_display_metadata_after_full_history_load(tmp_path, monkeypatch):
+@pytest.mark.parametrize("identified", [False, True])
+async def test_startup_history_keeps_display_metadata_after_full_history_load(tmp_path, monkeypatch, identified):
     from core import provider_owner_bridge
     from plugins.providers.builtin.codex.python.storage_runtime import read_thread_history
     from plugins.providers.builtin.codex.python.tui_realtime_mirror import bootstrap_bound_codex_thread_activity
@@ -1008,11 +1012,15 @@ async def test_startup_history_keeps_display_metadata_after_full_history_load(tm
     expected = []
     for index, (role, phase, text, display_mode) in enumerate(rows):
         timestamp = f"2026-04-06T10:00:0{index}Z"
-        _append_response_item(session_file, role=role, phase=phase, text=text, timestamp=timestamp)
+        _append_response_item(session_file, role=role, phase=phase, text=text, timestamp=timestamp,
+                              turn_id="turn-a" if identified else "",
+                              item_id=f"item-{index}" if identified else "")
         expected.append({
             "role": role, "content": text, "phase": phase,
             "timestamp": timestamp, "displayMode": display_mode,
         })
+        if identified:
+            expected[-1].update(turnId="turn-a", itemId=f"item-{index}")
 
     delivery = MagicMock()
     state.message_bus.subscribe_delivery(delivery)
