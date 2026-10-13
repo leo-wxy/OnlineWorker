@@ -246,7 +246,8 @@ async def test_external_hook_suppresses_subagent_session_and_later_notify(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_external_hook_suppresses_codex_memories_workspace(tmp_path, monkeypatch):
+@pytest.mark.parametrize("directory", ["memories", "memories_v2"])
+async def test_external_hook_suppresses_codex_memories_workspace(tmp_path, monkeypatch, directory):
     monkeypatch.setenv("HOME", str(tmp_path))
     callback = AsyncMock()
     adapter = CodexAdapter()
@@ -256,7 +257,7 @@ async def test_external_hook_suppresses_codex_memories_workspace(tmp_path, monke
         {
             "hook_event_name": "SessionStart",
             "session_id": "memory-session",
-            "cwd": str(tmp_path / ".codex" / "memories"),
+            "cwd": str(tmp_path / ".codex" / directory),
         }
     )
 
@@ -266,6 +267,109 @@ async def test_external_hook_suppresses_codex_memories_workspace(tmp_path, monke
         "suppressed": "non_user_visible_session",
     }
     callback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prompt_field", ["prompt", "user_prompt", "userPrompt", "input_messages"])
+async def test_external_hook_suppresses_next_message_suggestion_and_later_events(
+    tmp_path, monkeypatch, prompt_field,
+):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    callback = AsyncMock()
+    adapter = CodexAdapter()
+    adapter.on_event(callback)
+    prompt = (
+        "This is an app-generated request for a suggested next user message. "
+        "The user did not write this message. Your suggestion will appear in the user's empty message composer."
+    )
+    result = await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "UserPromptSubmit",
+            "session_id": "suggestion-session",
+            "cwd": str(tmp_path / "project"),
+            prompt_field: [prompt] if prompt_field == "input_messages" else prompt,
+        }
+    )
+    completed = await adapter.ingest_external_hook_payload(
+        {
+            "hook_event_name": "AgentTurnComplete",
+            "session_id": "suggestion-session",
+            "last_assistant_message": "继续检查",
+        }
+    )
+    await adapter._dispatch(json.dumps({
+        "method": "turn/started",
+        "params": {"threadId": "suggestion-session", "turn": {"id": "suggestion-turn"}},
+    }))
+
+    assert result == completed == {
+        "accepted": True,
+        "emitted": 0,
+        "suppressed": "non_user_visible_session",
+    }
+    assert not adapter.has_authoritative_live_session("suggestion-session")
+    callback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_external_hook_keeps_user_request_quoting_suggestion_prompt(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    callback = AsyncMock()
+    adapter = CodexAdapter()
+    adapter.on_event(callback)
+    result = await adapter.ingest_external_hook_payload({
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "user-session",
+        "cwd": str(tmp_path / "project"),
+        "prompt": (
+            "请解释这段内部指令：\n"
+            "This is an app-generated request for a suggested next user message. "
+            "The user did not write this message."
+        ),
+    })
+
+    assert result["emitted"] == 3
+    assert "user-session" not in adapter._hidden_live_sessions
+
+
+@pytest.mark.asyncio
+async def test_suggestion_notify_removes_existing_session_activity(tmp_path, monkeypatch):
+    from core.messages.bus import MessageEventBus
+    from core.messages.publishing import publish_session_message_event
+    from core.providers.session_events import normalize_session_event
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    bus = MessageEventBus()
+    state = MagicMock(message_bus=bus)
+    adapter = CodexAdapter()
+
+    async def publish_event(method, params):
+        event = normalize_session_event(method, params)
+        assert event is not None
+        publish_session_message_event(state, event)
+
+    adapter.on_event(publish_event)
+    await adapter.ingest_external_hook_payload({
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "suggestion-session",
+        "cwd": str(tmp_path / "project"),
+        "prompt": "早期入口缺少内部来源标志",
+    })
+    assert bus.session_activities()
+
+    result = await adapter.ingest_external_hook_payload({
+        "hook_event_name": "AgentTurnComplete",
+        "session_id": "suggestion-session",
+        "input_messages": [
+            "This is an app-generated request for a suggested next user message. "
+            "The user did not write this message."
+        ],
+        "last_assistant_message": "继续检查",
+    })
+
+    assert result["suppressed"] == "non_user_visible_session"
+    assert bus.session_activities() == []
+    assert bus.recent_events()[-1]["kind"] == "session.hidden"
 
 
 @pytest.mark.asyncio
@@ -365,7 +469,8 @@ async def test_app_server_event_marks_session_as_authoritative_live_source():
 
 
 @pytest.mark.asyncio
-async def test_app_server_hides_codex_memories_workspace_before_activity(tmp_path, monkeypatch):
+@pytest.mark.parametrize("directory", ["memories", "memories_v2"])
+async def test_app_server_hides_codex_memories_workspace_before_activity(tmp_path, monkeypatch, directory):
     monkeypatch.setenv("HOME", str(tmp_path))
     adapter = CodexAdapter()
     callback = AsyncMock()
@@ -377,7 +482,7 @@ async def test_app_server_hides_codex_memories_workspace_before_activity(tmp_pat
                 "method": "turn/started",
                 "params": {
                     "threadId": "memory-session",
-                    "cwd": str(tmp_path / ".codex" / "memories"),
+                    "cwd": str(tmp_path / ".codex" / directory),
                     "turn": {"id": "memory-turn"},
                 },
             }

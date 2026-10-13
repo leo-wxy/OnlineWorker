@@ -22,13 +22,106 @@ from plugins.providers.builtin.codex.python.storage_runtime import (
 )
 
 
-def test_codex_memories_workspace_is_not_user_visible(tmp_path, monkeypatch):
+@pytest.mark.parametrize("directory", ["memories", "memories_v2"])
+def test_codex_memories_workspace_is_not_user_visible(tmp_path, monkeypatch, directory):
     monkeypatch.setenv("HOME", str(tmp_path))
-    memories = tmp_path / ".codex" / "memories"
+    memories = tmp_path / ".codex" / directory
 
     assert not is_codex_user_visible_session(cwd=str(memories))
     assert not is_codex_user_visible_session(cwd=str(memories / "rollout"))
     assert is_codex_user_visible_session(cwd=str(tmp_path / "project"))
+    assert is_codex_user_visible_session(cwd=str(tmp_path / ".codex" / f"{directory}-project"))
+
+
+@pytest.mark.parametrize("directory", ["memories", "memories_v2"])
+def test_codex_session_list_excludes_memory_rollouts(tmp_path, monkeypatch, directory):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    sessions_dir = tmp_path / ".codex" / "sessions"
+    sessions_dir.mkdir(parents=True)
+    for session_id, cwd in (
+        ("memory-session", tmp_path / ".codex" / directory),
+        ("user-session", tmp_path / "project"),
+    ):
+        (sessions_dir / f"rollout-{session_id}.jsonl").write_text(
+            json.dumps({
+                "type": "session_meta",
+                "payload": {"id": session_id, "cwd": str(cwd), "source": "vscode"},
+            }) + "\n" + json.dumps({
+                "type": "response_item",
+                "payload": {"role": "user", "content": [{"type": "input_text", "text": "检查示例任务"}]},
+            }) + "\n",
+            encoding="utf-8",
+        )
+
+    assert [row["id"] for row in list_codex_sessions()] == ["user-session"]
+
+
+def test_codex_session_lists_hide_empty_and_keep_recorded_conversations(tmp_path, monkeypatch):
+    from plugins.providers.builtin.codex.python import storage_runtime
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    codex_home = tmp_path / ".codex"
+    sessions_dir = codex_home / "sessions"
+    sessions_dir.mkdir(parents=True)
+    cwd = str(tmp_path / "project")
+    message = lambda role: {"type": "response_item", "payload": {
+        "role": role, "content": [{"type": "input_text", "text": "# 检查示例任务"}],
+    }}
+    cases = {
+        "empty-named": ("", 0, []),
+        "first-prompt": ("检查示例任务", 0, []),
+        "tokens-used": ("", 10, []),
+        "history-only": ("", 0, []),
+        "user-jsonl": ("", 0, [message("user")]),
+        "assistant-jsonl": ("", 0, [message("assistant")]),
+        "message-event": ("", 0, [{"type": "event_msg", "payload": {
+            "type": "user_message", "message": "检查示例任务",
+        }}]),
+        "running-session": ("", 0, [{"type": "event_msg", "payload": {
+            "type": "task_started", "turn_id": "sample-turn",
+        }}]),
+    }
+    with sqlite3.connect(codex_home / "state_5.sqlite") as conn:
+        conn.execute("CREATE TABLE threads (id TEXT, cwd TEXT, title TEXT, source TEXT, "
+                     "created_at INT, updated_at INT, archived INT, has_user_event INT, "
+                     "first_user_message TEXT, tokens_used INT)")
+        conn.executemany("INSERT INTO threads VALUES (?, ?, ?, ?, 1, 1, 0, 0, ?, ?)", [
+            (session_id, cwd, "已命名任务", "vscode", first, tokens)
+            for session_id, (first, tokens, _) in cases.items()
+        ])
+    with sqlite3.connect(codex_home / "thread_history_1.sqlite") as conn:
+        conn.execute("CREATE TABLE thread_turns (thread_id TEXT)")
+        conn.execute("INSERT INTO thread_turns VALUES ('history-only')")
+    for session_id, (_, _, extra) in {**cases, "empty-jsonl-only": ("", 0, [])}.items():
+        rows = [{"type": "session_meta", "payload": {
+            "id": session_id, "cwd": cwd, "source": "vscode",
+        }}, *extra]
+        (sessions_dir / f"rollout-{session_id}.jsonl").write_text(
+            "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8",
+        )
+
+    expected = set(cases) - {"empty-named"}
+    assert {row["id"] for row in list_codex_sessions()} == expected
+    assert {row["id"] for row in list_codex_threads_by_cwd(cwd)} == expected
+    assert storage_runtime.scan_codex_session_cwds()[0]["thread_count"] == len(expected)
+
+    with (sessions_dir / "rollout-empty-named.jsonl").open("a") as handle:
+        handle.write(json.dumps(message("user")) + "\n")
+    assert {row["id"] for row in list_codex_sessions()} == expected | {"empty-named"}
+
+
+def test_codex_empty_session_filter_keeps_sessions_when_history_is_unavailable(tmp_path, monkeypatch):
+    from plugins.providers.builtin.codex.python import storage_runtime
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    with sqlite3.connect(codex_home / "state_5.sqlite") as conn:
+        conn.execute("CREATE TABLE threads (id TEXT, has_user_event INT, first_user_message TEXT, tokens_used INT)")
+        conn.execute("INSERT INTO threads VALUES ('sample-session', 0, '', 0)")
+    (codex_home / "thread_history_1.sqlite").write_bytes(b"unreadable history")
+
+    assert storage_runtime._query_empty_codex_thread_ids() == set()
 
 
 def test_load_storage_file_not_exists(tmp_path):
@@ -805,6 +898,9 @@ def test_list_codex_sessions_follows_latest_workspace_without_duplicate_rows(tmp
         }},
         {"type": "turn_context", "payload": {"cwd": current_workspace}},
         {"type": "turn_context", "payload": {"cwd": "sample-project"}},
+        {"type": "response_item", "payload": {
+            "role": "user", "content": [{"type": "input_text", "text": "检查移动后的任务"}],
+        }},
     ]
     (tmp_path / "rollout-moved-session.jsonl").write_text(
         "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8",

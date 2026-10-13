@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+from contextlib import closing
 from datetime import datetime
 from typing import Optional
 
@@ -19,9 +20,10 @@ def is_codex_user_visible_session(source=None, *, thread_source=None, cwd=None, 
     """统一判断 Codex session 是否应作为顶层用户会话展示。"""
     if cwd:
         session_cwd = os.path.realpath(os.path.expanduser(str(cwd)))
-        memories_root = os.path.realpath(os.path.expanduser("~/.codex/memories"))
-        if session_cwd == memories_root or session_cwd.startswith(memories_root + os.sep):
-            return False
+        for directory in ("memories", "memories_v2"):
+            memories_root = os.path.realpath(os.path.expanduser(f"~/.codex/{directory}"))
+            if session_cwd == memories_root or session_cwd.startswith(memories_root + os.sep):
+                return False
     if ephemeral is True or str(thread_source or "").strip().lower() in {"subagent", "side_conversation", "sideconversation", "ephemeral"}:
         return False
     if isinstance(source, str) and source.strip().lower() in {"side_conversation", "sideconversation", "ephemeral"}:
@@ -137,6 +139,34 @@ def _session_file_signature(fpath: str) -> tuple[int, int] | None:
     return int(stat.st_mtime_ns), int(stat.st_size)
 
 
+def _query_empty_codex_thread_ids(metadata_only_ids=()) -> set[str]:
+    import sqlite3
+    from pathlib import Path
+
+    db_path = Path(os.path.expanduser("~/.codex/state_5.sqlite"))
+    try:
+        empty_ids = set(metadata_only_ids)
+        if db_path.is_file():
+            with closing(sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True)) as conn:
+                for thread_id, has_user_event, first_message, tokens in conn.execute(
+                    "SELECT id, has_user_event, first_user_message, tokens_used FROM threads"
+                ):
+                    if has_user_event == 0 and not str(first_message or "").strip() and tokens == 0:
+                        empty_ids.add(thread_id)
+                    else:
+                        empty_ids.discard(thread_id)
+        history_path = db_path.with_name("thread_history_1.sqlite")
+        if empty_ids and history_path.is_file():
+            with closing(sqlite3.connect(history_path.as_uri() + "?mode=ro", uri=True)) as conn:
+                empty_ids.difference_update(row[0] for row in conn.execute(
+                    "SELECT DISTINCT thread_id FROM thread_turns"
+                ))
+        return empty_ids
+    except (OSError, sqlite3.Error):
+        # An unavailable history store or old schema cannot prove a session is empty.
+        return set()
+
+
 def _cached_scan_codex_session_file(
     fpath: str,
 ) -> tuple[Optional[dict], bool]:
@@ -168,6 +198,7 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
     current_turn_id: Optional[str] = None
     meta_row: Optional[dict] = None
     latest_event_at = 0
+    has_dialogue = False
 
     try:
         with _open_codex_session_file(fpath) as f:
@@ -239,6 +270,14 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
                         if maybe_preview and not maybe_preview.startswith("#") and not maybe_preview.startswith("<"):
                             preview = maybe_preview
 
+                if row.get("type") == "response_item":
+                    payload = row.get("payload", {})
+                    if isinstance(payload, dict) and payload.get("role") in {"user", "assistant"}:
+                        has_dialogue = has_dialogue or any(
+                            isinstance(item, dict) and (str(item.get("text") or "").strip() or "image" in str(item.get("type") or ""))
+                            for item in payload.get("content", [])
+                        )
+
                 if row.get("type") != "event_msg":
                     continue
                 payload = row.get("payload", {})
@@ -246,6 +285,11 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
                     continue
 
                 payload_type = str(payload.get("type") or "").strip()
+                if payload_type in {"user_message", "agent_message", "task_complete"}:
+                    has_dialogue = has_dialogue or bool(
+                        payload.get("message") or payload.get("last_agent_message")
+                        or payload.get("images") or payload.get("local_images")
+                    )
                 turn_id = str(payload.get("turn_id") or payload.get("turnId") or "").strip()
                 if payload_type in {"task_started", "turn_context"} and turn_id:
                     current_turn_id = turn_id
@@ -259,6 +303,7 @@ def _scan_codex_session_file(fpath: str) -> tuple[Optional[dict], bool]:
         return None, False
 
     if meta_row is not None:
+        meta_row["hasDialogue"] = bool(has_dialogue)
         meta_row["updatedAt"] = max(
             int(meta_row.get("createdAt") or 0),
             latest_event_at or file_mtime_ms,
@@ -322,11 +367,20 @@ def _build_codex_session_index(
     threads_by_workspace: dict[str, dict[str, dict]] = {}
     running_ids_by_workspace: dict[str, set[str]] = {}
     current_files: set[str] = set()
+    scanned = []
 
     for fpath in _collect_jsonl_files(sessions_root):
         current_files.add(fpath)
         meta, is_running = _cached_scan_codex_session_file(fpath)
         if meta is not None:
+            scanned.append((meta, is_running))
+
+    empty_ids = _query_empty_codex_thread_ids(
+        meta["id"] for meta, is_running in scanned
+        if not meta.get("hasDialogue") and not is_running
+    )
+    for meta, is_running in scanned:
+        if meta is not None and (meta["id"] not in empty_ids or meta.get("hasDialogue") or is_running):
             workspace = str(meta["cwd"])
             workspace_counts[workspace] = workspace_counts.get(workspace, 0) + 1
             thread_map = threads_by_workspace.setdefault(workspace, {})
@@ -827,7 +881,10 @@ def list_codex_threads_by_cwd(
             "updatedAt": int(meta.get("updatedAt") or 0),
         }
 
+    empty_ids = _query_empty_codex_thread_ids()
     for r in rows:
+        if r["id"] in empty_ids and r["id"] not in result_by_id:
+            continue
         if not is_codex_user_visible_session(
             r["source"] or "", cwd=r["cwd"],
             thread_source=r["thread_source"] if "thread_source" in r.keys() else None,
@@ -875,6 +932,7 @@ def list_codex_sessions(
     threads_by_workspace = dict(index.get("threads_by_workspace", {}))
     running_ids_by_workspace = dict(index.get("running_ids_by_workspace", {}))
     active_ids_by_workspace, sqlite_threads_by_workspace = _query_codex_active_thread_rows_by_workspace()
+    empty_ids = _query_empty_codex_thread_ids()
     active_workspace_by_id = {
         thread_id: workspace for workspace, thread_ids in active_ids_by_workspace.items()
         for thread_id in thread_ids
@@ -929,6 +987,8 @@ def list_codex_sessions(
         )
         for item in merged_items:
             thread_id = str(item.get("id") or "").strip()
+            if thread_id in empty_ids and thread_id not in threads_by_workspace.get(workspace_path, {}):
+                continue
             if not thread_id or active_workspace_by_id.get(thread_id, workspace_path) != workspace_path:
                 continue
             session_rows.append(

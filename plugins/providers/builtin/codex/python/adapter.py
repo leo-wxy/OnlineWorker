@@ -43,6 +43,7 @@ _INGRESS_SOURCE_PRIORITY = {
 }
 _INTERNAL_HOOK_PROMPT_PREFIXES = (
     "Side conversation boundary.",
+    "This is an app-generated request for a suggested next user message. The user did not write this message.",
     "You write the one-line activity update displayed beneath an existing Codex task title.",
     "You are a helpful assistant. You will be presented with a user prompt, and your job is to provide a short title for a task",
 )

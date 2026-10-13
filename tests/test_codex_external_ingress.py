@@ -592,6 +592,39 @@ async def test_new_desktop_rollout_file_is_discovered_without_session_polling(tm
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("directory", ["memories", "memories_v2"])
+async def test_desktop_memory_rollout_never_enters_provider_event_path(
+    tmp_path: Path, monkeypatch, directory,
+):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    adapter = SimpleNamespace(
+        ingest_external_hook_payload=AsyncMock(),
+        has_authoritative_live_session=MagicMock(return_value=False),
+    )
+    ingress = CodexDesktopRolloutIngress(
+        adapter=adapter,
+        state=AppState(storage=AppStorage()),
+        sessions_dir=str(tmp_path),
+    )
+    path = str(tmp_path / "rollout-memory-session.jsonl")
+    for row in (
+        {"type": "session_meta", "payload": {
+            "id": "memory-session", "cwd": str(tmp_path / ".codex" / directory),
+        }},
+        {"type": "turn_context", "payload": {"turn_id": "memory-turn"}},
+        {"type": "response_item", "payload": {
+            "role": "user", "content": [{"type": "input_text", "text": "整理记忆"}],
+        }},
+        {"type": "event_msg", "payload": {
+            "type": "task_complete", "turn_id": "memory-turn", "last_agent_message": "完成",
+        }},
+    ):
+        await ingress._process_rollout_line(path, json.dumps(row).encode("utf-8"))
+
+    adapter.ingest_external_hook_payload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_desktop_rollout_subagent_never_enters_provider_event_path(tmp_path: Path):
     parent_session_id = "11111111-2222-4333-8444-555555555555"
     child_session_id = "22222222-3333-4444-8555-666666666666"

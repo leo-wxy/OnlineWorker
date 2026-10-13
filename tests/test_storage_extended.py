@@ -20,6 +20,10 @@ def write_jsonl(path: str, first_line: dict, extra: str = ""):
         f.write(json.dumps(first_line) + "\n")
         if extra:
             f.write(extra + "\n")
+        elif first_line.get("type") == "session_meta":
+            f.write(json.dumps({"type": "response_item", "payload": {
+                "role": "user", "content": [{"type": "input_text", "text": "Sample task"}],
+            }}) + "\n")
 
 
 class TestScanCodexSessionCwds:
