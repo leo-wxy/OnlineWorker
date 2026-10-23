@@ -24,6 +24,7 @@ from typing import Any, Callable, Awaitable, Optional
 import websockets
 import websockets.exceptions
 
+from core.message_text import strip_appshot_context
 from plugins.providers.builtin.codex.python import storage_runtime
 from plugins.providers.builtin.codex.python.transport import (
     is_unix_endpoint,
@@ -896,12 +897,12 @@ class CodexAdapter:
             return {"accepted": True, "emitted": 0}
 
         if event_name == "UserPromptSubmit":
-            prompt = str(
+            prompt = strip_appshot_context(str(
                 payload.get("prompt")
                 or payload.get("user_prompt")
                 or payload.get("userPrompt")
                 or ""
-            ).strip()
+            ).strip())
             turn_id = str(payload.get("turn_id") or "").strip() or str(uuid.uuid4())
             if str(session.get("started_turn_id") or "").strip() == turn_id:
                 return {"accepted": True, "emitted": 0, "deduped": True}
@@ -1063,7 +1064,7 @@ class CodexAdapter:
                 ]
             else:
                 prompts = []
-            prompt = "\n\n".join(prompts)
+            prompt = strip_appshot_context("\n\n".join(prompts))
             if emit_prefix and not session.get("session_created_emitted"):
                 await self._emit_external_hook_event(
                     workspace_id,

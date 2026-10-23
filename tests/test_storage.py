@@ -1113,6 +1113,54 @@ def test_read_thread_history_preserves_turn_and_item_identity(tmp_path):
     assert history[-1]["phase"] == "commentary"
 
 
+@pytest.mark.parametrize("record_type", ["response_item", "event_msg"])
+@pytest.mark.parametrize("encoded", [False, True])
+@pytest.mark.parametrize("request_text", ["请检查截图", "# 请检查截图", ""])
+def test_read_thread_history_keeps_request_after_appshot(tmp_path, record_type, encoded, request_text):
+    text = '# Applications mentioned by the user:\n\n<appshot app="Example">screen context</appshot>'
+    text += '\n\n<appshot app="Second">more context</appshot>\n\n## My request:\n' + request_text
+    if encoded:
+        text = text.replace("<", "&lt;").replace(">", "&gt;")
+    payload = (
+        {"role": "user", "id": "user-a", "turn_id": "turn-a",
+         "content": [{"type": "input_text", "text": text},
+                     {"type": "input_image", "image_url": "data:image/png;base64,sample"}]}
+        if record_type == "response_item" else
+        {"type": "user_message", "message": text, "local_images": ["/tmp/sample.png"], "turn_id": "turn-a"}
+    )
+    path = tmp_path / "rollout-sample-session.jsonl"
+    original = json.dumps({"type": record_type, "payload": payload}) + "\n"
+    path.write_text(original, encoding="utf-8")
+
+    turns = read_thread_history("sample-session", sessions_dir=str(tmp_path))
+
+    assert len(turns) == 1
+    image_label = "image" if record_type == "response_item" else "sample.png"
+    expected = (request_text + "\n" if request_text else "") + f"[Attached image] {image_label}"
+    assert turns[0]["text"] == expected
+    assert turns[0]["turnId"] == "turn-a"
+    assert path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize("record_type", ["response_item", "event_msg"])
+@pytest.mark.parametrize("encoded", [False, True])
+def test_read_thread_history_strips_assistant_internal_citation(tmp_path, record_type, encoded):
+    suffix = "<oai-mem-citation><citation_entries>internal</citation_entries></oai-mem-citation>"
+    if encoded:
+        suffix = suffix.replace("<", "&lt;").replace(">", "&gt;")
+    text = "正文和 `代码` 保留。\n" + suffix
+    payload = ({"role": "assistant", "content": [{"type": "output_text", "text": text}]}
+               if record_type == "response_item" else {"type": "agent_message", "message": text})
+    path = tmp_path / "rollout-sample-session.jsonl"
+    original = json.dumps({"type": record_type, "payload": payload}) + "\n"
+    path.write_text(original, encoding="utf-8")
+
+    turns = read_thread_history("sample-session", sessions_dir=str(tmp_path))
+
+    assert turns[0]["text"] == "正文和 `代码` 保留。"
+    assert path.read_text(encoding="utf-8") == original
+
+
 def test_read_codex_turn_terminal_message_reads_task_complete_last_agent_message(tmp_path):
     sessions_dir = tmp_path / "sessions"
     day_dir = sessions_dir / "2026" / "04" / "10"

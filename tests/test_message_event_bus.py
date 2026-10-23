@@ -1078,3 +1078,77 @@ def test_history_merge_keeps_legacy_user_alignment_beside_identified_assistant()
     assert [turn["content"] for turn in turns] == ["request", "done"]
     assert turns[0]["messageRequestId"] == "request-a"
     assert turns[0]["itemId"] == "user-a"
+
+
+@pytest.mark.parametrize("kind", ["message.user.submitted", "message.user.accepted"])
+@pytest.mark.parametrize("request_text", ["请检查截图", ""])
+def test_user_appshot_is_removed_before_projection_and_outbound_delivery(kind, request_text):
+    text = (
+        '# Applications mentioned by the user:\n\n<appshot app="Example">\n'
+        + "screen context\n" * 500
+        + '</appshot>\n\n## My request:\n' + request_text
+    )
+    payload = {"text": text, "title": text, "attachments": [{"kind": "image", "name": "sample.png"}]}
+    bus = MessageEventBus()
+    outbound = []
+    bus.subscribe_delivery(lambda event, context: outbound.append(event))
+
+    bus.publish(create_message_event(kind, provider_id="codex", session_id="sample-session", payload=payload))
+
+    assert outbound[0].payload["text"] == request_text
+    assert outbound[0].payload["title"] == request_text
+    assert outbound[0].conversation_payload["text"] == request_text
+    expected = (request_text + "\n" if request_text else "") + "[Attached image] sample.png"
+    assert bus.session_conversation("codex", "sample-session")[0]["content"] == expected
+    activity = bus.session_activity("codex", "sample-session")
+    assert activity["conversationTurns"][0]["content"] == expected
+    assert activity["lastUserMessage"] == (request_text or "[1 attachments]")
+    assert payload["text"] == text
+
+
+def test_history_appshot_is_removed_without_mutating_source_turns():
+    text = '<appshot app="Example">screen context</appshot>\n\n## My request:\n请检查截图'
+    history = [{"role": "user", "content": text, "itemId": "user-a", "turnId": "turn-a"}]
+    bus = MessageEventBus()
+    bus.publish(create_message_event("session.history.loaded", provider_id="codex", session_id="sample-session",
+                                     payload={"turns": history}))
+
+    assert bus.session_conversation("codex", "sample-session") == [
+        {"role": "user", "content": "请检查截图", "itemId": "user-a", "turnId": "turn-a"},
+    ]
+    assert history[0]["content"] == text
+
+
+def test_user_message_can_discuss_appshot_tags_without_being_removed():
+    text = "请解释 `<appshot>` 和 `</appshot>` 标签的作用。"
+    event = create_message_event("message.user.submitted", payload={"text": text})
+    assert event.payload["text"] == text
+
+
+@pytest.mark.parametrize("kind", ["message.assistant.final", "message.assistant.delta"])
+def test_assistant_snapshot_strips_internal_citation_before_display_and_delivery(kind):
+    body = "正文与 `代码` 保留。"
+    text = body + "\n<oai-mem-citation>\n" + "internal reference\n" * 500 + "</oai-mem-citation>"
+    payload = {"text": text, "isSnapshot": True, "itemId": "assistant-a"}
+    bus = MessageEventBus()
+    outbound = []
+    bus.subscribe_delivery(lambda event, context: outbound.append(event))
+    bus.publish(create_message_event(kind, provider_id="codex", session_id="sample-session", payload=payload))
+
+    assert outbound[0].payload["text"] == body
+    assert outbound[0].conversation_payload["text"] == body
+    assert bus.session_conversation("codex", "sample-session")[0]["content"] == body
+    assert bus.session_activity("codex", "sample-session")["lastAssistantMessage"] == body
+    assert payload["text"] == text
+
+
+def test_assistant_history_strips_internal_citation_without_changing_source():
+    text = "已完成。\n<oai-mem-citation><citation_entries>internal</citation_entries></oai-mem-citation>"
+    turns = [{"role": "assistant", "content": text, "itemId": "assistant-a", "turnId": "turn-a"}]
+    bus = MessageEventBus()
+    bus.publish(create_message_event("session.history.loaded", provider_id="codex", session_id="sample-session",
+                                     payload={"turns": turns}))
+    assert bus.session_conversation("codex", "sample-session") == [
+        {"role": "assistant", "content": "已完成。", "itemId": "assistant-a", "turnId": "turn-a"},
+    ]
+    assert turns[0]["content"] == text

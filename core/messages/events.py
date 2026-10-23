@@ -6,6 +6,8 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from core.message_text import strip_appshot_context, strip_internal_citation_suffix
+
 
 SENSITIVE_KEY_PARTS = (
     "api_key",
@@ -154,7 +156,25 @@ def create_message_event(
     created_at: float | None = None,
 ) -> MessageEvent:
     timestamp = float(time.time() if created_at is None else created_at)
-    public_payload = _public_payload(payload or {})
+    payload = dict(payload or {})
+    # Remove internal context before public payload truncation can hide the body.
+    if _clean(kind).startswith("message.user."):
+        for key in ("text", "message", "title", "preview", "prompt"):
+            if isinstance(payload.get(key), str):
+                payload[key] = strip_appshot_context(payload[key])
+    elif _clean(kind).startswith("message.assistant."):
+        for key in ("text", "delta", "message"):
+            if isinstance(payload.get(key), str):
+                payload[key] = strip_internal_citation_suffix(payload[key])
+    elif _clean(kind) == "session.history.loaded":
+        payload["turns"] = [
+            {**turn, "content": (strip_appshot_context if turn["role"] == "user"
+                                 else strip_internal_citation_suffix)(turn["content"])}
+            if isinstance(turn, dict) and turn.get("role") in {"user", "assistant"} and isinstance(turn.get("content"), str)
+            else turn
+            for turn in payload.get("turns", [])
+        ]
+    public_payload = _public_payload(payload)
     normalized = {
         "kind": _clean(kind),
         "provider_id": _clean(provider_id),

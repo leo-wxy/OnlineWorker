@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from core.message_text import strip_appshot_context, strip_internal_citation_suffix
 from core.providers.registry import classify_provider, get_provider, provider_not_enabled_message
 
 
@@ -40,11 +41,19 @@ def read_provider_thread_history(
     config=None,
 ):
     provider = _require_provider(tool_name, config=config)
-    return provider.facts.read_thread_history(
+    history = provider.facts.read_thread_history(
         thread_id,
         limit=limit,
         sessions_dir=sessions_dir,
     )
+    if not history:
+        return history
+    return [
+        {**turn, "text": (strip_appshot_context if turn["role"] == "user"
+                          else strip_internal_citation_suffix)(turn["text"])}
+        if turn.get("role") in {"user", "assistant"} and isinstance(turn.get("text"), str) else turn
+        for turn in history
+    ]
 
 
 def query_provider_active_thread_ids(tool_name: str, workspace_path: str, *, config=None):

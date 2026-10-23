@@ -10,6 +10,8 @@ from typing import Optional
 
 import zstandard
 
+from core.message_text import strip_appshot_context, strip_internal_citation_suffix
+
 logger = logging.getLogger(__name__)
 
 CODEX_SESSIONS_DIR = "~/.codex/sessions"
@@ -485,7 +487,8 @@ def _build_user_text_from_response_items(content: list[dict]) -> str:
     for item in content:
         item_type = str(item.get("type") or "").strip().lower()
         if item_type.endswith("text"):
-            text = _normalize_turn_text(item.get("text") or "")
+            original_text = _normalize_turn_text(item.get("text") or "")
+            text = strip_appshot_context(original_text)
             if not text:
                 continue
             label = _is_wrapper_open(text)
@@ -495,7 +498,7 @@ def _build_user_text_from_response_items(content: list[dict]) -> str:
             if _is_wrapper_close(text):
                 pending_label = None
                 continue
-            if text.startswith("#") or text.startswith("<"):
+            if text == original_text and (text.startswith("#") or text.startswith("<")):
                 continue
             parts.append(text)
             continue
@@ -510,8 +513,9 @@ def _build_user_text_from_response_items(content: list[dict]) -> str:
 
 def _build_user_text_from_event_payload(payload: dict) -> str:
     parts: list[str] = []
-    message = _normalize_turn_text(payload.get("message") or "")
-    if message and not message.startswith("#") and not message.startswith("<"):
+    original_message = _normalize_turn_text(payload.get("message") or "")
+    message = strip_appshot_context(original_message)
+    if message and (message != original_message or not message.startswith(("#", "<"))):
         parts.append(message)
 
     image_refs = []
@@ -536,6 +540,8 @@ def _push_turn(
     turn_id: str = "", item_id: str = "",
 ) -> None:
     normalized_text = _normalize_turn_text(text)
+    if role == "assistant":
+        normalized_text = strip_internal_citation_suffix(normalized_text)
     if not normalized_text:
         return
 

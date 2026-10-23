@@ -829,6 +829,45 @@ async def test_replay_thread_history_accepts_iso_timestamp_cursor(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_replay_thread_history_strips_appshot_before_telegram_send(monkeypatch):
+    from bot.handlers.workspace import _replay_thread_history
+
+    text = '# Applications mentioned by the user:\n\n<appshot app="Example">'
+    text += "screen context\n" * 500 + '</appshot>\n\n## My request:\n请检查截图\n[Attached image] sample.png'
+    original = {"role": "user", "text": text, "timestamp": "2026-01-01T00:00:00Z"}
+    facts = SimpleNamespace(read_thread_history=lambda *args, **kwargs: [original])
+    monkeypatch.setattr("core.providers.facts._require_provider", lambda *args, **kwargs: SimpleNamespace(facts=facts))
+    send_to_group = AsyncMock()
+    monkeypatch.setattr("bot.handlers.workspace._send_to_group", send_to_group)
+
+    cursor = await _replay_thread_history(MagicMock(), GROUP_CHAT_ID, 123, "sample-session",
+                                         sessions_dir=None, tool_name="codex")
+
+    messages = [call.args[2] for call in send_to_group.await_args_list]
+    assert messages[1:] == ["👤 请检查截图\n[Attached image] sample.png"]
+    assert cursor is not None
+    assert original["text"] == text
+
+
+@pytest.mark.asyncio
+async def test_replay_thread_history_strips_assistant_citation_before_telegram_send(monkeypatch):
+    from bot.handlers.workspace import _replay_thread_history
+
+    text = "已整理文档。\n<oai-mem-citation><citation_entries>internal</citation_entries></oai-mem-citation>"
+    original = {"role": "assistant", "text": text, "timestamp": "2026-01-01T00:00:00Z"}
+    facts = SimpleNamespace(read_thread_history=lambda *args, **kwargs: [original])
+    monkeypatch.setattr("core.providers.facts._require_provider", lambda *args, **kwargs: SimpleNamespace(facts=facts))
+    send_to_group = AsyncMock()
+    monkeypatch.setattr("bot.handlers.workspace._send_to_group", send_to_group)
+
+    await _replay_thread_history(MagicMock(), GROUP_CHAT_ID, 123, "sample-session",
+                                 sessions_dir=None, tool_name="codex")
+
+    assert [call.args[2] for call in send_to_group.await_args_list][1:] == ["🤖 已整理文档。"]
+    assert original["text"] == text
+
+
+@pytest.mark.asyncio
 async def test_thread_open_customprovider_status_message_avoids_markdown_parse_risk(monkeypatch):
     storage = AppStorage()
     ws = WorkspaceInfo(

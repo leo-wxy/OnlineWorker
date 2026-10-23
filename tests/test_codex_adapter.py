@@ -333,6 +333,27 @@ async def test_external_hook_keeps_user_request_quoting_suggestion_prompt(tmp_pa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("event_name", ["UserPromptSubmit", "AgentTurnComplete"])
+async def test_external_hook_strips_appshot_before_message_and_title(tmp_path, monkeypatch, event_name):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    callback = AsyncMock()
+    adapter = CodexAdapter()
+    adapter.on_event(callback)
+    text = '# Applications mentioned by the user:\n\n<appshot app="Example">screen context</appshot>\n\n## My request:\n请检查截图'
+    payload = {"hook_event_name": event_name, "session_id": "sample-session", "turn_id": "sample-turn",
+               "cwd": str(tmp_path / "project"), "prompt": text, "input_messages": [text],
+               "last_assistant_message": "已检查"}
+
+    await adapter.ingest_external_hook_payload(payload)
+
+    events = [call.args[1]["message"] for call in callback.await_args_list]
+    created = next(event["params"] for event in events if event["method"] == "session.created")
+    user = next(event["params"] for event in events if event["method"] == "message.user.submitted")
+    assert created["title"] == user["text"] == "请检查截图"
+    assert payload["prompt"] == text
+
+
+@pytest.mark.asyncio
 async def test_suggestion_notify_removes_existing_session_activity(tmp_path, monkeypatch):
     from core.messages.bus import MessageEventBus
     from core.messages.publishing import publish_session_message_event
