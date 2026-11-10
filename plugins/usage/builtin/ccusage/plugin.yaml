@@ -26,3 +26,6 @@ sources:
   - { id: gemini, label: Gemini CLI, order: 130 }
   - { id: kimi, label: Kimi, order: 140 }
   - { id: qwen, label: Qwen, order: 150 }
+  - { id: antigravity, label: Antigravity, order: 160 }
+  - { id: grok, label: Grok, order: 170 }
+  - { id: zcode, label: ZCode, order: 180 }

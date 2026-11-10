@@ -12,11 +12,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CCUSAGE_DIR = ROOT / "third_party" / "ccusage"
 PRICING_PATH = ROOT / "third_party" / "ccusage-pricing.json"
-EXPECTED_TAG = "v20.0.17"
-EXPECTED_COMMIT = "88cdfa4fb201c92b163a34d0bbb097b68d3185cf"
-EXPECTED_LITELLM_REV = "49ca04d8c3ddea336237ce6f3082dbc26d19e944"
+EXPECTED_TAG = "v20.0.48"
+EXPECTED_COMMIT = "8995f3b7fd7110b8f37564f7d0468acc7a7d6b20"
+EXPECTED_LITELLM_REV = "1046716b6d3d45f30d5efad42becbd440d6187ee"
 EXPECTED_PRICING_SHA256 = (
-    "ae4532ba0c5da03ed694f37fffa050a65e0e250b816dcdb475bee0b7b7b1aa97"
+    "8f8060d8ce7a40c91b995c74d6a27657543d49e3c1c53430dabd556f244392c6"
 )
 EXPECTED_AGENT_IDS = [
     "claude",
@@ -32,8 +32,11 @@ EXPECTED_AGENT_IDS = [
     "kilo",
     "copilot",
     "gemini",
+    "antigravity",
     "kimi",
     "qwen",
+    "grok",
+    "zcode",
 ]
 
 
@@ -73,7 +76,10 @@ def test_ccusage_gitlink_is_pinned_to_verified_tag_commit():
 
 def test_checked_in_pricing_snapshot_matches_ccusage_build_contract():
     flake_lock = json.loads((CCUSAGE_DIR / "flake.lock").read_text(encoding="utf-8"))
-    assert flake_lock["nodes"]["litellm"]["locked"]["rev"] == EXPECTED_LITELLM_REV
+    assert flake_lock["nodes"]["litellm"]["locked"]["url"] == (
+        "https://raw.githubusercontent.com/BerriAI/litellm/"
+        f"{EXPECTED_LITELLM_REV}/model_prices_and_context_window.json"
+    )
 
     pricing_bytes = PRICING_PATH.read_bytes()
     assert hashlib.sha256(pricing_bytes).hexdigest() == EXPECTED_PRICING_SHA256
@@ -88,7 +94,7 @@ def test_checked_in_pricing_snapshot_matches_ccusage_build_contract():
         for model, values in pricing.items()
     )
 
-    build_script = (CCUSAGE_DIR / "rust/crates/ccusage/build.rs").read_text(
+    build_script = (CCUSAGE_DIR / "rust/crates/ccusage-pricing-snapshots/build.rs").read_text(
         encoding="utf-8"
     )
     assert 'const PRICING_JSON_PATH_ENV: &str = "CCUSAGE_PRICING_JSON_PATH";' in build_script

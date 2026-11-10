@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_LOADER = (
-    ROOT / "third_party/ccusage/rust/crates/ccusage/src/adapter/all/loader.rs"
+    ROOT / "third_party/ccusage/rust/crates/ccusage-cli/src/lib.rs"
 )
 CONSTANT_PATTERN = re.compile(
     r"\bBUILT_IN_AGENT_NAMES\s*:\s*&\s*\[\s*&str\s*\]\s*=\s*&\s*\[(?P<body>.*?)\]\s*;",
@@ -50,13 +50,13 @@ def extract_agent_ids(source: str) -> list[str]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Extract canonical built-in agent IDs from ccusage loader.rs"
+        description="Extract canonical built-in agent IDs from the ccusage CLI source"
     )
     parser.add_argument(
         "--loader",
         type=Path,
         default=DEFAULT_LOADER,
-        help=f"path to loader.rs (default: {DEFAULT_LOADER})",
+        help=f"path to the Rust source (default: {DEFAULT_LOADER})",
     )
     return parser.parse_args()
 

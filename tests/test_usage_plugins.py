@@ -24,6 +24,7 @@ def test_ccusage_plugin_exposes_all_pinned_sources(monkeypatch):
     assert [item["sourceId"] for item in catalog] == [
         "codex", "claude", "opencode", "amp", "droid", "codebuff", "hermes", "pi",
         "goose", "openclaw", "kilo", "copilot", "gemini", "kimi", "qwen",
+        "antigravity", "grok", "zcode",
     ]
     associated = {
         item["sourceId"]: item["providerId"]
